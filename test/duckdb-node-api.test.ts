@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { studyNoteGraph, type StudyNote } from "../src/core/study.js";
-import { createBioGraphSchema, syncStudyNoteGraph } from "../src/duckdb/kg-sync.js";
+import { createBioGraphSchema, reportStudyNoteGraph, syncStudyNoteGraph } from "../src/duckdb/kg-sync.js";
 import { duckdbNodeConn } from "../src/duckdb/node-api.js";
 
 function note(slug: string, body: string): StudyNote {
@@ -76,5 +76,23 @@ describe("duckdbNodeConn (real in-memory DuckDB)", () => {
     );
     // the memory node survives the refused write
     assert.equal(await count(conn, "bio_nodes WHERE node_id = 'memory:acmg-pm2'"), 1);
+  });
+
+  test("reportStudyNoteGraph surfaces counts, dangling links, and external inbound edges", async () => {
+    const conn = await memoryConn();
+    await createBioGraphSchema(conn, { ifNotExists: true });
+    await syncStudyNoteGraph(
+      conn,
+      studyNoteGraph([note("acmg-pm2", "See [[gnomad-frequencies]] and [[ghost-note]]."), note("gnomad-frequencies", "x")]),
+      { dryRun: false, allowWrite: true },
+    );
+    await conn.run("INSERT INTO bio_nodes (node_id, family, type, label) VALUES ('variant:1', 'variant', 'variant', 'v')");
+    await conn.run("INSERT INTO bio_edges (from_id, to_id, predicate) VALUES ('variant:1', 'memory:acmg-pm2', 'about')");
+
+    const report = await reportStudyNoteGraph(conn);
+    assert.equal(report.memoryNodes, 2);
+    assert.equal(report.memoryEdges, 2); // both edges originate at memory:acmg-pm2
+    assert.deepEqual(report.danglingEdges, [{ from: "memory:acmg-pm2", to: "memory:ghost-note", predicate: "references" }]);
+    assert.deepEqual(report.externalInboundEdges, [{ from: "variant:1", to: "memory:acmg-pm2", predicate: "about" }]);
   });
 });

@@ -38,6 +38,8 @@ const OWNED_EDGES = "bio_edges WHERE from_id LIKE 'memory:%'";
 // to those rows rather than matching a to_id prefix — otherwise it over-blocks edges to missing memory:*
 // targets and under-protects family='memory' nodes whose id is not a well-formed memory: id.
 const EXTERNAL_INBOUND_EDGES = "bio_edges e JOIN bio_nodes n ON e.to_id = n.node_id WHERE n.family = 'memory' AND e.from_id NOT LIKE 'memory:%'";
+// Memory-origin edges whose target node does not exist: the persisted dangling links.
+const DANGLING_MEMORY_EDGES = "bio_edges e WHERE e.from_id LIKE 'memory:%' AND NOT EXISTS (SELECT 1 FROM bio_nodes n WHERE n.node_id = e.to_id)";
 const MEMORY_NODE_ID_RE = /^memory:[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 function jsonParam(value: unknown): string | null {
@@ -172,4 +174,41 @@ export async function createBioGraphSchema(conn: KgSqlConn, options: CreateBioGr
   await conn.run(`CREATE INDEX ${ifNotExists}bio_nodes_family ON bio_nodes (family)`);
   await conn.run(`CREATE INDEX ${ifNotExists}bio_edges_from_id ON bio_edges (from_id)`);
   await conn.run(`CREATE INDEX ${ifNotExists}bio_edges_to_id ON bio_edges (to_id)`);
+}
+
+export interface BioGraphEdgeRow {
+  from: string;
+  to: string;
+  predicate: string;
+}
+
+export interface StudyNoteGraphReport {
+  memoryNodes: number;
+  memoryEdges: number;
+  /** Memory-origin edges whose target node does not exist — persisted dangling links to fix or fill. */
+  danglingEdges: BioGraphEdgeRow[];
+  /** Non-owned edges pointing into memory nodes — these block a write until removed/re-homed. */
+  externalInboundEdges: BioGraphEdgeRow[];
+}
+
+function toEdgeRows(rows: Array<{ from_id: string; to_id: string; predicate: string }>): BioGraphEdgeRow[] {
+  return rows.map((row) => ({ from: row.from_id, to: row.to_id, predicate: row.predicate }));
+}
+
+/**
+ * Read-only report over the memory subgraph: scalar counts for the (potentially large) node/edge totals,
+ * plus the full rows for the two actionable problem sets — persisted dangling links and non-owned inbound
+ * edges that would block a sync. No writes, no transaction; safe to run any time.
+ */
+export async function reportStudyNoteGraph(conn: KgSqlConn): Promise<StudyNoteGraphReport> {
+  const [nodeRow] = await conn.all<{ n: number }>(`SELECT count(*) AS n FROM ${OWNED_NODES}`);
+  const [edgeRow] = await conn.all<{ n: number }>(`SELECT count(*) AS n FROM ${OWNED_EDGES}`);
+  const dangling = await conn.all<{ from_id: string; to_id: string; predicate: string }>(`SELECT e.from_id, e.to_id, e.predicate FROM ${DANGLING_MEMORY_EDGES}`);
+  const externalInbound = await conn.all<{ from_id: string; to_id: string; predicate: string }>(`SELECT e.from_id, e.to_id, e.predicate FROM ${EXTERNAL_INBOUND_EDGES}`);
+  return {
+    memoryNodes: Number(nodeRow?.n ?? 0),
+    memoryEdges: Number(edgeRow?.n ?? 0),
+    danglingEdges: toEdgeRows(dangling),
+    externalInboundEdges: toEdgeRows(externalInbound),
+  };
 }

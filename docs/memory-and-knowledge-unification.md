@@ -214,13 +214,18 @@ The pure projection (`studyNoteGraph`) hands off to `syncStudyNoteGraph` in
   scans/join the sync runs (`family`, `from_id`, `to_id`). **No foreign keys** — dangling link
   targets are allowed, so an edge may reference an absent node id.
 - **Concrete DuckDB binding.** `duckdbNodeConn(connection)` (`src/duckdb/node-api.ts`) adapts a
-  live `@duckdb/node-api` connection to `KgSqlConn`. The coupling to the driver is **type-only**
-  — the host creates and owns the `DuckDBInstance`/connection — so core stays driver-agnostic and
-  the adapter logic is still fake-testable. `@duckdb/node-api` is a direct dependency (DuckDB is a
-  first-class substrate here); the port means a CLI/Pi host can also inject its own connection.
-  Real in-memory DuckDB tests (explicit construction, no ambient activation) exercise the actual
-  dialect: round-trip, idempotent re-sync, persisted dangling edges, the `UNIQUE` constraint, and
-  the external-inbound refusal.
+  live `@duckdb/node-api` connection to `KgSqlConn`. **The core and sync logic stay
+  driver-agnostic** (`node-api.ts` imports the driver only as a *type*; the host creates and owns
+  the `DuckDBInstance`/connection); the concrete binding, and the package, depend on
+  `@duckdb/node-api` as a direct dependency — DuckDB is a first-class substrate here. The port
+  still lets a CLI/Pi host inject its own connection. Real in-memory DuckDB tests (explicit
+  construction, no ambient activation) exercise the actual dialect: round-trip, idempotent
+  re-sync, persisted dangling edges, the `UNIQUE` constraint, and the external-inbound refusal.
+- **Read-only report.** `reportStudyNoteGraph(conn)` returns memory node/edge counts plus the full
+  rows for the two actionable problem sets — persisted **dangling** links (memory-origin edges with
+  no target node) and **external inbound** edges (which would block a write) — so an agent can fix
+  graph issues before syncing. No writes, no transaction. (Totals are scalar counts; the bounded,
+  fixable problem sets come back as rows.)
 - **Refuses to orphan non-owned edges.** A non-owned edge (origin not `memory:`) pointing at
   a node in the **delete set** (`family='memory'`, found by joining `to_id` to those rows —
   not a `to_id` prefix match, so the guard covers exactly what gets deleted) would be dangled
