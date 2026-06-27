@@ -279,6 +279,23 @@ raw source / API docs
   -> workflow skill only after repeated use stabilizes
 ```
 
+## Harness adaptation
+
+Extending the harness is core to the Pi lineage (packages, extensions, custom tools, skills, prompts,
+provider registration, reload/install boundaries). `pi-bio-agent` inherits that but makes it
+biomedical-safe and provenance-aware. The lineage is **agent-mediated extension through explicit harness
+surfaces, not arbitrary self-mutation.** The invariant, which every surface must satisfy from the start
+even before adaptation tooling exists:
+
+> Safe adaptation is **declarative, validated, reversible, recorded, and never edits core in place.**
+> The agent may *propose* an extension/spec/skill; tests and the `/reload`/install boundary decide
+> whether it becomes real. Core updates happen through package/git, not self-modification.
+
+Concretely: `declare → validate → test → record → activate → rollback`. Forbidden: editing core runtime
+files in place, monkey-patching tools, silent behavior changes, hidden env/process activation. See
+[`roadmap.md`](./roadmap.md#6-harness-adaptation-doctrine-mods-vs-hooks) for the full doctrine and the
+graph model of harness state.
+
 ## Progressive disclosure
 
 Context should carry compact indexes, not every body/schema/result:

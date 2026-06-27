@@ -22,6 +22,17 @@ parallel system.** The "memory and KG stop being two systems" point in
 this global bet; the study/[machine-studying](./machine-studying-lineage.md) angle is one consumer of
 the substrate, not its foundation.
 
+**The harness models itself in the same graph — but only its *declarations*, not its running code.**
+Capabilities, operation specs, resolvers, extensions, skills, runs, and artifacts become nodes, with
+edges like `extension —declares→ tool`, `tool —implements→ BioToolSpec`, `run —used→ capability`,
+`run —produced→ artifact`, `skill —derived_from→ study-note`, `operation —requires→ network-policy`.
+This makes the harness *inspectable as graph data*: the agent queries its own capabilities, provenance,
+and run history with the same graph-as-SQL it uses for biology. Crucially, **executable code still lives
+in package files / CAS / artifacts** — the graph records declarations, provenance, dependencies,
+activation, and outputs, never the running code. That boundary is what lets the harness be queryable and
+self-describing without the graph becoming an executor (and is the substrate behind the
+harness-adaptation doctrine in [`roadmap.md`](./roadmap.md#6-harness-adaptation-doctrine-mods-vs-hooks)).
+
 It is a *bet*, not a theorem, and the design hedges it honestly: not all bio data is usefully
 graph-shaped (dense matrices, sequences, large tables stay tabular/extension-backed or in CAS; the graph
 holds hot structured facts + indexes, not raw bytes), a single graph store can rot into a god-store, and
