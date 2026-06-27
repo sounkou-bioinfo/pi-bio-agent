@@ -1,86 +1,19 @@
-import { randomUUID } from "node:crypto";
-import { promises as fs } from "node:fs";
-import { basename, join, resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { summarizeBioContext, type BioContext } from "../../src/core/context.js";
 import { findToolSpecs, toolSpecIndex } from "../../src/core/tool-spec.js";
 import { validateReadOnlySelect } from "../../src/core/knowledge-graph.js";
 import { deriveStudyPlan, studyNoteIndex, type StudyArtifactKind, type StudyCorpus, type StudyNote } from "../../src/core/study.js";
+import { deleteStudyNote, listStudyNotes, makeStudyNote, readStudyNotes, runtimeSkillRoot, runtimeStudyRoot, writeProjectSkill, writeStudyNote } from "../../src/hosts/pi-project.js";
 import { ontologySqlContract } from "../../src/core/ontology.js";
 import { defaultDuckDbExtensionCatalog, findDuckDbExtensions } from "../../src/duckdb/extensions.js";
 import { bioSqlContract } from "../../src/duckdb/sql-contract.js";
 import { defaultBioToolRegistry } from "../../src/primitives/bio-tool-specs.js";
 import { defaultBioResourceRegistry, findResourceResolvers } from "../../src/primitives/resources.js";
 
-const SKILL_NAME_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
-
-function runtimeSkillRoot(cwd: string): string {
-  return resolve(cwd, ".pi", "bio-agent", "skills");
-}
-
-function runtimeStudyRoot(cwd: string): string {
-  return resolve(cwd, ".pi", "bio-agent", "study-notes");
-}
-
 function text(payload: unknown) {
   const body = typeof payload === "string" ? payload : JSON.stringify(payload, null, 2);
   return { content: [{ type: "text" as const, text: body }], details: payload };
-}
-
-function validateSkillInput(name: string, description: string, body: string): void {
-  if (!SKILL_NAME_RE.test(name) || name.length > 64) throw new Error("skill name must be lowercase kebab-case, max 64 chars");
-  if (!description.trim() || description.length > 1024) throw new Error("description is required and must be <= 1024 chars");
-  if (!body.trim()) throw new Error("body is required");
-  if (body.length > 100_000) throw new Error("skill body too large");
-}
-
-async function writeProjectSkill(cwd: string, name: string, description: string, body: string): Promise<string> {
-  validateSkillInput(name, description, body);
-  const dir = join(runtimeSkillRoot(cwd), name);
-  await fs.mkdir(dir, { recursive: true });
-  const path = join(dir, "SKILL.md");
-  const content = `---\nname: ${name}\ndescription: ${description.replace(/\s+/g, " ").trim()}\n---\n\n${body.trim()}\n`;
-  await fs.writeFile(path, content, "utf8");
-  return path;
-}
-
-async function readStudyNotes(cwd: string): Promise<StudyNote[]> {
-  const root = runtimeStudyRoot(cwd);
-  let entries: string[];
-  try {
-    entries = await fs.readdir(root);
-  } catch {
-    return [];
-  }
-  const notes: StudyNote[] = [];
-  for (const entry of entries) {
-    if (!entry.endsWith(".json")) continue;
-    try {
-      const raw = await fs.readFile(join(root, entry), "utf8");
-      const parsed = JSON.parse(raw) as StudyNote;
-      if (parsed.schema === "pi-bio.study_note.v1" && parsed.id) notes.push(parsed);
-    } catch {
-      // Ignore corrupt notes; they are project-local working memory, not source code.
-    }
-  }
-  notes.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-  return notes;
-}
-
-async function writeStudyNote(cwd: string, note: StudyNote): Promise<string> {
-  const root = runtimeStudyRoot(cwd);
-  await fs.mkdir(root, { recursive: true });
-  const safeId = basename(note.id).replace(/[^a-zA-Z0-9._-]/g, "_");
-  const path = join(root, `${safeId}.json`);
-  await fs.writeFile(path, `${JSON.stringify(note, null, 2)}\n`, "utf8");
-  return path;
-}
-
-function scoreNote(note: StudyNote, query: string): number {
-  const q = query.toLowerCase().split(/\s+/).filter(Boolean);
-  const hay = [note.title, note.hook, note.body, ...note.tags].join("\n").toLowerCase();
-  return q.reduce((score, term) => score + (hay.includes(term) ? 1 : 0), 0);
 }
 
 export default function piBioAgentExtension(pi: ExtensionAPI): void {
@@ -205,12 +138,13 @@ export default function piBioAgentExtension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "bio_write_study_note",
     label: "Write bio study note",
-    description: "Persist an indexed project-local study note under .pi/bio-agent/study-notes. Use for corpus maps, cheatsheets, concept maps, probes, and memories that are too volatile or broad to become skills.",
+    description: "Persist an indexed project-local study note under .pi/bio-agent/study-notes. Upserts by slug, so re-writing the same slug updates the note in place. Use for corpus maps, cheatsheets, concept maps, probes, and memories that are too volatile or broad to become skills.",
     parameters: Type.Object({
       kind: Type.String({ description: "corpus_map | cheatsheet | concept_map | question_bank | rubric | worked_example | failure_case | memory_note | skill_draft | index" }),
       title: Type.String(),
-      hook: Type.String({ description: "One-line retrieval hook: when this note should be read." }),
+      hook: Type.String({ description: "One-line retrieval hook: when this note should be read. Must say when to read it, not just restate the title." }),
       body: Type.String(),
+      slug: Type.Optional(Type.String({ description: "Stable kebab-case identity and upsert key. Derived from the title when omitted." })),
       tags: Type.Optional(Type.Array(Type.String())),
       sources: Type.Optional(Type.Array(Type.Object({
         path: Type.Optional(Type.String()),
@@ -219,22 +153,10 @@ export default function piBioAgentExtension(pi: ExtensionAPI): void {
         quote: Type.Optional(Type.String()),
       }))),
     }),
-    async execute(_id, params: { kind: StudyArtifactKind; title: string; hook: string; body: string; tags?: string[]; sources?: StudyNote["sources"] }, _signal, _onUpdate, ctx) {
-      const now = new Date().toISOString();
-      const note: StudyNote = {
-        schema: "pi-bio.study_note.v1",
-        id: `${now.slice(0, 10)}-${randomUUID()}`,
-        kind: params.kind,
-        title: params.title,
-        hook: params.hook,
-        body: params.body,
-        tags: params.tags ?? [],
-        sources: params.sources ?? [],
-        createdAt: now,
-        updatedAt: now,
-      };
+    async execute(_id, params: { kind: StudyArtifactKind; title: string; hook: string; body: string; slug?: string; tags?: string[]; sources?: StudyNote["sources"] }, _signal, _onUpdate, ctx) {
+      const note = makeStudyNote(params);
       const path = await writeStudyNote(ctx.cwd, note);
-      return text({ path, note: { id: note.id, kind: note.kind, title: note.title, hook: note.hook, tags: note.tags } });
+      return text({ path, note: { slug: note.slug, id: note.id, kind: note.kind, title: note.title, hook: note.hook, tags: note.tags } });
     },
   });
 
@@ -247,9 +169,7 @@ export default function piBioAgentExtension(pi: ExtensionAPI): void {
       limit: Type.Optional(Type.Number()),
     }),
     async execute(_id, params: { query?: string; limit?: number }, _signal, _onUpdate, ctx) {
-      let notes = await readStudyNotes(ctx.cwd);
-      if (params.query?.trim()) notes = notes.map((note) => ({ note, score: scoreNote(note, params.query!) })).filter((x) => x.score > 0).sort((a, b) => b.score - a.score || b.note.updatedAt.localeCompare(a.note.updatedAt)).map((x) => x.note);
-      notes = notes.slice(0, params.limit ?? 25);
+      const notes = await listStudyNotes(ctx.cwd, params);
       return text({ notes: studyNoteIndex(notes), root: runtimeStudyRoot(ctx.cwd) });
     },
   });
@@ -257,13 +177,25 @@ export default function piBioAgentExtension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "bio_read_study_note",
     label: "Read bio study note",
-    description: "Read a full project-local study note by id after finding it with bio_list_study_notes.",
-    parameters: Type.Object({ id: Type.String() }),
+    description: "Read a full project-local study note by slug (or id) after finding it with bio_list_study_notes.",
+    parameters: Type.Object({ id: Type.String({ description: "Note slug or id (prefix match allowed)." }) }),
     async execute(_id, params: { id: string }, _signal, _onUpdate, ctx) {
       const notes = await readStudyNotes(ctx.cwd);
-      const note = notes.find((x) => x.id === params.id || x.id.startsWith(params.id));
-      if (!note) throw new Error(`no study note found for id '${params.id}'`);
+      const note = notes.find((x) => x.slug === params.id || x.id === params.id || x.slug.startsWith(params.id) || x.id.startsWith(params.id));
+      if (!note) throw new Error(`no study note found for slug or id '${params.id}'`);
       return text(note);
+    },
+  });
+
+  pi.registerTool({
+    name: "bio_delete_study_note",
+    label: "Delete bio study note",
+    description: "Delete a project-local study note by slug when it is wrong or stale. Memory hygiene: prefer updating by slug via bio_write_study_note; delete only rotten units.",
+    parameters: Type.Object({ slug: Type.String({ description: "Slug of the note to delete." }) }),
+    async execute(_id, params: { slug: string }, _signal, _onUpdate, ctx) {
+      const deleted = await deleteStudyNote(ctx.cwd, params.slug);
+      if (!deleted) throw new Error(`no study note found for slug '${params.slug}'`);
+      return text({ deleted: true, slug: params.slug });
     },
   });
 }

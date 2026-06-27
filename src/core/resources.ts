@@ -77,11 +77,12 @@ const RESOLVER_NAME_RE = /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/;
 
 export function validateResourceResolverSpec(spec: ResourceResolverSpec): string[] {
   const errors: string[] = [];
+  const modes = Array.isArray(spec.modes) ? spec.modes : [];
   if (spec.schema !== "pi-bio.resource_resolver.v1") errors.push("schema must be pi-bio.resource_resolver.v1");
-  if (!RESOLVER_NAME_RE.test(spec.name)) errors.push("invalid resolver name");
-  if (!spec.version.trim()) errors.push("version is required");
-  if (!spec.description.trim()) errors.push("description is required");
-  if (!spec.modes.length) errors.push("at least one mode is required");
+  if (typeof spec.name !== "string" || !RESOLVER_NAME_RE.test(spec.name)) errors.push("invalid resolver name");
+  if (typeof spec.version !== "string" || !spec.version.trim()) errors.push("version is required");
+  if (typeof spec.description !== "string" || !spec.description.trim()) errors.push("description is required");
+  if (!modes.length) errors.push("at least one mode is required");
   if (spec.request && spec.request.networkPolicy === "forbidden") errors.push("request templates cannot declare forbidden network policy");
   return errors;
 }
