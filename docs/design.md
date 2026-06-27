@@ -40,6 +40,18 @@ Storage/index adapters
 
 A Pi tool is a **host surface**, not the same kind of thing as HTTP, DuckDB, MCP, or code execution. The host surface exposes registered capabilities to the current agent. Execution adapters do the actual work behind the contracts.
 
+### Core boundary
+
+> Core may define **identities, schemas, registries, and validators**. It must **not** grow bespoke SQL
+> builders (or equivalent hand-coded logic) for individual biomedical questions.
+
+A per-question filter ("is this variant rare?", "is this consequence high-impact?") is the agent
+composing SQL over a stable view, or **declarative data** — a predicate-registry entry, an ontology term
+set, a study-note caveat, a generated view/operation spec — not a `frequencyPredicateSql()` in core.
+The moment core answers a *question* instead of defining a *primitive*, it has reproduced ClawBio-style
+skill sprawl in a different shape. (`variants.ts` was trimmed to variant identity for exactly this
+reason; the question-level builders were removed.)
+
 ## Integration surfaces
 
 `pi-bio-agent` should not be Pi-only. Pi is the first and most important host adapter because it is where this package is used today, but the stable product is a small core library with multiple thin surfaces over the same registries.

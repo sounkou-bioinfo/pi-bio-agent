@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { intervalOverlapsSql, makeInterval, normalizeSeqId, toOneBasedClosed, toZeroBasedHalfOpen, variantToInterval } from "../src/core/intervals.js";
 import { normalizeTermRef, ontologySqlContract, termKey } from "../src/core/ontology.js";
-import { carriedGenotypeSql, consequencePredicateSql, cpraSql, frequencyPredicateSql, makeVariantKey, variantStableKey, type AlleleFrequencyPredicate } from "../src/core/variants.js";
+import { makeVariantKey, variantStableKey } from "../src/core/variants.js";
 
 describe("genomic interval primitives", () => {
   test("normalizes seqids and validates coordinates", () => {
@@ -48,27 +48,6 @@ describe("variant primitives", () => {
     assert.equal(variantStableKey(v), "GRCh38:1:154453788:C:T");
     assert.throws(() => makeVariantKey({ seqid: "1", pos: 0, ref: "C", alt: "T" }), /1-based positive/);
     assert.throws(() => makeVariantKey({ seqid: "1", pos: 1, ref: "", alt: "T" }), /REF and ALT/);
-  });
-
-  test("generates variant SQL snippets deterministically", () => {
-    assert.equal(cpraSql("chrom", "pos", "ref", "alt"), "concat(chrom, ':', pos::VARCHAR, ':', ref, ':', alt)");
-    assert.equal(carriedGenotypeSql("gt"), "regexp_matches(gt, '(^|[\\/|])([1-9][0-9]*)([\\/|]|$)')");
-    assert.equal(consequencePredicateSql("csq", []), "TRUE");
-    assert.equal(consequencePredicateSql("csq", ["missense_variant", "Bob's term"]), "(contains(lower(csq), lower('missense_variant')) OR contains(lower(csq), lower('Bob''s term')))" );
-  });
-
-  test("generates allele-frequency predicates for absent-value policies", () => {
-    const base: AlleleFrequencyPredicate = {
-      id: "rare",
-      label: "Rare",
-      frequencySources: ["gnomad"],
-      absentFrequencyPolicy: "exclude",
-      maxPopulationAf: 0.01,
-    };
-    assert.equal(frequencyPredicateSql("af", base), "(af IS NOT NULL AND af < 0.01)");
-    assert.equal(frequencyPredicateSql("af", { ...base, minPopulationAf: 0.001, absentFrequencyPolicy: "include" }), "((af IS NOT NULL AND af >= 0.001 AND af < 0.01) OR af IS NULL)");
-    assert.equal(frequencyPredicateSql("af", { ...base, maxPopulationAf: undefined, absentFrequencyPolicy: "include" }), "TRUE");
-    assert.equal(frequencyPredicateSql("af", { ...base, absentFrequencyPolicy: "unknown" }), "(af IS NOT NULL AND af < 0.01)");
   });
 });
 
