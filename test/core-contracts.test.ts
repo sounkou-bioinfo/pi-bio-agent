@@ -6,7 +6,7 @@ import { appendRunEvent, defineBioRunSpec, newRunRecord, validateBioRunSpec, typ
 import { bioProjectLayout, casPathForAddress, validateContentAddress } from "../src/core/storage.js";
 import { defineBioToolSpec, validateBioToolSpec, type BioToolSpec } from "../src/core/tool-spec.js";
 import { makeConceptNode, validateReadOnlySelect } from "../src/core/knowledge-graph.js";
-import { deriveStudyPlan, studyNoteIndex, validateStudyNote, type StudyNote } from "../src/core/study.js";
+import { deriveStudyPlan, memoryNodeId, parseStudyNoteLinks, studyNoteIndex, studyNoteLinkEdges, validateStudyNote, STUDY_DEFAULT_LINK_PREDICATE, type StudyNote } from "../src/core/study.js";
 
 const validTool: BioToolSpec = {
   schema: "pi-bio.tool_spec.v1",
@@ -257,5 +257,24 @@ describe("Study helpers", () => {
     assert.ok(errors.includes("id is required"));
     assert.ok(errors.includes("tags must be an array"));
     assert.ok(errors.includes("sources must be an array"));
+    assert.ok(validateStudyNote({ schema: "pi-bio.study_note.v1", slug: "ok", id: "i", kind: "cheatsheet", title: "T", hook: "Read it later.", body: "b", tags: [], sources: [], createdAt: "t", updatedAt: "t", links: [{ to: "Bad Slug" }] } as unknown as StudyNote).includes("each link.to must be a slug"));
+  });
+
+  test("parses and projects note links: dedup, dangling-tolerant, body + explicit field", () => {
+    const note = {
+      slug: "acmg-pm2",
+      body: "See [[gnomad-frequencies]] and again [[gnomad-frequencies]]; also [[Not A Slug]] is ignored.",
+      links: [{ to: "acmg-pvs1", predicate: "supersedes" as const }, { to: "gnomad-frequencies" }],
+    };
+    const links = parseStudyNoteLinks(note);
+    // explicit (acmg-pvs1/supersedes), explicit (gnomad-frequencies/references), body (gnomad-frequencies/references dedup) -> 2 unique
+    assert.equal(links.length, 2);
+    assert.ok(links.some((l) => l.to === "acmg-pvs1" && l.predicate === "supersedes"));
+    assert.ok(links.some((l) => l.to === "gnomad-frequencies" && l.predicate === STUDY_DEFAULT_LINK_PREDICATE));
+
+    const edges = studyNoteLinkEdges(note);
+    assert.equal(edges.length, 2);
+    // Dangling is fine: gnomad-frequencies need not exist as a note for the edge to project.
+    assert.ok(edges.some((e) => e.from === memoryNodeId("acmg-pm2") && e.to === memoryNodeId("gnomad-frequencies") && e.predicate === "references"));
   });
 });

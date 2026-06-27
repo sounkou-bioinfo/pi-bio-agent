@@ -145,12 +145,13 @@ commit to the full `KnowledgeUnit`:
 
 - `StudyNote.slug` — stable kebab identity and upsert/link key; `id` is an opaque
   uniqueness/provenance tag, not the identity (`src/core/study.ts`).
-- `normalizeStudySlug` + a **fail-closed, full-shape** `validateStudyNote` (accepts
-  `unknown`; checks `slug` shape+length, `id`, `kind`, `tags`/`sources` are arrays,
-  timestamps, and a **required hook that must not merely restate the title**) — both in
-  `src/core/study.ts`. Because `readStudyNotes` uses this as the **admission gate**, it
-  validates the *whole* persisted shape so downstream readers can dereference fields
-  safely. `makeStudyNote` (`src/hosts/pi-project.ts`) derives the slug and throws on an
+- `normalizeStudySlug` + a **fail-closed** `validateStudyNote` (accepts `unknown`; checks
+  `slug` shape+length, `id`, `kind`, timestamps, that `tags`/`sources`/`links` are arrays
+  with slug-shaped link targets, and a **required hook that must not merely restate the
+  title**) — both in `src/core/study.ts`. It guards every field readers later dereference;
+  it does not deep-validate `tags`/`sources` *elements* (not load-bearing yet). Because
+  `readStudyNotes` uses it as the **admission gate**, only valid notes enter the typed
+  system. `makeStudyNote` (`src/hosts/pi-project.ts`) derives the slug and throws on an
   invalid note. Pre-slug notes are dropped, not migrated (working memory is unversioned).
 - **Upsert by slug** in `writeStudyNote` (`src/hosts/pi-project.ts`) — same slug overwrites
   the same `<slug>.json`, preserving the original `createdAt` **and `id`**; the **write
@@ -162,23 +163,25 @@ commit to the full `KnowledgeUnit`:
   every write and delete (`src/hosts/pi-project.ts`).
 - **`deleteStudyNote`** plus a `bio_delete_study_note` Pi tool — hygiene: prefer updating
   by slug, delete only rotten units (`extensions/pi-coding-agent/index.ts`).
+- **Links → graph edges (step 3).** An optional `StudyNote.links` field plus `[[slug]]`
+  body links, both collected by the pure `parseStudyNoteLinks` (dedup by `(to, predicate)`,
+  dangling-tolerant) and projected by the pure `studyNoteLinkEdges` into `BioGraphEdge`
+  records (`memory:<slug>` → `memory:<to>`, default predicate `references`) —
+  `src/core/study.ts`. No I/O, no `KnowledgeUnit`; the projection is just a function the KG
+  substrate can consume. Closes lessons 3, 5.
 
 `studyNoteIndex` now includes `slug`, and `bio_write_study_note` takes an optional `slug`
 and returns the persisted note plus a `created` flag.
 
-## Still to do (steps 3–4)
+## Still to do (step 4)
 
-Ordered, each independently shippable — and only after the shipped subset proves out:
-
-3. **Project links into `bio_edges`.** Parse `[[slug]]` / an explicit `links[]` into edges
-   with `family = memory`. Closes lessons 3, 5 — memory becomes queryable by the same
-   graph-as-SQL substrate as ontology/KG data, with no second retrieval system.
-4. **Introduce the minimal `KnowledgeUnit` core** — `slug, role, form, title, hook, body,
-   tags, links, sources, createdAt, updatedAt`, nothing more — and make `StudyNote` and
-   `BioSkillDraft` thin views over it; a skill is `form: "skill"` rendered to `SKILL.md`
-   with `/reload` still the activation boundary. Add the promotion lint (lesson 8: a note
-   whose body is a schema or API client should become an operation spec, not a note). Do
-   this only once steps 3 proves two real consumers share the core.
+- **Introduce the minimal `KnowledgeUnit` core** — `slug, role, form, title, hook, body,
+  tags, links, sources, createdAt, updatedAt`, nothing more — and make `StudyNote` and
+  `BioSkillDraft` thin views over it; a skill is `form: "skill"` rendered to `SKILL.md`
+  with `/reload` still the activation boundary. Add the promotion lint (lesson 8: a note
+  whose body is a schema or API client should become an operation spec, not a note). Do
+  this only once a second real consumer (e.g. a KG-ingest path that writes
+  `studyNoteLinkEdges` into `bio_edges`) actually shares the core.
 
 ## Non-goals
 

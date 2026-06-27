@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { join } from "node:path";
 import { bioProjectLayout } from "../core/storage.js";
-import { normalizeStudySlug, validateStudyNote, type StudyArtifactKind, type StudyNote } from "../core/study.js";
+import { normalizeStudySlug, validateStudyNote, type StudyArtifactKind, type StudyNote, type StudyNoteLink } from "../core/study.js";
 
 export const SKILL_NAME_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
@@ -76,10 +76,14 @@ export async function writeStudyNote(cwd: string, note: StudyNote, now = new Dat
   let id = note.id;
   let created = true;
   try {
-    const existing = JSON.parse(await fs.readFile(path, "utf8")) as Partial<StudyNote>;
-    created = false;
-    if (typeof existing?.createdAt === "string" && existing.createdAt.trim()) createdAt = existing.createdAt;
-    if (typeof existing?.id === "string" && existing.id.trim()) id = existing.id;
+    const existing = JSON.parse(await fs.readFile(path, "utf8")) as StudyNote;
+    // Only inherit identity from a prior note that is itself valid and actually shares this slug;
+    // a corrupt-but-parseable file is treated as a fresh create rather than poisoning the new record.
+    if (validateStudyNote(existing).length === 0 && existing.slug === note.slug) {
+      created = false;
+      createdAt = existing.createdAt;
+      id = existing.id;
+    }
   } catch {
     // No prior note for this slug (or it was unreadable); this is a fresh create.
   }
@@ -114,6 +118,7 @@ export function makeStudyNote(params: {
   body: string;
   slug?: string;
   tags?: string[];
+  links?: StudyNoteLink[];
   sources?: StudyNote["sources"];
 }, now = new Date().toISOString()): StudyNote {
   const note: StudyNote = {
@@ -125,6 +130,7 @@ export function makeStudyNote(params: {
     hook: params.hook,
     body: params.body,
     tags: params.tags ?? [],
+    ...(params.links ? { links: params.links.map((l) => ({ to: normalizeStudySlug(l.to), predicate: l.predicate })) } : {}),
     sources: params.sources ?? [],
     createdAt: now,
     updatedAt: now,
