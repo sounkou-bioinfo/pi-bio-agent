@@ -199,8 +199,14 @@ The pure projection (`studyNoteGraph`) hands off to `syncStudyNoteGraph` in
   It does **not** own external edges pointing *into* memory nodes (`to_id` memory, `from_id`
   elsewhere), so a re-sync never tramples future non-memory relationships.
 - **Fails closed on scope.** It accepts a generic `BioGraphSnapshot` but refuses (throws,
-  even in dry-run) any node that is not `family: "memory"` with a `memory:` id, or any edge
-  whose `from` is not a memory node — so it can never write outside what it owns.
+  even in dry-run) any node that is not `family: "memory"` with a **strict `memory:<slug>`
+  id** (prefix alone is not enough — `memory:`, `memory:Bad Slug`, `memory:../x` are
+  rejected), or any edge whose `from` is not such a memory node — so it can never write
+  outside what it owns.
+- **Refuses to orphan non-owned edges.** Because external inbound edges (`to_id` memory,
+  `from_id` elsewhere) are not owned, a delete-then-reinsert would dangle or break them under
+  future FK constraints. So the write **fails closed while any exist**: dry-run reports
+  `externalInboundEdges`, and a write throws before touching anything when that count is > 0.
 - **FK-safe ordering.** Within the transaction: delete memory-origin edges, then memory
   nodes; insert nodes, then edges.
 - **Dangling targets:** not materialized as stub nodes; counted in the result
@@ -210,8 +216,8 @@ The pure projection (`studyNoteGraph`) hands off to `syncStudyNoteGraph` in
   truth; DuckDB is an index/cache.
 - **Effect contract:** writes only the memory subgraph; no network; no arbitrary SQL (fixed,
   parameterized statements); transaction required; **dry-run by default**, writing needs
-  `{ dryRun: false, allowWrite: true }`; result returns delete/insert/dangling counts. No Pi
-  tool yet — only when a workflow needs it.
+  `{ dryRun: false, allowWrite: true }`; result returns delete/insert/dangling/external-inbound
+  counts. No Pi tool yet — only when a workflow needs it.
 
 ## Still to do (step 4)
 

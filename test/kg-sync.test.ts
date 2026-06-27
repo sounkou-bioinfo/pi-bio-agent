@@ -20,11 +20,13 @@ function note(slug: string, body: string, links?: StudyNote["links"]): StudyNote
   };
 }
 
-function fakeConn(counts: { nodes: number; edges: number }) {
+function fakeConn(counts: { nodes: number; edges: number; externalInbound?: number }) {
   const statements: Array<{ sql: string; params?: readonly unknown[] }> = [];
   const conn: KgSqlConn = {
     async all(sql: string) {
       statements.push({ sql });
+      // The external-inbound query also reads bio_edges, so match it first by its distinguishing clause.
+      if (sql.includes("from_id NOT LIKE")) return [{ n: counts.externalInbound ?? 0 }] as never;
       if (sql.includes("FROM bio_nodes")) return [{ n: counts.nodes }] as never;
       if (sql.includes("FROM bio_edges")) return [{ n: counts.edges }] as never;
       return [] as never;
@@ -49,6 +51,7 @@ describe("syncStudyNoteGraph", () => {
       nodesToInsert: 2,
       edgesToInsert: 1,
       danglingEdges: 0,
+      externalInboundEdges: 0,
     });
     assert.ok(!statements.some((s) => /^(BEGIN|DELETE|INSERT|COMMIT)/.test(s.sql)), "dry run must not write");
   });
@@ -116,5 +119,28 @@ describe("syncStudyNoteGraph", () => {
       edges: [{ from: "variant:1", to: "memory:x", predicate: "references" }],
     };
     await assert.rejects(() => syncStudyNoteGraph(conn, foreignEdge), /refusing edge from non-memory node/);
+  });
+
+  test("rejects malformed memory: ids (prefix is not enough)", async () => {
+    const { conn } = fakeConn({ nodes: 0, edges: 0 });
+    for (const id of ["memory:", "memory:Bad Slug", "memory:../x", "memory:trailing-"]) {
+      const bad = {
+        schema: "pi-bio.graph_snapshot.v1" as const,
+        nodes: [{ id, family: "memory" as const, type: "cheatsheet", label: "x" }],
+        edges: [],
+      };
+      await assert.rejects(() => syncStudyNoteGraph(conn, bad), /refusing non-memory node/, `should reject ${id}`);
+    }
+  });
+
+  test("counts external inbound edges in dry-run and refuses to write while any exist", async () => {
+    const dry = fakeConn({ nodes: 1, edges: 1, externalInbound: 2 });
+    const res = await syncStudyNoteGraph(dry.conn, snapshot);
+    assert.equal(res.externalInboundEdges, 2);
+
+    const write = fakeConn({ nodes: 1, edges: 1, externalInbound: 1 });
+    await assert.rejects(() => syncStudyNoteGraph(write.conn, snapshot, { dryRun: false, allowWrite: true }), /non-owned edges point into them/);
+    // The refusal happens before any delete/insert: the owned nodes are never touched.
+    assert.ok(!write.statements.some((s) => /^(BEGIN|DELETE|INSERT)/.test(s.sql)), "no delete/insert when external inbound edges exist");
   });
 });

@@ -25,12 +25,16 @@ export interface SyncStudyNoteGraphResult {
   edgesToInsert: number;
   /** Edges whose target id is absent from the snapshot's nodes (dangling links). Reported, never materialized as stub nodes. */
   danglingEdges: number;
+  /** Non-owned edges pointing into memory nodes. Reported in dry-runs; writes refuse while any exist. */
+  externalInboundEdges: number;
 }
 
 // Ownership scope: the adapter owns exactly the memory-origin subgraph and nothing else.
 // External edges that point INTO memory nodes (to_id 'memory:%' but from_id elsewhere) are not owned.
 const OWNED_NODES = "bio_nodes WHERE family = 'memory'";
 const OWNED_EDGES = "bio_edges WHERE from_id LIKE 'memory:%'";
+const EXTERNAL_INBOUND_EDGES = "bio_edges WHERE to_id LIKE 'memory:%' AND from_id NOT LIKE 'memory:%'";
+const MEMORY_NODE_ID_RE = /^memory:[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 function jsonParam(value: unknown): string | null {
   return value == null ? null : JSON.stringify(value);
@@ -43,19 +47,19 @@ function jsonParam(value: unknown): string | null {
  */
 function assertMemorySubgraph(snapshot: BioGraphSnapshot): void {
   for (const node of snapshot.nodes) {
-    if (node.family !== "memory" || !node.id.startsWith("memory:")) {
+    if (node.family !== "memory" || !MEMORY_NODE_ID_RE.test(node.id)) {
       throw new Error(`syncStudyNoteGraph: refusing non-memory node ${node.id} (family=${node.family})`);
     }
   }
   for (const edge of snapshot.edges) {
-    if (!edge.from.startsWith("memory:")) throw new Error(`syncStudyNoteGraph: refusing edge from non-memory node ${edge.from}`);
+    if (!MEMORY_NODE_ID_RE.test(edge.from)) throw new Error(`syncStudyNoteGraph: refusing edge from non-memory node ${edge.from}`);
   }
 }
 
 /**
  * Full re-sync of the `memory` subgraph from a pure snapshot. Effect contract:
  * - writes ONLY `bio_nodes(family='memory')` and `bio_edges(from_id LIKE 'memory:%')`; external edges
- *   pointing into memory nodes are not owned and left untouched;
+ *   pointing into memory nodes are not owned, and writes fail closed while any exist;
  * - no network, no arbitrary SQL, all writes in one transaction;
  * - dry-run by default; writing requires `{ dryRun: false, allowWrite: true }`.
  *
@@ -72,6 +76,7 @@ export async function syncStudyNoteGraph(
 
   const [nodeRow] = await conn.all<{ n: number }>(`SELECT count(*) AS n FROM ${OWNED_NODES}`);
   const [edgeRow] = await conn.all<{ n: number }>(`SELECT count(*) AS n FROM ${OWNED_EDGES}`);
+  const [externalInboundRow] = await conn.all<{ n: number }>(`SELECT count(*) AS n FROM ${EXTERNAL_INBOUND_EDGES}`);
   const nodeIds = new Set(snapshot.nodes.map((node) => node.id));
   const result: SyncStudyNoteGraphResult = {
     dryRun,
@@ -80,8 +85,10 @@ export async function syncStudyNoteGraph(
     nodesToInsert: snapshot.nodes.length,
     edgesToInsert: snapshot.edges.length,
     danglingEdges: snapshot.edges.filter((edge) => !nodeIds.has(edge.to)).length,
+    externalInboundEdges: Number(externalInboundRow?.n ?? 0),
   };
   if (dryRun) return result;
+  if (result.externalInboundEdges > 0) throw new Error(`syncStudyNoteGraph: refusing to delete memory nodes while ${result.externalInboundEdges} non-owned edges point into them`);
 
   await conn.run("BEGIN");
   try {
