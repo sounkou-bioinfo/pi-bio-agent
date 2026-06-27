@@ -1,5 +1,5 @@
 import type { BioArtifact, Provenance } from "./types.js";
-import type { BioGraphEdge } from "./knowledge-graph.js";
+import type { BioGraphEdge, BioGraphNode, BioGraphSnapshot } from "./knowledge-graph.js";
 
 export type StudyArtifactKind =
   | "corpus_map"
@@ -149,20 +149,25 @@ export function memoryNodeId(slug: string): string {
 /** Collect a note's links from both its explicit `links` field and `[[slug]]` body links, normalized and de-duplicated by (to, predicate). Pure; dangling targets are allowed and not resolved here. */
 export function parseStudyNoteLinks(note: Pick<StudyNote, "body" | "links">): Required<StudyNoteLink>[] {
   const out = new Map<string, Required<StudyNoteLink>>();
-  const add = (to: string, predicate?: unknown) => {
+  // Defensive throughout: this is exported core and can receive unvalidated JSON, so bad targets and
+  // unknown predicates are skipped/defaulted rather than projecting bogus edges.
+  const add = (to: unknown, predicate?: unknown) => {
+    if (typeof to !== "string") return;
     let slug: string;
     try {
       slug = normalizeStudySlug(to);
     } catch {
       return; // unusable target, skip
     }
-    // Defensive: this is exported core and can receive unvalidated JSON, so an unknown predicate
-    // falls back to the default rather than projecting a bogus edge.
     const pred = isStudyNoteLinkPredicate(predicate) ? predicate : STUDY_DEFAULT_LINK_PREDICATE;
     out.set(JSON.stringify([slug, pred]), { to: slug, predicate: pred });
   };
-  for (const link of note.links ?? []) add(link.to, link.predicate);
-  for (const match of (note.body ?? "").matchAll(WIKILINK_RE)) add(match[1]);
+  for (const link of Array.isArray(note.links) ? note.links : []) {
+    if (link && typeof link === "object") add((link as StudyNoteLink).to, (link as StudyNoteLink).predicate);
+  }
+  if (typeof note.body === "string") {
+    for (const match of note.body.matchAll(WIKILINK_RE)) add(match[1]);
+  }
   return [...out.values()];
 }
 
@@ -170,6 +175,31 @@ export function parseStudyNoteLinks(note: Pick<StudyNote, "body" | "links">): Re
 export function studyNoteLinkEdges(note: Pick<StudyNote, "slug" | "body" | "links">): BioGraphEdge[] {
   const from = memoryNodeId(note.slug);
   return parseStudyNoteLinks(note).map((link) => ({ from, to: memoryNodeId(link.to), predicate: link.predicate }));
+}
+
+/** Project a note into its knowledge-graph node (`memory` family). Pure; the retrieval hook becomes the node description. */
+export function studyNoteNode(note: Pick<StudyNote, "slug" | "kind" | "title" | "hook" | "tags">): BioGraphNode {
+  return {
+    id: memoryNodeId(note.slug),
+    family: "memory",
+    type: note.kind,
+    label: note.title,
+    description: note.hook,
+    attrs: { slug: note.slug, kind: note.kind, tags: note.tags ?? [] },
+  };
+}
+
+/**
+ * Fold a set of notes into a knowledge-graph snapshot: one `memory` node per note plus their link edges.
+ * Pure: no I/O. Edges may reference `memory:<to>` ids absent from `nodes` (dangling links by design); a
+ * later effectful KG-ingest adapter decides whether to materialize stub nodes for those targets.
+ */
+export function studyNoteGraph(notes: StudyNote[]): BioGraphSnapshot {
+  return {
+    schema: "pi-bio.graph_snapshot.v1",
+    nodes: notes.map(studyNoteNode),
+    edges: notes.flatMap((note) => studyNoteLinkEdges(note)),
+  };
 }
 
 export function studyNoteIndex(notes: StudyNote[]): Array<Pick<StudyNote, "slug" | "id" | "kind" | "title" | "hook" | "tags" | "updatedAt">> {

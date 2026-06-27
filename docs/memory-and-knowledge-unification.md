@@ -174,6 +174,12 @@ commit to the full `KnowledgeUnit`:
   `supersedes`/`derived_from` semantics (those live on KG facts, per decision 1). No I/O,
   no `KnowledgeUnit`; the projection is just a function the KG substrate can consume.
   Closes lessons 3, 5.
+- **Note → graph projection (step 3, completion).** `studyNoteNode` projects a note into a
+  `memory`-family `BioGraphNode` (hook → description), and `studyNoteGraph` folds a note set
+  into a `BioGraphSnapshot` (`memory` nodes + their link edges) — `src/core/study.ts`. Pure,
+  dangling-tolerant (edges may reference target ids absent from `nodes`); a later **effectful**
+  KG-ingest adapter (a new opt-in surface, separately reviewed) decides whether to materialize
+  stub nodes and write into `bio_nodes`/`bio_edges`.
 
 `studyNoteIndex` now includes `slug`, and `bio_write_study_note` takes an optional `slug`
 and returns the persisted note plus a `created` flag.

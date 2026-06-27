@@ -6,7 +6,7 @@ import { appendRunEvent, defineBioRunSpec, newRunRecord, validateBioRunSpec, typ
 import { bioProjectLayout, casPathForAddress, validateContentAddress } from "../src/core/storage.js";
 import { defineBioToolSpec, validateBioToolSpec, type BioToolSpec } from "../src/core/tool-spec.js";
 import { makeConceptNode, validateReadOnlySelect } from "../src/core/knowledge-graph.js";
-import { deriveStudyPlan, memoryNodeId, parseStudyNoteLinks, studyNoteIndex, studyNoteLinkEdges, validateStudyNote, STUDY_DEFAULT_LINK_PREDICATE, type StudyNote } from "../src/core/study.js";
+import { deriveStudyPlan, memoryNodeId, parseStudyNoteLinks, studyNoteGraph, studyNoteIndex, studyNoteLinkEdges, studyNoteNode, validateStudyNote, STUDY_DEFAULT_LINK_PREDICATE, type StudyNote } from "../src/core/study.js";
 
 const validTool: BioToolSpec = {
   schema: "pi-bio.tool_spec.v1",
@@ -287,5 +287,28 @@ describe("Study helpers", () => {
 
     // memoryNodeId rejects non-slug input rather than minting memory:<garbage>.
     assert.throws(() => memoryNodeId("Bad Slug"), /invalid memory slug/);
+  });
+
+  test("parseStudyNoteLinks tolerates malformed entries and a non-string body", () => {
+    const messy = { body: 42, links: [null, "nope", { to: 7 }, { to: "good-note" }] } as unknown as Parameters<typeof parseStudyNoteLinks>[0];
+    assert.deepEqual(parseStudyNoteLinks(messy), [{ to: "good-note", predicate: STUDY_DEFAULT_LINK_PREDICATE }]);
+  });
+
+  test("projects notes into a memory-family graph snapshot", () => {
+    const notes = [
+      { schema: "pi-bio.study_note.v1", slug: "acmg-pm2", id: "a", kind: "cheatsheet", title: "ACMG PM2", hook: "Read on rare-variant calls.", body: "See [[gnomad-frequencies]].", tags: ["acmg"], sources: [], createdAt: "t", updatedAt: "t" },
+      { schema: "pi-bio.study_note.v1", slug: "gnomad-frequencies", id: "b", kind: "cheatsheet", title: "gnomAD freqs", hook: "Read before AF filters.", body: "x", tags: [], sources: [], createdAt: "t", updatedAt: "t" },
+    ] as StudyNote[];
+
+    const node = studyNoteNode(notes[0]);
+    assert.equal(node.id, memoryNodeId("acmg-pm2"));
+    assert.equal(node.family, "memory");
+    assert.equal(node.description, "Read on rare-variant calls.");
+
+    const graph = studyNoteGraph(notes);
+    assert.equal(graph.schema, "pi-bio.graph_snapshot.v1");
+    assert.deepEqual(graph.nodes.map((n) => n.id), [memoryNodeId("acmg-pm2"), memoryNodeId("gnomad-frequencies")]);
+    assert.equal(graph.edges.length, 1);
+    assert.deepEqual(graph.edges[0], { from: memoryNodeId("acmg-pm2"), to: memoryNodeId("gnomad-frequencies"), predicate: "references" });
   });
 });
