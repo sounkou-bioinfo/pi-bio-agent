@@ -9,6 +9,7 @@ export * from "./resources.js";
 export * from "./run-spec.js";
 export * from "./storage.js";
 export * from "./manifest.js";
+export * from "./operations.js";
 export * from "./extensions.js";
 export * from "./context.js";
 export * from "./study.js";

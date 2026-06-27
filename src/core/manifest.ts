@@ -66,6 +66,15 @@ export interface ResolutionReceipt {
 
 export type BioResolverImpl = (query: Record<string, unknown>, ctx: ResolutionContext) => Promise<ResolutionReceipt>;
 
+export interface VirtualResourceSpec {
+  id: string;
+  title: string;
+  kind: "virtual";
+  resolver: string; // a registered resolver id
+  params: Record<string, unknown>; // opaque to core; passed to the resolver
+  schemaRef?: string;
+}
+
 export interface DomainPackManifest {
   id: string;
   version: string;
@@ -73,6 +82,7 @@ export interface DomainPackManifest {
   description: string;
   domains: string[];
   provides: {
+    resources?: VirtualResourceSpec[];
     resolvers?: BioResolverSpec[];
     views?: BioViewDef[];
     termSets?: TermSet[];
@@ -83,6 +93,7 @@ export interface DomainPackManifest {
 export interface BioRegistrySnapshot {
   schema: "pi-bio.registry_snapshot.v1";
   manifests: Array<Pick<DomainPackManifest, "id" | "version" | "title" | "domains">>;
+  resources: VirtualResourceSpec[];
   resolvers: BioResolverSpec[];
   views: BioViewDef[];
   termSets: TermSet[];
@@ -92,6 +103,7 @@ export interface BioRegistrySnapshot {
 export interface BioRegistry {
   registerManifest(manifest: DomainPackManifest): void;
   bindResolverImpl(resolverId: string, impl: BioResolverImpl): void;
+  getResource(id: string): VirtualResourceSpec | undefined;
   getResolverSpec(id: string): BioResolverSpec | undefined;
   getTermSet(id: string): TermSet | undefined;
   getView(id: string): BioViewDef | undefined;
@@ -103,6 +115,7 @@ export interface BioRegistry {
 
 export function createBioRegistry(): BioRegistry {
   const manifests: DomainPackManifest[] = [];
+  const resources = new Map<string, VirtualResourceSpec>();
   const resolverSpecs = new Map<string, BioResolverSpec>();
   const resolverImpls = new Map<string, BioResolverImpl>();
   const termSets = new Map<string, TermSet>();
@@ -112,6 +125,7 @@ export function createBioRegistry(): BioRegistry {
   return {
     registerManifest(manifest) {
       manifests.push(manifest);
+      for (const r of manifest.provides.resources ?? []) resources.set(r.id, r);
       for (const r of manifest.provides.resolvers ?? []) resolverSpecs.set(r.id, r);
       for (const t of manifest.provides.termSets ?? []) termSets.set(t.id, t);
       for (const v of manifest.provides.views ?? []) views.set(v.id, v);
@@ -121,6 +135,7 @@ export function createBioRegistry(): BioRegistry {
       if (!resolverSpecs.has(resolverId)) throw new Error(`cannot bind impl: no resolver spec '${resolverId}' is registered`);
       resolverImpls.set(resolverId, impl);
     },
+    getResource: (id) => resources.get(id),
     getResolverSpec: (id) => resolverSpecs.get(id),
     getTermSet: (id) => termSets.get(id),
     getView: (id) => views.get(id),
@@ -135,6 +150,7 @@ export function createBioRegistry(): BioRegistry {
       return {
         schema: "pi-bio.registry_snapshot.v1",
         manifests: manifests.map(({ id, version, title, domains }) => ({ id, version, title, domains })),
+        resources: [...resources.values()],
         resolvers: [...resolverSpecs.values()],
         views: [...views.values()],
         termSets: [...termSets.values()],
