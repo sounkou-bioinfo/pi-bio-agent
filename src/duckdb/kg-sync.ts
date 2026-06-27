@@ -37,6 +37,22 @@ function jsonParam(value: unknown): string | null {
 }
 
 /**
+ * Fail closed: the adapter only owns the memory subgraph, so it refuses to write a snapshot that
+ * carries anything else. Every node must be `family: "memory"` with a `memory:` id, and every edge
+ * must originate at a memory node (edge targets may be anything — dangling links are allowed).
+ */
+function assertMemorySubgraph(snapshot: BioGraphSnapshot): void {
+  for (const node of snapshot.nodes) {
+    if (node.family !== "memory" || !node.id.startsWith("memory:")) {
+      throw new Error(`syncStudyNoteGraph: refusing non-memory node ${node.id} (family=${node.family})`);
+    }
+  }
+  for (const edge of snapshot.edges) {
+    if (!edge.from.startsWith("memory:")) throw new Error(`syncStudyNoteGraph: refusing edge from non-memory node ${edge.from}`);
+  }
+}
+
+/**
  * Full re-sync of the `memory` subgraph from a pure snapshot. Effect contract:
  * - writes ONLY `bio_nodes(family='memory')` and `bio_edges(from_id LIKE 'memory:%')`; external edges
  *   pointing into memory nodes are not owned and left untouched;
@@ -50,6 +66,7 @@ export async function syncStudyNoteGraph(
   snapshot: BioGraphSnapshot,
   options: SyncStudyNoteGraphOptions = {},
 ): Promise<SyncStudyNoteGraphResult> {
+  assertMemorySubgraph(snapshot);
   const dryRun = options.dryRun ?? true;
   if (!dryRun && options.allowWrite !== true) throw new Error("syncStudyNoteGraph: writing requires allowWrite: true");
 
@@ -68,8 +85,9 @@ export async function syncStudyNoteGraph(
 
   await conn.run("BEGIN");
   try {
-    await conn.run(`DELETE FROM ${OWNED_NODES}`);
+    // Edges before nodes on delete, nodes before edges on insert: safe even if FK constraints are added later.
     await conn.run(`DELETE FROM ${OWNED_EDGES}`);
+    await conn.run(`DELETE FROM ${OWNED_NODES}`);
     for (const node of snapshot.nodes) await insertNode(conn, node);
     for (const edge of snapshot.edges) await insertEdge(conn, edge);
     await conn.run("COMMIT");

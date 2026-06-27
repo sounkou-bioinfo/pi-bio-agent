@@ -177,7 +177,7 @@ Open design issues and cleanup targets. Keep this file focused on what still nee
 ## Testing framework
 
 - Use Node `node:test` and TypeScript typecheck as the default test framework.
-- Keep live API tests opt-in behind environment flags.
+- Keep live API tests opt-in through explicit command arguments or config objects; do not activate live tests through ambient process state.
 - Add conformance tests for:
   - no provider-specific shape in core
   - resolver fail-closed behavior

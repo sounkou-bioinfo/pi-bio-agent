@@ -312,7 +312,7 @@ Keep tests deterministic and lean:
 - temp DuckDB databases for storage/KG/index tests
 - injected `fetch` or local HTTP servers for network tests
 - no live provider/API dependency by default
-- live integration tests only behind explicit env flags
+- live integration tests only behind explicit command arguments or config objects; no hidden environment-flag activation
 
 Test what matters:
 

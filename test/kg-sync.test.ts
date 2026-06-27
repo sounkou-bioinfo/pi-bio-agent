@@ -70,13 +70,15 @@ describe("syncStudyNoteGraph", () => {
     const commit = idx((s) => s === "COMMIT");
     const delNodes = idx((s) => s.startsWith("DELETE FROM bio_nodes"));
     const delEdges = idx((s) => s.startsWith("DELETE FROM bio_edges"));
+    const insNodes = idx((s) => s.startsWith("INSERT INTO bio_nodes"));
     // ownership-scoped deletes, bracketed by a single transaction
     assert.ok(begin >= 0 && commit > begin, "writes are wrapped in BEGIN/COMMIT");
-    assert.ok(begin < delNodes && delNodes < commit, "deletes happen inside the transaction");
+    assert.ok(begin < delEdges && delNodes < commit, "deletes happen inside the transaction");
     assert.ok(sqls.some((s) => s.includes("WHERE family = 'memory'")), "only deletes memory nodes");
     assert.ok(sqls.some((s) => s.includes("WHERE from_id LIKE 'memory:%'")), "only deletes memory-origin edges");
-    assert.ok(delEdges > delNodes && idx((s) => s.startsWith("INSERT INTO bio_nodes")) > delEdges, "delete before insert");
-    assert.ok(sqls.some((s) => s.startsWith("INSERT INTO bio_edges")), "inserts edges");
+    // edges before nodes on delete; nodes before edges on insert (FK-safe ordering)
+    assert.ok(delEdges < delNodes && delNodes < insNodes, "delete edges, then nodes, then insert");
+    assert.ok(insNodes < idx((s) => s.startsWith("INSERT INTO bio_edges")), "insert nodes before edges");
   });
 
   test("rolls back and rethrows if a write fails mid-transaction", async () => {
@@ -98,5 +100,21 @@ describe("syncStudyNoteGraph", () => {
     const { conn, statements } = fakeConn({ nodes: 0, edges: 0 });
     await assert.rejects(() => syncStudyNoteGraph(conn, snapshot, { dryRun: false }), /allowWrite/);
     assert.ok(!statements.some((s) => /^(BEGIN|DELETE|INSERT)/.test(s.sql)), "no writes attempted");
+  });
+
+  test("fails closed on a non-memory snapshot (even in dry run)", async () => {
+    const { conn } = fakeConn({ nodes: 0, edges: 0 });
+    const foreign = {
+      schema: "pi-bio.graph_snapshot.v1" as const,
+      nodes: [{ id: "variant:1", family: "variant" as const, type: "variant", label: "v" }],
+      edges: [],
+    };
+    await assert.rejects(() => syncStudyNoteGraph(conn, foreign), /refusing non-memory node/);
+    const foreignEdge = {
+      schema: "pi-bio.graph_snapshot.v1" as const,
+      nodes: [],
+      edges: [{ from: "variant:1", to: "memory:x", predicate: "references" }],
+    };
+    await assert.rejects(() => syncStudyNoteGraph(conn, foreignEdge), /refusing edge from non-memory node/);
   });
 });

@@ -198,6 +198,11 @@ The pure projection (`studyNoteGraph`) hands off to `syncStudyNoteGraph` in
   - `bio_edges WHERE from_id LIKE 'memory:%'`
   It does **not** own external edges pointing *into* memory nodes (`to_id` memory, `from_id`
   elsewhere), so a re-sync never tramples future non-memory relationships.
+- **Fails closed on scope.** It accepts a generic `BioGraphSnapshot` but refuses (throws,
+  even in dry-run) any node that is not `family: "memory"` with a `memory:` id, or any edge
+  whose `from` is not a memory node — so it can never write outside what it owns.
+- **FK-safe ordering.** Within the transaction: delete memory-origin edges, then memory
+  nodes; insert nodes, then edges.
 - **Dangling targets:** not materialized as stub nodes; counted in the result
   (`danglingEdges`) and surfaced as future-work markers, mirroring dangling `[[wikilinks]]`.
 - **Sync semantics:** full re-sync of the memory subgraph in **one transaction** (delete the
