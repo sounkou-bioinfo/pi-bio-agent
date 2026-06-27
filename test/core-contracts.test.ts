@@ -257,19 +257,23 @@ describe("Study helpers", () => {
     assert.ok(errors.includes("id is required"));
     assert.ok(errors.includes("tags must be an array"));
     assert.ok(errors.includes("sources must be an array"));
-    assert.ok(validateStudyNote({ schema: "pi-bio.study_note.v1", slug: "ok", id: "i", kind: "cheatsheet", title: "T", hook: "Read it later.", body: "b", tags: [], sources: [], createdAt: "t", updatedAt: "t", links: [{ to: "Bad Slug" }] } as unknown as StudyNote).includes("each link.to must be a slug"));
+    const base = { schema: "pi-bio.study_note.v1", slug: "ok", id: "i", kind: "cheatsheet", title: "T", hook: "Read it later.", body: "b", tags: [], sources: [], createdAt: "t", updatedAt: "t" };
+    assert.ok(validateStudyNote({ ...base, links: [{ to: "Bad Slug" }] } as unknown as StudyNote).some((e) => e.includes("each link")));
+    // A KG-evidence predicate like `supersedes` is not a note-navigation predicate and must be rejected.
+    assert.ok(validateStudyNote({ ...base, links: [{ to: "other-note", predicate: "supersedes" }] } as unknown as StudyNote).some((e) => e.includes("each link")));
+    assert.deepEqual(validateStudyNote({ ...base, links: [{ to: "other-note", predicate: "depends_on" }] } as unknown as StudyNote), []);
   });
 
   test("parses and projects note links: dedup, dangling-tolerant, body + explicit field", () => {
     const note = {
       slug: "acmg-pm2",
       body: "See [[gnomad-frequencies]] and again [[gnomad-frequencies]]; also [[Not A Slug]] is ignored.",
-      links: [{ to: "acmg-pvs1", predicate: "supersedes" as const }, { to: "gnomad-frequencies" }],
+      links: [{ to: "acmg-pvs1", predicate: "depends_on" as const }, { to: "gnomad-frequencies" }],
     };
     const links = parseStudyNoteLinks(note);
-    // explicit (acmg-pvs1/supersedes), explicit (gnomad-frequencies/references), body (gnomad-frequencies/references dedup) -> 2 unique
+    // explicit (acmg-pvs1/depends_on), explicit (gnomad-frequencies/references), body (gnomad-frequencies/references dedup) -> 2 unique
     assert.equal(links.length, 2);
-    assert.ok(links.some((l) => l.to === "acmg-pvs1" && l.predicate === "supersedes"));
+    assert.ok(links.some((l) => l.to === "acmg-pvs1" && l.predicate === "depends_on"));
     assert.ok(links.some((l) => l.to === "gnomad-frequencies" && l.predicate === STUDY_DEFAULT_LINK_PREDICATE));
 
     const edges = studyNoteLinkEdges(note);

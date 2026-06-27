@@ -167,8 +167,13 @@ commit to the full `KnowledgeUnit`:
   body links, both collected by the pure `parseStudyNoteLinks` (dedup by `(to, predicate)`,
   dangling-tolerant) and projected by the pure `studyNoteLinkEdges` into `BioGraphEdge`
   records (`memory:<slug>` → `memory:<to>`, default predicate `references`) —
-  `src/core/study.ts`. No I/O, no `KnowledgeUnit`; the projection is just a function the KG
-  substrate can consume. Closes lessons 3, 5.
+  `src/core/study.ts`. Predicates are a **narrow, closed note-navigation set**
+  (`StudyNoteLinkPredicate`: `references | see_also | depends_on | contrasts_with`),
+  deliberately excluding KG evidence/provenance predicates — note links are a
+  note-reference surface, **not** a general KG edge-authoring API, and carry no
+  `supersedes`/`derived_from` semantics (those live on KG facts, per decision 1). No I/O,
+  no `KnowledgeUnit`; the projection is just a function the KG substrate can consume.
+  Closes lessons 3, 5.
 
 `studyNoteIndex` now includes `slug`, and `bio_write_study_note` takes an optional `slug`
 and returns the persisted note plus a `created` flag.
