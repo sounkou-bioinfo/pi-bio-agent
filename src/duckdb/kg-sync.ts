@@ -46,17 +46,27 @@ function jsonParam(value: unknown): string | null {
 
 /**
  * Fail closed: the adapter only owns the memory subgraph, so it refuses to write a snapshot that
- * carries anything else. Every node must be `family: "memory"` with a `memory:` id, and every edge
- * must originate at a memory node (edge targets may be anything — dangling links are allowed).
+ * carries anything else, or one that is internally inconsistent. Every node must be `family: "memory"`
+ * with a well-formed `memory:<slug>` id and a unique id; every edge must originate at a memory node
+ * (targets may be anything — dangling links are allowed) and be unique by `(from, to, predicate)`.
+ * The pure projection never produces duplicates, so a duplicate is a caller bug surfaced here rather
+ * than silently deduped (which would skew the reported insert counts) or left to a constraint rollback.
  */
 function assertMemorySubgraph(snapshot: BioGraphSnapshot): void {
+  const seenNodes = new Set<string>();
   for (const node of snapshot.nodes) {
     if (node.family !== "memory" || !MEMORY_NODE_ID_RE.test(node.id)) {
       throw new Error(`syncStudyNoteGraph: refusing non-memory node ${node.id} (family=${node.family})`);
     }
+    if (seenNodes.has(node.id)) throw new Error(`syncStudyNoteGraph: duplicate node id ${node.id}`);
+    seenNodes.add(node.id);
   }
+  const seenEdges = new Set<string>();
   for (const edge of snapshot.edges) {
     if (!MEMORY_NODE_ID_RE.test(edge.from)) throw new Error(`syncStudyNoteGraph: refusing edge from non-memory node ${edge.from}`);
+    const key = JSON.stringify([edge.from, edge.to, edge.predicate]);
+    if (seenEdges.has(key)) throw new Error(`syncStudyNoteGraph: duplicate edge ${edge.from} -> ${edge.to} (${edge.predicate})`);
+    seenEdges.add(key);
   }
 }
 

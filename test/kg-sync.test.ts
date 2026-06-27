@@ -124,6 +124,41 @@ describe("syncStudyNoteGraph", () => {
     await assert.rejects(() => syncStudyNoteGraph(conn, foreignEdge), /refusing edge from non-memory node/);
   });
 
+  test("fails closed on duplicate node ids or duplicate edges", async () => {
+    const { conn } = fakeConn({ nodes: 0, edges: 0 });
+    const dupNodes = {
+      schema: "pi-bio.graph_snapshot.v1" as const,
+      nodes: [
+        { id: "memory:a", family: "memory" as const, type: "cheatsheet", label: "a" },
+        { id: "memory:a", family: "memory" as const, type: "cheatsheet", label: "a again" },
+      ],
+      edges: [],
+    };
+    await assert.rejects(() => syncStudyNoteGraph(conn, dupNodes), /duplicate node id memory:a/);
+
+    const dupEdges = {
+      schema: "pi-bio.graph_snapshot.v1" as const,
+      nodes: [{ id: "memory:a", family: "memory" as const, type: "cheatsheet", label: "a" }],
+      edges: [
+        { from: "memory:a", to: "memory:b", predicate: "references" },
+        { from: "memory:a", to: "memory:b", predicate: "references" },
+      ],
+    };
+    await assert.rejects(() => syncStudyNoteGraph(conn, dupEdges), /duplicate edge memory:a -> memory:b/);
+
+    // Same endpoints but a different predicate is NOT a duplicate.
+    const distinct = {
+      schema: "pi-bio.graph_snapshot.v1" as const,
+      nodes: [{ id: "memory:a", family: "memory" as const, type: "cheatsheet", label: "a" }],
+      edges: [
+        { from: "memory:a", to: "memory:b", predicate: "references" },
+        { from: "memory:a", to: "memory:b", predicate: "depends_on" },
+      ],
+    };
+    const res = await syncStudyNoteGraph(conn, distinct);
+    assert.equal(res.edgesToInsert, 2);
+  });
+
   test("rejects malformed memory: ids (prefix is not enough)", async () => {
     const { conn } = fakeConn({ nodes: 0, edges: 0 });
     for (const id of ["memory:", "memory:Bad Slug", "memory:../x", "memory:trailing-"]) {

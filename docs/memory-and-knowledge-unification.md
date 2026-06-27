@@ -203,6 +203,11 @@ The pure projection (`studyNoteGraph`) hands off to `syncStudyNoteGraph` in
   id** (prefix alone is not enough — `memory:`, `memory:Bad Slug`, `memory:../x` are
   rejected), or any edge whose `from` is not such a memory node — so it can never write
   outside what it owns.
+- **Fails closed on duplicates.** A duplicate node id, or a duplicate edge by
+  `(from, to, predicate)`, throws. The pure projection never emits duplicates, so one is a
+  caller bug — surfaced here rather than silently deduped (which would skew the insert
+  counts) or left to a future constraint rollback. Same endpoints with a different predicate
+  are distinct, not duplicates.
 - **Refuses to orphan non-owned edges.** A non-owned edge (origin not `memory:`) pointing at
   a node in the **delete set** (`family='memory'`, found by joining `to_id` to those rows —
   not a `to_id` prefix match, so the guard covers exactly what gets deleted) would be dangled
