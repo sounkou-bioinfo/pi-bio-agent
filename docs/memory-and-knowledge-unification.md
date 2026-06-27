@@ -212,8 +212,15 @@ The pure projection (`studyNoteGraph`) hands off to `syncStudyNoteGraph` in
   `bio_edges` through the same port, mirroring the duplicate policy as constraints
   (`node_id PRIMARY KEY`, `UNIQUE (from_id, to_id, predicate)`) and adding indexes for the
   scans/join the sync runs (`family`, `from_id`, `to_id`). **No foreign keys** — dangling link
-  targets are allowed, so an edge may reference an absent node id. No native dependency; the
-  driver binding for `KgSqlConn` remains a separate, later step.
+  targets are allowed, so an edge may reference an absent node id.
+- **Concrete DuckDB binding.** `duckdbNodeConn(connection)` (`src/duckdb/node-api.ts`) adapts a
+  live `@duckdb/node-api` connection to `KgSqlConn`. The coupling to the driver is **type-only**
+  — the host creates and owns the `DuckDBInstance`/connection — so core stays driver-agnostic and
+  the adapter logic is still fake-testable. `@duckdb/node-api` is a direct dependency (DuckDB is a
+  first-class substrate here); the port means a CLI/Pi host can also inject its own connection.
+  Real in-memory DuckDB tests (explicit construction, no ambient activation) exercise the actual
+  dialect: round-trip, idempotent re-sync, persisted dangling edges, the `UNIQUE` constraint, and
+  the external-inbound refusal.
 - **Refuses to orphan non-owned edges.** A non-owned edge (origin not `memory:`) pointing at
   a node in the **delete set** (`family='memory'`, found by joining `to_id` to those rows —
   not a `to_id` prefix match, so the guard covers exactly what gets deleted) would be dangled
