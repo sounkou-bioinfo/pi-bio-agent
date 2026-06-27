@@ -21,6 +21,8 @@ Do not turn every natural-language question into a bespoke hand-coded skill. Fir
 
 The LLM routes, clarifies, writes SQL/tool calls, explains, and can author new skills. It is not the source of biomedical facts.
 
+"Study notes" here are [machine studying](https://jacobxli.com/blog/2026/machine-studying/) artifacts — the agent's own indexed, hooked learning about a corpus/API/domain — not biomedical studies/trials/cohorts.
+
 ## Preferred workflow
 
 1. Call `bio_describe_model` to inspect the model and SQL contracts.
