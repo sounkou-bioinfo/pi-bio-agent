@@ -57,15 +57,7 @@ function assertMemorySubgraph(snapshot: BioGraphSnapshot): void {
   }
 }
 
-/**
- * Full re-sync of the `memory` subgraph from a pure snapshot. Effect contract:
- * - writes ONLY `bio_nodes(family='memory')` and `bio_edges(from_id LIKE 'memory:%')`; external edges
- *   pointing into memory nodes are not owned, and writes fail closed while any exist;
- * - no network, no arbitrary SQL, all writes in one transaction;
- * - dry-run by default; writing requires `{ dryRun: false, allowWrite: true }`.
- *
- * Files remain the source of truth; this projects them into DuckDB as an index/cache.
- */
+/** Private helper: read the owned-subgraph delete counts plus the non-owned external-inbound count. */
 async function countOwned(conn: KgSqlConn): Promise<Pick<SyncStudyNoteGraphResult, "nodesToDelete" | "edgesToDelete" | "externalInboundEdges">> {
   const [nodeRow] = await conn.all<{ n: number }>(`SELECT count(*) AS n FROM ${OWNED_NODES}`);
   const [edgeRow] = await conn.all<{ n: number }>(`SELECT count(*) AS n FROM ${OWNED_EDGES}`);
@@ -77,6 +69,15 @@ async function countOwned(conn: KgSqlConn): Promise<Pick<SyncStudyNoteGraphResul
   };
 }
 
+/**
+ * Full re-sync of the `memory` subgraph from a pure snapshot. Effect contract:
+ * - writes ONLY `bio_nodes(family='memory')` and `bio_edges(from_id LIKE 'memory:%')`; external edges
+ *   pointing into memory nodes are not owned, and writes fail closed while any exist;
+ * - no network, no arbitrary SQL, all writes in one transaction;
+ * - dry-run by default; writing requires `{ dryRun: false, allowWrite: true }`.
+ *
+ * Files remain the source of truth; this projects them into DuckDB as an index/cache.
+ */
 export async function syncStudyNoteGraph(
   conn: KgSqlConn,
   snapshot: BioGraphSnapshot,

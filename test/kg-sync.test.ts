@@ -74,8 +74,11 @@ describe("syncStudyNoteGraph", () => {
     const delNodes = idx((s) => s.startsWith("DELETE FROM bio_nodes"));
     const delEdges = idx((s) => s.startsWith("DELETE FROM bio_edges"));
     const insNodes = idx((s) => s.startsWith("INSERT INTO bio_nodes"));
+    const firstCount = idx((s) => s.startsWith("SELECT count("));
     // ownership-scoped deletes, bracketed by a single transaction
     assert.ok(begin >= 0 && commit > begin, "writes are wrapped in BEGIN/COMMIT");
+    // TOCTOU: the count/external-inbound check runs INSIDE the transaction, before the deletes.
+    assert.ok(begin < firstCount && firstCount < delEdges, "counts/check run after BEGIN, before delete");
     assert.ok(begin < delEdges && delNodes < commit, "deletes happen inside the transaction");
     assert.ok(sqls.some((s) => s.includes("WHERE family = 'memory'")), "only deletes memory nodes");
     assert.ok(sqls.some((s) => s.includes("WHERE from_id LIKE 'memory:%'")), "only deletes memory-origin edges");
@@ -140,8 +143,12 @@ describe("syncStudyNoteGraph", () => {
 
     const write = fakeConn({ nodes: 1, edges: 1, externalInbound: 1 });
     await assert.rejects(() => syncStudyNoteGraph(write.conn, snapshot, { dryRun: false, allowWrite: true }), /non-owned edges point into them/);
-    // The check runs inside the transaction, so it may BEGIN, but it rolls back without touching owned rows.
-    assert.ok(!write.statements.some((s) => /^(DELETE|INSERT)/.test(s.sql)), "no delete/insert when external inbound edges exist");
-    assert.ok(write.statements.some((s) => s.sql === "ROLLBACK"), "rolls back after refusing");
+    const wsqls = write.statements.map((s) => s.sql);
+    const wbegin = wsqls.findIndex((s) => s === "BEGIN");
+    const wcount = wsqls.findIndex((s) => s.startsWith("SELECT count("));
+    // The check is inside the transaction (count after BEGIN), and it rolls back without touching owned rows.
+    assert.ok(wbegin >= 0 && wcount > wbegin, "external-inbound check runs after BEGIN");
+    assert.ok(!wsqls.some((s) => /^(DELETE|INSERT)/.test(s)), "no delete/insert when external inbound edges exist");
+    assert.ok(wsqls.includes("ROLLBACK"), "rolls back after refusing");
   });
 });
