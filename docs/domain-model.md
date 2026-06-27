@@ -1,57 +1,68 @@
 ---
 type: Reference
 title: Domain model
-description: "Read before adding any core type — the domain bet, the six-slot test, virtual/CAS resources, and temporality the substrate is built on."
-tags: [domain-model, resources, temporality, manifest, primitives]
+description: "Read before adding any core type or domain pack — kernel slots, resources/CAS/resolvers, temporality, domain packs, and execution backends."
+tags: [domain-model, resources, resolvers, temporality, domain-packs, execution-backends]
 ---
 
 # Domain model
 
 ## The domain bet
 
-> A bio agent is **not a pile of skills**. It is a **time-aware resource/knowledge substrate** where
-> concrete operations are **registered, inspectable, reproducible, and queryable**.
+> A bio agent is **not a pile of skills**. It is **time-aware, resource-addressed, operation-registered
+> bioinformatics execution and knowledge** — where concrete operations are registered, inspectable,
+> reproducible, and queryable.
 
-So the core models **resources, identity, time, schemas/views, facts/evidence, operations, runs, and
-manifests** — not variant-question helpers or Diamond-shaped entity types. The clean shape:
+Core models the **grammar by which a domain becomes inspectable** — not all of bioinformatics. The clean
+shape:
 
 ```text
 Time-aware biomedical resource graph
-  + immutable artifacts (CAS)
-  + virtual resources (recipes)
-  + registered schemas/views
-  + registered operations
-  + evidenced temporal facts
-  + runs / provenance
-  + host-agnostic adapters
+  + immutable artifacts (CAS) + virtual resources (recipes) + registered schemas/views
+  + registered operations + evidenced temporal facts + runs/provenance + host-agnostic adapters
 ```
 
-## The six-slot test
+## Three layers
+
+Bioinformatics is too broad for core to encode as `Feature`/`Sample`/`Cohort`/`Matrix` classes, but too
+real to ignore. The resolution is **domain packs over a small kernel, executed by pluggable backends**:
+
+```text
+core kernel        identity · resource handles/CAS/resolvers · facts/relations/time · declarations · runs · memory
+domain packs       genomics · proteomics · transcriptomics/single-cell · metagenomics · data-science · clinical-annotation
+execution backends DuckDB SQL · CLI · R · Python · HTTP · wasm/local-service
+```
+
+- **core owns the grammar** (what *is* a resource, operation, fact, run, term, temporal scope, resolver).
+- **packs own domain vocabulary/views/tools** (how do I get annotated variants? what view exists?).
+- **backends own execution** (with policy, provenance, timeouts, CAS receipts, tests).
+- **runs/CAS/provenance/time make outputs reproducible.**
+
+## The kernel: six-slot test
 
 Everything in `core/` is exactly one of these. **If a proposed type is none of them, it does not belong
-in core** — this is the test that rejects the speculative zoo (Feature/Sample/Cohort/Matrix/…) up front.
+in core** — the test that rejects the speculative zoo (Feature/Sample/Cohort/Matrix/…) up front.
 
 1. **Identity** — names of things (open ids + CURIEs).
-2. **Handle** — a reference to content: virtual recipe, CAS artifact, or external pointer.
+2. **Handle** — a reference to content: virtual recipe, CAS artifact, or external pointer (+ its resolver).
 3. **Fact / relation** — a temporal, evidenced graph assertion.
-4. **Declaration** — a registered capability/operation/view/term-set/predicate (enters via manifest).
+4. **Declaration** — a registered capability/operation/view/term-set/predicate/resolver (via a manifest).
 5. **Run** — the ledger that produces facts/handles with provenance.
 6. **Memory** — mutable machine-studying notes, projected into the graph. *Not facts.*
 
-## 1. Boundaries
+## Boundaries
 
 ```text
 core/         contracts, primitives, validators — no question-specific SQL, no Pi dependency, no domain zoo
 duckdb/       materialization, schema/view execution, graph sync
-extensions/   concrete implementations: views, term sets, SQL operations, resolvers, fixtures (operation packs)
+extensions/   domain & operation packs: views, term sets, SQL operations, resolvers, fixtures
 hosts/        Pi, CLI, future JSON-RPC/MCP
 notes/        machine-studying memory, not authoritative facts
 ```
 
-Core answers: *what is a resource, operation, fact, run, term, temporal scope?* Extensions answer: *how
-do I get annotated variants? how do I run this report? what view exists?*
+No hidden global activation: registries are **explicit objects passed into runners/tests/hosts**.
 
-## 2. Identity & vocabulary — open ids, not fake enums
+## Identity & vocabulary — open ids, not fake enums
 
 ```ts
 type Curie = string;        // "SO:0001587"
@@ -67,11 +78,10 @@ interface PredicateDef {
 }
 ```
 
-Predicate vocabularies are **registered data** (RO/BFO/SKOS seeded), never TypeScript unions. (Existing
-genomic identities — `GenomicInterval`, `VariantKey`, `OntologyTermRef`, `ContentAddress` — are the
-already-built members of this slot.)
+Predicate vocabularies are **registered data** (RO/BFO/SKOS seeded), never TypeScript unions. (Built
+genomic identities — `GenomicInterval`, `VariantKey`, `OntologyTermRef`, `ContentAddress` — are this slot.)
 
-## 3. Virtual resources + CAS (central)
+## Resources: handles, CAS, virtual
 
 Four distinct things — collapsing them is the bug:
 
@@ -84,75 +94,96 @@ materialization record   the resolver run that turned virtual -> CAS/view
 
 ```ts
 interface ContentAddress { algorithm: "sha256" | "sha512"; digest: string; mediaType?: string; sizeBytes?: number }
-
 interface VirtualResourceSpec {
   id: ResourceId; title: string; kind: "virtual";
-  resolver: string; params: Record<string, unknown>;   // a registered resolver id + its inputs
+  resolver: string; params: Record<string, unknown>;   // a registered resolver id + its inputs (opaque to core)
   schemaRef?: SchemaId; temporalScope?: TemporalScope; dependencies?: ResourceId[];
-}
-
-interface MaterializationRecord {
-  resourceId: ResourceId; contentAddress: ContentAddress; createdAt: string;
-  resolver: { id: string; version: string }; temporalScope?: TemporalScope; inputs?: ResourceId[];
 }
 ```
 
-> **A virtual resource may be re-resolved. A CAS artifact never mutates.** That gives reproducibility
-> without pretending external data is stable. The agent reasons over handles + compact summaries, never
-> raw bytes; live/expensive stays virtual (fails closed with no resolver), materialized goes to CAS, hot
-> structured facts go to DuckDB, large raw bytes stay out of DuckDB.
+> **A virtual resource may be re-resolved. A CAS artifact never mutates.** Reproducibility without
+> pretending external data is stable. The agent reasons over handles + compact summaries, never raw bytes;
+> live/expensive stays virtual, materialized goes to CAS, hot structured facts go to DuckDB.
 
-## 4. Temporality — on facts/resources/runs, never on notes
+## Resolvers — turning virtual into real
 
-Bio drifts: gnomAD versions change, ontology releases change, genome builds matter, APIs drift, "unknown
-frequency" is not "rare", and old facts may stay historically true but no longer current. So time is
-first-class on the fact/resource layers:
+The bridge from a virtual handle to concrete bytes/tables, **without core knowing any vendor**. (Pattern
+generalized from a connector/resolver plugin design — opaque `resolver_ref`, fail-closed, stable-locator —
+minus the clinical scope/ACL/global-singleton specifics.)
+
+```ts
+interface BioResolverSpec {       // DECLARATION — serializable, lives in a manifest
+  id: string; version: string; title: string; description: string;
+  inputSchema?: unknown;
+  output: { mode: "inline" | "reference" | "content_address" | "table"; mediaType?: string; schemaRef?: string };
+  temporal?: { kind: "snapshot" | "live" | "as_of"; source?: string; versionRequired?: boolean };
+  policy?: { network: "forbidden" | "explicit" | "allowed"; cache: "none" | "prefer_cas" | "require_cas"; timeoutSeconds?: number };
+}
+type BioResolverImpl = (handle: ResourceHandle, ctx: ResolutionContext) => Promise<ResolutionReceipt>;  // BINDING — runtime only
+interface ResolutionReceipt {
+  handle: ResourceHandle; resolvedAt: string; retrievedAt?: string;
+  sourceSnapshots?: SourceSnapshot[]; result: ResourceHandle; /* usually CAS/reference/inline/table */ provenance: Provenance[];
+}
+```
+
+Four rules, all load-bearing:
+
+1. **Opaque resolver ids.** Core never learns "how gnomAD works" — `resolver: { id: "gnomad.variant_frequency", query }`. The id is a registered capability.
+2. **Fail closed.** A handle naming `resolver = opentargets.associations` with no such resolver registered → resolution *fails*. It must not silently fall back to HTTP/shell/generic fetch.
+3. **Stable-locator discipline.** Resolve by a **source-consistent, churn-stable** key, never a volatile id. Good: accession+version, genome-build+normalized-variant-key, CURIE+ontology-release, DOI/checksum. Bad: temp path, API/UI row id, unversioned "latest" (unless explicitly marked `live`). This is where **temporality enters resolution** — a handle pins what it depends on.
+4. **Declaration separate from implementation.** A **manifest carries `BioResolverSpec` (data)**; a host/runtime **binds the `BioResolverImpl` (function)** — `registry.registerResolverSpec(spec)` then `registry.bindResolverImpl(id, impl)`. Manifests stay serializable/snapshot-able; impls never live in the manifest.
+
+**Resolver vs operation** (a kernel distinction):
+
+```text
+resolver  = dereference / materialize a resource     (side-effect-light, receipt-producing)
+operation = transform / analyze, produce facts/reports/CAS/runs
+```
+
+```text
+resolver: tabix.slice_vcf          operation: annotate_variants
+resolver: uniprot.protein_record   operation: protein_enrichment
+resolver: opentargets.associations operation: rank_candidate_genes
+```
+
+The clean path: `virtual handle → registered resolver → CAS/materialized table → DuckDB view → operation → run record + facts + provenance`.
+
+## Temporality — on facts/resources/runs, never on notes
+
+Bio drifts: gnomAD/Ensembl/UniProt versions change, ontology releases change, genome builds matter, APIs
+drift, "unknown frequency" ≠ "rare", and old facts may stay historically true but no longer current.
 
 ```ts
 interface SourceSnapshot   { source: string; version?: string; releasedAt?: string; retrievedAt?: string }
 interface TemporalScope    { asOf?: string; sourceSnapshots?: SourceSnapshot[]; coordinateSystem?: string }
-interface TemporalValidity {
-  observedAt?: string;   // when the measurement/event happened
-  validFrom?: string; validTo?: string;   // valid-time: true in the world
-  recordedAt: string;    // transaction-time: when the substrate recorded it
-}
+interface TemporalValidity { observedAt?: string; validFrom?: string; validTo?: string; recordedAt: string }
 ```
 
-Bi-temporal (`valid_*` × `recordedAt`) is what makes **reanalysis** work ("what did we believe on date
-X"). It belongs on facts, evidence, resources, runs, and source snapshots — **not** on notes (mutable
-memory; git is their history) and **not** on CAS content (content is timeless identity; only its
-*retrieval* is timed).
+Bi-temporal (`valid_*` × `recordedAt`) makes **reanalysis** work ("what did we believe on date X"). It
+belongs on facts, evidence, resources, runs, and source snapshots — **not** on notes (mutable memory; git
+is their history) and **not** on CAS content (timeless identity; only its *retrieval* is timed).
 
-## 5. Facts / KG — evidenced temporal assertions, not a placeholder `Evidence` entity
+## Facts / KG — evidenced temporal assertions
 
 ```ts
-interface BioFact {
-  id: string; subject: string; predicate: PredicateId;
-  object: string | number | boolean | null;
-  qualifiers?: Record<string, unknown>;
-  temporal?: TemporalValidity; evidence?: EvidenceBlock[];
-}
+interface BioFact { id: string; subject: string; predicate: PredicateId; object: string | number | boolean | null;
+  qualifiers?: Record<string, unknown>; temporal?: TemporalValidity; evidence?: EvidenceBlock[] }
 interface EvidenceBlock { sources: SourceSnapshot[]; artifacts?: ContentAddress[]; method?: string; confidence?: number }
 ```
 
-This resolves the note-vs-KG split cleanly: **notes = mutable agent memory; facts = temporal, evidenced
-graph assertions.** (Current `BioGraphNode`/`BioGraphEdge`/`TrustBlock` are the built graph layer; the
-temporal/evidence fields above are the target they grow into.)
+**Notes = mutable agent memory; facts = temporal, evidenced graph assertions.** (Built: `BioGraphNode`/
+`Edge`/`TrustBlock`; the temporal/evidence fields are the target they grow into.)
 
-## 6. Schemas / views — declarative, generated
-
-No hand-written SQL contract strings. Small declarative contracts that *generate* DDL/docs/contract/tests
-when a consumer needs them:
+## Schemas / views — declarative, generated
 
 ```ts
 interface ColumnDef  { name: string; type: "TEXT" | "INTEGER" | "DOUBLE" | "BOOLEAN" | "JSON"; nullable?: boolean; description?: string }
 interface BioViewDef { id: ViewId; name: string; description: string; columns: ColumnDef[]; dependsOnResources?: ResourceId[]; temporalScope?: TemporalScope }
 ```
 
-## 7. Operations — the boundary for executable behavior
+Generate DDL/docs/contract/tests from these when a consumer needs it — no hand-written SQL contract strings.
 
-`BioOperationSpec` is where biomedical *behavior* lives — question logic goes here or in the registered
-operation pack, **never** in core helpers:
+## Operations — the boundary for executable behavior
 
 ```ts
 interface BioOperationSpec {
@@ -164,46 +195,71 @@ interface BioOperationSpec {
 }
 ```
 
-## 8. Extension manifest — consumer-driven
+Question logic lives **here or in the registered operation pack — never in core helpers.**
 
-The registration boundary for concrete implementations. **Do not prebuild a giant manifest framework —
-let the flagship pull each `provides.*` kind into existence.**
+## Domain packs & the manifest
+
+A domain/operation pack is the registration boundary for concrete implementations. It declares
+serializable specs; **do not prebuild a giant framework — let the flagship pull each `provides.*` kind
+into existence.**
 
 ```ts
-interface BioExtensionManifest {
+interface DomainPackManifest {
   id: string; version: string; title: string; description: string;
+  domains: string[];                                 // ["genomics"], ["proteomics"], ...
   provides: {
-    resources?: VirtualResourceSpec[]; views?: BioViewDef[]; termSets?: TermSet[];
-    predicates?: PredicateDef[]; operations?: BioOperationSpec[];
+    resourceKinds?: ResourceKindDef[];               // "vcf", "bcf", "mzML", "h5ad"
+    resolvers?: BioResolverSpec[];                    // declarations; impls bound at runtime
+    views?: BioViewDef[]; termSets?: TermSet[]; predicates?: PredicateDef[];
+    operations?: BioOperationSpec[]; tools?: BioToolSpec[];
   };
 }
 ```
 
-## 9. Flagship as proof
+Examples (registered data, not guessed TS classes): a **genomics** pack provides vcf/bam resource kinds,
+`annotated_variants`/`alignments` views, `so.loss_of_function`, `annotate_variant`/`count_rare_high_impact`
+operations, `duckhts`/`vep` tools; **proteomics** provides mzML/FASTA, peptide/PSM views, UniProt/GO sets;
+**single-cell** provides h5ad/Zarr, count-matrix views, PCA/UMAP operations, Seurat/Scanpy/`duckdb_zarr`.
+
+## Execution backends
+
+`BioOperationSpec`/`BioResolverSpec` separate **what** from **how**. One operation ("annotate variants")
+may have many implementations:
+
+```ts
+type ExecutionBackend = "duckdb.sql" | "cli" | "r" | "python" | "http" | "wasm";
+```
+
+Core defines only the **contract**; actual execution lives in adapters with policy, provenance, timeouts,
+CAS receipts, and tests. CLI/R/Python are first-class — `bcftools`/`duckhts`, Bioconductor, scanpy/pysam.
+
+## Flagship as proof
 
 Rare-high-impact-variants becomes **manifest #1**, proving the bet end to end:
 
 ```text
-manifest:   termSet so.loss_of_function · virtual resource (synthetic annotated variants)
+manifest:   termSet so.loss_of_function · resolver fixture.annotated_variants (output: table)
             · view annotated_variants · operation rare_high_impact.report
 operation:  SQL over annotated_variants — count only frequency-KNOWN rare LoF, exclude unknown-frequency,
             emit abstention/caveat counts
-outputs:    report JSON · run record · provenance/materialization record
+outputs:    report JSON · run record · resolution/materialization record · provenance
 ```
 
-Not a bespoke skill, not a core SQL helper, not hidden policy — **registered resource + registered view
-+ operation SQL + temporal provenance + abstention.**
+Not a bespoke skill, not a core SQL helper, not hidden policy — **registered resolver + view + operation
+SQL + temporal provenance + abstention.** The same resolver shape later supports `duckhts.vcf_scan`,
+`gnomad.frequency_lookup`, `vep.consequence_lookup`, `opentargets.associations`, `uniprot.entry`,
+`zarr.matrix_slice`, `r.bioconductor_result`, `python.scanpy_result`.
 
 ## Model vs current code (honest status)
 
 | Slot | Built | Target (grows into) |
 |---|---|---|
 | Identity | `GenomicInterval`, `VariantKey`, `OntologyTermRef`, `ContentAddress`, `PredicateId=string` | id aliases, `TermRef`/`TermSet`/`PredicateDef` registry |
-| Handle | `ResourceHandle`, `ResourceResolverSpec`, `ContentAddress`, `casPathForAddress` | `VirtualResourceSpec`, `MaterializationRecord`, real resolution |
+| Handle | `ResourceHandle`, `ResourceResolverSpec`, `ContentAddress`, `casPathForAddress` | `VirtualResourceSpec`, `BioResolverSpec`/`Impl`, `ResolutionReceipt`, real resolution |
 | Fact | `BioGraphNode`/`Edge`/`Snapshot`, `TrustBlock`, `Provenance` | `BioFact` + `EvidenceBlock` + `TemporalValidity` |
-| Declaration | `BioToolSpec`, `BioOperationSpec` | `BioViewDef`, `PredicateDef`, `BioExtensionManifest` registry |
+| Declaration | `BioToolSpec`, `BioOperationSpec` | `BioViewDef`, `PredicateDef`, `DomainPackManifest` registry |
 | Run | `BioRunSpec`/`Record`/`Event` (no producer) | first producer = the flagship |
 | Memory | `StudyNote`, `studyNoteGraph`, KG sync | — (intentionally time-free) |
 
-Everything in the right column is built **consumer-driven** — when the flagship or a real operation pack
+Everything in the right column is built **consumer-driven** — when the flagship or a real domain pack
 needs it — never speculatively.

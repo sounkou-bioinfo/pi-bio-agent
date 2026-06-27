@@ -45,13 +45,14 @@
       "path": "docs/domain-model.md",
       "type": "Reference",
       "title": "Domain model",
-      "description": "Read before adding any core type — the domain bet, the six-slot test, virtual/CAS resources, and temporality the substrate is built on.",
+      "description": "Read before adding any core type or domain pack — kernel slots, resources/CAS/resolvers, temporality, domain packs, and execution backends.",
       "tags": [
         "domain-model",
         "resources",
+        "resolvers",
         "temporality",
-        "manifest",
-        "primitives"
+        "domain-packs",
+        "execution-backends"
       ]
     },
     {
