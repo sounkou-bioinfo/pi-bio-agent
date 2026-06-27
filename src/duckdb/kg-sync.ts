@@ -2,9 +2,10 @@ import type { BioGraphEdge, BioGraphNode, BioGraphSnapshot } from "../core/knowl
 
 /**
  * Minimal SQL port the KG-sync adapter writes through, implemented by a concrete DuckDB connection
- * exposing the `bio_nodes`/`bio_edges` contract. Keeping the adapter behind this port means the
- * package needs no native database-driver dependency; the host wires a real connection. The adapter
- * emits DuckDB-dialect SQL (e.g. `?::JSON` casts), so the port is not dialect-neutral.
+ * exposing the `bio_nodes`/`bio_edges` contract. The sync logic writes through this port so it stays
+ * testable (fake port) and injectable (a host can pass its own connection); the concrete
+ * `@duckdb/node-api` binding (`duckdbNodeConn`) is separate. The adapter emits DuckDB-dialect SQL
+ * (e.g. `?::JSON` casts), so the port is not dialect-neutral.
  */
 export interface KgSqlConn {
   all<T = Record<string, unknown>>(sql: string, params?: readonly unknown[]): Promise<T[]>;
@@ -154,10 +155,16 @@ export interface CreateBioGraphSchemaOptions {
 
 /**
  * Create the `bio_nodes`/`bio_edges` tables this adapter writes into, plus indexes for the scans and
- * join the sync runs (`family`, `from_id`, `to_id`). The duplicate policy enforced in
- * `assertMemorySubgraph` is mirrored as constraints: `node_id PRIMARY KEY` and
- * `UNIQUE (from_id, to_id, predicate)`. No foreign keys — dangling link targets are allowed by design,
- * so an edge may reference a node id that does not exist. DuckDB-dialect DDL.
+ * join the sync runs (`family`, `from_id`, `to_id`). DuckDB-dialect DDL.
+ *
+ * These are the *global* KG tables, not memory-only, so their constraints encode KG-wide policy:
+ * - `node_id PRIMARY KEY`;
+ * - `UNIQUE (from_id, to_id, predicate)` — **one edge per (from, to, predicate)**. Multiple evidences
+ *   for the same relationship aggregate in the edge's `trust` block (`TrustBlock.evidence[]`), not as
+ *   parallel rows. If parallel evidence edges with the same triple are ever required, this constraint
+ *   must be revisited.
+ * - No foreign keys — dangling link targets are allowed by design, so an edge may reference a node id
+ *   that does not exist.
  */
 export async function createBioGraphSchema(conn: KgSqlConn, options: CreateBioGraphSchemaOptions = {}): Promise<void> {
   const ifNotExists = options.ifNotExists ? "IF NOT EXISTS " : "";

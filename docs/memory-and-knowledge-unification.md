@@ -225,7 +225,20 @@ The pure projection (`studyNoteGraph`) hands off to `syncStudyNoteGraph` in
   rows for the two actionable problem sets — persisted **dangling** links (memory-origin edges with
   no target node) and **external inbound** edges (which would block a write) — so an agent can fix
   graph issues before syncing. No writes, no transaction. (Totals are scalar counts; the bounded,
-  fixable problem sets come back as rows.)
+  fixable problem sets come back as rows. A `limit` is deferred until a CLI/Pi surface exposes it.)
+- **Project helper.** `syncProjectStudyNotes(conn, cwd, { dryRun, allowWrite, createSchema })`
+  (`src/hosts/study-sync.ts`) is the one call that ties the file layer to the graph layer:
+  `readStudyNotes → studyNoteGraph → (optional createBioGraphSchema) → syncStudyNoteGraph`. Explicit
+  args only — dry-run by default, writing needs `allowWrite`, schema creation is opt-in; nothing from
+  ambient process state.
+
+### Global KG edge policy
+
+`createBioGraphSchema` creates the **global** `bio_nodes`/`bio_edges` tables, not memory-only ones, so
+its constraints are KG-wide decisions: **one edge per `(from, to, predicate)`**. Multiple evidences for
+the same relationship aggregate inside the edge's `trust` block (`TrustBlock.evidence[]`), not as
+parallel rows — consistent with the existing typed model. If parallel evidence edges with the same
+triple are ever needed, the `UNIQUE` constraint must be revisited.
 - **Refuses to orphan non-owned edges.** A non-owned edge (origin not `memory:`) pointing at
   a node in the **delete set** (`family='memory'`, found by joining `to_id` to those rows —
   not a `to_id` prefix match, so the guard covers exactly what gets deleted) would be dangled
