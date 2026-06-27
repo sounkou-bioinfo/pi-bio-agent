@@ -3,15 +3,23 @@ import { createBioGraphSchema, syncStudyNoteGraph, type KgSqlConn, type SyncStud
 import { readStudyNotes } from "./pi-project.js";
 
 export interface SyncProjectStudyNotesOptions extends SyncStudyNoteGraphOptions {
-  /** Create the `bio_nodes`/`bio_edges` schema (IF NOT EXISTS) before syncing. Default false: the tables are assumed to exist. */
+  /**
+   * Ensure the `bio_nodes`/`bio_edges` schema exists (`CREATE TABLE/INDEX IF NOT EXISTS`) before syncing.
+   * Default false. This is **DDL and runs even under `dryRun`** — `dryRun` governs only the memory
+   * subgraph *row* writes, not schema setup. For a dry run that touches the database not at all, leave
+   * this false and create the schema yourself beforehand.
+   */
   createSchema?: boolean;
 }
 
 /**
  * Project-level orchestration: read the project's study notes under `cwd`, project them to a memory
  * graph, and sync that into DuckDB through the given connection. The one call ties the file layer to the
- * graph layer. Explicit args only — dry-run by default, writing needs `allowWrite`, and schema creation
- * is opt-in via `createSchema`; nothing is read from ambient process state.
+ * graph layer. Explicit args only; nothing is read from ambient process state.
+ *
+ * Two independent effect axes: `createSchema` controls schema/index DDL (idempotent, runs even in
+ * dry-run); `dryRun`/`allowWrite` control the memory subgraph row sync (dry-run by default, writing
+ * needs `allowWrite`).
  */
 export async function syncProjectStudyNotes(
   conn: KgSqlConn,

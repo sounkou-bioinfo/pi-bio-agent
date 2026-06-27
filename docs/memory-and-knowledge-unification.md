@@ -188,11 +188,10 @@ and returns the persisted note plus a `created` flag.
 
 The pure projection (`studyNoteGraph`) hands off to `syncStudyNoteGraph` in
 `src/duckdb/kg-sync.ts`. It is the first **effectful** surface, kept policy-explicit per
-`design.md`:
+`design.md`. The sync writes through a minimal `KgSqlConn` port (`all`/`run`) so the sync logic
+stays testable (fake port) and injectable (a host passes its own connection); the concrete
+`@duckdb/node-api` binding is a separate file (see below).
 
-- **No native driver dependency.** The adapter writes through a minimal `KgSqlConn` port
-  (`all`/`run`); the host wires a concrete DuckDB connection. The package stays driver-free —
-  DuckDB is one backend, not a hard dependency.
 - **Ownership scope (exact).** It owns, and only ever deletes:
   - `bio_nodes WHERE family = 'memory'`
   - `bio_edges WHERE from_id LIKE 'memory:%'`
@@ -229,16 +228,11 @@ The pure projection (`studyNoteGraph`) hands off to `syncStudyNoteGraph` in
 - **Project helper.** `syncProjectStudyNotes(conn, cwd, { dryRun, allowWrite, createSchema })`
   (`src/hosts/study-sync.ts`) is the one call that ties the file layer to the graph layer:
   `readStudyNotes → studyNoteGraph → (optional createBioGraphSchema) → syncStudyNoteGraph`. Explicit
-  args only — dry-run by default, writing needs `allowWrite`, schema creation is opt-in; nothing from
-  ambient process state.
-
-### Global KG edge policy
-
-`createBioGraphSchema` creates the **global** `bio_nodes`/`bio_edges` tables, not memory-only ones, so
-its constraints are KG-wide decisions: **one edge per `(from, to, predicate)`**. Multiple evidences for
-the same relationship aggregate inside the edge's `trust` block (`TrustBlock.evidence[]`), not as
-parallel rows — consistent with the existing typed model. If parallel evidence edges with the same
-triple are ever needed, the `UNIQUE` constraint must be revisited.
+  args only; nothing from ambient process state. **Two independent effect axes:** `createSchema`
+  controls schema/index DDL — idempotent, and it **runs even under `dryRun`**; `dryRun`/`allowWrite`
+  control the memory-subgraph *row* sync (dry-run by default). A dry run with `createSchema: true`
+  still writes the schema; for a run that touches the DB not at all, create the schema beforehand and
+  leave `createSchema` false.
 - **Refuses to orphan non-owned edges.** A non-owned edge (origin not `memory:`) pointing at
   a node in the **delete set** (`family='memory'`, found by joining `to_id` to those rows —
   not a `to_id` prefix match, so the guard covers exactly what gets deleted) would be dangled
@@ -257,6 +251,14 @@ triple are ever needed, the `UNIQUE` constraint must be revisited.
   parameterized statements); transaction required; **dry-run by default**, writing needs
   `{ dryRun: false, allowWrite: true }`; result returns delete/insert/dangling/external-inbound
   counts. No Pi tool yet — only when a workflow needs it.
+
+### Global KG edge policy
+
+`createBioGraphSchema` creates the **global** `bio_nodes`/`bio_edges` tables, not memory-only ones, so
+its constraints are KG-wide decisions: **one edge per `(from, to, predicate)`**. Multiple evidences for
+the same relationship aggregate inside the edge's `trust` block (`TrustBlock.evidence[]`), not as
+parallel rows — consistent with the existing typed model. If parallel evidence edges with the same
+triple are ever needed, the `UNIQUE` constraint must be revisited.
 
 ## Still to do (step 4)
 
