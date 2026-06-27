@@ -52,6 +52,14 @@ The moment core answers a *question* instead of defining a *primitive*, it has r
 skill sprawl in a different shape. (`variants.ts` was trimmed to variant identity for exactly this
 reason; the question-level builders were removed.)
 
+> **Pre-1.0 core has no compatibility promise.** Remove speculative types rather than maintain unclear
+> abstractions — clarity over hodgepodge. Concrete biomedical behavior enters through operation/extension
+> **manifests with tests**, never through convenience helpers in core. Keep only: (1) true primitives
+> (identity, coordinates, CURIEs, content addresses); (2) contracts with real boundaries (`BioToolSpec`,
+> `BioOperationSpec`, `ResourceHandle`, `BioRunSpec`, graph node/edge snapshot, study note); (3) adapters
+> with tests (DuckDB sync/report, Pi extension, CLI, project helpers). Everything else is removed until a
+> real consumer demands it.
+
 ## Integration surfaces
 
 `pi-bio-agent` should not be Pi-only. Pi is the first and most important host adapter because it is where this package is used today, but the stable product is a small core library with multiple thin surfaces over the same registries.

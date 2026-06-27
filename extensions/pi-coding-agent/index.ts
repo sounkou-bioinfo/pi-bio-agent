@@ -5,9 +5,7 @@ import { findToolSpecs, toolSpecIndex } from "../../src/core/tool-spec.js";
 import { validateReadOnlySelect } from "../../src/core/knowledge-graph.js";
 import { deriveStudyPlan, studyNoteIndex, type StudyArtifactKind, type StudyCorpus, type StudyNote } from "../../src/core/study.js";
 import { deleteStudyNote, listStudyNotes, makeStudyNote, readStudyNotes, runtimeSkillRoot, runtimeStudyRoot, writeProjectSkill, writeStudyNote } from "../../src/hosts/pi-project.js";
-import { ontologySqlContract } from "../../src/core/ontology.js";
 import { defaultDuckDbExtensionCatalog, findDuckDbExtensions } from "../../src/duckdb/extensions.js";
-import { bioSqlContract } from "../../src/duckdb/sql-contract.js";
 import { defaultBioToolRegistry } from "../../src/primitives/bio-tool-specs.js";
 import { defaultBioResourceRegistry, findResourceResolvers } from "../../src/primitives/resources.js";
 
@@ -44,8 +42,6 @@ export default function piBioAgentExtension(pi: ExtensionAPI): void {
           "BioToolSpec is the provider-agnostic contract; adapters bind it to Pi tools, DuckDB, R, shell, HTTP, MCP, or memory.",
           "The agent may author project-local skills when a repeated workflow emerges; run /reload to expose them.",
         ],
-        sql_contract: bioSqlContract(),
-        ontology_contract: ontologySqlContract(),
       });
     },
   });

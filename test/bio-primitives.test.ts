@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { intervalOverlapsSql, makeInterval, normalizeSeqId, toOneBasedClosed, toZeroBasedHalfOpen, variantToInterval } from "../src/core/intervals.js";
-import { normalizeTermRef, ontologySqlContract, termKey } from "../src/core/ontology.js";
+import { normalizeTermRef, termKey } from "../src/core/ontology.js";
 import { makeVariantKey, variantStableKey } from "../src/core/variants.js";
 
 describe("genomic interval primitives", () => {
@@ -60,10 +60,7 @@ describe("ontology primitives", () => {
     assert.throws(() => normalizeTermRef("0001250"), /no system prefix/);
   });
 
-  test("builds ontology keys and exposes SQL contract", () => {
+  test("builds ontology term keys", () => {
     assert.equal(termKey({ system: "HP", id: "0001250" }), "HP:0001250");
-    const contract = ontologySqlContract();
-    assert.match(contract, /ontology_terms/);
-    assert.match(contract, /term_set_members/);
   });
 });
