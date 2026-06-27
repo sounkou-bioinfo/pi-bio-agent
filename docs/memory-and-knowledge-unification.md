@@ -204,10 +204,15 @@ The pure projection (`studyNoteGraph`) hands off to `syncStudyNoteGraph` in
   rejected), or any edge whose `from` is not such a memory node — so it can never write
   outside what it owns.
 - **Fails closed on duplicates.** A duplicate node id, or a duplicate edge by
-  `(from, to, predicate)`, throws. The pure projection never emits duplicates, so one is a
-  caller bug — surfaced here rather than silently deduped (which would skew the insert
-  counts) or left to a future constraint rollback. Same endpoints with a different predicate
-  are distinct, not duplicates.
+  `(from, to, predicate)`, throws. A normal file-backed note set does not emit duplicates, so
+  one reaching the adapter is a caller/input bug — surfaced here rather than silently deduped
+  (which would skew the insert counts) or left to a future constraint rollback. Same endpoints
+  with a different predicate are distinct, not duplicates.
+- **Schema DDL helper.** `createBioGraphSchema(conn, { ifNotExists })` creates `bio_nodes`/
+  `bio_edges` through the same port, mirroring the duplicate policy as constraints
+  (`node_id PRIMARY KEY`, `UNIQUE (from_id, to_id, predicate)`). **No foreign keys** — dangling
+  link targets are allowed, so an edge may reference an absent node id. No native dependency;
+  the driver binding for `KgSqlConn` remains a separate, later step.
 - **Refuses to orphan non-owned edges.** A non-owned edge (origin not `memory:`) pointing at
   a node in the **delete set** (`family='memory'`, found by joining `to_id` to those rows —
   not a `to_id` prefix match, so the guard covers exactly what gets deleted) would be dangled

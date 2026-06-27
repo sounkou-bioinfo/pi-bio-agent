@@ -49,8 +49,9 @@ function jsonParam(value: unknown): string | null {
  * carries anything else, or one that is internally inconsistent. Every node must be `family: "memory"`
  * with a well-formed `memory:<slug>` id and a unique id; every edge must originate at a memory node
  * (targets may be anything — dangling links are allowed) and be unique by `(from, to, predicate)`.
- * The pure projection never produces duplicates, so a duplicate is a caller bug surfaced here rather
- * than silently deduped (which would skew the reported insert counts) or left to a constraint rollback.
+ * A normal file-backed note set does not produce duplicates, so a duplicate reaching the adapter is a
+ * caller/input bug surfaced here rather than silently deduped (which would skew the reported insert
+ * counts) or left to a constraint rollback.
  */
 function assertMemorySubgraph(snapshot: BioGraphSnapshot): void {
   const seenNodes = new Set<string>();
@@ -141,5 +142,30 @@ async function insertEdge(conn: KgSqlConn, edge: BioGraphEdge): Promise<void> {
   await conn.run(
     "INSERT INTO bio_edges (from_id, to_id, predicate, attrs, trust) VALUES (?, ?, ?, ?::JSON, ?::JSON)",
     [edge.from, edge.to, edge.predicate, jsonParam(edge.attrs), jsonParam(edge.trust)],
+  );
+}
+
+export interface CreateBioGraphSchemaOptions {
+  /** Emit `CREATE TABLE IF NOT EXISTS`, so the call is idempotent against an existing store. */
+  ifNotExists?: boolean;
+}
+
+/**
+ * Create the `bio_nodes`/`bio_edges` tables this adapter writes into. The duplicate policy enforced in
+ * `assertMemorySubgraph` is mirrored as constraints: `node_id PRIMARY KEY` and
+ * `UNIQUE (from_id, to_id, predicate)`. No foreign keys — dangling link targets are allowed by design,
+ * so an edge may reference a node id that does not exist. DuckDB-dialect DDL.
+ */
+export async function createBioGraphSchema(conn: KgSqlConn, options: CreateBioGraphSchemaOptions = {}): Promise<void> {
+  const ifNotExists = options.ifNotExists ? "IF NOT EXISTS " : "";
+  await conn.run(
+    `CREATE TABLE ${ifNotExists}bio_nodes (` +
+      "node_id TEXT PRIMARY KEY, family TEXT NOT NULL, type TEXT NOT NULL, label TEXT NOT NULL, " +
+      "description TEXT, attrs JSON, trust JSON)",
+  );
+  await conn.run(
+    `CREATE TABLE ${ifNotExists}bio_edges (` +
+      "from_id TEXT NOT NULL, to_id TEXT NOT NULL, predicate TEXT NOT NULL, attrs JSON, trust JSON, " +
+      "UNIQUE (from_id, to_id, predicate))",
   );
 }

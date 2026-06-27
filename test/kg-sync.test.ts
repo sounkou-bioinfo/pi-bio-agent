@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { studyNoteGraph, type StudyNote } from "../src/core/study.js";
-import { syncStudyNoteGraph, type KgSqlConn } from "../src/duckdb/kg-sync.js";
+import { createBioGraphSchema, syncStudyNoteGraph, type KgSqlConn } from "../src/duckdb/kg-sync.js";
 
 function note(slug: string, body: string, links?: StudyNote["links"]): StudyNote {
   return {
@@ -189,5 +189,25 @@ describe("syncStudyNoteGraph", () => {
     assert.ok(wbegin >= 0 && wcount > wbegin, "external-inbound check runs after BEGIN");
     assert.ok(!wsqls.some((s) => /^(DELETE|INSERT)/.test(s)), "no delete/insert when external inbound edges exist");
     assert.ok(wsqls.includes("ROLLBACK"), "rolls back after refusing");
+  });
+});
+
+describe("createBioGraphSchema", () => {
+  test("emits bio_nodes/bio_edges DDL encoding the duplicate policy, no FKs", async () => {
+    const { conn, statements } = fakeConn({ nodes: 0, edges: 0 });
+    await createBioGraphSchema(conn);
+    const ddl = statements.map((s) => s.sql);
+    assert.equal(ddl.length, 2);
+    assert.ok(ddl[0].startsWith("CREATE TABLE bio_nodes") && ddl[0].includes("node_id TEXT PRIMARY KEY"), "node_id is the primary key");
+    assert.ok(ddl[1].startsWith("CREATE TABLE bio_edges") && ddl[1].includes("UNIQUE (from_id, to_id, predicate)"), "edges unique by triple");
+    // dangling targets are allowed by design, so no foreign keys
+    assert.ok(!ddl.some((s) => /FOREIGN KEY|REFERENCES/.test(s)), "no foreign-key constraints");
+    assert.ok(!ddl.some((s) => s.includes("IF NOT EXISTS")), "plain CREATE by default");
+  });
+
+  test("ifNotExists makes it idempotent", async () => {
+    const { conn, statements } = fakeConn({ nodes: 0, edges: 0 });
+    await createBioGraphSchema(conn, { ifNotExists: true });
+    assert.ok(statements.every((s) => s.sql.includes("CREATE TABLE IF NOT EXISTS")), "all tables use IF NOT EXISTS");
   });
 });
