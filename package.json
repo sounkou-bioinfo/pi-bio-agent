@@ -1,0 +1,56 @@
+{
+  "name": "pi-bio-agent",
+  "version": "0.1.0",
+  "private": false,
+  "description": "Provider-agnostic bioinformatics agent primitives, DuckDB SQL planning, and Pi coding-agent integration.",
+  "license": "MIT",
+  "type": "module",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "bioinformatics",
+    "genomics",
+    "duckdb",
+    "agentic-ai"
+  ],
+  "files": [
+    "src",
+    "extensions",
+    "skills",
+    "docs",
+    "examples",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck"
+  },
+  "pi": {
+    "extensions": [
+      "./extensions"
+    ],
+    "skills": [
+      "./skills"
+    ],
+    "prompts": []
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    },
+    "typebox": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.78.0",
+    "@types/node": "^24.0.0",
+    "typebox": "^1.1.38",
+    "typescript": "^5.8.3"
+  }
+}
