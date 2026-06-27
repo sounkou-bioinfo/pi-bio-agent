@@ -111,6 +111,8 @@ describe("duckdbNodeConn (real in-memory DuckDB)", () => {
     const capped = await reportStudyNoteGraph(conn, { limit: 2 });
     assert.equal(capped.danglingEdgeCount, 3); // exact total survives the cap
     assert.equal(capped.danglingEdges.length, 2); // sample is capped
+    // deterministic ORDER BY (to_id ghost-a, ghost-b, ghost-c) makes the capped sample stable
+    assert.deepEqual(capped.danglingEdges.map((e) => e.to), ["memory:ghost-a", "memory:ghost-b"]);
 
     await assert.rejects(() => reportStudyNoteGraph(conn, { limit: -1 }), /non-negative integer/);
   });

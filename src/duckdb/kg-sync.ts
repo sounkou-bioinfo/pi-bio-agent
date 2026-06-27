@@ -228,8 +228,10 @@ export async function reportStudyNoteGraph(conn: KgSqlConn, options: ReportStudy
   const [edgeRow] = await conn.all<{ n: number }>(`SELECT count(*) AS n FROM ${OWNED_EDGES}`);
   const [danglingCountRow] = await conn.all<{ n: number }>(`SELECT count(*) AS n FROM ${DANGLING_MEMORY_EDGES}`);
   const [externalCountRow] = await conn.all<{ n: number }>(`SELECT count(*) AS n FROM ${EXTERNAL_INBOUND_EDGES}`);
-  const dangling = await conn.all<{ from_id: string; to_id: string; predicate: string }>(`SELECT e.from_id, e.to_id, e.predicate FROM ${DANGLING_MEMORY_EDGES}${lim}`);
-  const externalInbound = await conn.all<{ from_id: string; to_id: string; predicate: string }>(`SELECT e.from_id, e.to_id, e.predicate FROM ${EXTERNAL_INBOUND_EDGES}${lim}`);
+  // Deterministic order so a capped sample is stable across runs.
+  const order = " ORDER BY e.from_id, e.to_id, e.predicate";
+  const dangling = await conn.all<{ from_id: string; to_id: string; predicate: string }>(`SELECT e.from_id, e.to_id, e.predicate FROM ${DANGLING_MEMORY_EDGES}${order}${lim}`);
+  const externalInbound = await conn.all<{ from_id: string; to_id: string; predicate: string }>(`SELECT e.from_id, e.to_id, e.predicate FROM ${EXTERNAL_INBOUND_EDGES}${order}${lim}`);
   return {
     memoryNodes: Number(nodeRow?.n ?? 0),
     memoryEdges: Number(edgeRow?.n ?? 0),

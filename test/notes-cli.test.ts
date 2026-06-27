@@ -7,7 +7,7 @@ import { DuckDBInstance } from "@duckdb/node-api";
 import { makeStudyNote, writeStudyNote } from "../src/hosts/pi-project.js";
 import { duckdbNodeConn } from "../src/duckdb/node-api.js";
 import type { KgSqlConn } from "../src/duckdb/kg-sync.js";
-import { mainNotes, parseNotesArgs } from "../src/cli/notes.js";
+import { DEFAULT_NOTES_REPORT_LIMIT, mainNotes, parseNotesArgs } from "../src/cli/notes.js";
 
 describe("parseNotesArgs", () => {
   test("parses sync with defaults (dry run) and flags", () => {
@@ -15,12 +15,12 @@ describe("parseNotesArgs", () => {
     assert.deepEqual(parseNotesArgs(["sync", "--db", "g.duckdb", "--write", "--create-schema", "--json"]), { command: "sync", db: "g.duckdb", write: true, createSchema: true, json: true });
   });
 
-  test("parses report with limit", () => {
+  test("parses report with limit, defaulting to a finite cap", () => {
     assert.deepEqual(parseNotesArgs(["report", "--db", "g.duckdb", "--limit", "5"]), { command: "report", db: "g.duckdb", limit: 5, json: false });
-    assert.deepEqual(parseNotesArgs(["report", "--db", "g.duckdb"]), { command: "report", db: "g.duckdb", limit: undefined, json: false });
+    assert.deepEqual(parseNotesArgs(["report", "--db", "g.duckdb"]), { command: "report", db: "g.duckdb", limit: DEFAULT_NOTES_REPORT_LIMIT, json: false });
   });
 
-  test("rejects bad input", () => {
+  test("rejects bad input and command-inapplicable flags", () => {
     assert.throws(() => parseNotesArgs([]), /unknown notes command/);
     assert.throws(() => parseNotesArgs(["nope", "--db", "x"]), /unknown notes command/);
     assert.throws(() => parseNotesArgs(["sync"]), /--db <path> is required/);
@@ -28,6 +28,10 @@ describe("parseNotesArgs", () => {
     assert.throws(() => parseNotesArgs(["report", "--db", "x", "--limit=-2"]), /non-negative integer/);
     assert.throws(() => parseNotesArgs(["report", "--db", "x", "--limit", "abc"]), /non-negative integer/);
     assert.throws(() => parseNotesArgs(["report", "--db", "x", "--bogus"]), /Unknown option/);
+    // fail closed on flags that don't apply to the command
+    assert.throws(() => parseNotesArgs(["sync", "--db", "x", "--limit", "5"]), /Unknown option/);
+    assert.throws(() => parseNotesArgs(["report", "--db", "x", "--write"]), /Unknown option/);
+    assert.throws(() => parseNotesArgs(["sync", "--db", "x", "--bogus"]), /Unknown option/);
   });
 });
 

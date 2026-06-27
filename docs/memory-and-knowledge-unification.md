@@ -236,14 +236,18 @@ stays testable (fake port) and injectable (a host passes its own connection); th
   control the memory-subgraph *row* sync (dry-run by default). A dry run with `createSchema: true`
   still writes the schema; for a run that performs **no database writes**, leave `createSchema` false
   (the schema must already exist) — note a dry run still *reads* (it SELECTs counts).
-- **CLI engine.** `src/cli/notes.ts` — `parseNotesArgs` (pure, `node:util parseArgs`, no dependency)
-  and `mainNotes(argv, { cwd, openConn, out })` (injected connection-factory + output sink, returns an
-  exit code, never calls `process.exit`). Surface: `notes sync --db <path> [--write] [--create-schema]
-  [--json]` (dry-run unless `--write`) and `notes report --db <path> [--limit N] [--json]`; `--db`
-  required, write gated behind `--write`. User-facing name is **`notes`**, not `study` (the term is
-  overloaded in bio). Fully unit-tested against in-memory DuckDB. Wiring it to an executable `bin`
-  needs a build step (the package ships `.ts` with `.js` specifiers, which Node can't run un-compiled)
-  — deferred as a packaging decision.
+- **CLI.** `src/cli/notes.ts` — `parseNotesArgs` (pure, `node:util parseArgs`, no dependency) and
+  `mainNotes(argv, { cwd, openConn, out })` (injected connection-factory + output sink, returns an exit
+  code, never calls `process.exit`). Surface: `notes sync --db <path> [--write] [--create-schema]
+  [--json]` (dry-run unless `--write`) and `notes report --db <path> [--limit N] [--json]`. `--db`
+  required; write gated behind `--write`; each command has its **own** option set so an inapplicable
+  flag fails closed (`Unknown option`); `report` rows default to `DEFAULT_NOTES_REPORT_LIMIT` (100) with
+  exact counts, deterministically ordered before the cap. User-facing name is **`notes`**, not `study`.
+  The executable is `src/cli/bin.ts` (the only file touching real argv/stdout/driver/`process.exit`),
+  compiled to `dist/cli/bin.js` and exposed as the `pi-bio-agent` bin via a `tsc` build
+  (`tsconfig.build.json`, run by `prepare`/`npm run build`). `src` still ships for Pi; `dist` is added
+  for the bin — not committed, built on pack/install. Verified by running the compiled binary against a
+  real DuckDB file, plus unit tests against in-memory DuckDB.
 - **Refuses to orphan non-owned edges.** A non-owned edge (origin not `memory:`) pointing at
   a node in the **delete set** (`family='memory'`, found by joining `to_id` to those rows —
   not a `to_id` prefix match, so the guard covers exactly what gets deleted) would be dangled

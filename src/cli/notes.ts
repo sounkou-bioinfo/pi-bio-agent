@@ -13,9 +13,13 @@ export interface NotesSyncArgs {
 export interface NotesReportArgs {
   command: "report";
   db: string;
-  limit?: number;
+  /** Always set: defaults to DEFAULT_NOTES_REPORT_LIMIT so the CLI never prints unbounded rows. */
+  limit: number;
   json: boolean;
 }
+
+/** The CLI caps report rows by default so it can't flood output; raise with --limit N (counts stay exact). */
+export const DEFAULT_NOTES_REPORT_LIMIT = 100;
 
 export type NotesArgs = NotesSyncArgs | NotesReportArgs;
 
@@ -31,34 +35,51 @@ them into the memory subgraph (bio_nodes/bio_edges) of the given DuckDB database
 sync performs a dry run (reads counts, writes no rows) unless --write is passed.
 --create-schema runs CREATE TABLE/INDEX IF NOT EXISTS even in a dry run.`;
 
-/** Pure: parse argv (after the `notes` token) into a typed command. Throws on bad input. */
+/**
+ * Pure: parse argv (after the `notes` token) into a typed command. Throws on bad input. Each command
+ * gets its own option set, so an inapplicable flag (e.g. `report --write`, `sync --limit`) fails closed
+ * with an "Unknown option" error rather than being silently ignored.
+ */
 export function parseNotesArgs(argv: string[]): NotesArgs {
   const [command, ...rest] = argv;
-  if (command !== "sync" && command !== "report") {
-    throw new Error(`unknown notes command '${command ?? ""}'.\n\n${NOTES_USAGE}`);
-  }
-  const { values } = parseArgs({
-    args: rest,
-    allowPositionals: false,
-    options: {
-      db: { type: "string" },
-      write: { type: "boolean", default: false },
-      "create-schema": { type: "boolean", default: false },
-      limit: { type: "string" },
-      json: { type: "boolean", default: false },
-    },
-  });
-  if (!values.db) throw new Error(`--db <path> is required.\n\n${NOTES_USAGE}`);
+  const requireDb = (db: string | undefined): string => {
+    if (!db) throw new Error(`--db <path> is required.\n\n${NOTES_USAGE}`);
+    return db;
+  };
 
   if (command === "sync") {
-    return { command, db: values.db, write: values.write ?? false, createSchema: values["create-schema"] ?? false, json: values.json ?? false };
+    const { values } = parseArgs({
+      args: rest,
+      allowPositionals: false,
+      options: {
+        db: { type: "string" },
+        write: { type: "boolean", default: false },
+        "create-schema": { type: "boolean", default: false },
+        json: { type: "boolean", default: false },
+      },
+    });
+    return { command, db: requireDb(values.db), write: values.write ?? false, createSchema: values["create-schema"] ?? false, json: values.json ?? false };
   }
-  let limit: number | undefined;
-  if (values.limit !== undefined) {
-    limit = Number(values.limit);
-    if (!Number.isInteger(limit) || limit < 0) throw new Error(`--limit must be a non-negative integer, got '${values.limit}'`);
+
+  if (command === "report") {
+    const { values } = parseArgs({
+      args: rest,
+      allowPositionals: false,
+      options: {
+        db: { type: "string" },
+        limit: { type: "string" },
+        json: { type: "boolean", default: false },
+      },
+    });
+    let limit = DEFAULT_NOTES_REPORT_LIMIT;
+    if (values.limit !== undefined) {
+      limit = Number(values.limit);
+      if (!Number.isInteger(limit) || limit < 0) throw new Error(`--limit must be a non-negative integer, got '${values.limit}'`);
+    }
+    return { command, db: requireDb(values.db), limit, json: values.json ?? false };
   }
-  return { command, db: values.db, limit, json: values.json ?? false };
+
+  throw new Error(`unknown notes command '${command ?? ""}'.\n\n${NOTES_USAGE}`);
 }
 
 function formatSync(r: SyncStudyNoteGraphResult): string {
