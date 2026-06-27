@@ -280,5 +280,12 @@ describe("Study helpers", () => {
     assert.equal(edges.length, 2);
     // Dangling is fine: gnomad-frequencies need not exist as a note for the edge to project.
     assert.ok(edges.some((e) => e.from === memoryNodeId("acmg-pm2") && e.to === memoryNodeId("gnomad-frequencies") && e.predicate === "references"));
+
+    // Defensive: a bogus predicate from unvalidated input falls back to the default, not a junk edge.
+    const coerced = parseStudyNoteLinks({ body: "", links: [{ to: "x", predicate: "supersedes" as unknown as undefined }] });
+    assert.deepEqual(coerced, [{ to: "x", predicate: "references" }]);
+
+    // memoryNodeId rejects non-slug input rather than minting memory:<garbage>.
+    assert.throws(() => memoryNodeId("Bad Slug"), /invalid memory slug/);
   });
 });

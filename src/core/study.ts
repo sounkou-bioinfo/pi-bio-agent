@@ -27,9 +27,13 @@ export interface StudyCorpus {
  * predicates: note links carry no `supersedes`/`derived_from`/`supports` semantics — those belong on
  * KG facts, not procedural memory. This is a note-reference surface, not a general KG edge-authoring API.
  */
-export type StudyNoteLinkPredicate = "references" | "see_also" | "depends_on" | "contrasts_with";
+export const STUDY_NOTE_LINK_PREDICATES = ["references", "see_also", "depends_on", "contrasts_with"] as const;
 
-export const STUDY_NOTE_LINK_PREDICATES: StudyNoteLinkPredicate[] = ["references", "see_also", "depends_on", "contrasts_with"];
+export type StudyNoteLinkPredicate = typeof STUDY_NOTE_LINK_PREDICATES[number];
+
+function isStudyNoteLinkPredicate(value: unknown): value is StudyNoteLinkPredicate {
+  return typeof value === "string" && (STUDY_NOTE_LINK_PREDICATES as readonly string[]).includes(value);
+}
 
 /** A typed cross-reference from one note to another note's slug. Untyped `[[slug]]` body links default their predicate. */
 export interface StudyNoteLink {
@@ -125,7 +129,7 @@ export function validateStudyNote(note: unknown): string[] {
     else if (n.links.some((l) => {
       const link = l as StudyNoteLink;
       return !l || typeof l !== "object" || typeof link.to !== "string" || !STUDY_SLUG_RE.test(link.to) || link.to.length > 64
-        || (link.predicate !== undefined && !STUDY_NOTE_LINK_PREDICATES.includes(link.predicate));
+        || (link.predicate !== undefined && !isStudyNoteLinkPredicate(link.predicate));
     })) errors.push("each link needs a slug `to` (max 64 chars) and a known predicate");
   }
   return errors;
@@ -145,14 +149,16 @@ export function memoryNodeId(slug: string): string {
 /** Collect a note's links from both its explicit `links` field and `[[slug]]` body links, normalized and de-duplicated by (to, predicate). Pure; dangling targets are allowed and not resolved here. */
 export function parseStudyNoteLinks(note: Pick<StudyNote, "body" | "links">): Required<StudyNoteLink>[] {
   const out = new Map<string, Required<StudyNoteLink>>();
-  const add = (to: string, predicate?: StudyNoteLinkPredicate) => {
+  const add = (to: string, predicate?: unknown) => {
     let slug: string;
     try {
       slug = normalizeStudySlug(to);
     } catch {
       return; // unusable target, skip
     }
-    const pred = predicate ?? STUDY_DEFAULT_LINK_PREDICATE;
+    // Defensive: this is exported core and can receive unvalidated JSON, so an unknown predicate
+    // falls back to the default rather than projecting a bogus edge.
+    const pred = isStudyNoteLinkPredicate(predicate) ? predicate : STUDY_DEFAULT_LINK_PREDICATE;
     out.set(JSON.stringify([slug, pred]), { to: slug, predicate: pred });
   };
   for (const link of note.links ?? []) add(link.to, link.predicate);
