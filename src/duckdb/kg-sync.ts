@@ -151,7 +151,8 @@ export interface CreateBioGraphSchemaOptions {
 }
 
 /**
- * Create the `bio_nodes`/`bio_edges` tables this adapter writes into. The duplicate policy enforced in
+ * Create the `bio_nodes`/`bio_edges` tables this adapter writes into, plus indexes for the scans and
+ * join the sync runs (`family`, `from_id`, `to_id`). The duplicate policy enforced in
  * `assertMemorySubgraph` is mirrored as constraints: `node_id PRIMARY KEY` and
  * `UNIQUE (from_id, to_id, predicate)`. No foreign keys — dangling link targets are allowed by design,
  * so an edge may reference a node id that does not exist. DuckDB-dialect DDL.
@@ -168,4 +169,7 @@ export async function createBioGraphSchema(conn: KgSqlConn, options: CreateBioGr
       "from_id TEXT NOT NULL, to_id TEXT NOT NULL, predicate TEXT NOT NULL, attrs JSON, trust JSON, " +
       "UNIQUE (from_id, to_id, predicate))",
   );
+  await conn.run(`CREATE INDEX ${ifNotExists}bio_nodes_family ON bio_nodes (family)`);
+  await conn.run(`CREATE INDEX ${ifNotExists}bio_edges_from_id ON bio_edges (from_id)`);
+  await conn.run(`CREATE INDEX ${ifNotExists}bio_edges_to_id ON bio_edges (to_id)`);
 }

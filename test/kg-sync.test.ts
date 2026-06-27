@@ -193,13 +193,16 @@ describe("syncStudyNoteGraph", () => {
 });
 
 describe("createBioGraphSchema", () => {
-  test("emits bio_nodes/bio_edges DDL encoding the duplicate policy, no FKs", async () => {
+  test("emits bio_nodes/bio_edges DDL + indexes encoding the duplicate policy, no FKs", async () => {
     const { conn, statements } = fakeConn({ nodes: 0, edges: 0 });
     await createBioGraphSchema(conn);
     const ddl = statements.map((s) => s.sql);
-    assert.equal(ddl.length, 2);
-    assert.ok(ddl[0].startsWith("CREATE TABLE bio_nodes") && ddl[0].includes("node_id TEXT PRIMARY KEY"), "node_id is the primary key");
-    assert.ok(ddl[1].startsWith("CREATE TABLE bio_edges") && ddl[1].includes("UNIQUE (from_id, to_id, predicate)"), "edges unique by triple");
+    assert.ok(ddl.some((s) => s.startsWith("CREATE TABLE bio_nodes") && s.includes("node_id TEXT PRIMARY KEY")), "node_id is the primary key");
+    assert.ok(ddl.some((s) => s.startsWith("CREATE TABLE bio_edges") && s.includes("UNIQUE (from_id, to_id, predicate)")), "edges unique by triple");
+    // indexes for the scans/join the sync runs
+    assert.ok(ddl.some((s) => s.startsWith("CREATE INDEX") && s.includes("ON bio_nodes (family)")), "index on family");
+    assert.ok(ddl.some((s) => s.startsWith("CREATE INDEX") && s.includes("ON bio_edges (from_id)")), "index on from_id");
+    assert.ok(ddl.some((s) => s.startsWith("CREATE INDEX") && s.includes("ON bio_edges (to_id)")), "index on to_id");
     // dangling targets are allowed by design, so no foreign keys
     assert.ok(!ddl.some((s) => /FOREIGN KEY|REFERENCES/.test(s)), "no foreign-key constraints");
     assert.ok(!ddl.some((s) => s.includes("IF NOT EXISTS")), "plain CREATE by default");
@@ -208,6 +211,6 @@ describe("createBioGraphSchema", () => {
   test("ifNotExists makes it idempotent", async () => {
     const { conn, statements } = fakeConn({ nodes: 0, edges: 0 });
     await createBioGraphSchema(conn, { ifNotExists: true });
-    assert.ok(statements.every((s) => s.sql.includes("CREATE TABLE IF NOT EXISTS")), "all tables use IF NOT EXISTS");
+    assert.ok(statements.every((s) => s.sql.includes("IF NOT EXISTS")), "every table and index uses IF NOT EXISTS");
   });
 });

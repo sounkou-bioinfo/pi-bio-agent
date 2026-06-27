@@ -210,9 +210,10 @@ The pure projection (`studyNoteGraph`) hands off to `syncStudyNoteGraph` in
   with a different predicate are distinct, not duplicates.
 - **Schema DDL helper.** `createBioGraphSchema(conn, { ifNotExists })` creates `bio_nodes`/
   `bio_edges` through the same port, mirroring the duplicate policy as constraints
-  (`node_id PRIMARY KEY`, `UNIQUE (from_id, to_id, predicate)`). **No foreign keys** — dangling
-  link targets are allowed, so an edge may reference an absent node id. No native dependency;
-  the driver binding for `KgSqlConn` remains a separate, later step.
+  (`node_id PRIMARY KEY`, `UNIQUE (from_id, to_id, predicate)`) and adding indexes for the
+  scans/join the sync runs (`family`, `from_id`, `to_id`). **No foreign keys** — dangling link
+  targets are allowed, so an edge may reference an absent node id. No native dependency; the
+  driver binding for `KgSqlConn` remains a separate, later step.
 - **Refuses to orphan non-owned edges.** A non-owned edge (origin not `memory:`) pointing at
   a node in the **delete set** (`family='memory'`, found by joining `to_id` to those rows —
   not a `to_id` prefix match, so the guard covers exactly what gets deleted) would be dangled
