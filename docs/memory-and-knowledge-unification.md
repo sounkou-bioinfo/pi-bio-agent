@@ -184,6 +184,25 @@ commit to the full `KnowledgeUnit`:
 `studyNoteIndex` now includes `slug`, and `bio_write_study_note` takes an optional `slug`
 and returns the persisted note plus a `created` flag.
 
+## Next: KG-ingest adapter (effectful, gated — agreed contract)
+
+The pure projection (`studyNoteGraph`) hands off to an effectful host/DuckDB adapter. This is a
+new opt-in surface and stays policy-explicit per `design.md`. Agreed shape, to build before
+step 4:
+
+- **Layering:** `core` already does `notes → BioGraphSnapshot` (pure). The adapter lives in
+  the host/DuckDB layer and does `snapshot → bio_nodes/bio_edges`. A Pi tool only if/when a
+  workflow needs it.
+- **Dangling targets:** do **not** materialize stub nodes initially. Project source nodes +
+  edges as-is and expose dangling links via a query/report — they are useful future-work
+  markers (mirrors the memory system's dangling `[[wikilinks]]`).
+- **Sync semantics:** full re-sync of the `memory` subgraph in **one transaction** — files are
+  the source of truth, DuckDB is an index/cache. Delete existing `memory` nodes and
+  memory-origin edges, then insert the projected set. No incremental drift.
+- **Effect contract (explicit):** writes only the `bio_nodes`/`bio_edges` memory subgraph; no
+  network; no arbitrary SQL; transaction required; dry-run/counts first; no Pi tool until a
+  workflow needs it.
+
 ## Still to do (step 4)
 
 - **Introduce the minimal `KnowledgeUnit` core** — `slug, role, form, title, hook, body,

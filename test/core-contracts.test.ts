@@ -289,8 +289,12 @@ describe("Study helpers", () => {
     assert.throws(() => memoryNodeId("Bad Slug"), /invalid memory slug/);
   });
 
-  test("parseStudyNoteLinks tolerates malformed entries and a non-string body", () => {
-    const messy = { body: 42, links: [null, "nope", { to: 7 }, { to: "good-note" }] } as unknown as Parameters<typeof parseStudyNoteLinks>[0];
+  test("parseStudyNoteLinks tolerates malformed input and agrees with the validator", () => {
+    assert.deepEqual(parseStudyNoteLinks(null), []);
+    assert.deepEqual(parseStudyNoteLinks("not an object"), []);
+    // "Bad Slug" is a string but not a slug: the parser skips it rather than rewriting to "bad-slug",
+    // so it agrees with validateStudyNote (which rejects the same link).
+    const messy = { body: 42, links: [null, "nope", { to: 7 }, { to: "Bad Slug" }, { to: "good-note" }] };
     assert.deepEqual(parseStudyNoteLinks(messy), [{ to: "good-note", predicate: STUDY_DEFAULT_LINK_PREDICATE }]);
   });
 

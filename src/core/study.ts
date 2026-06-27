@@ -138,7 +138,8 @@ export function validateStudyNote(note: unknown): string[] {
 /** Untyped `[[slug]]` body links default to this predicate. A note-to-note reference is not an ontology "about" edge, so it gets its own name. */
 export const STUDY_DEFAULT_LINK_PREDICATE: StudyNoteLinkPredicate = "references";
 
-const WIKILINK_RE = /\[\[([a-z0-9][a-z0-9-]*)\]\]/gi;
+// Case-sensitive: body links must already be lowercase slugs, matching what validateStudyNote accepts.
+const WIKILINK_RE = /\[\[([a-z0-9][a-z0-9-]*)\]\]/g;
 
 /** Knowledge-graph node id for a study note. Rejects non-slug input rather than minting a malformed node id. */
 export function memoryNodeId(slug: string): string {
@@ -146,21 +147,21 @@ export function memoryNodeId(slug: string): string {
   return `memory:${slug}`;
 }
 
-/** Collect a note's links from both its explicit `links` field and `[[slug]]` body links, normalized and de-duplicated by (to, predicate). Pure; dangling targets are allowed and not resolved here. */
-export function parseStudyNoteLinks(note: Pick<StudyNote, "body" | "links">): Required<StudyNoteLink>[] {
+/**
+ * Collect a note's links from its explicit `links` field and `[[slug]]` body links, de-duplicated by
+ * (to, predicate). Pure; dangling targets are allowed and not resolved here. Accepts `unknown` and is
+ * fully defensive: a target is taken only if it is *already* a valid slug — the parser agrees with
+ * `validateStudyNote` and never silently rewrites a bad target (normalization happens once, in
+ * `makeStudyNote`, at authoring time). Unknown predicates fall back to the default.
+ */
+export function parseStudyNoteLinks(input: unknown): Required<StudyNoteLink>[] {
+  if (!input || typeof input !== "object") return [];
+  const note = input as Partial<StudyNote>;
   const out = new Map<string, Required<StudyNoteLink>>();
-  // Defensive throughout: this is exported core and can receive unvalidated JSON, so bad targets and
-  // unknown predicates are skipped/defaulted rather than projecting bogus edges.
   const add = (to: unknown, predicate?: unknown) => {
-    if (typeof to !== "string") return;
-    let slug: string;
-    try {
-      slug = normalizeStudySlug(to);
-    } catch {
-      return; // unusable target, skip
-    }
+    if (typeof to !== "string" || !STUDY_SLUG_RE.test(to) || to.length > 64) return; // not a slug: skip, don't rewrite
     const pred = isStudyNoteLinkPredicate(predicate) ? predicate : STUDY_DEFAULT_LINK_PREDICATE;
-    out.set(JSON.stringify([slug, pred]), { to: slug, predicate: pred });
+    out.set(JSON.stringify([to, pred]), { to, predicate: pred });
   };
   for (const link of Array.isArray(note.links) ? note.links : []) {
     if (link && typeof link === "object") add((link as StudyNoteLink).to, (link as StudyNoteLink).predicate);
