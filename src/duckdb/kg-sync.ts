@@ -31,10 +31,13 @@ export interface SyncStudyNoteGraphResult {
 }
 
 // Ownership scope: the adapter owns exactly the memory-origin subgraph and nothing else.
-// External edges that point INTO memory nodes (to_id 'memory:%' but from_id elsewhere) are not owned.
+// External edges that point INTO memory nodes (non-owned origin) are not owned.
 const OWNED_NODES = "bio_nodes WHERE family = 'memory'";
 const OWNED_EDGES = "bio_edges WHERE from_id LIKE 'memory:%'";
-const EXTERNAL_INBOUND_EDGES = "bio_edges WHERE to_id LIKE 'memory:%' AND from_id NOT LIKE 'memory:%'";
+// The guard must protect exactly the delete set (the family='memory' nodes), so it joins inbound edges
+// to those rows rather than matching a to_id prefix — otherwise it over-blocks edges to missing memory:*
+// targets and under-protects family='memory' nodes whose id is not a well-formed memory: id.
+const EXTERNAL_INBOUND_EDGES = "bio_edges e JOIN bio_nodes n ON e.to_id = n.node_id WHERE n.family = 'memory' AND e.from_id NOT LIKE 'memory:%'";
 const MEMORY_NODE_ID_RE = /^memory:[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 function jsonParam(value: unknown): string | null {

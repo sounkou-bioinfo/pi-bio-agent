@@ -140,6 +140,10 @@ describe("syncStudyNoteGraph", () => {
     const dry = fakeConn({ nodes: 1, edges: 1, externalInbound: 2 });
     const res = await syncStudyNoteGraph(dry.conn, snapshot);
     assert.equal(res.externalInboundEdges, 2);
+    // The guard must protect the actual delete set: join family='memory' nodes, not match a to_id prefix.
+    const extSql = dry.statements.map((s) => s.sql).find((s) => s.includes("from_id NOT LIKE"));
+    assert.ok(extSql?.includes("JOIN bio_nodes") && extSql.includes("n.family = 'memory'"), "external-inbound guard joins the delete set");
+    assert.ok(!extSql?.includes("to_id LIKE 'memory:%'"), "guard does not scope inbound edges by to_id prefix");
 
     const write = fakeConn({ nodes: 1, edges: 1, externalInbound: 1 });
     await assert.rejects(() => syncStudyNoteGraph(write.conn, snapshot, { dryRun: false, allowWrite: true }), /non-owned edges point into them/);
