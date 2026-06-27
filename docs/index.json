@@ -45,11 +45,13 @@
       "path": "docs/domain-model.md",
       "type": "Reference",
       "title": "Domain model",
-      "description": "Read to learn the bio primitive families and the question to context to tool to facts loop.",
+      "description": "Read before adding any core type — the domain bet, the six-slot test, virtual/CAS resources, and temporality the substrate is built on.",
       "tags": [
         "domain-model",
-        "primitives",
-        "context"
+        "resources",
+        "temporality",
+        "manifest",
+        "primitives"
       ]
     },
     {
