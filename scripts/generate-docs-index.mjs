@@ -1,8 +1,12 @@
 #!/usr/bin/env node
 // Generates docs/index.json (machine/agent) and docs/INDEX.md (human) from the OKF frontmatter on each
 // docs/*.md. Source of truth is the individual docs; these two files are generated caches, validated by
-// `--check`. Uses a strict, fail-closed parser for exactly our frontmatter subset (type/title/description/
-// tags) rather than a general YAML dependency — it throws on anything it does not understand.
+// `--check`.
+//
+// This is OKF-*compatible*, not full OKF: the strict, fail-closed parser accepts only our local supported
+// subset — `type`, `title`, `description`, `tags` — and throws on any other key or unquoted ':' rather than
+// pulling in a general YAML dependency. To support a new key (e.g. `resource`, `updated`), add it here; the
+// parser rejects unknown keys by design.
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";

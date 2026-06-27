@@ -15,7 +15,7 @@ This repo is an early core plus Pi coding-agent integration. The goal is not a p
 ## Install in Pi
 
 ```sh
-pi install /root/pi-bio-agent
+pi install git:github.com/sounkou-bioinfo/pi-bio-agent
 /reload
 ```
 
@@ -52,13 +52,9 @@ for Pi to consume directly.
 
 ## Design notes
 
-- [Roadmap, success, and testing contract](docs/roadmap.md)
-- [Domain model](docs/domain-model.md)
-- [Resources and BioToolSpec](docs/resources-and-tool-specs.md)
-- [Ontologies and knowledge graphs](docs/ontology-and-knowledge-graphs.md)
-- [DuckDB substrate](docs/duckdb-substrate.md)
-- [Deriving abstractions](docs/abstraction-derivation.md)
-- [Machine studying lineage](docs/machine-studying-lineage.md)
+See the generated [docs index](docs/INDEX.md) — one line per doc, from each doc's frontmatter
+(regenerate with `npm run docs:index`; `npm run check` fails if it is stale). Start with the
+[roadmap](docs/roadmap.md).
 
 ## Development
 

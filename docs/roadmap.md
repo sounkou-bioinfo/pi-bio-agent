@@ -83,26 +83,32 @@ A pyramid, plus a conformance cross-cut. Layers 1–3 substantially exist today;
 **Conformance cross-cut** (asserted across layers, not a single layer): no provider-specific shape in
 core; resolvers fail closed; no ambient network/env activation; writes gated behind explicit flags.
 
-## 4. Flagship: rare-disease reanalysis walking skeleton
+## 4. Flagship: "rare high-impact variants" walking skeleton
 
-The flagship is a **forcing function landed early**, not a finale. It is intentionally tiny — the goal is
-**composition pressure, not clinical realism**:
+The flagship is a **forcing function landed early**, not a finale, and it has a concrete, public target.
+It comes straight from the project's origin (ClawBio, a per-question skill-sprawl agent): the question
+*"how many rare high-impact variants do I have?"* there required hand-writing a skill, and the hard part
+turned out to be **abstention** — a naive count over-called (~110), but once you refuse to call
+"no frequency data" rare, the defensible number collapses (~6 documented-rare LoF, 1 disease-relevant).
+
+That is **why this is the flagship**: it exposes both bets at once — *substrate over skill sprawl*
+(the count is one SQL filter over annotated variants, not a bespoke skill) and the *abstention/safety
+gate* (no-frequency ≠ rare; benign LoF ≠ actionable; unsupported claims are excluded). It is intentionally
+tiny — **composition pressure, not clinical realism**:
 
 ```text
-3 synthetic variants
-2 HPO terms
-1 mocked gene/disease/evidence table
-1 note with an ACMG / source caveat
-1 run record
-1 evidence subgraph
-1 report (stable JSON)
+3 synthetic variants  (one no-frequency, one benign LoF, one documented-rare disease-relevant)
+1 mocked annotation table (frequency + consequence; duckhts-shaped, so the real reader drops in)
+1 note with the abstention caveat
+1 SQL filter: rare ∧ high-impact ∧ frequency-known   (a query, not a skill)
+1 run record + provenance
+1 report (stable JSON): the count, plus what was excluded and why
 ```
 
 No live APIs, no full ACMG engine, **no diagnosis language**. It forces the whole substrate to compose:
-notes → graph, variants/phenotypes → typed nodes, mocked evidence → edges with provenance, run record →
-produced artifacts, report → structured safety-bounded output. Output is a **provenance-backed
-reanalysis report — ranked candidates with evidence graph, sources, caveats, and missing evidence — not
-a diagnosis.** The test asserts structure + provenance + safety language + bounded budget.
+variants → typed nodes, annotation → edges with provenance, run record → produced artifacts, report →
+structured safety-bounded output. The test asserts the **abstention** (the count excludes no-frequency
+variants and says so), structure, provenance, and bounded budget — not free-form prose.
 
 ## 5. Phases (walking skeleton first)
 
