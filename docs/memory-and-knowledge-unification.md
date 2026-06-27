@@ -13,7 +13,9 @@ This is a design proposal, not yet implemented. It is meant to sharpen
 The agent driving this repo carries a persistent file-based memory. Its shape is worth
 copying because it solves the same problem `pi-bio-agent` solves with study notes, skill
 drafts, and the knowledge graph: **keep durable knowledge cheap to recall and honest about
-where it came from.**
+where it came from.** The vocabulary also follows the machine-studying lineage summarized in
+[`machine-studying-lineage.md`](./machine-studying-lineage.md): studying means agent-side
+expertise acquisition over a corpus, not a biomedical study/trial/cohort.
 
 That memory system is, stripped to its contract:
 

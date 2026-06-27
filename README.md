@@ -41,6 +41,7 @@ Generated project-local skills and study notes live under `.pi/bio-agent/` in th
 - [Ontologies and knowledge graphs](docs/ontology-and-knowledge-graphs.md)
 - [DuckDB substrate](docs/duckdb-substrate.md)
 - [Deriving abstractions](docs/abstraction-derivation.md)
+- [Machine studying lineage](docs/machine-studying-lineage.md)
 
 ## Development
 

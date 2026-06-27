@@ -39,7 +39,9 @@ source -> raw resource -> curated table/view -> dimension graph -> guarded SQL s
 "Study" here is the [machine studying](https://jacobxli.com/blog/2026/machine-studying/) sense — an
 agent deliberately learning a corpus and retaining what it learns — **not** a biomedical study, trial,
 cohort, or GWAS. The repo keeps the term internally (`StudyNote`, `studyNote*`); user-facing surfaces
-should prefer "notes" to avoid that domain collision.
+should prefer "notes" to avoid that domain collision. See
+[`machine-studying-lineage.md`](./machine-studying-lineage.md) for the distilled source notes and
+implications for this package.
 
 Studying is different from skill sprawl. A skill is a reusable playbook. A study note is developing expertise:
 
