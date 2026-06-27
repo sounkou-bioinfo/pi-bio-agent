@@ -6,8 +6,8 @@ export interface SyncProjectStudyNotesOptions extends SyncStudyNoteGraphOptions 
   /**
    * Ensure the `bio_nodes`/`bio_edges` schema exists (`CREATE TABLE/INDEX IF NOT EXISTS`) before syncing.
    * Default false. This is **DDL and runs even under `dryRun`** — `dryRun` governs only the memory
-   * subgraph *row* writes, not schema setup. For a dry run that touches the database not at all, leave
-   * this false and create the schema yourself beforehand.
+   * subgraph *row* writes, not schema setup. For a dry run that performs no database writes, leave this
+   * false (the schema must already exist); note that a dry run still *reads* (it SELECTs counts).
    */
   createSchema?: boolean;
 }

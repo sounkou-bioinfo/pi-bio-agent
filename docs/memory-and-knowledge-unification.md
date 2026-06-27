@@ -231,8 +231,8 @@ stays testable (fake port) and injectable (a host passes its own connection); th
   args only; nothing from ambient process state. **Two independent effect axes:** `createSchema`
   controls schema/index DDL — idempotent, and it **runs even under `dryRun`**; `dryRun`/`allowWrite`
   control the memory-subgraph *row* sync (dry-run by default). A dry run with `createSchema: true`
-  still writes the schema; for a run that touches the DB not at all, create the schema beforehand and
-  leave `createSchema` false.
+  still writes the schema; for a run that performs **no database writes**, leave `createSchema` false
+  (the schema must already exist) — note a dry run still *reads* (it SELECTs counts).
 - **Refuses to orphan non-owned edges.** A non-owned edge (origin not `memory:`) pointing at
   a node in the **delete set** (`family='memory'`, found by joining `to_id` to those rows —
   not a `to_id` prefix match, so the guard covers exactly what gets deleted) would be dangled
