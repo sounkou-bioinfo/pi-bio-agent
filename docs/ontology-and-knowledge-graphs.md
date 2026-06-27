@@ -4,7 +4,9 @@
 
 The deepest architectural choice in `pi-bio-agent` is not the memory/study layer — it is the bet that
 **agentic biomedicine is best served by one typed-graph substrate**, queried as SQL over DuckDB, rather
-than by per-source API clients, a vector store, or prose context. Biomedical knowledge is natively
+than by organizing the system primarily around per-source API clients, a vector store, or prose context.
+Per-source clients and operation specs remain essential as *adapters and ingestion surfaces* — the bet
+is that they feed the graph, not that they become the organizing substrate. Biomedical knowledge is natively
 graph-shaped: ontologies (`term —is_a→ term`), entities and relations (`variant —in→ gene
 —associated_with→ disease`), evidence (`claim —supports→ entity`), provenance and lineage
 (`fact —derived_from→ fact`), and reanalysis (as-of edges). The domain is graph-first, with tabular and
