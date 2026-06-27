@@ -184,24 +184,29 @@ commit to the full `KnowledgeUnit`:
 `studyNoteIndex` now includes `slug`, and `bio_write_study_note` takes an optional `slug`
 and returns the persisted note plus a `created` flag.
 
-## Next: KG-ingest adapter (effectful, gated — agreed contract)
+## KG-ingest adapter (effectful, gated — implemented)
 
-The pure projection (`studyNoteGraph`) hands off to an effectful host/DuckDB adapter. This is a
-new opt-in surface and stays policy-explicit per `design.md`. Agreed shape, to build before
-step 4:
+The pure projection (`studyNoteGraph`) hands off to `syncStudyNoteGraph` in
+`src/duckdb/kg-sync.ts`. It is the first **effectful** surface, kept policy-explicit per
+`design.md`:
 
-- **Layering:** `core` already does `notes → BioGraphSnapshot` (pure). The adapter lives in
-  the host/DuckDB layer and does `snapshot → bio_nodes/bio_edges`. A Pi tool only if/when a
-  workflow needs it.
-- **Dangling targets:** do **not** materialize stub nodes initially. Project source nodes +
-  edges as-is and expose dangling links via a query/report — they are useful future-work
-  markers (mirrors the memory system's dangling `[[wikilinks]]`).
-- **Sync semantics:** full re-sync of the `memory` subgraph in **one transaction** — files are
-  the source of truth, DuckDB is an index/cache. Delete existing `memory` nodes and
-  memory-origin edges, then insert the projected set. No incremental drift.
-- **Effect contract (explicit):** writes only the `bio_nodes`/`bio_edges` memory subgraph; no
-  network; no arbitrary SQL; transaction required; dry-run/counts first; no Pi tool until a
-  workflow needs it.
+- **No native driver dependency.** The adapter writes through a minimal `KgSqlConn` port
+  (`all`/`run`); the host wires a concrete DuckDB connection. The package stays driver-free —
+  DuckDB is one backend, not a hard dependency.
+- **Ownership scope (exact).** It owns, and only ever deletes:
+  - `bio_nodes WHERE family = 'memory'`
+  - `bio_edges WHERE from_id LIKE 'memory:%'`
+  It does **not** own external edges pointing *into* memory nodes (`to_id` memory, `from_id`
+  elsewhere), so a re-sync never tramples future non-memory relationships.
+- **Dangling targets:** not materialized as stub nodes; counted in the result
+  (`danglingEdges`) and surfaced as future-work markers, mirroring dangling `[[wikilinks]]`.
+- **Sync semantics:** full re-sync of the memory subgraph in **one transaction** (delete the
+  owned subgraph, insert the projected set; rollback on any failure). Files are the source of
+  truth; DuckDB is an index/cache.
+- **Effect contract:** writes only the memory subgraph; no network; no arbitrary SQL (fixed,
+  parameterized statements); transaction required; **dry-run by default**, writing needs
+  `{ dryRun: false, allowWrite: true }`; result returns delete/insert/dangling counts. No Pi
+  tool yet — only when a workflow needs it.
 
 ## Still to do (step 4)
 
