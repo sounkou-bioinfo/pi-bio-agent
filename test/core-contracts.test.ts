@@ -253,5 +253,9 @@ describe("Study helpers", () => {
     assert.ok(errors.some((e) => e.includes("hook must say when to read")));
     assert.ok(errors.includes("body is required"));
     assert.ok(errors.includes("createdAt is required"));
+    // The admission gate must also catch fields readers later dereference (id/tags/sources).
+    assert.ok(errors.includes("id is required"));
+    assert.ok(errors.includes("tags must be an array"));
+    assert.ok(errors.includes("sources must be an array"));
   });
 });

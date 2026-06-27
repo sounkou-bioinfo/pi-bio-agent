@@ -154,9 +154,8 @@ export default function piBioAgentExtension(pi: ExtensionAPI): void {
       }))),
     }),
     async execute(_id, params: { kind: StudyArtifactKind; title: string; hook: string; body: string; slug?: string; tags?: string[]; sources?: StudyNote["sources"] }, _signal, _onUpdate, ctx) {
-      const note = makeStudyNote(params);
-      const path = await writeStudyNote(ctx.cwd, note);
-      return text({ path, note: { slug: note.slug, id: note.id, kind: note.kind, title: note.title, hook: note.hook, tags: note.tags } });
+      const { path, note, created } = await writeStudyNote(ctx.cwd, makeStudyNote(params));
+      return text({ path, created, note: { slug: note.slug, id: note.id, kind: note.kind, title: note.title, hook: note.hook, tags: note.tags } });
     },
   });
 

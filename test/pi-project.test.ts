@@ -63,10 +63,15 @@ describe("Pi project host helpers", () => {
   test("upserts by slug, preserves createdAt, and regenerates INDEX.md", async () => {
     const cwd = await tempProject();
     const v1 = makeStudyNote({ slug: "opentargets-ids", kind: "cheatsheet", title: "OpenTargets IDs", hook: "Read before queries.", body: "v1" }, "2026-06-27T00:00:00Z");
-    const p1 = await writeStudyNote(cwd, v1, "2026-06-27T00:00:00Z");
+    const r1 = await writeStudyNote(cwd, v1, "2026-06-27T00:00:00Z");
     const v2 = makeStudyNote({ slug: "opentargets-ids", kind: "cheatsheet", title: "OpenTargets IDs", hook: "Read before queries.", body: "v2 updated", tags: ["x"] }, "2026-06-28T00:00:00Z");
-    const p2 = await writeStudyNote(cwd, v2, "2026-06-28T00:00:00Z");
-    assert.equal(p1, p2); // same slug -> same file (upsert, not duplicate)
+    const r2 = await writeStudyNote(cwd, v2, "2026-06-28T00:00:00Z");
+    assert.equal(r1.path, r2.path); // same slug -> same file (upsert, not duplicate)
+    assert.equal(r1.created, true);
+    assert.equal(r2.created, false);
+    // The returned note is the persisted truth, not the caller's input: id preserved, updatedAt owned by the write layer.
+    assert.equal(r2.note.id, v1.id);
+    assert.equal(r2.note.updatedAt, "2026-06-28T00:00:00Z");
 
     const all = await readStudyNotes(cwd);
     assert.equal(all.length, 1);

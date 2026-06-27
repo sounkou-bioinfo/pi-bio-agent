@@ -25,7 +25,7 @@ export interface StudyNote {
   schema: "pi-bio.study_note.v1";
   /** Stable, human-meaningful identity and upsert/link key. A slug is mutable in place; edits keep the slug and bump updatedAt. */
   slug: string;
-  /** Opaque uniqueness id; retained for back-compat and provenance. Not the upsert key. */
+  /** Opaque uniqueness/provenance tag, stable across edits. Not the identity or upsert key — the slug is. */
   id: string;
   kind: StudyArtifactKind;
   title: string;
@@ -91,6 +91,7 @@ export function validateStudyNote(note: unknown): string[] {
   const errors: string[] = [];
   if (n.schema !== "pi-bio.study_note.v1") errors.push("schema must be pi-bio.study_note.v1");
   if (typeof n.slug !== "string" || !STUDY_SLUG_RE.test(n.slug) || n.slug.length > 64) errors.push("slug must be lowercase kebab-case (max 64 chars)");
+  if (typeof n.id !== "string" || !n.id.trim()) errors.push("id is required");
   if (typeof n.kind !== "string" || !STUDY_ARTIFACT_KINDS.includes(n.kind as StudyArtifactKind)) errors.push("kind is invalid");
   if (typeof n.title !== "string" || !n.title.trim()) errors.push("title is required");
   if (typeof n.hook !== "string" || !n.hook.trim()) errors.push("hook is required");
@@ -99,6 +100,8 @@ export function validateStudyNote(note: unknown): string[] {
   if (typeof n.body !== "string" || !n.body.trim()) errors.push("body is required");
   if (typeof n.createdAt !== "string" || !n.createdAt.trim()) errors.push("createdAt is required");
   if (typeof n.updatedAt !== "string" || !n.updatedAt.trim()) errors.push("updatedAt is required");
+  if (!Array.isArray(n.tags)) errors.push("tags must be an array");
+  if (!Array.isArray(n.sources)) errors.push("sources must be an array");
   return errors;
 }
 

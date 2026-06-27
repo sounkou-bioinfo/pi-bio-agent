@@ -143,24 +143,28 @@ replaces. If the line count goes up, the unification was done wrong.
 The low-risk, no-new-type subset is shipped on `StudyNote` directly — it does **not**
 commit to the full `KnowledgeUnit`:
 
-- `StudyNote.slug` — stable kebab identity and upsert/link key; `id` retained for
-  uniqueness/provenance (`src/core/study.ts`).
-- `normalizeStudySlug` + a **fail-closed** `validateStudyNote` (accepts `unknown`, checks
-  `slug` shape+length, `kind`, timestamps, and a **required, non-empty hook that must not
-  merely restate the title**) — both in `src/core/study.ts`. `makeStudyNote`
-  (`src/hosts/pi-project.ts`) derives the slug and throws on an invalid note;
-  `readStudyNotes` runs every parsed file through `validateStudyNote` before admitting it.
+- `StudyNote.slug` — stable kebab identity and upsert/link key; `id` is an opaque
+  uniqueness/provenance tag, not the identity (`src/core/study.ts`).
+- `normalizeStudySlug` + a **fail-closed, full-shape** `validateStudyNote` (accepts
+  `unknown`; checks `slug` shape+length, `id`, `kind`, `tags`/`sources` are arrays,
+  timestamps, and a **required hook that must not merely restate the title**) — both in
+  `src/core/study.ts`. Because `readStudyNotes` uses this as the **admission gate**, it
+  validates the *whole* persisted shape so downstream readers can dereference fields
+  safely. `makeStudyNote` (`src/hosts/pi-project.ts`) derives the slug and throws on an
+  invalid note. Pre-slug notes are dropped, not migrated (working memory is unversioned).
 - **Upsert by slug** in `writeStudyNote` (`src/hosts/pi-project.ts`) — same slug overwrites
-  the same `<slug>.json`, preserving the original `createdAt` **and `id`** (so older id
-  references still resolve); the **write layer owns `updatedAt`** via a `now` parameter
-  (defaulted for runtime, injected for deterministic tests).
+  the same `<slug>.json`, preserving the original `createdAt` **and `id`**; the **write
+  layer owns `updatedAt`** via a `now` parameter (defaulted for runtime, injected for
+  deterministic tests). The write may change the note, so the boundary is honest: it
+  returns `StudyNoteWriteResult { path, note, created }` — the **persisted** note, not the
+  caller's input — and the Pi tool reports that persisted note (not the pre-write one).
 - **`INDEX.md` generated cache** via `renderStudyIndex`/`writeStudyIndex`, rewritten on
   every write and delete (`src/hosts/pi-project.ts`).
 - **`deleteStudyNote`** plus a `bio_delete_study_note` Pi tool — hygiene: prefer updating
   by slug, delete only rotten units (`extensions/pi-coding-agent/index.ts`).
 
 `studyNoteIndex` now includes `slug`, and `bio_write_study_note` takes an optional `slug`
-and returns it.
+and returns the persisted note plus a `created` flag.
 
 ## Still to do (steps 3–4)
 

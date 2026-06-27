@@ -44,6 +44,9 @@ export async function readStudyNotes(cwd: string): Promise<StudyNote[]> {
     if (!entry.endsWith(".json")) continue;
     try {
       const parsed = JSON.parse(await fs.readFile(join(root, entry), "utf8"));
+      // Fail-closed admission gate: only fully valid notes enter the typed system, so downstream
+      // (scoreStudyNote, studyNoteIndex, bio_read_study_note) can dereference fields safely.
+      // Pre-slug notes are dropped, not migrated — acceptable while .pi/bio-agent is unversioned working memory.
       if (validateStudyNote(parsed).length === 0) notes.push(parsed as StudyNote);
     } catch {
       // Ignore corrupt notes; they are project-local working memory, not source code.
@@ -53,7 +56,15 @@ export async function readStudyNotes(cwd: string): Promise<StudyNote[]> {
   return notes;
 }
 
-export async function writeStudyNote(cwd: string, note: StudyNote, now = new Date().toISOString()): Promise<string> {
+export interface StudyNoteWriteResult {
+  path: string;
+  /** The note as actually persisted. May differ from the input note (preserved id/createdAt, write-layer updatedAt). */
+  note: StudyNote;
+  /** false when an existing note with this slug was overwritten. */
+  created: boolean;
+}
+
+export async function writeStudyNote(cwd: string, note: StudyNote, now = new Date().toISOString()): Promise<StudyNoteWriteResult> {
   const errors = validateStudyNote(note);
   if (errors.length) throw new Error(`invalid study note ${note.slug || "<unnamed>"}: ${errors.join("; ")}`);
   const root = runtimeStudyRoot(cwd);
@@ -63,17 +74,19 @@ export async function writeStudyNote(cwd: string, note: StudyNote, now = new Dat
   // (so older id references still resolve); the write layer owns updatedAt.
   let createdAt = note.createdAt;
   let id = note.id;
+  let created = true;
   try {
-    const existing = JSON.parse(await fs.readFile(path, "utf8")) as StudyNote;
-    if (existing?.createdAt) createdAt = existing.createdAt;
-    if (existing?.id) id = existing.id;
+    const existing = JSON.parse(await fs.readFile(path, "utf8")) as Partial<StudyNote>;
+    created = false;
+    if (typeof existing?.createdAt === "string" && existing.createdAt.trim()) createdAt = existing.createdAt;
+    if (typeof existing?.id === "string" && existing.id.trim()) id = existing.id;
   } catch {
-    // No prior note for this slug; this is a fresh create.
+    // No prior note for this slug (or it was unreadable); this is a fresh create.
   }
   const persisted: StudyNote = { ...note, id, createdAt, updatedAt: now };
   await fs.writeFile(path, `${JSON.stringify(persisted, null, 2)}\n`, "utf8");
   await writeStudyIndex(cwd);
-  return path;
+  return { path, note: persisted, created };
 }
 
 export function scoreStudyNote(note: StudyNote, query: string): number {
