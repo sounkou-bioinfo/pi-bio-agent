@@ -1,5 +1,31 @@
 # Ontologies and knowledge graphs
 
+## The graph bet (the domain wager)
+
+The deepest architectural choice in `pi-bio-agent` is not the memory/study layer — it is the bet that
+**agentic biomedicine is best served by one typed-graph substrate**, queried as SQL over DuckDB, rather
+than by per-source API clients, a vector store, or prose context. Biomedical knowledge is natively
+graph-shaped: ontologies (`term —is_a→ term`), entities and relations (`variant —in→ gene
+—associated_with→ disease`), evidence (`claim —supports→ entity`), provenance and lineage
+(`fact —derived_from→ fact`), and reanalysis (as-of edges). The domain is graph-first, with tabular and
+document views over it — not the other way round.
+
+So everything that can be a fact, a concept, or a relationship lives in the **same** `bio_nodes`/
+`bio_edges` (plus ontology tables), with trust/provenance on every node and edge. Ontology terms, KG
+facts, observations, artifacts — and the agent's own study notes (`memory:<slug>` nodes, note-links as
+edges) — are all one graph, queried the same way. This is *why* `studyNoteGraph` projects notes into
+`bio_edges` instead of a separate notes index: **memory is a node family in the one graph, not a
+parallel system.** The "memory and KG stop being two systems" point in
+[`memory-and-knowledge-unification.md`](./memory-and-knowledge-unification.md) is the local symptom of
+this global bet; the study/[machine-studying](./machine-studying-lineage.md) angle is one consumer of
+the substrate, not its foundation.
+
+It is a *bet*, not a theorem, and the design hedges it honestly: not all bio data is usefully
+graph-shaped (dense matrices, sequences, large tables stay tabular/extension-backed or in CAS; the graph
+holds hot structured facts + indexes, not raw bytes), a single graph store can rot into a god-store, and
+"graph-as-SQL over DuckDB" assumes the join/scan performance holds at scale. Those hedges — CAS, virtual
+resources, DuckDB extensions, no-FK dangling tolerance — are what keep the bet from becoming a monolith.
+
 ## Ontologies
 
 Model ontologies as ordinary graph data. The minimum contract is:

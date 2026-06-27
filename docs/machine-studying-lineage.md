@@ -2,7 +2,7 @@
 
 Source studied: Jacob Xiaochen Li, Rick Battle, and Omar Khattab, "Machine Studying" (published June 17, 2026), <https://jacobxli.com/blog/2026/machine-studying/>.
 
-Local study copy used for this note: downloaded HTML to `/tmp/pi-bio-machine-studying/machine-studying.html` and extracted text to `/tmp/pi-bio-machine-studying/machine-studying.txt` on 2026-06-27. The article text itself is **not** vendored into this repo; this file is a distilled design note with citation.
+Downloaded and locally extracted during development (2026-06-27); the article text is **not** vendored into this repo. The source of record is the URL above; this file is a distilled design note with citation.
 
 ## What the term means here
 
@@ -29,6 +29,26 @@ In `pi-bio-agent`, this is **not** a biomedical study, cohort, trial, GWAS, or p
 5. **Skills are graduation, not the default.** Stable repeated workflows can become skills; volatile corpus knowledge should remain notes until it proves operational.
 6. **Evaluation should prefer cost curves over one-off pass/fail.** Future expertise probes or workflow fixtures should track whether notes reduce tool calls/tokens or improve accuracy at the same budget, not merely whether a final answer is possible.
 7. **Weight-update studying is out of scope for now.** The current substrate focuses on harness-level studying: notes, indexes, operation specs, guarded SQL, resources, and runs. That is compatible with future model-side studying but should not be conflated with it.
+
+## Study and the graph bet (the deeper link)
+
+The study/memory framing is the visible half of a deeper choice: see
+[the graph bet](./ontology-and-knowledge-graphs.md#the-graph-bet-the-domain-wager). Machine studying
+defines expertise as knowing *what to search, where, what to distrust, and how to interpret* — i.e.,
+**structure over the corpus**, captured cheaply ("amortized context management"). A graph is exactly
+that structure. The two are one bet seen from two sides:
+
+- **Study produces graph.** The durable residue of an agent studying a corpus is graph structure —
+  concept nodes, note-links, ontology mappings, provenance edges — not prose. That residue is what
+  `studyNoteGraph` projects into `bio_nodes`/`bio_edges`.
+- **Graph makes study cheap.** A queryable map (`memory:<slug>` nodes + edges, joined to ontology and
+  KG facts) is consulted *before* spending expensive tool/inference budget — the cost-curve win the
+  article measures.
+
+So the agent's notebook and the domain's knowledge graph are the **same substrate** because expertise
+*is* navigable structure, and in this domain that structure is a graph. "Study" is therefore not a
+memory feature bolted on; it is one way knowledge enters the graph the rest of the system already bets
+on. That is why this lineage note lives next to the KG/ontology design, not only next to the memory one.
 
 ## Design guardrails
 
