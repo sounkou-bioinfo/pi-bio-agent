@@ -13,7 +13,7 @@ graph-shaped: ontologies (`term —is_a→ term`), entities and relations (`vari
 document views over it — not the other way round.
 
 So everything that can be a fact, a concept, or a relationship lives in the **same** `bio_nodes`/
-`bio_edges` (plus ontology tables), with trust/provenance on every node and edge. Ontology terms, KG
+`bio_edges` (plus ontology tables), with trust/provenance fields available on every node and edge. Ontology terms, KG
 facts, observations, artifacts — and the agent's own study notes (`memory:<slug>` nodes, note-links as
 edges) — are all one graph, queried the same way. This is *why* `studyNoteGraph` projects notes into
 `bio_edges` instead of a separate notes index: **memory is a node family in the one graph, not a
