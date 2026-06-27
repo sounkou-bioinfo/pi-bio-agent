@@ -1,3 +1,10 @@
+---
+type: Reference
+title: Resources and BioToolSpec
+description: "Read before defining resources, resolvers, or BioToolSpec/operation contracts."
+tags: [resources, cas, tool-spec, operation-spec]
+---
+
 # Resources and BioToolSpec
 
 ## BioToolSpec

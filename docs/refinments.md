@@ -1,3 +1,10 @@
+---
+type: Worklog
+title: Refinements
+description: "Open design issues and cleanup targets still to sharpen before abstractions harden."
+tags: [refinements, open-issues, worklog]
+---
+
 # Refinments
 
 Open design issues and cleanup targets. Keep this file focused on what still needs sharpening before the abstractions harden.

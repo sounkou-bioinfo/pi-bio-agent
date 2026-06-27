@@ -1,3 +1,10 @@
+---
+type: Proposal
+title: Memory and knowledge unification
+description: "Read before changing study notes, the note-to-graph projection, or the KG-ingest adapter."
+tags: [memory, study-notes, knowledge-unit, kg-sync]
+---
+
 # Memory and knowledge unification
 
 Notes on what a coding agent's file-based memory system teaches us, and a proposal to

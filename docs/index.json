@@ -1,0 +1,133 @@
+{
+  "schema": "pi-bio.docs_index.v1",
+  "note": "generated from docs/*.md frontmatter by scripts/generate-docs-index.mjs — do not edit by hand",
+  "docs": [
+    {
+      "slug": "memory-and-knowledge-unification",
+      "path": "docs/memory-and-knowledge-unification.md",
+      "type": "Proposal",
+      "title": "Memory and knowledge unification",
+      "description": "Read before changing study notes, the note-to-graph projection, or the KG-ingest adapter.",
+      "tags": [
+        "memory",
+        "study-notes",
+        "knowledge-unit",
+        "kg-sync"
+      ]
+    },
+    {
+      "slug": "abstraction-derivation",
+      "path": "docs/abstraction-derivation.md",
+      "type": "Reference",
+      "title": "Deriving the abstractions",
+      "description": "Read to see why the core primitives exist and where machine-studying fits.",
+      "tags": [
+        "abstractions",
+        "primitives",
+        "machine-studying"
+      ]
+    },
+    {
+      "slug": "design",
+      "path": "docs/design.md",
+      "type": "Reference",
+      "title": "Design notes",
+      "description": "Read before changing core boundaries, adapters, storage, skills, or the harness-adaptation surface.",
+      "tags": [
+        "architecture",
+        "boundaries",
+        "adapters",
+        "harness"
+      ]
+    },
+    {
+      "slug": "domain-model",
+      "path": "docs/domain-model.md",
+      "type": "Reference",
+      "title": "Domain model",
+      "description": "Read to learn the bio primitive families and the question to context to tool to facts loop.",
+      "tags": [
+        "domain-model",
+        "primitives",
+        "context"
+      ]
+    },
+    {
+      "slug": "duckdb-substrate",
+      "path": "docs/duckdb-substrate.md",
+      "type": "Reference",
+      "title": "DuckDB substrate",
+      "description": "Read before using DuckDB tables, extensions, or SQL surfaces over bio data.",
+      "tags": [
+        "duckdb",
+        "sql",
+        "extensions",
+        "substrate"
+      ]
+    },
+    {
+      "slug": "machine-studying-lineage",
+      "path": "docs/machine-studying-lineage.md",
+      "type": "Reference",
+      "title": "Machine studying lineage",
+      "description": "Read to understand what 'study' means here (machine studying) and how it lands on graphs.",
+      "tags": [
+        "machine-studying",
+        "study-notes",
+        "graph-bet",
+        "lineage"
+      ]
+    },
+    {
+      "slug": "ontology-and-knowledge-graphs",
+      "path": "docs/ontology-and-knowledge-graphs.md",
+      "type": "Reference",
+      "title": "Ontologies and knowledge graphs",
+      "description": "Read before modeling ontologies, KG nodes/edges, or the graph-as-substrate bet.",
+      "tags": [
+        "ontology",
+        "knowledge-graph",
+        "graph-bet",
+        "provenance"
+      ]
+    },
+    {
+      "slug": "resources-and-tool-specs",
+      "path": "docs/resources-and-tool-specs.md",
+      "type": "Reference",
+      "title": "Resources and BioToolSpec",
+      "description": "Read before defining resources, resolvers, or BioToolSpec/operation contracts.",
+      "tags": [
+        "resources",
+        "cas",
+        "tool-spec",
+        "operation-spec"
+      ]
+    },
+    {
+      "slug": "roadmap",
+      "path": "docs/roadmap.md",
+      "type": "Reference",
+      "title": "Roadmap, success, and testing contract",
+      "description": "Read before planning roadmap, success metrics, tests, or flagship work.",
+      "tags": [
+        "roadmap",
+        "testing",
+        "success",
+        "flagship"
+      ]
+    },
+    {
+      "slug": "refinments",
+      "path": "docs/refinments.md",
+      "type": "Worklog",
+      "title": "Refinements",
+      "description": "Open design issues and cleanup targets still to sharpen before abstractions harden.",
+      "tags": [
+        "refinements",
+        "open-issues",
+        "worklog"
+      ]
+    }
+  ]
+}

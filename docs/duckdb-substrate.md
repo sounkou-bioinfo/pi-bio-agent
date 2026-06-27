@@ -1,3 +1,10 @@
+---
+type: Reference
+title: DuckDB substrate
+description: "Read before using DuckDB tables, extensions, or SQL surfaces over bio data."
+tags: [duckdb, sql, extensions, substrate]
+---
+
 # DuckDB substrate
 
 DuckDB is the default tabular and graph substrate for `pi-bio-agent`.

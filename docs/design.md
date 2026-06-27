@@ -1,3 +1,10 @@
+---
+type: Reference
+title: Design notes
+description: "Read before changing core boundaries, adapters, storage, skills, or the harness-adaptation surface."
+tags: [architecture, boundaries, adapters, harness]
+---
+
 # Design notes
 
 `pi-bio-agent` should remain a lean, provider-agnostic substrate for biomedical agents. The core should define the durable primitives; adapters, operation packs, skills, and study notes compose those primitives for particular workflows.

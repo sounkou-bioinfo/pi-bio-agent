@@ -1,3 +1,10 @@
+---
+type: Reference
+title: Machine studying lineage
+description: "Read to understand what 'study' means here (machine studying) and how it lands on graphs."
+tags: [machine-studying, study-notes, graph-bet, lineage]
+---
+
 # Machine studying lineage
 
 Source studied: Jacob Xiaochen Li, Rick Battle, and Omar Khattab, "Machine Studying" (published June 17, 2026), <https://jacobxli.com/blog/2026/machine-studying/>.

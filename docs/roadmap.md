@@ -1,3 +1,10 @@
+---
+type: Reference
+title: Roadmap, success, and testing contract
+description: "Read before planning roadmap, success metrics, tests, or flagship work."
+tags: [roadmap, testing, success, flagship]
+---
+
 # Roadmap, success, and testing contract
 
 Decisions, not aspirations. This file is the spine: what we are building, the one claim that can

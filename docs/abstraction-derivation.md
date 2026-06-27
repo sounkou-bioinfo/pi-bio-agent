@@ -1,3 +1,10 @@
+---
+type: Reference
+title: Deriving the abstractions
+description: "Read to see why the core primitives exist and where machine-studying fits."
+tags: [abstractions, primitives, machine-studying]
+---
+
 # Deriving the abstractions
 
 The core should stay small enough that new domains can be expressed as data, tool specs, and study notes instead of new framework code.

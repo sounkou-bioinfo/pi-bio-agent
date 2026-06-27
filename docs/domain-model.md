@@ -1,3 +1,10 @@
+---
+type: Reference
+title: Domain model
+description: "Read to learn the bio primitive families and the question to context to tool to facts loop."
+tags: [domain-model, primitives, context]
+---
+
 # Domain model
 
 `pi-bio-agent` is a substrate for agentic bioinformatics, not a pile of canned scripts.

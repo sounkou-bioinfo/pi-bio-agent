@@ -1,3 +1,10 @@
+---
+type: Reference
+title: Ontologies and knowledge graphs
+description: "Read before modeling ontologies, KG nodes/edges, or the graph-as-substrate bet."
+tags: [ontology, knowledge-graph, graph-bet, provenance]
+---
+
 # Ontologies and knowledge graphs
 
 ## The graph bet (the domain wager)
