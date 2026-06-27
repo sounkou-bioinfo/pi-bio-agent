@@ -1,6 +1,6 @@
 ---
 name: pi-bio-agent
-description: Guides design and use of pi-bio-agent abstractions: SQL-first bio primitives, ontology and knowledge-graph modeling, DuckDB extension substrates, capability discovery, and project-local skill authoring. Use when building agentic bio/genomics workflows over Pi.
+description: "Guides design and use of pi-bio-agent abstractions: SQL-first bio primitives, ontology and knowledge-graph modeling, DuckDB extension substrates, capability discovery, and project-local skill authoring. Use when building agentic bio/genomics workflows over Pi."
 ---
 
 # Pi Bio Agent

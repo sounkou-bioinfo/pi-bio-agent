@@ -22,7 +22,17 @@ describe("Pi project host helpers", () => {
     const path = await writeProjectSkill(cwd, "rare-disease-review", "Reusable rare disease review workflow.", "# Steps\n\nUse structured evidence.");
     const body = await readFile(path, "utf8");
     assert.match(body, /name: rare-disease-review/);
-    assert.match(body, /description: Reusable rare disease review workflow\./);
+    assert.match(body, /description: "Reusable rare disease review workflow\."/);
+  });
+
+  test("quotes a description containing a colon so the YAML frontmatter stays valid", async () => {
+    const cwd = await tempProject();
+    // Unquoted, this 'X: Y' would be read as a nested mapping and fail to load (the SKILL.md bug).
+    const path = await writeProjectSkill(cwd, "hpo-grounding", "Ground phenotypes to HPO: terms first.", "body");
+    const body = await readFile(path, "utf8");
+    assert.match(body, /description: "Ground phenotypes to HPO: terms first\."/);
+    // the colon is inside the quoted scalar, not a bare mapping value
+    assert.doesNotMatch(body, /description: Ground phenotypes to HPO: terms/);
   });
 
   test("writes, reads, searches, and ignores corrupt study notes", async () => {

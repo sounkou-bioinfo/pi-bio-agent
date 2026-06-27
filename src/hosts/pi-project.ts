@@ -21,12 +21,19 @@ export function validateSkillInput(name: string, description: string, body: stri
   if (body.length > 100_000) throw new Error("skill body too large");
 }
 
+/** YAML double-quoted scalar: safe for free text that may contain `:` (which otherwise reads as a mapping). */
+function yamlQuoted(value: string): string {
+  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
 export async function writeProjectSkill(cwd: string, name: string, description: string, body: string): Promise<string> {
   validateSkillInput(name, description, body);
   const dir = join(runtimeSkillRoot(cwd), name);
   await fs.mkdir(dir, { recursive: true });
   const path = join(dir, "SKILL.md");
-  const content = `---\nname: ${name}\ndescription: ${description.replace(/\s+/g, " ").trim()}\n---\n\n${body.trim()}\n`;
+  // Quote the description: agent-authored text routinely contains ':' (e.g. "Use before X: do Y"), which
+  // breaks unquoted YAML frontmatter and stops the skill from loading.
+  const content = `---\nname: ${name}\ndescription: ${yamlQuoted(description.replace(/\s+/g, " ").trim())}\n---\n\n${body.trim()}\n`;
   await fs.writeFile(path, content, "utf8");
   return path;
 }
