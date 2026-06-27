@@ -125,7 +125,10 @@ export interface NotesCliDeps {
   cwd: string;
   /** Open a `KgSqlConn` for the `--db` path. Injected so the command is testable without a real driver. */
   openConn: (db: string) => Promise<KgSqlConn>;
+  /** Successful output (the report/summary, or `--json`) → stdout. */
   out: (line: string) => void;
+  /** Usage and errors → stderr, so stdout stays clean for piping (`notes report --json | jq`). */
+  err: (line: string) => void;
 }
 
 /** Top-level entry: parse → open connection → run → print. Returns a process exit code; never calls process.exit. */
@@ -134,14 +137,14 @@ export async function mainNotes(argv: string[], deps: NotesCliDeps): Promise<num
   try {
     args = parseNotesArgs(argv);
   } catch (error) {
-    deps.out((error as Error).message);
+    deps.err((error as Error).message);
     return 2;
   }
   let conn: KgSqlConn;
   try {
     conn = await deps.openConn(args.db);
   } catch (error) {
-    deps.out(`failed to open --db '${args.db}': ${(error as Error).message}`);
+    deps.err(`failed to open --db '${args.db}': ${(error as Error).message}`);
     return 1;
   }
   try {
@@ -149,7 +152,7 @@ export async function mainNotes(argv: string[], deps: NotesCliDeps): Promise<num
     deps.out(args.json ? JSON.stringify(data, null, 2) : text);
     return 0;
   } catch (error) {
-    deps.out(`error: ${(error as Error).message}`);
+    deps.err(`error: ${(error as Error).message}`);
     return 1;
   }
 }

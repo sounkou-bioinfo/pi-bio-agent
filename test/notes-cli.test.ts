@@ -39,13 +39,14 @@ describe("mainNotes (end to end against in-memory DuckDB)", () => {
   async function harness() {
     const cwd = await mkdtemp(join(tmpdir(), "pi-bio-cli-"));
     const conn = duckdbNodeConn(await (await DuckDBInstance.create(":memory:")).connect());
-    const lines: string[] = [];
-    const deps = { cwd, openConn: async (_db: string): Promise<KgSqlConn> => conn, out: (l: string) => lines.push(l) };
-    return { cwd, conn, lines, deps };
+    const out: string[] = [];
+    const errs: string[] = [];
+    const deps = { cwd, openConn: async (_db: string): Promise<KgSqlConn> => conn, out: (l: string) => out.push(l), err: (l: string) => errs.push(l) };
+    return { cwd, conn, out, errs, deps };
   }
 
   test("sync dry-run writes nothing, --write applies, report reads back", async () => {
-    const { cwd, conn, lines, deps } = await harness();
+    const { cwd, conn, out: lines, deps } = await harness();
     await writeStudyNote(cwd, makeStudyNote({ slug: "acmg-pm2", kind: "cheatsheet", title: "ACMG PM2", hook: "Read on rare-variant calls.", body: "See [[gnomad-frequencies]]." }));
     await writeStudyNote(cwd, makeStudyNote({ slug: "gnomad-frequencies", kind: "cheatsheet", title: "gnomAD", hook: "Read before AF filters.", body: "x" }));
 
@@ -63,12 +64,19 @@ describe("mainNotes (end to end against in-memory DuckDB)", () => {
     assert.equal(report.danglingEdgeCount, 0);
   });
 
-  test("missing --db exits 2 without opening a connection", async () => {
-    const { lines } = await harness();
+  test("missing --db exits 2 to stderr without opening a connection", async () => {
+    const out: string[] = [];
+    const errs: string[] = [];
     let opened = false;
-    const code = await mainNotes(["sync"], { cwd: ".", openConn: async () => { opened = true; throw new Error("should not open"); }, out: (l) => lines.push(l) });
+    const code = await mainNotes(["sync"], {
+      cwd: ".",
+      openConn: async () => { opened = true; throw new Error("should not open"); },
+      out: (l) => out.push(l),
+      err: (l) => errs.push(l),
+    });
     assert.equal(code, 2);
     assert.equal(opened, false);
-    assert.match(lines.at(-1)!, /--db <path> is required/);
+    assert.equal(out.length, 0, "errors must not pollute stdout");
+    assert.match(errs.at(-1)!, /--db <path> is required/);
   });
 });

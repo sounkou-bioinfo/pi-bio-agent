@@ -30,12 +30,29 @@ pi install /root/pi-bio-agent
 - `bio_write_study_note`
 - `bio_list_study_notes`
 - `bio_read_study_note`
+- `bio_delete_study_note`
 - `bio_create_skill`
 
 Generated project-local skills and study notes live under `.pi/bio-agent/` in the current project.
 
+## CLI
+
+Project study notes (under `.pi/bio-agent/study-notes`) project into the memory subgraph
+(`bio_nodes`/`bio_edges`) of a DuckDB database. `sync` is a dry run unless `--write`; output and
+`--json` go to stdout, usage/errors to stderr.
+
+```sh
+pi-bio-agent notes sync   --db graph.duckdb --create-schema   # dry run (counts only)
+pi-bio-agent notes sync   --db graph.duckdb --write           # apply
+pi-bio-agent notes report --db graph.duckdb --json            # counts + dangling/inbound rows
+```
+
+The bin is compiled to `dist/` via `npm run build` (run by `prepare`); the package also ships `src`
+for Pi to consume directly.
+
 ## Design notes
 
+- [Roadmap, success, and testing contract](docs/roadmap.md)
 - [Domain model](docs/domain-model.md)
 - [Resources and BioToolSpec](docs/resources-and-tool-specs.md)
 - [Ontologies and knowledge graphs](docs/ontology-and-knowledge-graphs.md)

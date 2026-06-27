@@ -18,6 +18,7 @@ mainNotes(rest, {
   cwd: process.cwd(),
   openConn: async (db) => duckdbNodeConn(await (await DuckDBInstance.create(db)).connect()),
   out: (line) => console.log(line),
+  err: (line) => console.error(line),
 }).then(
   (code) => process.exit(code),
   (error) => {
