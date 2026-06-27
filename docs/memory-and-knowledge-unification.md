@@ -206,7 +206,9 @@ The pure projection (`studyNoteGraph`) hands off to `syncStudyNoteGraph` in
 - **Refuses to orphan non-owned edges.** Because external inbound edges (`to_id` memory,
   `from_id` elsewhere) are not owned, a delete-then-reinsert would dangle or break them under
   future FK constraints. So the write **fails closed while any exist**: dry-run reports
-  `externalInboundEdges`, and a write throws before touching anything when that count is > 0.
+  `externalInboundEdges`, and the write runs that check **inside the transaction** (so it
+  can't drift between check and delete) and rolls back without touching owned rows when the
+  count is > 0.
 - **FK-safe ordering.** Within the transaction: delete memory-origin edges, then memory
   nodes; insert nodes, then edges.
 - **Dangling targets:** not materialized as stub nodes; counted in the result

@@ -140,7 +140,8 @@ describe("syncStudyNoteGraph", () => {
 
     const write = fakeConn({ nodes: 1, edges: 1, externalInbound: 1 });
     await assert.rejects(() => syncStudyNoteGraph(write.conn, snapshot, { dryRun: false, allowWrite: true }), /non-owned edges point into them/);
-    // The refusal happens before any delete/insert: the owned nodes are never touched.
-    assert.ok(!write.statements.some((s) => /^(BEGIN|DELETE|INSERT)/.test(s.sql)), "no delete/insert when external inbound edges exist");
+    // The check runs inside the transaction, so it may BEGIN, but it rolls back without touching owned rows.
+    assert.ok(!write.statements.some((s) => /^(DELETE|INSERT)/.test(s.sql)), "no delete/insert when external inbound edges exist");
+    assert.ok(write.statements.some((s) => s.sql === "ROLLBACK"), "rolls back after refusing");
   });
 });

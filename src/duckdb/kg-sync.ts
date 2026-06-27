@@ -1,9 +1,10 @@
 import type { BioGraphEdge, BioGraphNode, BioGraphSnapshot } from "../core/knowledge-graph.js";
 
 /**
- * Minimal SQL port the KG-sync adapter writes through. A concrete DuckDB connection (or any backend
- * exposing the `bio_nodes`/`bio_edges` contract) implements it. Keeping the adapter behind this port
- * means the package needs no native database-driver dependency; the host wires a real connection.
+ * Minimal SQL port the KG-sync adapter writes through, implemented by a concrete DuckDB connection
+ * exposing the `bio_nodes`/`bio_edges` contract. Keeping the adapter behind this port means the
+ * package needs no native database-driver dependency; the host wires a real connection. The adapter
+ * emits DuckDB-dialect SQL (e.g. `?::JSON` casts), so the port is not dialect-neutral.
  */
 export interface KgSqlConn {
   all<T = Record<string, unknown>>(sql: string, params?: readonly unknown[]): Promise<T[]>;
@@ -65,6 +66,17 @@ function assertMemorySubgraph(snapshot: BioGraphSnapshot): void {
  *
  * Files remain the source of truth; this projects them into DuckDB as an index/cache.
  */
+async function countOwned(conn: KgSqlConn): Promise<Pick<SyncStudyNoteGraphResult, "nodesToDelete" | "edgesToDelete" | "externalInboundEdges">> {
+  const [nodeRow] = await conn.all<{ n: number }>(`SELECT count(*) AS n FROM ${OWNED_NODES}`);
+  const [edgeRow] = await conn.all<{ n: number }>(`SELECT count(*) AS n FROM ${OWNED_EDGES}`);
+  const [externalInboundRow] = await conn.all<{ n: number }>(`SELECT count(*) AS n FROM ${EXTERNAL_INBOUND_EDGES}`);
+  return {
+    nodesToDelete: Number(nodeRow?.n ?? 0),
+    edgesToDelete: Number(edgeRow?.n ?? 0),
+    externalInboundEdges: Number(externalInboundRow?.n ?? 0),
+  };
+}
+
 export async function syncStudyNoteGraph(
   conn: KgSqlConn,
   snapshot: BioGraphSnapshot,
@@ -74,35 +86,34 @@ export async function syncStudyNoteGraph(
   const dryRun = options.dryRun ?? true;
   if (!dryRun && options.allowWrite !== true) throw new Error("syncStudyNoteGraph: writing requires allowWrite: true");
 
-  const [nodeRow] = await conn.all<{ n: number }>(`SELECT count(*) AS n FROM ${OWNED_NODES}`);
-  const [edgeRow] = await conn.all<{ n: number }>(`SELECT count(*) AS n FROM ${OWNED_EDGES}`);
-  const [externalInboundRow] = await conn.all<{ n: number }>(`SELECT count(*) AS n FROM ${EXTERNAL_INBOUND_EDGES}`);
   const nodeIds = new Set(snapshot.nodes.map((node) => node.id));
-  const result: SyncStudyNoteGraphResult = {
-    dryRun,
-    nodesToDelete: Number(nodeRow?.n ?? 0),
-    edgesToDelete: Number(edgeRow?.n ?? 0),
+  const projection = {
     nodesToInsert: snapshot.nodes.length,
     edgesToInsert: snapshot.edges.length,
     danglingEdges: snapshot.edges.filter((edge) => !nodeIds.has(edge.to)).length,
-    externalInboundEdges: Number(externalInboundRow?.n ?? 0),
   };
-  if (dryRun) return result;
-  if (result.externalInboundEdges > 0) throw new Error(`syncStudyNoteGraph: refusing to delete memory nodes while ${result.externalInboundEdges} non-owned edges point into them`);
 
+  if (dryRun) return { dryRun: true, ...(await countOwned(conn)), ...projection };
+
+  // Write mode: count and run the fail-closed external-inbound check INSIDE the transaction, so the
+  // guarantee can't drift between the check and the delete (TOCTOU under a concurrent connection).
   await conn.run("BEGIN");
   try {
+    const counts = await countOwned(conn);
+    if (counts.externalInboundEdges > 0) {
+      throw new Error(`syncStudyNoteGraph: refusing to delete memory nodes while ${counts.externalInboundEdges} non-owned edges point into them`);
+    }
     // Edges before nodes on delete, nodes before edges on insert: safe even if FK constraints are added later.
     await conn.run(`DELETE FROM ${OWNED_EDGES}`);
     await conn.run(`DELETE FROM ${OWNED_NODES}`);
     for (const node of snapshot.nodes) await insertNode(conn, node);
     for (const edge of snapshot.edges) await insertEdge(conn, edge);
     await conn.run("COMMIT");
+    return { dryRun: false, ...counts, ...projection };
   } catch (error) {
     await conn.run("ROLLBACK");
     throw error;
   }
-  return result;
 }
 
 async function insertNode(conn: KgSqlConn, node: BioGraphNode): Promise<void> {
