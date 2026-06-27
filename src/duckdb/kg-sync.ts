@@ -189,12 +189,21 @@ export interface BioGraphEdgeRow {
   predicate: string;
 }
 
+export interface ReportStudyNoteGraphOptions {
+  /** Cap how many dangling / external-inbound rows are returned. The *counts* stay exact. Default: no cap. */
+  limit?: number;
+}
+
 export interface StudyNoteGraphReport {
   memoryNodes: number;
   memoryEdges: number;
-  /** Memory-origin edges whose target node does not exist — persisted dangling links to fix or fill. */
+  /** Exact count of memory-origin edges whose target node does not exist. */
+  danglingEdgeCount: number;
+  /** Persisted dangling links to fix or fill (capped at `limit`; may be fewer than `danglingEdgeCount`). */
   danglingEdges: BioGraphEdgeRow[];
-  /** Non-owned edges pointing into memory nodes — these block a write until removed/re-homed. */
+  /** Exact count of non-owned edges pointing into memory nodes (these block a write). */
+  externalInboundEdgeCount: number;
+  /** Non-owned inbound edges to remove/re-home (capped at `limit`; may be fewer than `externalInboundEdgeCount`). */
   externalInboundEdges: BioGraphEdgeRow[];
 }
 
@@ -202,20 +211,31 @@ function toEdgeRows(rows: Array<{ from_id: string; to_id: string; predicate: str
   return rows.map((row) => ({ from: row.from_id, to: row.to_id, predicate: row.predicate }));
 }
 
+function limitClause(limit?: number): string {
+  if (limit === undefined) return "";
+  if (!Number.isInteger(limit) || limit < 0) throw new Error(`reportStudyNoteGraph: limit must be a non-negative integer, got ${limit}`);
+  return ` LIMIT ${limit}`;
+}
+
 /**
- * Read-only report over the memory subgraph: scalar counts for the (potentially large) node/edge totals,
- * plus the full rows for the two actionable problem sets — persisted dangling links and non-owned inbound
- * edges that would block a sync. No writes, no transaction; safe to run any time.
+ * Read-only report over the memory subgraph: exact counts for the (potentially large) totals and the two
+ * problem sets, plus the actual problem rows capped at `limit` (progressive disclosure — summarize totals,
+ * sample the fixable rows). No writes, no transaction; safe to run any time.
  */
-export async function reportStudyNoteGraph(conn: KgSqlConn): Promise<StudyNoteGraphReport> {
+export async function reportStudyNoteGraph(conn: KgSqlConn, options: ReportStudyNoteGraphOptions = {}): Promise<StudyNoteGraphReport> {
+  const lim = limitClause(options.limit);
   const [nodeRow] = await conn.all<{ n: number }>(`SELECT count(*) AS n FROM ${OWNED_NODES}`);
   const [edgeRow] = await conn.all<{ n: number }>(`SELECT count(*) AS n FROM ${OWNED_EDGES}`);
-  const dangling = await conn.all<{ from_id: string; to_id: string; predicate: string }>(`SELECT e.from_id, e.to_id, e.predicate FROM ${DANGLING_MEMORY_EDGES}`);
-  const externalInbound = await conn.all<{ from_id: string; to_id: string; predicate: string }>(`SELECT e.from_id, e.to_id, e.predicate FROM ${EXTERNAL_INBOUND_EDGES}`);
+  const [danglingCountRow] = await conn.all<{ n: number }>(`SELECT count(*) AS n FROM ${DANGLING_MEMORY_EDGES}`);
+  const [externalCountRow] = await conn.all<{ n: number }>(`SELECT count(*) AS n FROM ${EXTERNAL_INBOUND_EDGES}`);
+  const dangling = await conn.all<{ from_id: string; to_id: string; predicate: string }>(`SELECT e.from_id, e.to_id, e.predicate FROM ${DANGLING_MEMORY_EDGES}${lim}`);
+  const externalInbound = await conn.all<{ from_id: string; to_id: string; predicate: string }>(`SELECT e.from_id, e.to_id, e.predicate FROM ${EXTERNAL_INBOUND_EDGES}${lim}`);
   return {
     memoryNodes: Number(nodeRow?.n ?? 0),
     memoryEdges: Number(edgeRow?.n ?? 0),
+    danglingEdgeCount: Number(danglingCountRow?.n ?? 0),
     danglingEdges: toEdgeRows(dangling),
+    externalInboundEdgeCount: Number(externalCountRow?.n ?? 0),
     externalInboundEdges: toEdgeRows(externalInbound),
   };
 }

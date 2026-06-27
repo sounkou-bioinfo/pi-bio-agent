@@ -32,7 +32,9 @@ describe("syncProjectStudyNotes (files -> graph -> DuckDB)", () => {
     const report = await reportStudyNoteGraph(conn);
     assert.equal(report.memoryNodes, 2);
     assert.equal(report.memoryEdges, 2);
+    assert.equal(report.danglingEdgeCount, 1);
     assert.deepEqual(report.danglingEdges, [{ from: "memory:acmg-pm2", to: "memory:ghost-note", predicate: "references" }]);
+    assert.equal(report.externalInboundEdgeCount, 0);
     assert.equal(report.externalInboundEdges.length, 0);
   });
 });

@@ -225,8 +225,9 @@ stays testable (fake port) and injectable (a host passes its own connection); th
 - **Read-only report.** `reportStudyNoteGraph(conn)` returns memory node/edge counts plus the full
   rows for the two actionable problem sets — persisted **dangling** links (memory-origin edges with
   no target node) and **external inbound** edges (which would block a write) — so an agent can fix
-  graph issues before syncing. No writes, no transaction. (Totals are scalar counts; the bounded,
-  fixable problem sets come back as rows. A `limit` is deferred until a CLI/Pi surface exposes it.)
+  graph issues before syncing. No writes, no transaction. Totals (including exact dangling /
+  external-inbound counts) are always returned; the fixable problem rows come back capped at an
+  optional `{ limit }` (progressive disclosure: summarize totals, sample the rows).
 - **Project helper.** `syncProjectStudyNotes(conn, cwd, { dryRun, allowWrite, createSchema })`
   (`src/hosts/study-sync.ts`) is the one call that ties the file layer to the graph layer:
   `readStudyNotes → studyNoteGraph → (optional createBioGraphSchema) → syncStudyNoteGraph`. Explicit
@@ -235,6 +236,14 @@ stays testable (fake port) and injectable (a host passes its own connection); th
   control the memory-subgraph *row* sync (dry-run by default). A dry run with `createSchema: true`
   still writes the schema; for a run that performs **no database writes**, leave `createSchema` false
   (the schema must already exist) — note a dry run still *reads* (it SELECTs counts).
+- **CLI engine.** `src/cli/notes.ts` — `parseNotesArgs` (pure, `node:util parseArgs`, no dependency)
+  and `mainNotes(argv, { cwd, openConn, out })` (injected connection-factory + output sink, returns an
+  exit code, never calls `process.exit`). Surface: `notes sync --db <path> [--write] [--create-schema]
+  [--json]` (dry-run unless `--write`) and `notes report --db <path> [--limit N] [--json]`; `--db`
+  required, write gated behind `--write`. User-facing name is **`notes`**, not `study` (the term is
+  overloaded in bio). Fully unit-tested against in-memory DuckDB. Wiring it to an executable `bin`
+  needs a build step (the package ships `.ts` with `.js` specifiers, which Node can't run un-compiled)
+  — deferred as a packaging decision.
 - **Refuses to orphan non-owned edges.** A non-owned edge (origin not `memory:`) pointing at
   a node in the **delete set** (`family='memory'`, found by joining `to_id` to those rows —
   not a `to_id` prefix match, so the guard covers exactly what gets deleted) would be dangled

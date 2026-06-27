@@ -92,7 +92,26 @@ describe("duckdbNodeConn (real in-memory DuckDB)", () => {
     const report = await reportStudyNoteGraph(conn);
     assert.equal(report.memoryNodes, 2);
     assert.equal(report.memoryEdges, 2); // both edges originate at memory:acmg-pm2
+    assert.equal(report.danglingEdgeCount, 1);
     assert.deepEqual(report.danglingEdges, [{ from: "memory:acmg-pm2", to: "memory:ghost-note", predicate: "references" }]);
+    assert.equal(report.externalInboundEdgeCount, 1);
     assert.deepEqual(report.externalInboundEdges, [{ from: "variant:1", to: "memory:acmg-pm2", predicate: "about" }]);
+  });
+
+  test("report --limit caps rows but keeps counts exact", async () => {
+    const conn = await memoryConn();
+    await createBioGraphSchema(conn, { ifNotExists: true });
+    // three dangling links from one note
+    await syncStudyNoteGraph(conn, studyNoteGraph([note("acmg-pm2", "[[ghost-a]] [[ghost-b]] [[ghost-c]]")]), { dryRun: false, allowWrite: true });
+
+    const full = await reportStudyNoteGraph(conn);
+    assert.equal(full.danglingEdgeCount, 3);
+    assert.equal(full.danglingEdges.length, 3);
+
+    const capped = await reportStudyNoteGraph(conn, { limit: 2 });
+    assert.equal(capped.danglingEdgeCount, 3); // exact total survives the cap
+    assert.equal(capped.danglingEdges.length, 2); // sample is capped
+
+    await assert.rejects(() => reportStudyNoteGraph(conn, { limit: -1 }), /non-negative integer/);
   });
 });
