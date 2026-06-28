@@ -26,19 +26,6 @@ export interface BioOperationIdentifierHint {
   description?: string;
 }
 
-/**
- * Declared, generic report projection over a classification/filter result: each row carries an id and a
- * bucket, and one bucket is the "included" answer; the rest are excluded (each excluded bucket is a reason).
- * The runner derives counts + an auditable report — the analysis is data, not a per-question code module.
- */
-export interface BioBucketedReportSpec {
-  kind: "bucketed_rows";
-  idColumn: string;
-  bucketColumn: string;
-  includedBucket: string;
-  caveats?: string[];
-}
-
 export interface BioOperationSpec {
   schema: "pi-bio.operation_spec.v1";
   id: string;
@@ -51,7 +38,6 @@ export interface BioOperationSpec {
   outputSchema?: JsonSchema;
   identifiers?: BioOperationIdentifierHint[];
   sql?: BioSqlOperationRequest;
-  report?: BioBucketedReportSpec;
   cache?: {
     mode: BioOperationCacheMode;
     ttlSeconds?: number;
@@ -97,12 +83,6 @@ export function validateBioOperationSpec(spec: BioOperationSpec): string[] {
     if (!spec.sql.sqlTemplate.trim()) errors.push("sql.sqlTemplate is required");
     if (spec.sql.requiredColumns && spec.sql.requiredColumns.some((c) => typeof c !== "string" || !c.trim())) {
       errors.push("sql.requiredColumns must be non-empty strings");
-    }
-  }
-  if (spec.report) {
-    if (spec.report.kind !== "bucketed_rows") errors.push("report.kind must be 'bucketed_rows'");
-    for (const f of ["idColumn", "bucketColumn", "includedBucket"] as const) {
-      if (typeof spec.report[f] !== "string" || !spec.report[f].trim()) errors.push(`report.${f} is required`);
     }
   }
   if (spec.cache?.ttlSeconds !== undefined && spec.cache.ttlSeconds < 0) errors.push("cache.ttlSeconds cannot be negative");

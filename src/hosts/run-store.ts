@@ -2,23 +2,23 @@ import { promises as fs } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { createBioRegistry, type BioResolverImpl, type DomainPackManifest, type ResolutionReceipt } from "../core/manifest.js";
-import { runOperation, type BucketedOperationReport, type OperationResult } from "../core/operations.js";
+import { runOperation, type OperationResult } from "../core/operations.js";
 import type { BioRunRecord } from "../core/run-spec.js";
 import { duckdbNodeConn } from "../duckdb/node-api.js";
 import { duckdbFileScanResolver } from "../duckdb/resolvers/duckdb-file-scan.js";
-import { duckhtsVcfScanResolver } from "../duckdb/resolvers/duckhts-vcf-scan.js";
+import { duckhtsReadBcfResolver } from "../duckdb/resolvers/duckhts-read-bcf.js";
 
-// Host-level run runner + store. Core returns { run, result, report, receipts }; persistence and resolver
-// binding live HERE, not in core. Only built-in resolver impls are bound; a manifest that declares any other
+// Host-level run runner + store. Core returns { run, result, receipts }; persistence and resolver binding
+// live HERE, not in core. Only built-in resolver impls are bound; a manifest that declares any other
 // resolver leaves it unbound and fails closed at resolve time.
 
 const BUILTIN_RESOLVERS: Record<string, BioResolverImpl> = {
   "duckdb.file_scan": duckdbFileScanResolver,
-  "duckhts.vcf_scan": duckhtsVcfScanResolver, // bound always; fails closed at resolve time if duckhts is not provisioned
+  "duckhts.read_bcf": duckhtsReadBcfResolver, // bound always; fails closed at resolve time if duckhts is not provisioned
 };
 
 // Built-in resolvers whose params.path is a file location to resolve relative to the manifest's directory.
-const FILE_PATH_RESOLVERS = new Set(["duckdb.file_scan", "duckhts.vcf_scan"]);
+const FILE_PATH_RESOLVERS = new Set(["duckdb.file_scan", "duckhts.read_bcf"]);
 
 /**
  * Make relative local resource paths absolute, anchored to the MANIFEST's directory (not the Node process
@@ -42,16 +42,16 @@ export function runsRoot(cwd: string): string {
 export interface RunPayload {
   run: BioRunRecord;
   result: OperationResult;
-  report?: BucketedOperationReport;
   receipts: ResolutionReceipt[];
 }
 
 export interface PersistedRun {
   dir: string;
-  files: { run: string; result: string; receipts: string; report?: string };
+  files: { run: string; result: string; receipts: string };
 }
 
-/** Host-level persistence: write run/result/report/receipts under .pi/bio-agent/runs/<runId>/. */
+/** Host-level persistence: write run/result/receipts under .pi/bio-agent/runs/<runId>/. result.json IS the
+ *  report — whatever the operation's SQL returned. */
 export async function persistRun(cwd: string, runId: string, payload: RunPayload): Promise<PersistedRun> {
   const dir = join(runsRoot(cwd), runId);
   await fs.mkdir(dir, { recursive: true });
@@ -60,13 +60,14 @@ export async function persistRun(cwd: string, runId: string, payload: RunPayload
     await fs.writeFile(path, `${JSON.stringify(data, null, 2)}\n`, "utf8");
     return path;
   };
-  const files: PersistedRun["files"] = {
-    run: await write("run.json", payload.run),
-    result: await write("result.json", payload.result),
-    receipts: await write("receipts.json", payload.receipts),
+  return {
+    dir,
+    files: {
+      run: await write("run.json", payload.run),
+      result: await write("result.json", payload.result),
+      receipts: await write("receipts.json", payload.receipts),
+    },
   };
-  if (payload.report) files.report = await write("report.json", payload.report);
-  return { dir, files };
 }
 
 export interface RunOperationRequest {
@@ -84,7 +85,6 @@ export interface RunOperationResponse {
   operationId: string;
   status: BioRunRecord["status"];
   rowCount: number;
-  report?: { included: number; excluded: number; countsByBucket: Record<string, number>; caveats: string[] };
   artifacts: PersistedRun["files"];
   runDir: string;
 }
@@ -123,8 +123,8 @@ export async function runBioOperationFromManifest(req: RunOperationRequest): Pro
   const instance = await DuckDBInstance.create(resolveInCwd(req.cwd, req.dbPath));
   const conn = duckdbNodeConn(await instance.connect());
 
-  const { run, result, report, receipts } = await runOperation(registry, conn, { operationId: req.operationId, runId, now });
-  const persisted = await persistRun(req.cwd, runId, { run, result, report, receipts });
+  const { run, result, receipts } = await runOperation(registry, conn, { operationId: req.operationId, runId, now });
+  const persisted = await persistRun(req.cwd, runId, { run, result, receipts });
 
   return {
     ok: true,
@@ -132,7 +132,6 @@ export async function runBioOperationFromManifest(req: RunOperationRequest): Pro
     operationId: req.operationId,
     status: run.status,
     rowCount: result.rows.length,
-    report: report ? { included: report.included, excluded: report.excluded, countsByBucket: report.countsByBucket, caveats: report.caveats } : undefined,
     artifacts: persisted.files,
     runDir: persisted.dir,
   };

@@ -41,7 +41,6 @@ const manifest: DomainPackManifest = {
       title: "Rare high-impact variant classification", description: "Classify variants, abstaining on unknown frequency.",
       domains: ["genomics"], transport: "duckdb.sql", inputSchema: { type: "object" },
       sql: { sqlTemplate: RARE_HIGH_IMPACT_SQL, readOnly: true, singleStatement: true, requiredResources: ["annotated_variants", "so_loss_of_function"], requiredColumns: ["variant_key", "consequence", "allele_frequency", "clinical_significance"] },
-      report: { kind: "bucketed_rows", idColumn: "variant_key", bucketColumn: "bucket", includedBucket: "included", caveats: ["Unknown frequency is abstained.", "Benign is excluded."] },
     }],
   },
 };
@@ -58,29 +57,27 @@ const run = (cwd: string, runId = "run-1") =>
   runBioOperationFromManifest({ cwd, dbPath: ":memory:", manifestPath: "manifest.json", operationId: "rare_high_impact.report", runId, now: "2026-06-28T00:00:00Z" });
 
 describe("host: bio_run_operation end-to-end", () => {
-  test("runs a manifest operation and persists run/result/report/receipts", async () => {
+  test("runs a manifest operation and persists run/result/receipts", async () => {
     const cwd = await tmpProject(manifest);
     const res = await run(cwd);
     assert.equal(res.ok, true);
     assert.equal(res.status, "succeeded");
-    assert.equal(res.report?.included, 1); // ClawBio rhi_01 ground truth, via the host
-    assert.equal(res.report?.countsByBucket.no_frequency, 1);
+    assert.equal(res.rowCount, 5);
 
-    // the four artifacts exist, parse, and carry the right content
+    // the three artifacts exist, parse, and carry the right content; result.json IS the report
     const dir = join(runsRoot(cwd), "run-1");
     assert.equal(res.runDir, dir);
     const run_ = JSON.parse(await fs.readFile(join(dir, "run.json"), "utf8"));
     const result = JSON.parse(await fs.readFile(join(dir, "result.json"), "utf8"));
-    const report = JSON.parse(await fs.readFile(join(dir, "report.json"), "utf8"));
     const receipts = JSON.parse(await fs.readFile(join(dir, "receipts.json"), "utf8"));
     assert.equal(run_.status, "succeeded");
     assert.equal(result.rows.length, 5);
-    assert.equal(report.included, 1);
+    const counts = result.rows.reduce((acc: Record<string, number>, r: { bucket: string }) => ({ ...acc, [r.bucket]: (acc[r.bucket] ?? 0) + 1 }), {});
+    assert.equal(counts.included, 1); // ClawBio rhi_01 ground truth, via the host (counts from SQL output)
     const avReceipt = receipts.find((r: { resourceId: string }) => r.resourceId === "annotated_variants");
     assert.equal(avReceipt.resolverId, "duckdb.file_scan");
     // the relative manifest path was resolved to an absolute file under the project, not the process cwd
     assert.ok(avReceipt.sourceSnapshots.some((s: { source: string }) => s.source === `file:${join(cwd, "data", "annotated_variants.csv")}`));
-    assert.equal(res.artifacts.report, join(dir, "report.json"));
   });
 
   test("fails closed on an invalid manifest", async () => {

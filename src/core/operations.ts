@@ -19,17 +19,6 @@ export interface OperationResult {
   rows: Array<Record<string, unknown>>;
 }
 
-/** Stable, auditable report over a bucketed classification result — derived when the operation declares `report`. */
-export interface BucketedOperationReport {
-  schema: "pi-bio.bucketed_operation_report.v1";
-  operationId: string;
-  runId: string;
-  countsByBucket: Record<string, number>;
-  included: number;
-  excluded: number;
-  caveats: string[];
-  rows: Array<{ id: unknown; bucket: unknown }>;
-}
 
 /**
  * Generic operation runner: resolve the named required resources (materializing their tables/views), run
@@ -41,7 +30,7 @@ export async function runOperation(
   registry: BioRegistry,
   conn: SqlConn,
   opts: { operationId: string; resources?: string[]; params?: readonly unknown[]; runId: string; now: string },
-): Promise<{ result: OperationResult; report?: BucketedOperationReport; run: BioRunRecord; receipts: ResolutionReceipt[] }> {
+): Promise<{ result: OperationResult; run: BioRunRecord; receipts: ResolutionReceipt[] }> {
   const { operationId, params = [], runId, now } = opts;
   const op = registry.getOperation(operationId);
   if (!op?.sql) throw new Error(`operation '${operationId}' has no duckdb.sql request`);
@@ -78,19 +67,11 @@ export async function runOperation(
   const sourceSnapshots = receipts.flatMap((r) => r.sourceSnapshots);
   const result: OperationResult = { schema: "pi-bio.operation_result.v1", operationId, runId, sourceSnapshots, rows };
 
-  let report: BucketedOperationReport | undefined;
-  if (op.report) {
-    const { idColumn, bucketColumn, includedBucket, caveats = [] } = op.report;
-    const reportRows = rows.map((r) => ({ id: r[idColumn], bucket: r[bucketColumn] }));
-    const countsByBucket: Record<string, number> = {};
-    for (const r of reportRows) countsByBucket[String(r.bucket)] = (countsByBucket[String(r.bucket)] ?? 0) + 1;
-    const included = countsByBucket[includedBucket] ?? 0;
-    report = { schema: "pi-bio.bucketed_operation_report.v1", operationId, runId, countsByBucket, included, excluded: rows.length - included, caveats, rows: reportRows };
-  }
-
+  // The result IS the report: whatever the operation's SQL returns (classified rows, or a GROUP BY count).
+  // No TS reducer, no report-kind taxonomy — counts/aggregation are the operation's SQL when it wants them.
   const artifact: BioArtifact = {
     kind: "artifact",
-    role: "report",
+    role: "output",
     path: `runs/${runId}/${operationId}.json`,
     format: "json",
     provenance: [
@@ -104,5 +85,5 @@ export async function runOperation(
   run = appendRunEvent(run, { type: "artifact", at: now, artifacts: [artifact] });
   run = appendRunEvent(run, { type: "completed", at: now, data: { rowCount: rows.length } });
 
-  return { result, report, run, receipts };
+  return { result, run, receipts };
 }

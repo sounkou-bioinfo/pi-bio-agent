@@ -50,13 +50,10 @@ const flagshipManifest: DomainPackManifest = {
       title: "Rare high-impact variant classification", description: "Classify variants, abstaining on unknown frequency.",
       domains: ["genomics"], transport: "duckdb.sql", inputSchema: { type: "object" },
       sql: { sqlTemplate: RARE_HIGH_IMPACT_SQL, readOnly: true, singleStatement: true, requiredResources: ["annotated_variants", "so_loss_of_function"], requiredColumns: ["variant_key", "consequence", "allele_frequency", "clinical_significance"] },
-      report: {
-        kind: "bucketed_rows", idColumn: "variant_key", bucketColumn: "bucket", includedBucket: "included",
-        caveats: [
-          "Variants with unknown allele frequency are abstained from, not counted as rare.",
-          "Benign-annotated variants are excluded regardless of frequency or consequence.",
-        ],
-      },
+      notes: [
+        "Variants with unknown allele frequency are abstained from, not counted as rare.",
+        "Benign-annotated variants are excluded regardless of frequency or consequence.",
+      ],
     })],
   },
 };
@@ -109,23 +106,15 @@ describe("flagship: rare high-impact variants (data over generic primitives)", (
     assert.equal(result.rows.find((r) => r.bucket === "included")?.variant_key, "1:1000:C:T");
   });
 
-  test("the runner derives a stable, auditable bucketed report (counts + caveats)", async () => {
-    const { report } = await runFlagship(freshRegistry(), await memoryConn());
-    assert.ok(report);
-    assert.equal(report.schema, "pi-bio.bucketed_operation_report.v1");
-    assert.equal(report.included, 1);
-    assert.equal(report.excluded, 4); // total 5 - included 1
-    assert.equal(report.countsByBucket.no_frequency, 1);
-    assert.equal(report.countsByBucket.benign, 1);
-    assert.equal(report.caveats.length, 2); // the abstention + benign caveats travel with the answer
-    assert.ok(report.rows.every((r) => "id" in r && "bucket" in r));
+  test("safety caveats are operation data (notes), not a code-computed report", () => {
+    const op = freshRegistry().getOperation("rare_high_impact.report");
+    assert.equal(op?.notes?.length, 2); // caveats travel with the operation as manifest data
   });
 
   test("the result + report are stable and the run links operation + resolver receipts", async () => {
     const a = await runFlagship(freshRegistry(), await memoryConn());
     const b = await runFlagship(freshRegistry(), await memoryConn());
     assert.deepEqual(a.result, b.result);
-    assert.deepEqual(a.report, b.report);
     assert.equal(a.run.status, "succeeded");
     assert.deepEqual(a.run.events.map((e) => e.type), ["created", "started", "artifact", "completed"]);
     const sources = (a.run.artifacts?.[0]?.provenance ?? []).map((p) => p.source);

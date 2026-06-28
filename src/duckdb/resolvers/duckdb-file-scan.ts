@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import type { BioResolverImpl } from "../../core/manifest.js";
 
 // Generic DuckDB-native file resolver. A *variant record* (or any record) is an abstraction over a table
-// shape — the source FORMAT is a swappable provider. VCF/BCF is one provider (duckhts.vcf_scan); CSV, TSV,
+// shape — the source FORMAT is a swappable provider. VCF/BCF is one provider (duckhts.read_bcf); CSV, TSV,
 // Parquet, and JSON are native to DuckDB and need no extension; 23andMe/MAF/Excel are just more readers.
 // This resolver materializes any DuckDB-readable file into a table; the same downstream operation consumes
 // it regardless of where the rows came from.

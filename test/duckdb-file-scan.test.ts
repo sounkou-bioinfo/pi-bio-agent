@@ -46,7 +46,6 @@ const manifest: DomainPackManifest = {
       title: "Rare high-impact variant classification", description: "Classify variants, abstaining on unknown frequency.",
       domains: ["genomics"], transport: "duckdb.sql", inputSchema: { type: "object" },
       sql: { sqlTemplate: RARE_HIGH_IMPACT_SQL, readOnly: true, singleStatement: true, requiredResources: ["annotated_variants", "so_loss_of_function"], requiredColumns: ["variant_key", "consequence", "allele_frequency", "clinical_significance"] },
-      report: { kind: "bucketed_rows", idColumn: "variant_key", bucketColumn: "bucket", includedBucket: "included", caveats: ["Unknown frequency is abstained, not counted as rare.", "Benign variants are excluded."] },
     })],
   },
 };
@@ -63,15 +62,16 @@ function registry(resolver = "duckdb.file_scan", params: Record<string, unknown>
 }
 const run = (r: ReturnType<typeof createBioRegistry>, conn: SqlConn) =>
   runOperation(r, conn, { operationId: "rare_high_impact.report", resources: ["annotated_variants", "so_loss_of_function"], runId: "csv-run-1", now: "2026-06-28T00:00:00Z" });
+const countBuckets = (rows: Array<Record<string, unknown>>) =>
+  rows.reduce<Record<string, number>>((acc, r) => ({ ...acc, [String(r.bucket)]: (acc[String(r.bucket)] ?? 0) + 1 }), {});
 
 describe("duckdb.file_scan: variant record from a non-VCF provider", () => {
   test("a CSV provider yields the same bucketed answer as VCF/inline — format is swappable", async () => {
-    const { report, receipts } = await run(registry(), await memoryConn());
-    assert.ok(report);
-    assert.equal(report.included, 1);
-    assert.equal(report.countsByBucket.no_frequency, 1); // empty CSV cell -> NULL -> abstained
-    assert.equal(report.countsByBucket.benign, 1);
-    assert.equal(report.excluded, 4);
+    const { result, receipts } = await run(registry(), await memoryConn());
+    const counts = countBuckets(result.rows);
+    assert.equal(counts.included, 1);
+    assert.equal(counts.no_frequency, 1); // empty CSV cell -> NULL -> abstained
+    assert.equal(counts.benign, 1);
     const receipt = receipts.find((x) => x.resourceId === "annotated_variants")!;
     assert.equal(receipt.resolverId, "duckdb.file_scan");
     assert.ok(receipt.sourceSnapshots.some((s) => s.source === "duckdb.read_csv_auto"));

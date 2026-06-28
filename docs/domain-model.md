@@ -198,8 +198,10 @@ registry:   records the declaration + provenance
 So the substrate ships generic discovery (`describeTable`, `assertColumnsPresent`), and `runOperation`
 checks the operation's declared `requiredColumns` against what the resolved inputs actually produced —
 failing closed before binding the SQL. A column set is **consumer-local** to the operation that needs it,
-never a global record type. Interchangeability is proven behaviorally: the same operation over VCF
-(`duckhts.vcf_scan`), CSV/Parquet (`duckdb.file_scan`), and inline providers yields the same answer.
+never a global record type. Interchangeability is proven behaviorally: the same classification logic yields
+the same answer over a raw VCF (`duckhts.read_bcf` + an INFO→canonical mapping in the operation's SQL),
+CSV/Parquet (`duckdb.file_scan`), and inline providers. The source-dialect mapping is **manifest SQL data**,
+not resolver code — a new VCF dialect is a new projection, never a new `.ts`.
 
 **Caveat — same columns ≠ same normalized variant identity.** `variant_key` is provider-verbatim; a richer
 `columnRoles` mapping or a normalization view/UDF (assembly/seqid/pos/ref/alt → canonical key) waits until a
@@ -276,17 +278,18 @@ CAS receipts, and tests. CLI/R/Python are first-class — `bcftools`/`duckhts`, 
 Rare-high-impact-variants becomes **manifest #1**, proving the bet end to end:
 
 ```text
-manifest:   termSet so.loss_of_function · resolver fixture.annotated_variants (output: table)
-            · view annotated_variants · operation rare_high_impact.report
-operation:  SQL over annotated_variants — count only frequency-KNOWN rare LoF, exclude unknown-frequency,
-            emit abstention/caveat counts
-outputs:    report JSON · run record · resolution/materialization record · provenance
+manifest:   termSet so.loss_of_function · resolver(s) for the variant source (output: table)
+            · operation rare_high_impact.report
+operation:  SQL — classify variants: count only frequency-KNOWN rare LoF, abstain on unknown frequency,
+            exclude benign. Counts/aggregation are SQL (GROUP BY), never a TypeScript reducer.
+outputs:    result JSON (the answer) · run record · resolution receipts · provenance
 ```
 
-Not a bespoke skill, not a core SQL helper, not hidden policy — **registered resolver + view + operation
-SQL + temporal provenance + abstention.** The same resolver shape later supports `duckhts.vcf_scan`,
+Not a bespoke skill, not a core SQL helper, not hidden policy — **registered resolver + operation SQL +
+provenance + abstention.** The same resolver shape later supports `duckhts.read_bcf`,
 `gnomad.frequency_lookup`, `vep.consequence_lookup`, `opentargets.associations`, `uniprot.entry`,
-`zarr.matrix_slice`, `r.bioconductor_result`, `python.scanpy_result`.
+`zarr.matrix_slice`, `r.bioconductor_result`, `python.scanpy_result` — generic readers, with source dialect
+and analysis as manifest SQL, not per-source TypeScript.
 
 ## Model vs current code (honest status)
 
