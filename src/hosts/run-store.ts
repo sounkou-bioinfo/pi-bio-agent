@@ -1,5 +1,5 @@
 import { promises as fs } from "node:fs";
-import { isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { createBioRegistry, type BioResolverImpl, type DomainPackManifest, type ResolutionReceipt } from "../core/manifest.js";
 import { runOperation, type BucketedOperationReport, type OperationResult } from "../core/operations.js";
@@ -16,6 +16,24 @@ const BUILTIN_RESOLVERS: Record<string, BioResolverImpl> = {
   "duckdb.file_scan": duckdbFileScanResolver,
   "duckhts.vcf_scan": duckhtsVcfScanResolver, // bound always; fails closed at resolve time if duckhts is not provisioned
 };
+
+// Built-in resolvers whose params.path is a file location to resolve relative to the manifest's directory.
+const FILE_PATH_RESOLVERS = new Set(["duckdb.file_scan", "duckhts.vcf_scan"]);
+
+/**
+ * Make relative local resource paths absolute, anchored to the MANIFEST's directory (not the Node process
+ * cwd). Absolute paths and remote URIs (http(s)/s3/...) are left untouched. Host-level — core never touches
+ * resolver params. Done before registration so the registry (and the receipt's paramsDigest) see the real path.
+ */
+function resolveResourcePaths(manifest: DomainPackManifest, manifestDir: string): DomainPackManifest {
+  const resources = (manifest.provides?.resources ?? []).map((res) => {
+    if (!FILE_PATH_RESOLVERS.has(res.resolver)) return res;
+    const path = (res.params as { path?: unknown }).path;
+    if (typeof path !== "string" || isAbsolute(path) || path.includes("://")) return res;
+    return { ...res, params: { ...res.params, path: resolve(manifestDir, path) } };
+  });
+  return { ...manifest, provides: { ...manifest.provides, resources } };
+}
 
 export function runsRoot(cwd: string): string {
   return join(cwd, ".pi", "bio-agent", "runs");
@@ -81,7 +99,12 @@ function resolveInCwd(cwd: string, p: string): string {
  * unchanged — it returns { run, result, report, receipts }; binding + persistence are the host's job.
  */
 export async function runBioOperationFromManifest(req: RunOperationRequest): Promise<RunOperationResponse> {
-  const manifest = JSON.parse(await fs.readFile(resolveInCwd(req.cwd, req.manifestPath), "utf8")) as DomainPackManifest;
+  if (req.runId !== undefined && !/^[A-Za-z0-9._-]+$/.test(req.runId)) {
+    throw new Error("runId must contain only [A-Za-z0-9._-] (no path separators)"); // no run-dir traversal
+  }
+  const manifestPath = resolveInCwd(req.cwd, req.manifestPath);
+  const raw = JSON.parse(await fs.readFile(manifestPath, "utf8")) as DomainPackManifest;
+  const manifest = resolveResourcePaths(raw, dirname(manifestPath)); // relative resource paths -> manifest dir
 
   const registry = createBioRegistry();
   registry.registerManifest(manifest); // throws on an invalid manifest (fail closed)

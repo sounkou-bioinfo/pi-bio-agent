@@ -32,8 +32,9 @@ const manifest: DomainPackManifest = {
   provides: {
     resolvers: [{ id: "duckdb.file_scan", version: "0.1.0", title: "DuckDB file scan", description: "Read a DuckDB-native file into a table.", output: { mode: "table" } }],
     resources: [
-      { id: "annotated_variants", title: "Annotated variants", kind: "virtual", resolver: "duckdb.file_scan", params: { path: "test/fixtures/annotated_variants.csv", table: "annotated_variants" } },
-      { id: "so_loss_of_function", title: "LoF SO terms", kind: "virtual", resolver: "duckdb.file_scan", params: { path: "test/fixtures/so_loss_of_function.csv", table: "so_loss_of_function" } },
+      // project-relative paths — resolved against the manifest's directory, not the process cwd
+      { id: "annotated_variants", title: "Annotated variants", kind: "virtual", resolver: "duckdb.file_scan", params: { path: "data/annotated_variants.csv", table: "annotated_variants" } },
+      { id: "so_loss_of_function", title: "LoF SO terms", kind: "virtual", resolver: "duckdb.file_scan", params: { path: "data/so_loss_of_function.csv", table: "so_loss_of_function" } },
     ],
     operations: [{
       schema: "pi-bio.operation_spec.v1", id: "rare_high_impact.report", version: "0.1.0",
@@ -47,6 +48,9 @@ const manifest: DomainPackManifest = {
 
 async function tmpProject(m: DomainPackManifest): Promise<string> {
   const cwd = await fs.mkdtemp(join(tmpdir(), "biorun-"));
+  await fs.mkdir(join(cwd, "data"), { recursive: true });
+  await fs.copyFile("test/fixtures/annotated_variants.csv", join(cwd, "data", "annotated_variants.csv"));
+  await fs.copyFile("test/fixtures/so_loss_of_function.csv", join(cwd, "data", "so_loss_of_function.csv"));
   await fs.writeFile(join(cwd, "manifest.json"), JSON.stringify(m), "utf8");
   return cwd;
 }
@@ -72,7 +76,10 @@ describe("host: bio_run_operation end-to-end", () => {
     assert.equal(run_.status, "succeeded");
     assert.equal(result.rows.length, 5);
     assert.equal(report.included, 1);
-    assert.equal(receipts.find((r: { resourceId: string }) => r.resourceId === "annotated_variants").resolverId, "duckdb.file_scan");
+    const avReceipt = receipts.find((r: { resourceId: string }) => r.resourceId === "annotated_variants");
+    assert.equal(avReceipt.resolverId, "duckdb.file_scan");
+    // the relative manifest path was resolved to an absolute file under the project, not the process cwd
+    assert.ok(avReceipt.sourceSnapshots.some((s: { source: string }) => s.source === `file:${join(cwd, "data", "annotated_variants.csv")}`));
     assert.equal(res.artifacts.report, join(dir, "report.json"));
   });
 
