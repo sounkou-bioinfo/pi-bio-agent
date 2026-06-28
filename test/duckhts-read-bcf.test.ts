@@ -33,16 +33,19 @@ const RARE_HIGH_IMPACT_SQL = [
   "         INFO_AF[1]     AS allele_frequency,",
   "         INFO_CLNSIG[1] AS clinical_significance",
   "  FROM vcf_raw",
+  "),",
+  "classified AS (",
+  "  SELECT variant_key,",
+  "    CASE",
+  "      WHEN allele_frequency IS NULL THEN 'no_frequency'",
+  "      WHEN consequence NOT IN (SELECT id FROM so_loss_of_function) THEN 'not_high_impact'",
+  "      WHEN clinical_significance = 'Benign' THEN 'benign'",
+  "      WHEN allele_frequency >= 0.01 THEN 'not_rare'",
+  "      ELSE 'included'",
+  "    END AS bucket",
+  "  FROM annotated",
   ")",
-  "SELECT variant_key, consequence, allele_frequency,",
-  "  CASE",
-  "    WHEN allele_frequency IS NULL THEN 'no_frequency'",
-  "    WHEN consequence NOT IN (SELECT id FROM so_loss_of_function) THEN 'not_high_impact'",
-  "    WHEN clinical_significance = 'Benign' THEN 'benign'",
-  "    WHEN allele_frequency >= 0.01 THEN 'not_rare'",
-  "    ELSE 'included'",
-  "  END AS bucket",
-  "FROM annotated ORDER BY variant_key",
+  "SELECT bucket, CAST(count(*) AS INTEGER) AS n FROM classified GROUP BY bucket ORDER BY bucket",
 ].join("\n");
 
 const manifest: DomainPackManifest = {
@@ -65,7 +68,7 @@ const manifest: DomainPackManifest = {
       schema: "pi-bio.operation_spec.v1", id: "rare_high_impact.report", version: "0.1.0",
       title: "Rare high-impact variant classification", description: "Map raw VCF INFO fields, then classify.",
       domains: ["genomics"], transport: "duckdb.sql", inputSchema: { type: "object" },
-      sql: { sqlTemplate: RARE_HIGH_IMPACT_SQL, readOnly: true, singleStatement: true, requiredResources: ["vcf_raw", "so_loss_of_function"], requiredColumns: ["CHROM", "POS", "REF", "ALT", "INFO_MC", "INFO_AF", "INFO_CLNSIG"] },
+      sql: { sqlTemplate: RARE_HIGH_IMPACT_SQL, readOnly: true, singleStatement: true, requiredResources: ["vcf_raw", "so_loss_of_function"] },
     })],
   },
 };
@@ -85,8 +88,8 @@ function registry(rawParams?: Record<string, unknown>) {
 }
 const run = (r: ReturnType<typeof createBioRegistry>, conn: SqlConn) =>
   runOperation(r, conn, { operationId: "rare_high_impact.report", resources: ["vcf_raw", "so_loss_of_function"], runId: "vcf-run-1", now: "2026-06-28T00:00:00Z" });
-const countBuckets = (rows: Array<Record<string, unknown>>) =>
-  rows.reduce<Record<string, number>>((acc, r) => ({ ...acc, [String(r.bucket)]: (acc[String(r.bucket)] ?? 0) + 1 }), {});
+const bucketCount = (rows: Array<Record<string, unknown>>, bucket: string) =>
+  Number((rows.find((r) => r.bucket === bucket)?.n as number | undefined) ?? 0);
 
 describe("duckhts.read_bcf: generic raw reader, mapping in SQL", { skip: duckhtsAvailable ? false : "duckhts unavailable (offline)" }, () => {
   test("the resolver materializes raw VCF columns; the operation SQL maps + classifies", async () => {
@@ -98,10 +101,9 @@ describe("duckhts.read_bcf: generic raw reader, mapping in SQL", { skip: duckhts
     assert.ok(["CHROM", "POS", "REF", "ALT", "INFO_MC", "INFO_AF", "INFO_CLNSIG"].every((c) => rawCols.includes(c)));
     assert.ok(!rawCols.includes("consequence")); // the canonical name only exists after the SQL mapping
 
-    const counts = countBuckets(result.rows);
-    assert.equal(counts.included, 1); // ClawBio rhi_01 ground truth, from a real VCF mapped in SQL
-    assert.equal(counts.no_frequency, 1); // abstention preserved
-    assert.equal(counts.benign, 1); // benign exclusion preserved
+    assert.equal(bucketCount(result.rows, "included"), 1); // ClawBio rhi_01 ground truth, from a real VCF mapped in SQL
+    assert.equal(bucketCount(result.rows, "no_frequency"), 1); // abstention preserved
+    assert.equal(bucketCount(result.rows, "benign"), 1); // benign exclusion preserved
 
     const vcfReceipt = receipts.find((x) => x.resourceId === "vcf_raw")!;
     assert.equal(vcfReceipt.resolverId, "duckhts.read_bcf");

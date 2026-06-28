@@ -1,7 +1,6 @@
 import type { BioArtifact } from "./types.js";
 import { appendRunEvent, newRunRecord, type BioRunRecord, type BioRunSpec } from "./run-spec.js";
 import { validateReadOnlySelect } from "./sql-guard.js";
-import { describeTable } from "./schema-discovery.js";
 import type { BioRegistry, ResolutionReceipt, SourceSnapshot, SqlConn } from "./manifest.js";
 
 // Generic execution primitives — the factored, reusable core of what ClawBio writes as a bespoke ~12 KB
@@ -52,17 +51,9 @@ export async function runOperation(
     receipts.push(await registry.resolveResource(rid, { conn, now }));
   }
 
-  // Schema discovery, not pre-declared table types: the operation declares the few columns it needs; we
-  // discover what the resolved inputs actually produced and fail closed (clearly) before binding the SQL.
-  if (op.sql.requiredColumns?.length && receipts.length) {
-    const present = new Set<string>();
-    for (const r of receipts) {
-      if (r.result.name) for (const c of await describeTable(conn, r.result.name)) present.add(c.name);
-    }
-    const missing = op.sql.requiredColumns.filter((c) => !present.has(c));
-    if (missing.length) throw new Error(`operation '${operationId}' requires column(s) not found in resolved inputs: ${missing.join(", ")}`);
-  }
-
+  // No column pre-declaration: the SQL the agent wrote references its columns, and DuckDB's binder is the
+  // arbiter — a missing column fails closed here with a clear binder error. Schema discovery (describeTable)
+  // is a primitive the agent CALLS to decide what SQL to write, not a contract the runner enforces.
   const rows = await conn.all<Record<string, unknown>>(op.sql.sqlTemplate, params);
   const sourceSnapshots = receipts.flatMap((r) => r.sourceSnapshots);
   const result: OperationResult = { schema: "pi-bio.operation_result.v1", operationId, runId, sourceSnapshots, rows };

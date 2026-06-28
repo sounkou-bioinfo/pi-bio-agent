@@ -175,49 +175,44 @@ interface EvidenceBlock { sources: SourceSnapshot[]; artifacts?: ContentAddress[
 **Notes = mutable agent memory; facts = temporal, evidenced graph assertions.** (Built: `BioGraphNode`/
 `Edge`/`TrustBlock`; the temporal/evidence fields are the target they grow into.)
 
-## Schemas / views — declarative, generated
+## Schema discovery — let the agent write SQL
 
-```ts
-interface ColumnDef  { name: string; type: "TEXT" | "INTEGER" | "DOUBLE" | "BOOLEAN" | "JSON"; nullable?: boolean; description?: string }
-interface BioViewDef { id: ViewId; name: string; description: string; columns: ColumnDef[]; dependsOnResources?: ResourceId[]; temporalScope?: TemporalScope }
-```
-
-Generate DDL/docs/contract/tests from these when a consumer needs it — no hand-written SQL contract strings.
-
-**Do not model every table shape — that recreates skill sprawl as schema sprawl** (`AnnotatedVariantsV1`,
-`ClinVarVariantsV1`, `GnomadVariantsV1`, …). SQL's advantage is schema **discovery**. The boundary:
+There is **no `BioViewDef`, no pre-declared table type, no `requiredColumns`**. Modelling every table shape
+recreates skill sprawl as schema sprawl (`AnnotatedVariantsV1`, `ClinVarVariantsV1`, …). SQL's advantage is
+schema **discovery**. The boundary:
 
 ```text
 resolver:   materializes some table
 DuckDB:     discovers its schema (information_schema / DESCRIBE)
-operation:  declares only the few columns/roles it requires  (sql.requiredColumns)
-agent:      can write SQL to map source columns to those columns
-registry:   records the declaration + provenance
+agent:      reads the schema, then writes the SQL it needs (mapping + analysis)
+DuckDB:     the binder is the arbiter — a missing column fails closed at run time
+registry:   records the operation + provenance
 ```
 
-So the substrate ships generic discovery (`describeTable`, `assertColumnsPresent`), and `runOperation`
-checks the operation's declared `requiredColumns` against what the resolved inputs actually produced —
-failing closed before binding the SQL. A column set is **consumer-local** to the operation that needs it,
-never a global record type. Interchangeability is proven behaviorally: the same classification logic yields
-the same answer over a raw VCF (`duckhts.read_bcf` + an INFO→canonical mapping in the operation's SQL),
-CSV/Parquet (`duckdb.file_scan`), and inline providers. The source-dialect mapping is **manifest SQL data**,
-not resolver code — a new VCF dialect is a new projection, never a new `.ts`.
+The substrate ships only generic discovery (`describeTable`, `assertColumnsPresent`) for the agent to CALL;
+the runner enforces no column contract. Interchangeability is proven behaviorally: the same classification
+logic yields the same answer over a raw VCF (`duckhts.read_bcf` + an INFO→canonical mapping in the
+operation's SQL), CSV/Parquet (`duckdb.file_scan`), and inline providers. The source-dialect mapping is
+**manifest SQL data**, not resolver code — a new VCF dialect is a new projection, never a new `.ts`.
 
-**Caveat — same columns ≠ same normalized variant identity.** `variant_key` is provider-verbatim; a richer
-`columnRoles` mapping or a normalization view/UDF (assembly/seqid/pos/ref/alt → canonical key) waits until a
-second real source actually disagrees.
+**Caveat — same columns ≠ same normalized variant identity.** `variant_key` is provider-verbatim; a
+normalization projection (assembly/seqid/pos/ref/alt → canonical key) is more manifest SQL, authored when a
+second real source actually disagrees — not a TS abstraction.
 
 ## Operations — the boundary for executable behavior
 
 ```ts
 interface BioOperationSpec {
   id: OperationId; title: string;
-  transport: "duckdb.sql" | "http" | "local.tool" | "agent";
-  requiredViews?: ViewId[]; requiredResources?: ResourceId[];
+  transport: "duckdb.sql";          // executable today; widen only when a transport ships with a runner
   inputSchema?: unknown; outputSchema?: unknown;
-  policy?: { allowNetwork?: boolean; timeoutSeconds?: number; writeMode?: "none" | "explicit" };
+  sql?: { sqlTemplate: string; readOnly: true; singleStatement?: true; requiredResources?: ResourceId[] };
+  notes?: string[];                 // caveats/abstention rationale travel here, as data
 }
 ```
+
+The operation's SQL returns the answer — classified rows, or a `GROUP BY` count. There is no report
+primitive and no TypeScript reducer: counts/aggregation are SQL.
 
 Question logic lives **here or in the registered operation pack — never in core helpers.**
 
@@ -248,18 +243,18 @@ interface DomainPackManifest {
   id: string; version: string; title: string; description: string;
   domains: string[];                                 // ["genomics"], ["proteomics"], ...
   provides: {
-    resourceKinds?: ResourceKindDef[];               // "vcf", "bcf", "mzML", "h5ad"
     resolvers?: BioResolverSpec[];                    // declarations; impls bound at runtime
-    views?: BioViewDef[]; termSets?: TermSet[]; predicates?: PredicateDef[];
-    operations?: BioOperationSpec[]; tools?: BioToolSpec[];
+    resources?: VirtualResourceSpec[];                // named inputs resolved into tables
+    termSets?: TermSet[];                             // ontology vocabulary as data
+    operations?: BioOperationSpec[];                  // declared SQL
   };
 }
 ```
 
-Examples (registered data, not guessed TS classes): a **genomics** pack provides vcf/bam resource kinds,
-`annotated_variants`/`alignments` views, `so.loss_of_function`, `annotate_variant`/`count_rare_high_impact`
-operations, `duckhts`/`vep` tools; **proteomics** provides mzML/FASTA, peptide/PSM views, UniProt/GO sets;
-**single-cell** provides h5ad/Zarr, count-matrix views, PCA/UMAP operations, Seurat/Scanpy/`duckdb_zarr`.
+Examples (registered data, not guessed TS classes): a **genomics** pack provides `duckhts.read_bcf`/
+`gnomad.frequency_lookup` resolvers, `so.loss_of_function` term set, and `rare_high_impact.report` SQL;
+**proteomics** provides mzML/FASTA resolvers, UniProt/GO sets, peptide/PSM SQL; **single-cell** provides
+h5ad/Zarr resolvers and PCA/UMAP SQL. Source dialect and analysis are SQL, not per-pack TypeScript.
 
 ## Execution backends
 
@@ -296,10 +291,10 @@ and analysis as manifest SQL, not per-source TypeScript.
 | Slot | Built | Target (grows into) |
 |---|---|---|
 | Identity | `GenomicInterval`, `VariantKey`, `OntologyTermRef`, `ContentAddress`, `PredicateId=string` | id aliases, `TermRef`/`TermSet`/`PredicateDef` registry |
-| Handle | `ResourceHandle`, `VirtualResourceSpec`, `BioResolverSpec`/`Impl`, `ResolutionReceipt`, resource-centered `resolveResource`, `ContentAddress`, `casPathForAddress` | real resolvers (vcf scan, gnomAD lookup), CAS materialization |
-| Fact | `BioGraphNode`/`Edge`/`Snapshot`, `TrustBlock`, `Provenance` | `BioFact` + `EvidenceBlock` + `TemporalValidity` |
-| Declaration | `BioToolSpec`, `BioOperationSpec` | `BioViewDef`, `PredicateDef`, `DomainPackManifest` registry |
-| Run | `BioRunSpec`/`Record`/`Event` (no producer) | first producer = the flagship |
+| Handle | `ResourceHandle`, `VirtualResourceSpec`, `BioResolverSpec`/`Impl`, `ResolutionReceipt`, `resolveResource`, real resolvers (`duckdb.file_scan`, `duckhts.read_bcf`), `ContentAddress`/`casPathForAddress` | gnomAD/http resolvers, CAS materialization |
+| Fact | `BioGraphNode`/`Edge`/`Snapshot`, `TrustBlock`, `Provenance` | `BioFact` + `EvidenceBlock` + `TemporalValidity`; recording judgments/results as edges |
+| Declaration | `BioToolSpec`, `BioOperationSpec`, `DomainPackManifest` registry (validated, frozen) | `PredicateDef` registry |
+| Run | `BioRunSpec`/`Record`/`Event` + host producer (`bio_run_operation` → run/result/receipts persisted) | richer run lifecycle (resume, budgets) |
 | Memory | `StudyNote`, `studyNoteGraph`, KG sync | — (intentionally time-free) |
 
 Everything in the right column is built **consumer-driven** — when the flagship or a real domain pack

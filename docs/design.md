@@ -139,7 +139,7 @@ BioOperationSpec
   transport: duckdb.sql            # executable today; widen only when a transport ships with a runner
   input schema
   output schema / normalizer
-  sql: { sqlTemplate, readOnly, requiredResources, requiredColumns }
+  sql: { sqlTemplate, readOnly, requiredResources }   # the SQL returns the answer; counts are GROUP BY, not TS
   identifier namespaces
   cache key policy
   provenance policy

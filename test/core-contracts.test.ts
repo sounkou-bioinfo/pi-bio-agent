@@ -33,7 +33,7 @@ const validOperation: BioOperationSpec = {
   inputSchema: { type: "object" },
   outputSchema: { type: "object" },
   identifiers: [{ name: "query", namespace: "free_text", required: true }],
-  sql: { sqlTemplate: "SELECT variant_key FROM annotated_variants", readOnly: true, requiredResources: ["annotated_variants"], requiredColumns: ["variant_key"] },
+  sql: { sqlTemplate: "SELECT variant_key FROM annotated_variants", readOnly: true, requiredResources: ["annotated_variants"] },
   cache: { mode: "metadata", ttlSeconds: 3600, keyFields: ["query"] },
   provenance: { includeRequest: true, includeResponseDigest: true },
 };
@@ -94,13 +94,11 @@ describe("BioOperationSpec validation", () => {
     assert.ok(errors.includes("transport must be duckdb.sql"));
   });
 
-  test("requires sql details and enforces read-only + column shape", () => {
+  test("requires sql details and enforces read-only", () => {
     const missingSql = validateBioOperationSpec({ ...validOperation, sql: undefined });
     assert.ok(missingSql.includes("a duckdb.sql operation requires sql request details"));
     const notReadOnly = validateBioOperationSpec({ ...validOperation, sql: { sqlTemplate: "SELECT 1", readOnly: false as true } });
     assert.ok(notReadOnly.includes("sql.readOnly must be true"));
-    const badCols = validateBioOperationSpec({ ...validOperation, sql: { sqlTemplate: "SELECT 1", readOnly: true, requiredColumns: [" "] } });
-    assert.ok(badCols.includes("sql.requiredColumns must be non-empty strings"));
   });
 });
 

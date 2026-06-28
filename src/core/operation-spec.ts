@@ -14,9 +14,6 @@ export interface BioSqlOperationRequest {
   /** Resource ids this operation needs resolved into tables. The runner resolves these when the caller
    *  omits an explicit resource list, and asserts an explicit list covers them. */
   requiredResources?: string[];
-  /** The few columns this operation needs from its resolved inputs — checked by schema discovery before
-   *  the query runs. Consumer-local: it is THIS operation's input contract, not a global record type. */
-  requiredColumns?: string[];
 }
 
 export interface BioOperationIdentifierHint {
@@ -81,9 +78,6 @@ export function validateBioOperationSpec(spec: BioOperationSpec): string[] {
   if (spec.sql) {
     if (spec.sql.readOnly !== true) errors.push("sql.readOnly must be true");
     if (!spec.sql.sqlTemplate.trim()) errors.push("sql.sqlTemplate is required");
-    if (spec.sql.requiredColumns && spec.sql.requiredColumns.some((c) => typeof c !== "string" || !c.trim())) {
-      errors.push("sql.requiredColumns must be non-empty strings");
-    }
   }
   if (spec.cache?.ttlSeconds !== undefined && spec.cache.ttlSeconds < 0) errors.push("cache.ttlSeconds cannot be negative");
   return errors;

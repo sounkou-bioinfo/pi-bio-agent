@@ -19,16 +19,21 @@ const ANNOTATED_VARIANTS = [
   { variant_key: "5:5000:G:C", consequence: "SO:0001587", allele_frequency: 0.0001, clinical_significance: "Benign" }, // rare LoF but Benign -> excluded (safety)
 ];
 
+// The operation returns the ANSWER (counts per bucket), in SQL — no TypeScript reducer. result.json IS the
+// report. This is plain SQL the agent could have written after a DESCRIBE.
 const RARE_HIGH_IMPACT_SQL = [
-  "SELECT variant_key, consequence, allele_frequency,",
-  "  CASE",
-  "    WHEN allele_frequency IS NULL THEN 'no_frequency'",
-  "    WHEN consequence NOT IN (SELECT id FROM so_loss_of_function) THEN 'not_high_impact'",
-  "    WHEN clinical_significance = 'Benign' THEN 'benign'",
-  "    WHEN allele_frequency >= 0.01 THEN 'not_rare'",
-  "    ELSE 'included'",
-  "  END AS bucket",
-  "FROM annotated_variants ORDER BY variant_key",
+  "WITH classified AS (",
+  "  SELECT variant_key,",
+  "    CASE",
+  "      WHEN allele_frequency IS NULL THEN 'no_frequency'",
+  "      WHEN consequence NOT IN (SELECT id FROM so_loss_of_function) THEN 'not_high_impact'",
+  "      WHEN clinical_significance = 'Benign' THEN 'benign'",
+  "      WHEN allele_frequency >= 0.01 THEN 'not_rare'",
+  "      ELSE 'included'",
+  "    END AS bucket",
+  "  FROM annotated_variants",
+  ")",
+  "SELECT bucket, CAST(count(*) AS INTEGER) AS n FROM classified GROUP BY bucket ORDER BY bucket",
 ].join("\n");
 
 // The whole "skill" is this manifest — pure data. No code is question-specific.
@@ -49,7 +54,7 @@ const flagshipManifest: DomainPackManifest = {
       schema: "pi-bio.operation_spec.v1", id: "rare_high_impact.report", version: "0.1.0",
       title: "Rare high-impact variant classification", description: "Classify variants, abstaining on unknown frequency.",
       domains: ["genomics"], transport: "duckdb.sql", inputSchema: { type: "object" },
-      sql: { sqlTemplate: RARE_HIGH_IMPACT_SQL, readOnly: true, singleStatement: true, requiredResources: ["annotated_variants", "so_loss_of_function"], requiredColumns: ["variant_key", "consequence", "allele_frequency", "clinical_significance"] },
+      sql: { sqlTemplate: RARE_HIGH_IMPACT_SQL, readOnly: true, singleStatement: true, requiredResources: ["annotated_variants", "so_loss_of_function"] },
       notes: [
         "Variants with unknown allele frequency are abstained from, not counted as rare.",
         "Benign-annotated variants are excluded regardless of frequency or consequence.",
@@ -70,8 +75,9 @@ function freshRegistry() {
 const runFlagship = (registry: ReturnType<typeof createBioRegistry>, conn: SqlConn) =>
   // resources omitted on purpose — the runner derives them from the operation's requiredResources
   runOperation(registry, conn, { operationId: "rare_high_impact.report", runId: "flagship-run-1", now: "2026-06-28T00:00:00Z" });
-const countBuckets = (rows: Array<Record<string, unknown>>) =>
-  rows.reduce<Record<string, number>>((acc, r) => ({ ...acc, [String(r.bucket)]: (acc[String(r.bucket)] ?? 0) + 1 }), {});
+// the operation's SQL already returned per-bucket counts; just index them
+const bucketCount = (rows: Array<Record<string, unknown>>, bucket: string) =>
+  Number((rows.find((r) => r.bucket === bucket)?.n as number | undefined) ?? 0);
 
 describe("flagship: rare high-impact variants (data over generic primitives)", () => {
   test("the manifest registers specs only — the snapshot is pure data (no impl leaks)", () => {
@@ -94,16 +100,14 @@ describe("flagship: rare high-impact variants (data over generic primitives)", (
     await assert.rejects(() => op(), /no implementation is bound/);
   });
 
-  test("the operation abstains/excludes: matches ClawBio rhi_01 (included = 1), no-frequency abstained, benign excluded", async () => {
+  test("the operation's SQL returns the answer: ClawBio rhi_01 (included = 1), no-frequency abstained, benign excluded", async () => {
     const { result } = await runFlagship(freshRegistry(), await memoryConn());
-    const counts = countBuckets(result.rows);
-    assert.equal(counts.included, 1); // ClawBio rhi_01 ground-truth count
-    assert.equal(counts.no_frequency, 1); // abstention: unknown frequency is NOT counted as rare
-    assert.equal(counts.not_rare, 1); // common splice_donor
-    assert.equal(counts.not_high_impact, 1); // rare missense
-    assert.equal(counts.benign, 1); // rare LoF but Benign -> excluded (safety thesis)
-    assert.equal(Object.values(counts).reduce((a, b) => a + b, 0), result.rows.length); // buckets partition
-    assert.equal(result.rows.find((r) => r.bucket === "included")?.variant_key, "1:1000:C:T");
+    assert.equal(bucketCount(result.rows, "included"), 1); // ClawBio rhi_01 ground-truth count
+    assert.equal(bucketCount(result.rows, "no_frequency"), 1); // abstention: unknown frequency is NOT counted as rare
+    assert.equal(bucketCount(result.rows, "not_rare"), 1); // common splice_donor
+    assert.equal(bucketCount(result.rows, "not_high_impact"), 1); // rare missense
+    assert.equal(bucketCount(result.rows, "benign"), 1); // rare LoF but Benign -> excluded (safety thesis)
+    assert.equal(result.rows.reduce((a, r) => a + Number(r.n), 0), 5); // all five variants partitioned
   });
 
   test("safety caveats are operation data (notes), not a code-computed report", () => {

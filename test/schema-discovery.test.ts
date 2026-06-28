@@ -30,8 +30,9 @@ describe("schema discovery (no record-type taxonomy)", () => {
     await assert.rejects(() => assertColumnsPresent(conn, "absent", ["x"]), /does not exist or has no columns/);
   });
 
-  test("runOperation fails closed (clearly) when a provider's table lacks a required column", async () => {
-    // The provider here materializes only variant_key, but the operation declares it needs allele_frequency.
+  test("SQL is the arbiter: an operation referencing a missing column fails closed at the DuckDB binder", async () => {
+    // No requiredColumns pre-declaration — the agent's SQL references allele_frequency, the table doesn't
+    // have it, and DuckDB's binder fails closed with a clear error. The substrate adds no ceremony on top.
     const manifest: DomainPackManifest = {
       schema: "pi-bio.domain_pack_manifest.v1", id: "needs-af", version: "0.1.0", title: "Needs AF", description: "x", domains: ["genomics"],
       provides: {
@@ -40,7 +41,7 @@ describe("schema discovery (no record-type taxonomy)", () => {
         operations: [defineBioOperationSpec({
           schema: "pi-bio.operation_spec.v1", id: "needs.af", version: "0.1.0", title: "Needs AF", description: "x", domains: ["genomics"],
           transport: "duckdb.sql", inputSchema: { type: "object" },
-          sql: { sqlTemplate: "SELECT variant_key FROM variants", readOnly: true, requiredColumns: ["variant_key", "allele_frequency"] },
+          sql: { sqlTemplate: "SELECT variant_key, allele_frequency FROM variants", readOnly: true },
         })],
       },
     };
@@ -50,7 +51,7 @@ describe("schema discovery (no record-type taxonomy)", () => {
     const conn = await memoryConn();
     await assert.rejects(
       () => runOperation(r, conn, { operationId: "needs.af", resources: ["variants"], runId: "x", now: "t" }),
-      /requires column\(s\) not found in resolved inputs: allele_frequency/,
+      /allele_frequency/,
     );
   });
 });

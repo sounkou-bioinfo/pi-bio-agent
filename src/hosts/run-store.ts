@@ -96,7 +96,7 @@ function resolveInCwd(cwd: string, p: string): string {
 /**
  * Host entry: load a manifest, register it (validated, fail closed), bind the built-in resolver impls it
  * declares, run a duckdb.sql operation against an explicit DuckDB database, and persist the run. Core is
- * unchanged — it returns { run, result, report, receipts }; binding + persistence are the host's job.
+ * unchanged — it returns { run, result, receipts }; binding + persistence are the host's job.
  */
 export async function runBioOperationFromManifest(req: RunOperationRequest): Promise<RunOperationResponse> {
   if (req.runId !== undefined && !/^[A-Za-z0-9._-]+$/.test(req.runId)) {

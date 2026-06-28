@@ -9,20 +9,23 @@ import { duckdbFileScanResolver } from "../src/duckdb/resolvers/duckdb-file-scan
 import { inlineTableResolver } from "./support/inline-table-resolver.js";
 
 // The variant record is the abstraction; the source FORMAT is a swappable provider. Here annotated_variants
-// comes from a plain CSV via DuckDB-native read_csv_auto — no VCF, no extension — yet the SAME generic
-// operation + bucketed report produce the SAME answer as the VCF and inline providers. Swapping provider is
-// swapping one resolver on the resource; the operation never changes.
+// comes from a plain CSV via DuckDB-native read_csv_auto — no VCF, no extension — yet the SAME operation SQL
+// produces the SAME answer as the VCF and inline providers. Swapping provider is swapping one resolver on the
+// resource; the operation SQL never changes.
 
 const RARE_HIGH_IMPACT_SQL = [
-  "SELECT variant_key, consequence, allele_frequency,",
-  "  CASE",
-  "    WHEN allele_frequency IS NULL THEN 'no_frequency'",
-  "    WHEN consequence NOT IN (SELECT id FROM so_loss_of_function) THEN 'not_high_impact'",
-  "    WHEN clinical_significance = 'Benign' THEN 'benign'",
-  "    WHEN allele_frequency >= 0.01 THEN 'not_rare'",
-  "    ELSE 'included'",
-  "  END AS bucket",
-  "FROM annotated_variants ORDER BY variant_key",
+  "WITH classified AS (",
+  "  SELECT variant_key,",
+  "    CASE",
+  "      WHEN allele_frequency IS NULL THEN 'no_frequency'",
+  "      WHEN consequence NOT IN (SELECT id FROM so_loss_of_function) THEN 'not_high_impact'",
+  "      WHEN clinical_significance = 'Benign' THEN 'benign'",
+  "      WHEN allele_frequency >= 0.01 THEN 'not_rare'",
+  "      ELSE 'included'",
+  "    END AS bucket",
+  "  FROM annotated_variants",
+  ")",
+  "SELECT bucket, CAST(count(*) AS INTEGER) AS n FROM classified GROUP BY bucket ORDER BY bucket",
 ].join("\n");
 
 const manifest: DomainPackManifest = {
@@ -45,7 +48,7 @@ const manifest: DomainPackManifest = {
       schema: "pi-bio.operation_spec.v1", id: "rare_high_impact.report", version: "0.1.0",
       title: "Rare high-impact variant classification", description: "Classify variants, abstaining on unknown frequency.",
       domains: ["genomics"], transport: "duckdb.sql", inputSchema: { type: "object" },
-      sql: { sqlTemplate: RARE_HIGH_IMPACT_SQL, readOnly: true, singleStatement: true, requiredResources: ["annotated_variants", "so_loss_of_function"], requiredColumns: ["variant_key", "consequence", "allele_frequency", "clinical_significance"] },
+      sql: { sqlTemplate: RARE_HIGH_IMPACT_SQL, readOnly: true, singleStatement: true, requiredResources: ["annotated_variants", "so_loss_of_function"] },
     })],
   },
 };
@@ -62,16 +65,15 @@ function registry(resolver = "duckdb.file_scan", params: Record<string, unknown>
 }
 const run = (r: ReturnType<typeof createBioRegistry>, conn: SqlConn) =>
   runOperation(r, conn, { operationId: "rare_high_impact.report", resources: ["annotated_variants", "so_loss_of_function"], runId: "csv-run-1", now: "2026-06-28T00:00:00Z" });
-const countBuckets = (rows: Array<Record<string, unknown>>) =>
-  rows.reduce<Record<string, number>>((acc, r) => ({ ...acc, [String(r.bucket)]: (acc[String(r.bucket)] ?? 0) + 1 }), {});
+const bucketCount = (rows: Array<Record<string, unknown>>, bucket: string) =>
+  Number((rows.find((r) => r.bucket === bucket)?.n as number | undefined) ?? 0);
 
 describe("duckdb.file_scan: variant record from a non-VCF provider", () => {
-  test("a CSV provider yields the same bucketed answer as VCF/inline — format is swappable", async () => {
+  test("a CSV provider yields the same answer as VCF/inline — format is swappable", async () => {
     const { result, receipts } = await run(registry(), await memoryConn());
-    const counts = countBuckets(result.rows);
-    assert.equal(counts.included, 1);
-    assert.equal(counts.no_frequency, 1); // empty CSV cell -> NULL -> abstained
-    assert.equal(counts.benign, 1);
+    assert.equal(bucketCount(result.rows, "included"), 1);
+    assert.equal(bucketCount(result.rows, "no_frequency"), 1); // empty CSV cell -> NULL -> abstained
+    assert.equal(bucketCount(result.rows, "benign"), 1);
     const receipt = receipts.find((x) => x.resourceId === "annotated_variants")!;
     assert.equal(receipt.resolverId, "duckdb.file_scan");
     assert.ok(receipt.sourceSnapshots.some((s) => s.source === "duckdb.read_csv_auto"));

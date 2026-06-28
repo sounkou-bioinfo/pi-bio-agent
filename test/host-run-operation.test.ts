@@ -11,15 +11,18 @@ import { runBioOperationFromManifest, runsRoot } from "../src/hosts/run-store.js
 // built-in), so nothing test-only is bound; this is what a real host run looks like.
 
 const RARE_HIGH_IMPACT_SQL = [
-  "SELECT variant_key, consequence, allele_frequency,",
-  "  CASE",
-  "    WHEN allele_frequency IS NULL THEN 'no_frequency'",
-  "    WHEN consequence NOT IN (SELECT id FROM so_loss_of_function) THEN 'not_high_impact'",
-  "    WHEN clinical_significance = 'Benign' THEN 'benign'",
-  "    WHEN allele_frequency >= 0.01 THEN 'not_rare'",
-  "    ELSE 'included'",
-  "  END AS bucket",
-  "FROM annotated_variants ORDER BY variant_key",
+  "WITH classified AS (",
+  "  SELECT variant_key,",
+  "    CASE",
+  "      WHEN allele_frequency IS NULL THEN 'no_frequency'",
+  "      WHEN consequence NOT IN (SELECT id FROM so_loss_of_function) THEN 'not_high_impact'",
+  "      WHEN clinical_significance = 'Benign' THEN 'benign'",
+  "      WHEN allele_frequency >= 0.01 THEN 'not_rare'",
+  "      ELSE 'included'",
+  "    END AS bucket",
+  "  FROM annotated_variants",
+  ")",
+  "SELECT bucket, CAST(count(*) AS INTEGER) AS n FROM classified GROUP BY bucket ORDER BY bucket",
 ].join("\n");
 
 const manifest: DomainPackManifest = {
@@ -40,7 +43,7 @@ const manifest: DomainPackManifest = {
       schema: "pi-bio.operation_spec.v1", id: "rare_high_impact.report", version: "0.1.0",
       title: "Rare high-impact variant classification", description: "Classify variants, abstaining on unknown frequency.",
       domains: ["genomics"], transport: "duckdb.sql", inputSchema: { type: "object" },
-      sql: { sqlTemplate: RARE_HIGH_IMPACT_SQL, readOnly: true, singleStatement: true, requiredResources: ["annotated_variants", "so_loss_of_function"], requiredColumns: ["variant_key", "consequence", "allele_frequency", "clinical_significance"] },
+      sql: { sqlTemplate: RARE_HIGH_IMPACT_SQL, readOnly: true, singleStatement: true, requiredResources: ["annotated_variants", "so_loss_of_function"] },
     }],
   },
 };
@@ -62,18 +65,16 @@ describe("host: bio_run_operation end-to-end", () => {
     const res = await run(cwd);
     assert.equal(res.ok, true);
     assert.equal(res.status, "succeeded");
-    assert.equal(res.rowCount, 5);
 
-    // the three artifacts exist, parse, and carry the right content; result.json IS the report
+    // the three artifacts exist, parse, and carry the right content; result.json IS the answer (SQL counts)
     const dir = join(runsRoot(cwd), "run-1");
     assert.equal(res.runDir, dir);
     const run_ = JSON.parse(await fs.readFile(join(dir, "run.json"), "utf8"));
     const result = JSON.parse(await fs.readFile(join(dir, "result.json"), "utf8"));
     const receipts = JSON.parse(await fs.readFile(join(dir, "receipts.json"), "utf8"));
     assert.equal(run_.status, "succeeded");
-    assert.equal(result.rows.length, 5);
-    const counts = result.rows.reduce((acc: Record<string, number>, r: { bucket: string }) => ({ ...acc, [r.bucket]: (acc[r.bucket] ?? 0) + 1 }), {});
-    assert.equal(counts.included, 1); // ClawBio rhi_01 ground truth, via the host (counts from SQL output)
+    const included = result.rows.find((r: { bucket: string }) => r.bucket === "included");
+    assert.equal(Number(included.n), 1); // ClawBio rhi_01 ground truth, via the host — counts come from SQL
     const avReceipt = receipts.find((r: { resourceId: string }) => r.resourceId === "annotated_variants");
     assert.equal(avReceipt.resolverId, "duckdb.file_scan");
     // the relative manifest path was resolved to an absolute file under the project, not the process cwd
