@@ -1,0 +1,15 @@
+##fileformat=VCFv4.2
+##INFO=<ID=MC,Number=.,Type=String,Description="Molecular consequence (SO term)">
+##INFO=<ID=AF,Number=A,Type=Float,Description="Allele frequency">
+##INFO=<ID=CLNSIG,Number=.,Type=String,Description="Clinical significance">
+##contig=<ID=1>
+##contig=<ID=2>
+##contig=<ID=3>
+##contig=<ID=4>
+##contig=<ID=5>
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO
+1	1000	.	C	T	.	.	MC=SO:0001587;AF=0.0003
+2	2000	.	G	A	.	.	MC=SO:0001575;AF=0.3
+3	3000	.	A	G	.	.	MC=SO:0001583;AF=0.0002
+4	4000	.	T	C	.	.	MC=SO:0001587
+5	5000	.	G	C	.	.	MC=SO:0001587;AF=0.0001;CLNSIG=Benign
