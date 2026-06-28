@@ -1,37 +1,11 @@
-import type { JsonSchema, JsonValue } from "./tool-spec.js";
+import type { JsonSchema } from "./tool-spec.js";
 import type { Provenance } from "./types.js";
 
-export type BioOperationTransport = "http" | "graphql" | "openapi" | "duckdb.sql" | "mcp" | "local.code";
-export type BioOperationNetworkPolicy = "forbidden" | "explicit-consent" | "allowed";
+// Executable today = duckdb.sql. Non-SQL transports (http/graphql/openapi/mcp/local) were declared but had
+// no runner — validated-but-unexecutable surface. They are removed; re-add a transport (and widen this
+// union) the day it ships with a runner and a test. The spec stays honest about what can actually run.
+export type BioOperationTransport = "duckdb.sql";
 export type BioOperationCacheMode = "none" | "metadata" | "materialize";
-
-export interface BioHttpOperationRequest {
-  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
-  urlTemplate: string;
-  headers?: Record<string, string>;
-  query?: Record<string, string>;
-  bodyTemplate?: JsonValue;
-  timeoutSeconds?: number;
-  networkPolicy?: BioOperationNetworkPolicy;
-}
-
-export interface BioGraphqlOperationRequest {
-  endpoint: string;
-  query: string;
-  operationName?: string;
-  variablesSchema?: JsonSchema;
-  timeoutSeconds?: number;
-  networkPolicy?: BioOperationNetworkPolicy;
-}
-
-export interface BioOpenApiOperationRequest {
-  specUrl?: string;
-  operationId?: string;
-  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
-  pathTemplate?: string;
-  timeoutSeconds?: number;
-  networkPolicy?: BioOperationNetworkPolicy;
-}
 
 export interface BioSqlOperationRequest {
   sqlTemplate: string;
@@ -43,16 +17,6 @@ export interface BioSqlOperationRequest {
   /** The few columns this operation needs from its resolved inputs — checked by schema discovery before
    *  the query runs. Consumer-local: it is THIS operation's input contract, not a global record type. */
   requiredColumns?: string[];
-}
-
-export interface BioMcpOperationRequest {
-  server: string;
-  tool: string;
-}
-
-export interface BioLocalCodeOperationRequest {
-  clientName: string;
-  functionName: string;
 }
 
 export interface BioOperationIdentifierHint {
@@ -86,12 +50,7 @@ export interface BioOperationSpec {
   inputSchema: JsonSchema;
   outputSchema?: JsonSchema;
   identifiers?: BioOperationIdentifierHint[];
-  http?: BioHttpOperationRequest;
-  graphql?: BioGraphqlOperationRequest;
-  openapi?: BioOpenApiOperationRequest;
   sql?: BioSqlOperationRequest;
-  mcp?: BioMcpOperationRequest;
-  local?: BioLocalCodeOperationRequest;
   report?: BioBucketedReportSpec;
   cache?: {
     mode: BioOperationCacheMode;
@@ -102,11 +61,6 @@ export interface BioOperationSpec {
     includeRequest?: boolean;
     includeResponseDigest?: boolean;
     sources?: Provenance[];
-  };
-  safety?: {
-    networkPolicy?: BioOperationNetworkPolicy;
-    acceptsSensitiveData?: boolean;
-    sensitiveDataClasses?: string[];
   };
   notes?: string[];
 }
@@ -135,32 +89,9 @@ export function validateBioOperationSpec(spec: BioOperationSpec): string[] {
   if (typeof spec.description !== "string" || !spec.description.trim()) errors.push("description is required");
   if (!domains.length) errors.push("at least one domain is required");
   if (!spec.inputSchema || typeof spec.inputSchema !== "object") errors.push("inputSchema is required");
-  if (!isTransport(spec.transport)) errors.push("transport is invalid");
+  if (spec.transport !== "duckdb.sql") errors.push("transport must be duckdb.sql");
+  if (!spec.sql) errors.push("a duckdb.sql operation requires sql request details");
 
-  if (spec.transport === "http" && !spec.http) errors.push("http transport requires http request details");
-  if (spec.transport === "graphql" && !spec.graphql) errors.push("graphql transport requires graphql request details");
-  if (spec.transport === "openapi" && !spec.openapi) errors.push("openapi transport requires openapi request details");
-  if (spec.transport === "duckdb.sql" && !spec.sql) errors.push("duckdb.sql transport requires sql request details");
-  if (spec.transport === "mcp" && !spec.mcp) errors.push("mcp transport requires mcp request details");
-  if (spec.transport === "local.code" && !spec.local) errors.push("local.code transport requires local request details");
-
-  if (spec.http) {
-    if (!/^https?:\/\//.test(spec.http.urlTemplate)) errors.push("http.urlTemplate must be absolute http(s)");
-    if (spec.http.networkPolicy === "forbidden") errors.push("http operations cannot declare forbidden network policy");
-    if (spec.safety?.networkPolicy && spec.http.networkPolicy && spec.safety.networkPolicy !== spec.http.networkPolicy) errors.push("safety.networkPolicy must match http.networkPolicy when both are set");
-  }
-  if (spec.graphql) {
-    if (!/^https?:\/\//.test(spec.graphql.endpoint)) errors.push("graphql.endpoint must be absolute http(s)");
-    if (!spec.graphql.query.trim()) errors.push("graphql.query is required");
-    if (spec.graphql.networkPolicy === "forbidden") errors.push("graphql operations cannot declare forbidden network policy");
-    if (spec.safety?.networkPolicy && spec.graphql.networkPolicy && spec.safety.networkPolicy !== spec.graphql.networkPolicy) errors.push("safety.networkPolicy must match graphql.networkPolicy when both are set");
-  }
-  if (spec.openapi) {
-    if (!spec.openapi.operationId && !(spec.openapi.method && spec.openapi.pathTemplate)) errors.push("openapi requires operationId or method plus pathTemplate");
-    if (spec.openapi.specUrl && !/^https?:\/\//.test(spec.openapi.specUrl)) errors.push("openapi.specUrl must be absolute http(s)");
-    if (spec.openapi.networkPolicy === "forbidden") errors.push("openapi operations cannot declare forbidden network policy");
-    if (spec.safety?.networkPolicy && spec.openapi.networkPolicy && spec.safety.networkPolicy !== spec.openapi.networkPolicy) errors.push("safety.networkPolicy must match openapi.networkPolicy when both are set");
-  }
   if (spec.sql) {
     if (spec.sql.readOnly !== true) errors.push("sql.readOnly must be true");
     if (!spec.sql.sqlTemplate.trim()) errors.push("sql.sqlTemplate is required");
@@ -175,9 +106,6 @@ export function validateBioOperationSpec(spec: BioOperationSpec): string[] {
     }
   }
   if (spec.cache?.ttlSeconds !== undefined && spec.cache.ttlSeconds < 0) errors.push("cache.ttlSeconds cannot be negative");
-  if (spec.safety?.networkPolicy === "forbidden" && (spec.transport === "http" || spec.transport === "graphql" || spec.transport === "openapi")) {
-    errors.push("network transports cannot have forbidden safety.networkPolicy");
-  }
   return errors;
 }
 
@@ -187,8 +115,4 @@ export function operationSpecIndex(registry: BioOperationRegistry): Array<Pick<B
 
 export function registryFromOperations(operations: BioOperationSpec[], extras: Omit<BioOperationRegistry, "schema" | "operations"> = {}): BioOperationRegistry {
   return { schema: "pi-bio.operation_registry.v1", operations: operations.map(defineBioOperationSpec), ...extras };
-}
-
-function isTransport(value: unknown): value is BioOperationTransport {
-  return value === "http" || value === "graphql" || value === "openapi" || value === "duckdb.sql" || value === "mcp" || value === "local.code";
 }

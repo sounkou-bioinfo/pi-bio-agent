@@ -136,14 +136,13 @@ Target shape:
 ```text
 BioOperationSpec
   id
-  transport: http | graphql | openapi | duckdb_sql | mcp | local_code
+  transport: duckdb.sql            # executable today; widen only when a transport ships with a runner
   input schema
   output schema / normalizer
+  sql: { sqlTemplate, readOnly, requiredResources, requiredColumns }
   identifier namespaces
   cache key policy
-  network policy
   provenance policy
-  PHI/PII policy
 
 BioToolSpec
   biomedical meaning

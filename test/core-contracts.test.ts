@@ -24,20 +24,16 @@ const validTool: BioToolSpec = {
 
 const validOperation: BioOperationSpec = {
   schema: "pi-bio.operation_spec.v1",
-  id: "opentargets.search",
+  id: "variants.classify",
   version: "0.1.0",
-  title: "OpenTargets search",
-  description: "Search public OpenTargets entities.",
-  domains: ["open-targets", "evidence"],
-  transport: "graphql",
+  title: "Classify variants",
+  description: "Classify resolved variants over DuckDB.",
+  domains: ["genomics", "variants"],
+  transport: "duckdb.sql",
   inputSchema: { type: "object" },
   outputSchema: { type: "object" },
   identifiers: [{ name: "query", namespace: "free_text", required: true }],
-  graphql: {
-    endpoint: "https://api.platform.opentargets.org/api/v4/graphql",
-    query: "query Search($q: String!) { search(queryString: $q) { hits { id name entity } } }",
-    networkPolicy: "explicit-consent",
-  },
+  sql: { sqlTemplate: "SELECT variant_key FROM annotated_variants", readOnly: true, requiredResources: ["annotated_variants"], requiredColumns: ["variant_key"] },
   cache: { mode: "metadata", ttlSeconds: 3600, keyFields: ["query"] },
   provenance: { includeRequest: true, includeResponseDigest: true },
 };
@@ -95,43 +91,16 @@ describe("BioOperationSpec validation", () => {
     assert.ok(errors.includes("schema must be pi-bio.operation_spec.v1"));
     assert.ok(errors.some((e) => e.includes("id must be lowercase")));
     assert.ok(errors.includes("inputSchema is required"));
-    assert.ok(errors.includes("graphql transport requires graphql request details"));
+    assert.ok(errors.includes("transport must be duckdb.sql"));
   });
 
-  test("enforces transport-specific policy", () => {
-    const httpErrors = validateBioOperationSpec({
-      ...validOperation,
-      transport: "http",
-      graphql: undefined,
-      http: { method: "GET", urlTemplate: "https://example.org/{id}", networkPolicy: "forbidden" },
-    });
-    assert.ok(httpErrors.includes("http operations cannot declare forbidden network policy"));
-    const sqlErrors = validateBioOperationSpec({
-      ...validOperation,
-      transport: "duckdb.sql",
-      graphql: undefined,
-      sql: { sqlTemplate: "SELECT * FROM bio_nodes", readOnly: false as true },
-    });
-    assert.ok(sqlErrors.includes("sql.readOnly must be true"));
-  });
-
-  test("requires OpenAPI details and validates network-policy consistency", () => {
-    const missingOpenapi = validateBioOperationSpec({ ...validOperation, transport: "openapi", graphql: undefined });
-    assert.ok(missingOpenapi.includes("openapi transport requires openapi request details"));
-    const validOpenapi = validateBioOperationSpec({
-      ...validOperation,
-      transport: "openapi",
-      graphql: undefined,
-      openapi: { specUrl: "https://example.org/openapi.json", operationId: "searchTargets", networkPolicy: "explicit-consent" },
-      safety: { networkPolicy: "explicit-consent" },
-    });
-    assert.deepEqual(validOpenapi, []);
-    const mismatch = validateBioOperationSpec({
-      ...validOperation,
-      safety: { networkPolicy: "allowed" },
-      graphql: { ...validOperation.graphql!, networkPolicy: "explicit-consent" },
-    });
-    assert.ok(mismatch.includes("safety.networkPolicy must match graphql.networkPolicy when both are set"));
+  test("requires sql details and enforces read-only + column shape", () => {
+    const missingSql = validateBioOperationSpec({ ...validOperation, sql: undefined });
+    assert.ok(missingSql.includes("a duckdb.sql operation requires sql request details"));
+    const notReadOnly = validateBioOperationSpec({ ...validOperation, sql: { sqlTemplate: "SELECT 1", readOnly: false as true } });
+    assert.ok(notReadOnly.includes("sql.readOnly must be true"));
+    const badCols = validateBioOperationSpec({ ...validOperation, sql: { sqlTemplate: "SELECT 1", readOnly: true, requiredColumns: [" "] } });
+    assert.ok(badCols.includes("sql.requiredColumns must be non-empty strings"));
   });
 });
 
