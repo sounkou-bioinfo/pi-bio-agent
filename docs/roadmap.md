@@ -102,36 +102,37 @@ tiny — **composition pressure, not clinical realism**:
 1 note with the abstention caveat
 1 SQL filter: rare ∧ high-impact ∧ frequency-known   (a query, not a skill)
 1 run record + provenance
-1 report (stable JSON): the count, plus what was excluded and why
+1 result (the count via SQL GROUP BY) + caveats as operation notes; what was excluded and why
 ```
 
 No live APIs, no full ACMG engine, **no diagnosis language**. It forces the whole substrate to compose:
-variants → typed nodes, annotation → edges with provenance, run record → produced artifacts, report →
-structured safety-bounded output. The test asserts the **abstention** (the count excludes no-frequency
-variants and says so), structure, provenance, and bounded budget — not free-form prose.
+resolvers → DuckDB tables, the operation's SQL → the answer, run record + resolution receipts → provenance.
+The test asserts the **abstention** (the count excludes no-frequency variants and says so), structure,
+provenance, and stability — not free-form prose.
 
 ## 5. Phases (walking skeleton first)
 
-Inverted from substrate-first: a thin flagship lands early and stays green as substrate thickens behind
-it. Current position: the notes → graph → DuckDB → report → CLI ingress is **done and engine-verified**;
-`BioRunSpec`/`BioRunRecord`, `storage`/CAS, `Provenance`, and `BioOperationSpec` are **contracts with no
-producers yet.**
+Inverted from substrate-first: a thin flagship lands early and stays green as substrate thickens behind it.
+**Current position:** the flagship is built (manifest #1) and `runOperation` produces run records + results +
+resolution receipts; the host tool `bio_run_operation` persists `run/result/receipts` under
+`.pi/bio-agent/runs/`. So `BioRunSpec`/`BioRunRecord`, `Provenance`, `BioOperationSpec`, and the
+resolver/registry all have **real producers**. Still spec-only: `storage`/CAS materialization; temporality;
+recording results/judgments as KG facts.
 
 ```text
-Phase 0 (next)  Flagship walking skeleton. Synthetic fixture -> run record + evidence subgraph +
-                report. Mocked everything. Turns three contracts into real producers; gives us the
-                cost-curve harness. THIS is the next code slice.
-Phase 1         Thicken the run/provenance substrate behind the skeleton: run ledger, CAS
-                materialization, provenance receipts — driven by what the skeleton needs.
-Phase 2         First declarative operation pack (OpenTargets or Monarch): mock-network tests,
-                dry-run/execute split, cache/provenance policy. Feeds the skeleton's evidence.
-Phase 3         Bounded code composition: scoped clients only, no raw fetch/secrets/DB handle,
-                timeout/output caps, a receipt per operation call.
-Phase 4         Safe harness-adaptation surface: extension/spec/skill scaffold implementing
-                declare -> validate -> test -> record -> activate -> rollback.
+Phase 0 (done)   Flagship walking skeleton: manifest #1, runOperation -> run/result/receipts, host
+                 persistence. Three contracts became real producers.
+Phase 1 (partial) Run/provenance substrate: run+receipt persistence DONE; CAS materialization +
+                 temporal anchoring still pending, driven by a real consumer.
+Phase 2          First networked resolver (OpenTargets/gnomAD) as ONE generic HTTP resolver, not a
+                 custom client: mock-network tests, explicit network policy, provenance receipt.
+Phase 3          Bounded code composition: scoped clients only, no raw fetch/secrets/DB handle,
+                 timeout/output caps, a receipt per code-exec call.
+Phase 4          Safe harness-adaptation surface: extension/spec/skill scaffold implementing
+                 declare -> validate -> test -> record -> activate -> rollback.
 ```
 
-The expertise-per-budget measurement (§2) runs continuously once the Phase 0 skeleton exists.
+The expertise-per-budget measurement (§2) runs continuously now that the Phase 0 skeleton exists.
 
 ## 6. Harness-adaptation doctrine (mods vs hooks)
 

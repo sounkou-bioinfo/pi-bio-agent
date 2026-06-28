@@ -7,7 +7,7 @@ import type { DomainPackManifest } from "../src/core/manifest.js";
 import { runBioOperationFromManifest, runsRoot } from "../src/hosts/run-store.js";
 
 // End-to-end through the host: a manifest JSON on disk -> validated registry -> built-in resolvers -> a
-// duckdb.sql operation -> persisted run/result/report/receipts. Both resources use duckdb.file_scan (a
+// duckdb.sql operation -> persisted run/result/receipts. Both resources use duckdb.file_scan (a
 // built-in), so nothing test-only is bound; this is what a real host run looks like.
 
 const RARE_HIGH_IMPACT_SQL = [
