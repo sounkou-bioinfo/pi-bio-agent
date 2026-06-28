@@ -32,6 +32,7 @@ const RARE_HIGH_IMPACT_SQL = [
 
 // The whole "skill" is this manifest — pure data. No code is question-specific.
 const flagshipManifest: DomainPackManifest = {
+  schema: "pi-bio.domain_pack_manifest.v1",
   id: "rare-high-impact-variants",
   version: "0.1.0",
   title: "Rare high-impact variants",

@@ -7,7 +7,6 @@ import { deriveStudyPlan, studyNoteIndex, type StudyArtifactKind, type StudyCorp
 import { deleteStudyNote, listStudyNotes, makeStudyNote, readStudyNotes, runtimeSkillRoot, runtimeStudyRoot, writeProjectSkill, writeStudyNote } from "../../src/hosts/pi-project.js";
 import { defaultDuckDbExtensionCatalog, findDuckDbExtensions } from "../../src/duckdb/extensions.js";
 import { defaultBioToolRegistry } from "../../src/primitives/bio-tool-specs.js";
-import { defaultBioResourceRegistry, findResourceResolvers } from "../../src/primitives/resources.js";
 
 function text(payload: unknown) {
   const body = typeof payload === "string" ? payload : JSON.stringify(payload, null, 2);
@@ -29,7 +28,6 @@ export default function piBioAgentExtension(pi: ExtensionAPI): void {
         schema: "pi-bio.context.v1",
         sources: [],
         toolRegistry: defaultBioToolRegistry,
-        resources: defaultBioResourceRegistry,
         duckdbExtensions: defaultDuckDbExtensionCatalog,
       };
       return text({
@@ -56,19 +54,6 @@ export default function piBioAgentExtension(pi: ExtensionAPI): void {
     async execute(_id, params: { query?: string }) {
       const matches = params.query ? findToolSpecs(defaultBioToolRegistry, params.query) : toolSpecIndex(defaultBioToolRegistry);
       return text({ schema: defaultBioToolRegistry.schema, tools: matches });
-    },
-  });
-
-  pi.registerTool({
-    name: "bio_list_resource_resolvers",
-    label: "List bio resource resolvers",
-    description: "List content-addressed and virtual resource resolver specs, including declarative HTTP JSON request surfaces.",
-    parameters: Type.Object({
-      query: Type.Optional(Type.String({ description: "Optional text search over resolver names, modes, and descriptions." })),
-    }),
-    async execute(_id, params: { query?: string }) {
-      const resolvers = params.query ? findResourceResolvers(params.query) : defaultBioResourceRegistry.resolvers;
-      return text({ schema: defaultBioResourceRegistry.schema, resolvers });
     },
   });
 

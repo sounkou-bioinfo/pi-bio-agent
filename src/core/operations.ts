@@ -53,9 +53,8 @@ export async function runOperation(
 
   const receipts: ResolutionReceipt[] = [];
   for (const rid of resources) {
-    const spec = registry.getResource(rid);
-    if (!spec) throw new Error(`operation '${operationId}' requires unregistered resource '${rid}'`);
-    receipts.push(await registry.resolve(spec.resolver, spec.params, { conn, now }));
+    if (!registry.getResource(rid)) throw new Error(`operation '${operationId}' requires unregistered resource '${rid}'`);
+    receipts.push(await registry.resolveResource(rid, { conn, now }));
   }
 
   const rows = await conn.all<Record<string, unknown>>(op.sql.sqlTemplate, params);

@@ -7,9 +7,12 @@ import type { BioResolverImpl } from "../../src/core/manifest.js";
 
 const IDENT_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
-/** Materialize a table from inline rows declared in the resource's `params`. The simplest resolver kind. */
-export const inlineTableResolver: BioResolverImpl = async (query, ctx) => {
-  const { table, columns, rows } = query as {
+/**
+ * Materialize a table from inline rows declared in the resource's `params`. The simplest resolver kind.
+ * Returns only resolved DATA — the registry stamps receipt identity/provenance metadata.
+ */
+export const inlineTableResolver: BioResolverImpl = async (resource, ctx) => {
+  const { table, columns, rows } = resource.params as {
     table: string;
     columns: Array<{ name: string; type: string }>;
     rows: Array<Record<string, unknown>>;
@@ -25,13 +28,8 @@ export const inlineTableResolver: BioResolverImpl = async (query, ctx) => {
     await ctx.conn.run(`INSERT INTO ${table} (${names.join(", ")}) VALUES (${placeholders})`, names.map((n) => row[n] ?? null));
   }
   return {
-    schema: "pi-bio.resolution_receipt.v1",
-    resolverId: "inline.table",
-    resolverVersion: "0.1.0",
-    resolvedAt: now,
-    query,
-    sourceSnapshots: [{ source: "inline", retrievedAt: now }],
     result: { schema: "pi-bio.resource_handle.v1", mode: "reference", name: table, pointer: { uri: `table:${table}`, format: "table" } },
+    sourceSnapshots: [{ source: "inline", retrievedAt: now }],
     provenance: [{ source: "inline.table", retrievedAt: now }],
   };
 };

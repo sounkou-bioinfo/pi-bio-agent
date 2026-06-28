@@ -18,31 +18,6 @@ export interface ResourcePointer {
   address?: ContentAddress;
 }
 
-export interface HttpRequestTemplate {
-  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
-  urlTemplate: string;
-  headers?: Record<string, string>;
-  query?: Record<string, string>;
-  bodyTemplate?: JsonValue;
-  timeoutSeconds?: number;
-  networkPolicy?: "forbidden" | "explicit-consent" | "allowed";
-}
-
-export interface ResourceResolverSpec {
-  schema: "pi-bio.resource_resolver.v1";
-  name: string;
-  version: string;
-  description: string;
-  modes: ResourceHandleMode[];
-  request?: HttpRequestTemplate;
-  output?: {
-    mediaType?: string;
-    format?: string;
-    jsonSchema?: Record<string, JsonValue | undefined>;
-  };
-  provenance?: Provenance[];
-}
-
 export interface ResourceHandle {
   schema: "pi-bio.resource_handle.v1";
   mode: ResourceHandleMode;
@@ -57,34 +32,32 @@ export interface ResourceHandle {
   provenance?: Provenance[];
 }
 
-export interface ResolvedResource {
-  schema: "pi-bio.resolved_resource.v1";
-  handle: ResourceHandle;
-  bytes?: Uint8Array;
-  json?: JsonValue;
-  pointer?: ResourcePointer;
-  fetchedAt?: string;
-  provenance?: Provenance[];
+/** A snapshot of an upstream source as it was at resolution time (the temporal anchor of a receipt). */
+export interface SourceSnapshot {
+  source: string;
+  version?: string;
+  releasedAt?: string;
+  retrievedAt?: string;
 }
 
-export interface ResourceRegistry {
-  schema: "pi-bio.resource_registry.v1";
-  resolvers: ResourceResolverSpec[];
-  handles?: ResourceHandle[];
+/** Declaration of a resolver — serializable, the single resolver model. Implementation is bound separately. */
+export interface BioResolverSpec {
+  id: string;
+  version: string;
+  title: string;
+  description: string;
+  output: { mode: "inline" | "reference" | "content_address" | "table"; mediaType?: string; schemaRef?: string };
+  temporal?: { kind: "snapshot" | "live" | "as_of"; source?: string; versionRequired?: boolean };
 }
 
-const RESOLVER_NAME_RE = /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/;
-
-export function validateResourceResolverSpec(spec: ResourceResolverSpec): string[] {
-  const errors: string[] = [];
-  const modes = Array.isArray(spec.modes) ? spec.modes : [];
-  if (spec.schema !== "pi-bio.resource_resolver.v1") errors.push("schema must be pi-bio.resource_resolver.v1");
-  if (typeof spec.name !== "string" || !RESOLVER_NAME_RE.test(spec.name)) errors.push("invalid resolver name");
-  if (typeof spec.version !== "string" || !spec.version.trim()) errors.push("version is required");
-  if (typeof spec.description !== "string" || !spec.description.trim()) errors.push("description is required");
-  if (!modes.length) errors.push("at least one mode is required");
-  if (spec.request && spec.request.networkPolicy === "forbidden") errors.push("request templates cannot declare forbidden network policy");
-  return errors;
+/** A named resource: opaque `params` resolved by a registered resolver into a ResourceHandle. */
+export interface VirtualResourceSpec {
+  id: string;
+  title: string;
+  kind: "virtual";
+  resolver: string; // a registered resolver id
+  params: Record<string, unknown>; // opaque to core; passed to the resolver
+  schemaRef?: string;
 }
 
 export function contentAddressUri(address: ContentAddress): string {

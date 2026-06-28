@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { defineBioOperationSpec, operationSpecIndex, registryFromOperations, validateBioOperationSpec, type BioOperationSpec } from "../src/core/operation-spec.js";
-import { contentAddressUri, isContentAddressUri, validateResourceResolverSpec, type ResourceResolverSpec } from "../src/core/resources.js";
+import { contentAddressUri, isContentAddressUri } from "../src/core/resources.js";
 import { appendRunEvent, defineBioRunSpec, newRunRecord, validateBioRunSpec, type BioRunSpec } from "../src/core/run-spec.js";
 import { bioProjectLayout, casPathForAddress, validateContentAddress } from "../src/core/storage.js";
 import { defineBioToolSpec, validateBioToolSpec, type BioToolSpec } from "../src/core/tool-spec.js";
@@ -20,15 +20,6 @@ const validTool: BioToolSpec = {
   outputs: [{ name: "output", kind: "fact_bundle" }],
   surfaces: [{ substrate: "pi", constraints: { readOnly: true } }],
   effects: ["read"],
-};
-
-const validResolver: ResourceResolverSpec = {
-  schema: "pi-bio.resource_resolver.v1",
-  name: "test.resolver",
-  version: "0.1.0",
-  description: "Resolve test resources.",
-  modes: ["virtual"],
-  request: { method: "GET", urlTemplate: "https://example.org/{id}", networkPolicy: "explicit-consent" },
 };
 
 const validOperation: BioOperationSpec = {
@@ -178,23 +169,7 @@ describe("BioRunSpec and storage helpers", () => {
   });
 });
 
-describe("Resource resolver validation", () => {
-  test("accepts valid resolver specs", () => {
-    assert.deepEqual(validateResourceResolverSpec(validResolver), []);
-  });
-
-  test("reports malformed resolver specs without throwing", () => {
-    const errors = validateResourceResolverSpec({ schema: "x", name: "Bad Resolver" } as unknown as ResourceResolverSpec);
-    assert.ok(errors.includes("schema must be pi-bio.resource_resolver.v1"));
-    assert.ok(errors.includes("invalid resolver name"));
-    assert.ok(errors.includes("at least one mode is required"));
-  });
-
-  test("forbids impossible request network policy", () => {
-    const errors = validateResourceResolverSpec({ ...validResolver, request: { ...validResolver.request!, networkPolicy: "forbidden" } });
-    assert.ok(errors.includes("request templates cannot declare forbidden network policy"));
-  });
-
+describe("Content-address URIs", () => {
   test("formats and detects content-address URIs", () => {
     const uri = contentAddressUri({ algorithm: "sha256", digest: "a".repeat(64), sizeBytes: 7 });
     assert.equal(uri, `cas:sha256:${"a".repeat(64)}`);
