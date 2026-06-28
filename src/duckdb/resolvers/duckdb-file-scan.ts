@@ -46,7 +46,7 @@ export const duckdbFileScanResolver: BioResolverImpl = async (resource, ctx) => 
     /* non-local or unreadable path: the reader fails closed below if the input is truly missing */
   }
 
-  await ctx.conn.run(`CREATE TABLE ${table} AS SELECT * FROM ${fn}(?)`, [path]);
+  await ctx.conn.run(`CREATE OR REPLACE TABLE ${table} AS SELECT * FROM ${fn}(?)`, [path]);
 
   return {
     result: { schema: "pi-bio.resource_handle.v1", mode: "reference", name: table, pointer: { uri: `table:${table}`, format: "table" } },

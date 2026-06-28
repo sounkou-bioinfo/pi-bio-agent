@@ -21,7 +21,7 @@ export const inlineTableResolver: BioResolverImpl = async (resource, ctx) => {
     throw new Error("inlineTableResolver: table/column/type names must be identifiers");
   }
   const now = ctx.now ?? new Date().toISOString();
-  await ctx.conn.run(`CREATE TABLE ${table} (${columns.map((c) => `${c.name} ${c.type}`).join(", ")})`);
+  await ctx.conn.run(`CREATE OR REPLACE TABLE ${table} (${columns.map((c) => `${c.name} ${c.type}`).join(", ")})`);
   const names = columns.map((c) => c.name);
   const placeholders = names.map(() => "?").join(", ");
   for (const row of rows) {

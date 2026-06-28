@@ -78,6 +78,15 @@ describe("duckdb.file_scan: variant record from a non-VCF provider", () => {
     assert.ok(receipt.sourceSnapshots.some((s) => /^sha256:/.test(s.version ?? "")));
   });
 
+  test("re-resolving on the same connection is idempotent (CREATE OR REPLACE)", async () => {
+    const conn = await memoryConn();
+    const r = registry();
+    await r.resolveResource("annotated_variants", { conn, now: "2026-06-28T00:00:00Z" });
+    await assert.doesNotReject(() => r.resolveResource("annotated_variants", { conn, now: "2026-06-28T00:00:00Z" }));
+    // the whole operation also re-runs cleanly on a reused connection
+    await assert.doesNotReject(() => run(r, conn));
+  });
+
   test("fails closed on a missing path, a bad reader, and an undetectable extension", async () => {
     const c1 = await memoryConn();
     await assert.rejects(() => run(registry("duckdb.file_scan", { table: "annotated_variants" }), c1), /'path' \(string\) is required/);
