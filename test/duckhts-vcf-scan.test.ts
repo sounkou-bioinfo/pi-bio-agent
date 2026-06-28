@@ -6,8 +6,7 @@ import { runOperation } from "../src/core/operations.js";
 import { defineBioOperationSpec } from "../src/core/operation-spec.js";
 import { duckdbNodeConn } from "../src/duckdb/node-api.js";
 import { duckhtsVcfScanResolver } from "../src/duckdb/resolvers/duckhts-vcf-scan.js";
-import { ANNOTATED_VARIANTS_V1 } from "../src/duckdb/resolvers/variant-record.js";
-import { assertTableMatchesView } from "../src/core/view-contract.js";
+import { describeTable } from "../src/core/schema-discovery.js";
 import { inlineTableResolver } from "./support/inline-table-resolver.js";
 
 const VCF = "test/fixtures/rare_high_impact.vcf";
@@ -59,7 +58,7 @@ const manifest: DomainPackManifest = {
       schema: "pi-bio.operation_spec.v1", id: "rare_high_impact.report", version: "0.1.0",
       title: "Rare high-impact variant classification", description: "Classify variants, abstaining on unknown frequency.",
       domains: ["genomics"], transport: "duckdb.sql", inputSchema: { type: "object" },
-      sql: { sqlTemplate: RARE_HIGH_IMPACT_SQL, readOnly: true, singleStatement: true, requiredViews: ["annotated_variants", "so_loss_of_function"] },
+      sql: { sqlTemplate: RARE_HIGH_IMPACT_SQL, readOnly: true, singleStatement: true, requiredViews: ["annotated_variants", "so_loss_of_function"], requiredColumns: ["variant_key", "consequence", "allele_frequency", "clinical_significance"] },
       report: { kind: "bucketed_rows", idColumn: "variant_key", bucketColumn: "bucket", includedBucket: "included", caveats: ["Unknown frequency is abstained, not counted as rare.", "Benign variants are excluded."] },
     })],
   },
@@ -85,7 +84,9 @@ describe("duckhts.vcf_scan: first real resolver over a real VCF", { skip: duckht
   test("the real VCF resolver yields the same bucketed answer as the inline fixture", async () => {
     const conn = await memoryConn();
     const { report, receipts } = await run(registry(), conn);
-    await assertTableMatchesView(conn, "annotated_variants", ANNOTATED_VARIANTS_V1); // VCF provider satisfies the record contract
+    // schema discovery on the VCF provider's output — no pre-declared variant table type
+    const cols = (await describeTable(conn, "annotated_variants")).map((c) => c.name);
+    assert.ok(["variant_key", "consequence", "allele_frequency", "clinical_significance"].every((c) => cols.includes(c)));
     assert.ok(report);
     assert.equal(report.included, 1); // ClawBio rhi_01 ground-truth count, now from a real VCF
     assert.equal(report.countsByBucket.no_frequency, 1); // abstention preserved

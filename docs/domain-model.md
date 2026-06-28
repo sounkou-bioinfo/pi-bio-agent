@@ -184,13 +184,26 @@ interface BioViewDef { id: ViewId; name: string; description: string; columns: C
 
 Generate DDL/docs/contract/tests from these when a consumer needs it — no hand-written SQL contract strings.
 
-A view contract is also the **interchange point between providers**: it is the record SHAPE that every
-resolver must materialize, so interchangeable providers can feed one operation. `ANNOTATED_VARIANTS_V1` is
-the first — VCF (`duckhts.vcf_scan`), CSV/Parquet (`duckdb.file_scan`), and inline rows all materialize it,
-checked by `assertTableMatchesView` before the operation runs. **Caveat — same columns ≠ same normalized
-variant identity.** `variant_key` is passed through verbatim per provider; cross-provider key normalization
-(assembly/seqid/pos/ref/alt → a canonical key) is deferred until a second real source disagrees. The
-contract fixes shape, not identity.
+**Do not model every table shape — that recreates skill sprawl as schema sprawl** (`AnnotatedVariantsV1`,
+`ClinVarVariantsV1`, `GnomadVariantsV1`, …). SQL's advantage is schema **discovery**. The boundary:
+
+```text
+resolver:   materializes some table
+DuckDB:     discovers its schema (information_schema / DESCRIBE)
+operation:  declares only the few columns/roles it requires  (sql.requiredColumns)
+agent:      can write SQL to map source columns to those columns
+registry:   records the declaration + provenance
+```
+
+So the substrate ships generic discovery (`describeTable`, `assertColumnsPresent`), and `runOperation`
+checks the operation's declared `requiredColumns` against what the resolved inputs actually produced —
+failing closed before binding the SQL. A column set is **consumer-local** to the operation that needs it,
+never a global record type. Interchangeability is proven behaviorally: the same operation over VCF
+(`duckhts.vcf_scan`), CSV/Parquet (`duckdb.file_scan`), and inline providers yields the same answer.
+
+**Caveat — same columns ≠ same normalized variant identity.** `variant_key` is provider-verbatim; a richer
+`columnRoles` mapping or a normalization view/UDF (assembly/seqid/pos/ref/alt → canonical key) waits until a
+second real source actually disagrees.
 
 ## Operations — the boundary for executable behavior
 

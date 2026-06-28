@@ -1,6 +1,7 @@
 import type { BioArtifact } from "./types.js";
 import { appendRunEvent, newRunRecord, type BioRunRecord, type BioRunSpec } from "./run-spec.js";
 import { validateReadOnlySelect } from "./sql-guard.js";
+import { describeTable } from "./schema-discovery.js";
 import type { BioRegistry, ResolutionReceipt, SourceSnapshot, SqlConn } from "./manifest.js";
 
 // Generic execution primitives — the factored, reusable core of what ClawBio writes as a bespoke ~12 KB
@@ -50,6 +51,17 @@ export async function runOperation(
   for (const rid of resources) {
     if (!registry.getResource(rid)) throw new Error(`operation '${operationId}' requires unregistered resource '${rid}'`);
     receipts.push(await registry.resolveResource(rid, { conn, now }));
+  }
+
+  // Schema discovery, not pre-declared table types: the operation declares the few columns it needs; we
+  // discover what the resolved inputs actually produced and fail closed (clearly) before binding the SQL.
+  if (op.sql.requiredColumns?.length && receipts.length) {
+    const present = new Set<string>();
+    for (const r of receipts) {
+      if (r.result.name) for (const c of await describeTable(conn, r.result.name)) present.add(c.name);
+    }
+    const missing = op.sql.requiredColumns.filter((c) => !present.has(c));
+    if (missing.length) throw new Error(`operation '${operationId}' requires column(s) not found in resolved inputs: ${missing.join(", ")}`);
   }
 
   const rows = await conn.all<Record<string, unknown>>(op.sql.sqlTemplate, params);
