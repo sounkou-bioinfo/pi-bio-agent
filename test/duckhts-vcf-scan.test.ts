@@ -10,11 +10,12 @@ import { inlineTableResolver } from "./support/inline-table-resolver.js";
 
 const VCF = "test/fixtures/rare_high_impact.vcf";
 
-// duckhts is a community extension — provision it once (the host's job), then skip cleanly if offline.
+// duckhts is a community extension provisioned by the HOST, never by the default test suite (no ambient
+// INSTALL / network). We only LOAD an already-installed extension and skip cleanly when it is absent.
+// To provision it for this test locally: `npm run provision:duckhts`.
 const duckhtsAvailable = await (async () => {
   try {
     const c = await (await DuckDBInstance.create(":memory:")).connect();
-    await c.run("INSTALL duckhts FROM community;");
     await c.run("LOAD duckhts;");
     return true;
   } catch {
