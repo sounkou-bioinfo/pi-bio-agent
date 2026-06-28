@@ -167,6 +167,15 @@ export function validateDomainPackManifest(manifest: DomainPackManifest): string
     if (!res.params || typeof res.params !== "object") errors.push(`resource '${res.id}' requires params object`);
     if (!resolverIds.has(res.resolver)) errors.push(`resource '${res.id}' points to undeclared resolver '${res.resolver}'`);
   }
+  for (const ts of termSets) {
+    if (!ts.title?.trim()) errors.push(`termSet '${ts.id}' requires a title`);
+    const seenMembers = new Set<string>();
+    for (const m of ts.members ?? []) {
+      if (typeof m.id !== "string" || !m.id.trim()) errors.push(`termSet '${ts.id}' has a member with an empty id`);
+      else if (seenMembers.has(m.id)) errors.push(`termSet '${ts.id}' has a duplicate member id '${m.id}'`);
+      else seenMembers.add(m.id);
+    }
+  }
   const tableNames = new Set<string>([...resources.map((r) => r.id), ...views.map((v) => v.id)]);
   for (const op of operations) {
     for (const e of validateBioOperationSpec(op)) errors.push(`operation '${op.id}': ${e}`);

@@ -46,6 +46,12 @@ export function decideGrounding(
   termSet: TermSet,
   opts: { minConfidence?: number } = {},
 ): Pick<GroundingJudgment, "status" | "chosen" | "evidence" | "confidence"> {
+  if (proposal.chosen !== null && proposal.chosen !== undefined && typeof proposal.chosen !== "string") {
+    throw new JudgeContractError("judge proposal 'chosen' must be a candidate id string or null");
+  }
+  if (proposal.confidence !== undefined && (typeof proposal.confidence !== "number" || !Number.isFinite(proposal.confidence) || proposal.confidence < 0 || proposal.confidence > 1)) {
+    throw new JudgeContractError("judge proposal 'confidence', if present, must be a finite number in [0, 1]");
+  }
   const common = { evidence: proposal.evidence, confidence: proposal.confidence };
   if (proposal.chosen === null || proposal.chosen === undefined) return { status: "abstained", chosen: null, ...common };
   const match = termSet.members.find((m) => m.id === proposal.chosen);

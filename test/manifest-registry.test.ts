@@ -58,6 +58,14 @@ describe("validateDomainPackManifest: fail closed", () => {
     assert.ok(validateDomainPackManifest(m).some((e) => e.includes("undeclared view/resource 'missing'")));
   });
 
+  test("rejects term sets with an untitled set, empty member id, or duplicate member id", () => {
+    const ts = (members: Array<{ id: string; label?: string }>, title = "T") => baseManifest({ termSets: [{ id: "ts1", title, members }] });
+    assert.ok(validateDomainPackManifest(ts([{ id: "A:1" }], "")).some((e) => e.includes("requires a title")));
+    assert.ok(validateDomainPackManifest(ts([{ id: "" }])).some((e) => e.includes("empty id")));
+    assert.ok(validateDomainPackManifest(ts([{ id: "A:1" }, { id: "A:1" }])).some((e) => e.includes("duplicate member id 'A:1'")));
+    assert.deepEqual(validateDomainPackManifest(ts([{ id: "A:1" }, { id: "A:2" }])), []);
+  });
+
   test("rejects an invalid operation spec (delegates to validateBioOperationSpec)", () => {
     const m = baseManifest({ operations: [{
       schema: "pi-bio.operation_spec.v1", id: "op.y", version: "0.1.0", title: "Y", description: "y", domains: ["genomics"],

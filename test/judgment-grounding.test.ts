@@ -65,6 +65,13 @@ describe("typed judgment: ground free text to a registered candidate term set", 
     );
   });
 
+  test("rejects a malformed proposal (non-string chosen, out-of-range confidence)", async () => {
+    const ts = candidates.provides.termSets![0]!;
+    assert.throws(() => decideGrounding({ chosen: 42 as unknown as string }, ts), /must be a candidate id string or null/);
+    assert.throws(() => decideGrounding({ chosen: null, confidence: 1.5 }, ts), /confidence.*\[0, 1\]/);
+    assert.throws(() => decideGrounding({ chosen: null, confidence: Number.NaN }, ts), /confidence.*\[0, 1\]/);
+  });
+
   test("the judgment is deterministic for a fixed proposal", async () => {
     const judge = judgeReturning({ chosen: "MONDO:0004975", confidence: 0.8 });
     assert.deepEqual(await run(registry(), judge), await run(registry(), judge));
