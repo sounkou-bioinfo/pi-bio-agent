@@ -33,9 +33,9 @@ A resource handle is a durable reference to data without forcing the core to kno
 
 Content-addressed resources make caching and reproducibility explicit. The same digest means the same bytes regardless of local path.
 
-## Resolver specs
+## Resolvers and resources
 
-A resolver spec describes how a handle can become bytes, JSON, or another pointer. Resolvers may be implemented by:
+A `BioResolverSpec` declares a capability that turns a `VirtualResourceSpec` (an opaque `params` bundle) into a `ResourceHandle` — bytes, JSON, a table, or another pointer. Resolution is resource-centered (`registry.resolveResource(resourceId, ctx)`); the registry stamps a `ResolutionReceipt` so an impl cannot forge identity/provenance. A `BioResolverImpl` may be backed by:
 
 - a Pi extension
 - local filesystem cache
@@ -44,7 +44,7 @@ A resolver spec describes how a handle can become bytes, JSON, or another pointe
 - DuckDB query
 - shell process
 
-Many bio tools are just HTTP requests plus validation. They should be modeled as resolver specs or BioToolSpecs with an HTTP surface, not custom framework code.
+Many bio tools are just HTTP requests plus validation. They should be modeled as a `BioResolverSpec` + `VirtualResourceSpec`, or a BioToolSpec with an HTTP surface, not custom framework code.
 
 ## Single-user default
 

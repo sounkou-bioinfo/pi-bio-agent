@@ -119,10 +119,11 @@ interface BioResolverSpec {       // DECLARATION — serializable, lives in a ma
   temporal?: { kind: "snapshot" | "live" | "as_of"; source?: string; versionRequired?: boolean };
   policy?: { network: "forbidden" | "explicit" | "allowed"; cache: "none" | "prefer_cas" | "require_cas"; timeoutSeconds?: number };
 }
-type BioResolverImpl = (handle: ResourceHandle, ctx: ResolutionContext) => Promise<ResolutionReceipt>;  // BINDING — runtime only
-interface ResolutionReceipt {
-  handle: ResourceHandle; resolvedAt: string; retrievedAt?: string;
-  sourceSnapshots?: SourceSnapshot[]; result: ResourceHandle; /* usually CAS/reference/inline/table */ provenance: Provenance[];
+type BioResolverImpl = (resource: VirtualResourceSpec, ctx: ResolutionContext) => Promise<ResolverOutput>;  // BINDING — runtime only
+interface ResolverOutput { result: ResourceHandle; sourceSnapshots: SourceSnapshot[]; provenance: Provenance[]; } // the impl returns only resolved data
+interface ResolutionReceipt {  // the REGISTRY stamps identity/provenance — an impl cannot forge them
+  resourceId: string; resolverId: string; resolverVersion: string; resolvedAt: string; paramsDigest: string;
+  sourceSnapshots: SourceSnapshot[]; result: ResourceHandle; /* usually CAS/reference/inline/table */ provenance: Provenance[];
 }
 ```
 
@@ -131,7 +132,7 @@ Four rules, all load-bearing:
 1. **Opaque resolver ids.** Core never learns "how gnomAD works" — `resolver: { id: "gnomad.variant_frequency", query }`. The id is a registered capability.
 2. **Fail closed.** A handle naming `resolver = opentargets.associations` with no such resolver registered → resolution *fails*. It must not silently fall back to HTTP/shell/generic fetch.
 3. **Stable-locator discipline.** Resolve by a **source-consistent, churn-stable** key, never a volatile id. Good: accession+version, genome-build+normalized-variant-key, CURIE+ontology-release, DOI/checksum. Bad: temp path, API/UI row id, unversioned "latest" (unless explicitly marked `live`). This is where **temporality enters resolution** — a handle pins what it depends on.
-4. **Declaration separate from implementation.** A **manifest carries `BioResolverSpec` (data)**; a host/runtime **binds the `BioResolverImpl` (function)** — `registry.registerResolverSpec(spec)` then `registry.bindResolverImpl(id, impl)`. Manifests stay serializable/snapshot-able; impls never live in the manifest.
+4. **Declaration separate from implementation.** A **manifest carries `BioResolverSpec` (data)**; a host/runtime **binds the `BioResolverImpl` (function)** — `registry.registerManifest(manifest)` then `registry.bindResolverImpl(id, impl)`, and resolution is resource-centered via `registry.resolveResource(resourceId, ctx)`. Manifests stay serializable/snapshot-able; impls never live in the manifest.
 
 **Resolver vs operation** (a kernel distinction):
 

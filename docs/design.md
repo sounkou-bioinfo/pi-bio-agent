@@ -20,7 +20,7 @@ Host surfaces
 Core contracts
   BioToolSpec
   BioOperationSpec / operation descriptor
-  ResourceHandle / resolver spec / CAS handle
+  ResourceHandle / BioResolverSpec / VirtualResourceSpec / CAS handle
   BioRunSpec / run record / events
   ontology and KG rows
   study notes / OKF-compatible bundles
@@ -80,11 +80,12 @@ Initial command/RPC families:
 
 ```text
 registry.listToolSpecs
-registry.listResourceResolvers
+registry.resolveResource
+registry.snapshot
 registry.listDuckdbExtensions
 spec.validateToolSpec
-spec.validateResourceResolver
-sql.validateSelect
+spec.validateDomainPackManifest
+sql.validateReadOnlySelect
 study.plan
 study.writeNote
 study.listNotes
@@ -104,7 +105,7 @@ The Pi coding-agent extension is the first concrete integration target. It shoul
 The extension should provide:
 
 - **resource discovery** for project-local bio skills and study bundles
-- **registry inspection** for BioToolSpecs, resource resolvers, operation packs, DuckDB extensions, and ontology/KG contracts
+- **registry inspection** for BioToolSpecs, resolvers/resources, operation packs, DuckDB extensions, and ontology/KG contracts
 - **validation tools** for specs, read-only SQL, resource handles, and operation descriptors
 - **study tools** for planning, writing, listing, reading, and eventually indexing notes
 - **skill drafting** for project-local procedural skills, with `/reload` as the activation boundary
@@ -302,7 +303,7 @@ raw source / API docs
   -> CAS/resource snapshot
   -> study note / OKF concept
   -> indexed study bundle
-  -> operation spec or resolver spec
+  -> operation spec or resolver/resource spec
   -> workflow skill only after repeated use stabilizes
 ```
 
@@ -342,7 +343,7 @@ Core should define run contracts, not implement a bespoke subagent system. Execu
 Deep study workflows should produce durable artifacts:
 
 - study notes / OKF bundle
-- operation specs or resolver specs
+- operation specs or resolver/resource specs
 - validation fixtures
 - summary/index files
 - optional skill drafts
