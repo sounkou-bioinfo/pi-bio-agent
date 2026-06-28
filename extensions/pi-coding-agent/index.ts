@@ -7,6 +7,7 @@ import { deriveStudyPlan, studyNoteIndex, type StudyArtifactKind, type StudyCorp
 import { deleteStudyNote, listStudyNotes, makeStudyNote, readStudyNotes, runtimeSkillRoot, runtimeStudyRoot, writeProjectSkill, writeStudyNote } from "../../src/hosts/pi-project.js";
 import { defaultDuckDbExtensionCatalog, findDuckDbExtensions } from "../../src/duckdb/extensions.js";
 import { defaultBioToolRegistry } from "../../src/primitives/bio-tool-specs.js";
+import { runBioOperationFromManifest } from "../../src/hosts/run-store.js";
 
 function text(payload: unknown) {
   const body = typeof payload === "string" ? payload : JSON.stringify(payload, null, 2);
@@ -54,6 +55,21 @@ export default function piBioAgentExtension(pi: ExtensionAPI): void {
     async execute(_id, params: { query?: string }) {
       const matches = params.query ? findToolSpecs(defaultBioToolRegistry, params.query) : toolSpecIndex(defaultBioToolRegistry);
       return text({ schema: defaultBioToolRegistry.schema, tools: matches });
+    },
+  });
+
+  pi.registerTool({
+    name: "bio_run_operation",
+    label: "Run a bio operation",
+    description: "Run a declared duckdb.sql operation from a domain-pack manifest JSON against an explicit DuckDB database, persisting run/result/report/receipts under .pi/bio-agent/runs/<runId>. Resolvers are bound from built-ins (duckdb.file_scan, duckhts.vcf_scan); any other resolver fails closed. The manifest must pass registry validation and the operation must be duckdb.sql.",
+    parameters: Type.Object({
+      dbPath: Type.String({ description: "Explicit DuckDB database path, or ':memory:'." }),
+      manifestPath: Type.String({ description: "Path to a domain-pack manifest JSON file (relative to cwd or absolute)." }),
+      operationId: Type.String({ description: "Operation id declared in the manifest." }),
+      runId: Type.Optional(Type.String({ description: "Stable run id; generated when omitted." })),
+    }),
+    async execute(_id, params: { dbPath: string; manifestPath: string; operationId: string; runId?: string }, _signal, _onUpdate, ctx) {
+      return text(await runBioOperationFromManifest({ cwd: ctx.cwd, ...params }));
     },
   });
 

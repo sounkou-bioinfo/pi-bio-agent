@@ -6,3 +6,4 @@ dist-test/
 .DS_Store
 .env
 .pi-bio-runs/
+.pi/
