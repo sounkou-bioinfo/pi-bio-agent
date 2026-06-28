@@ -16,6 +16,7 @@ const ANNOTATED_VARIANTS = [
   { variant_key: "2:2000:G:A", consequence: "SO:0001575", allele_frequency: 0.3, clinical_significance: null }, // splice_donor, high-impact but common -> not_rare (rhi_01)
   { variant_key: "3:3000:A:G", consequence: "SO:0001583", allele_frequency: 0.0002, clinical_significance: null }, // missense, rare but not LoF -> not_high_impact (rhi_01)
   { variant_key: "4:4000:T:C", consequence: "SO:0001587", allele_frequency: null, clinical_significance: null }, // LoF, no frequency -> abstain
+  { variant_key: "5:5000:G:C", consequence: "SO:0001587", allele_frequency: 0.0001, clinical_significance: "Benign" }, // rare LoF but Benign -> excluded (safety)
 ];
 
 const RARE_HIGH_IMPACT_SQL = [
@@ -49,6 +50,13 @@ const flagshipManifest: DomainPackManifest = {
       title: "Rare high-impact variant classification", description: "Classify variants, abstaining on unknown frequency.",
       domains: ["genomics"], transport: "duckdb.sql", inputSchema: { type: "object" },
       sql: { sqlTemplate: RARE_HIGH_IMPACT_SQL, readOnly: true, singleStatement: true, requiredViews: ["annotated_variants", "so_loss_of_function"] },
+      report: {
+        kind: "bucketed_rows", idColumn: "variant_key", bucketColumn: "bucket", includedBucket: "included",
+        caveats: [
+          "Variants with unknown allele frequency are abstained from, not counted as rare.",
+          "Benign-annotated variants are excluded regardless of frequency or consequence.",
+        ],
+      },
     })],
   },
 };
@@ -83,21 +91,35 @@ describe("flagship: rare high-impact variants (data over generic primitives)", (
     await assert.rejects(() => runOperation(r, conn, { operationId: "rare_high_impact.report", resources: ["annotated_variants"], runId: "x", now: "t" }), /no implementation is bound/);
   });
 
-  test("the operation abstains: matches ClawBio rhi_01 (included = 1) and excludes the no-frequency variant", async () => {
+  test("the operation abstains/excludes: matches ClawBio rhi_01 (included = 1), no-frequency abstained, benign excluded", async () => {
     const { result } = await runFlagship(freshRegistry(), await memoryConn());
     const counts = countBuckets(result.rows);
     assert.equal(counts.included, 1); // ClawBio rhi_01 ground-truth count
     assert.equal(counts.no_frequency, 1); // abstention: unknown frequency is NOT counted as rare
     assert.equal(counts.not_rare, 1); // common splice_donor
     assert.equal(counts.not_high_impact, 1); // rare missense
+    assert.equal(counts.benign, 1); // rare LoF but Benign -> excluded (safety thesis)
     assert.equal(Object.values(counts).reduce((a, b) => a + b, 0), result.rows.length); // buckets partition
     assert.equal(result.rows.find((r) => r.bucket === "included")?.variant_key, "1:1000:C:T");
   });
 
-  test("the result is stable and links operation + resolver receipts in a run record", async () => {
+  test("the runner derives a stable, auditable bucketed report (counts + caveats)", async () => {
+    const { report } = await runFlagship(freshRegistry(), await memoryConn());
+    assert.ok(report);
+    assert.equal(report.schema, "pi-bio.bucketed_operation_report.v1");
+    assert.equal(report.included, 1);
+    assert.equal(report.excluded, 4); // total 5 - included 1
+    assert.equal(report.countsByBucket.no_frequency, 1);
+    assert.equal(report.countsByBucket.benign, 1);
+    assert.equal(report.caveats.length, 2); // the abstention + benign caveats travel with the answer
+    assert.ok(report.rows.every((r) => "id" in r && "bucket" in r));
+  });
+
+  test("the result + report are stable and the run links operation + resolver receipts", async () => {
     const a = await runFlagship(freshRegistry(), await memoryConn());
     const b = await runFlagship(freshRegistry(), await memoryConn());
     assert.deepEqual(a.result, b.result);
+    assert.deepEqual(a.report, b.report);
     assert.equal(a.run.status, "succeeded");
     assert.deepEqual(a.run.events.map((e) => e.type), ["created", "started", "artifact", "completed"]);
     const sources = (a.run.artifacts?.[0]?.provenance ?? []).map((p) => p.source);

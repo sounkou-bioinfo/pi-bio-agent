@@ -57,6 +57,19 @@ export interface BioOperationIdentifierHint {
   description?: string;
 }
 
+/**
+ * Declared, generic report projection over a classification/filter result: each row carries an id and a
+ * bucket, and one bucket is the "included" answer; the rest are excluded (each excluded bucket is a reason).
+ * The runner derives counts + an auditable report — the analysis is data, not a per-question code module.
+ */
+export interface BioBucketedReportSpec {
+  kind: "bucketed_rows";
+  idColumn: string;
+  bucketColumn: string;
+  includedBucket: string;
+  caveats?: string[];
+}
+
 export interface BioOperationSpec {
   schema: "pi-bio.operation_spec.v1";
   id: string;
@@ -74,6 +87,7 @@ export interface BioOperationSpec {
   sql?: BioSqlOperationRequest;
   mcp?: BioMcpOperationRequest;
   local?: BioLocalCodeOperationRequest;
+  report?: BioBucketedReportSpec;
   cache?: {
     mode: BioOperationCacheMode;
     ttlSeconds?: number;
@@ -145,6 +159,12 @@ export function validateBioOperationSpec(spec: BioOperationSpec): string[] {
   if (spec.sql) {
     if (spec.sql.readOnly !== true) errors.push("sql.readOnly must be true");
     if (!spec.sql.sqlTemplate.trim()) errors.push("sql.sqlTemplate is required");
+  }
+  if (spec.report) {
+    if (spec.report.kind !== "bucketed_rows") errors.push("report.kind must be 'bucketed_rows'");
+    for (const f of ["idColumn", "bucketColumn", "includedBucket"] as const) {
+      if (typeof spec.report[f] !== "string" || !spec.report[f].trim()) errors.push(`report.${f} is required`);
+    }
   }
   if (spec.cache?.ttlSeconds !== undefined && spec.cache.ttlSeconds < 0) errors.push("cache.ttlSeconds cannot be negative");
   if (spec.safety?.networkPolicy === "forbidden" && (spec.transport === "http" || spec.transport === "graphql" || spec.transport === "openapi")) {
