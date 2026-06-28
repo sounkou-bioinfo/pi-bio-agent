@@ -184,6 +184,14 @@ interface BioViewDef { id: ViewId; name: string; description: string; columns: C
 
 Generate DDL/docs/contract/tests from these when a consumer needs it — no hand-written SQL contract strings.
 
+A view contract is also the **interchange point between providers**: it is the record SHAPE that every
+resolver must materialize, so interchangeable providers can feed one operation. `ANNOTATED_VARIANTS_V1` is
+the first — VCF (`duckhts.vcf_scan`), CSV/Parquet (`duckdb.file_scan`), and inline rows all materialize it,
+checked by `assertTableMatchesView` before the operation runs. **Caveat — same columns ≠ same normalized
+variant identity.** `variant_key` is passed through verbatim per provider; cross-provider key normalization
+(assembly/seqid/pos/ref/alt → a canonical key) is deferred until a second real source disagrees. The
+contract fixes shape, not identity.
+
 ## Operations — the boundary for executable behavior
 
 ```ts

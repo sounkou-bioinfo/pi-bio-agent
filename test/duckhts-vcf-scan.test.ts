@@ -6,6 +6,8 @@ import { runOperation } from "../src/core/operations.js";
 import { defineBioOperationSpec } from "../src/core/operation-spec.js";
 import { duckdbNodeConn } from "../src/duckdb/node-api.js";
 import { duckhtsVcfScanResolver } from "../src/duckdb/resolvers/duckhts-vcf-scan.js";
+import { ANNOTATED_VARIANTS_V1 } from "../src/duckdb/resolvers/variant-record.js";
+import { assertTableMatchesView } from "../src/core/view-contract.js";
 import { inlineTableResolver } from "./support/inline-table-resolver.js";
 
 const VCF = "test/fixtures/rare_high_impact.vcf";
@@ -81,7 +83,9 @@ const run = (r: ReturnType<typeof createBioRegistry>, conn: SqlConn) =>
 
 describe("duckhts.vcf_scan: first real resolver over a real VCF", { skip: duckhtsAvailable ? false : "duckhts unavailable (offline)" }, () => {
   test("the real VCF resolver yields the same bucketed answer as the inline fixture", async () => {
-    const { report, receipts } = await run(registry(), await memoryConn());
+    const conn = await memoryConn();
+    const { report, receipts } = await run(registry(), conn);
+    await assertTableMatchesView(conn, "annotated_variants", ANNOTATED_VARIANTS_V1); // VCF provider satisfies the record contract
     assert.ok(report);
     assert.equal(report.included, 1); // ClawBio rhi_01 ground-truth count, now from a real VCF
     assert.equal(report.countsByBucket.no_frequency, 1); // abstention preserved
