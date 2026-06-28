@@ -255,7 +255,7 @@ SQL + temporal provenance + abstention.** The same resolver shape later supports
 | Slot | Built | Target (grows into) |
 |---|---|---|
 | Identity | `GenomicInterval`, `VariantKey`, `OntologyTermRef`, `ContentAddress`, `PredicateId=string` | id aliases, `TermRef`/`TermSet`/`PredicateDef` registry |
-| Handle | `ResourceHandle`, `ResourceResolverSpec`, `ContentAddress`, `casPathForAddress` | `VirtualResourceSpec`, `BioResolverSpec`/`Impl`, `ResolutionReceipt`, real resolution |
+| Handle | `ResourceHandle`, `VirtualResourceSpec`, `BioResolverSpec`/`Impl`, `ResolutionReceipt`, resource-centered `resolveResource`, `ContentAddress`, `casPathForAddress` | real resolvers (vcf scan, gnomAD lookup), CAS materialization |
 | Fact | `BioGraphNode`/`Edge`/`Snapshot`, `TrustBlock`, `Provenance` | `BioFact` + `EvidenceBlock` + `TemporalValidity` |
 | Declaration | `BioToolSpec`, `BioOperationSpec` | `BioViewDef`, `PredicateDef`, `DomainPackManifest` registry |
 | Run | `BioRunSpec`/`Record`/`Event` (no producer) | first producer = the flagship |

@@ -57,7 +57,7 @@ Open design issues and cleanup targets. Keep this file focused on what still nee
 
 - Base tool, operation, resolver, run, SQL, storage/CAS validators are in place.
 - Add more operation-spec fixtures for valid and invalid provider/API shapes.
-- Add schema-level compatibility checks between BioToolSpec, BioOperationSpec, and ResourceResolverSpec.
+- Add schema-level compatibility checks between BioToolSpec, BioOperationSpec, and BioResolverSpec.
 
 ### Stage 2 — storage/index substrate
 

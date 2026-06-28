@@ -25,10 +25,6 @@ export interface ResourceHandle {
   inline?: JsonValue;
   pointer?: ResourcePointer;
   address?: ContentAddress;
-  resolver?: {
-    name: string;
-    query: JsonValue;
-  };
   provenance?: Provenance[];
 }
 

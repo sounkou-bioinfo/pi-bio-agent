@@ -158,7 +158,7 @@ Then derive:
 BioOperationSpec
   -> typed operation client
   -> BioToolSpec surface
-  -> ResourceResolverSpec when it resolves content
+  -> BioResolverSpec/VirtualResourceSpec when it resolves content
   -> Pi/MCP/CLI host exposure
   -> tests and docs
 ```

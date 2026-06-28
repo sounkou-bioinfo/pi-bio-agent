@@ -23,7 +23,6 @@ pi install git:github.com/sounkou-bioinfo/pi-bio-agent
 
 - `bio_describe_model`
 - `bio_list_tool_specs`
-- `bio_list_resource_resolvers`
 - `bio_list_duckdb_extensions`
 - `bio_validate_select`
 - `bio_study_plan`

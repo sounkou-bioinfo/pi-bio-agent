@@ -41,15 +41,7 @@ export interface BioGraphSnapshot {
   artifacts?: BioArtifact[];
 }
 
-const forbiddenSql = /\b(insert|update|delete|drop|alter|create|attach|detach|copy|pragma|install|load|export|import|call|reset|begin|commit|rollback|vacuum|checkpoint)\b/i;
-
-export function validateReadOnlySelect(sql: string): string {
-  const trimmed = sql.trim().replace(/;\s*$/, "");
-  if (trimmed.includes(";")) throw new Error("one statement only");
-  if (!/^(select|with)\b/i.test(trimmed)) throw new Error("query must be a SELECT or WITH ... SELECT");
-  if (forbiddenSql.test(trimmed)) throw new Error("query contains forbidden write/DDL keywords");
-  return trimmed;
-}
+export { validateReadOnlySelect } from "./sql-guard.js"; // the single shared read-only SQL guard
 
 // graphSqlContract() was a hand-written list of tables — most of which nothing creates. The real schema is
 // what createBioGraphSchema() builds; a generated contract/docs/DDL come from the schema registry. Removed.

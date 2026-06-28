@@ -95,7 +95,7 @@ export interface BioRegistrySnapshot {
 
 export interface BioRegistry {
   registerManifest(manifest: DomainPackManifest): void;
-  bindResolverImpl(resolverId: string, impl: BioResolverImpl): void;
+  bindResolverImpl(resolverId: string, impl: BioResolverImpl, opts?: { replace?: boolean }): void;
   getResource(id: string): VirtualResourceSpec | undefined;
   getResolverSpec(id: string): BioResolverSpec | undefined;
   getTermSet(id: string): TermSet | undefined;
@@ -178,6 +178,7 @@ export function validateDomainPackManifest(manifest: DomainPackManifest): string
 }
 
 export function createBioRegistry(): BioRegistry {
+  const manifestIds = new Set<string>();
   const manifests: DomainPackManifest[] = [];
   const resources = new Map<string, VirtualResourceSpec>();
   const resolverSpecs = new Map<string, BioResolverSpec>();
@@ -186,26 +187,35 @@ export function createBioRegistry(): BioRegistry {
   const views = new Map<string, BioViewDef>();
   const operations = new Map<string, BioOperationSpec>();
 
-  const claim = <T extends { id: string }>(into: Map<string, T>, kind: string, spec: T) => {
-    if (into.has(spec.id)) throw new Error(`cannot register ${kind} '${spec.id}': id already registered`);
-    into.set(spec.id, spec);
-  };
-
   return {
     registerManifest(manifest) {
       const errors = validateDomainPackManifest(manifest);
       if (errors.length) throw new Error(`invalid manifest '${manifest?.id ?? "<unknown>"}': ${errors.join("; ")}`);
+      // Preflight ALL collisions before mutating any map, so a failed manifest leaves the registry untouched.
+      if (manifestIds.has(manifest.id)) throw new Error(`manifest id '${manifest.id}' is already registered`);
+      const collisions: Array<[Map<string, { id: string }>, string]> = [
+        ...(manifest.provides.resolvers ?? []).map((r) => [resolverSpecs, r.id] as [Map<string, { id: string }>, string]),
+        ...(manifest.provides.resources ?? []).map((r) => [resources, r.id] as [Map<string, { id: string }>, string]),
+        ...(manifest.provides.views ?? []).map((v) => [views, v.id] as [Map<string, { id: string }>, string]),
+        ...(manifest.provides.termSets ?? []).map((t) => [termSets, t.id] as [Map<string, { id: string }>, string]),
+        ...(manifest.provides.operations ?? []).map((o) => [operations, o.id] as [Map<string, { id: string }>, string]),
+      ];
+      for (const [map, id] of collisions) {
+        if (map.has(id)) throw new Error(`cannot register manifest '${manifest.id}': id '${id}' is already registered`);
+      }
       // Clone + freeze so a caller cannot mutate the registry's view of a spec after the fact.
       const frozen = deepFreeze(JSON.parse(JSON.stringify(manifest)) as DomainPackManifest);
-      for (const r of frozen.provides.resolvers ?? []) claim(resolverSpecs, "resolver", r);
-      for (const r of frozen.provides.resources ?? []) claim(resources, "resource", r);
-      for (const v of frozen.provides.views ?? []) claim(views, "view", v);
-      for (const t of frozen.provides.termSets ?? []) claim(termSets, "termSet", t);
-      for (const o of frozen.provides.operations ?? []) claim(operations, "operation", o);
+      for (const r of frozen.provides.resolvers ?? []) resolverSpecs.set(r.id, r);
+      for (const r of frozen.provides.resources ?? []) resources.set(r.id, r);
+      for (const v of frozen.provides.views ?? []) views.set(v.id, v);
+      for (const t of frozen.provides.termSets ?? []) termSets.set(t.id, t);
+      for (const o of frozen.provides.operations ?? []) operations.set(o.id, o);
+      manifestIds.add(frozen.id);
       manifests.push(frozen);
     },
-    bindResolverImpl(resolverId, impl) {
+    bindResolverImpl(resolverId, impl, opts) {
       if (!resolverSpecs.has(resolverId)) throw new Error(`cannot bind impl: no resolver spec '${resolverId}' is registered`);
+      if (resolverImpls.has(resolverId) && !opts?.replace) throw new Error(`resolver '${resolverId}' already has a bound impl (pass { replace: true } to override)`);
       resolverImpls.set(resolverId, impl);
     },
     getResource: (id) => resources.get(id),

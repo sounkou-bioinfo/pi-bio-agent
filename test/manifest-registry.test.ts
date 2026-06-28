@@ -77,13 +77,39 @@ describe("registry: registration is fail-closed, frozen, and id-unique", () => {
     const r = createBioRegistry();
     r.registerManifest(baseManifest());
     const clash: DomainPackManifest = { ...baseManifest(), id: "pack-b", provides: { resolvers: [inlineResolver] } };
-    assert.throws(() => r.registerManifest(clash), /id already registered/);
+    assert.throws(() => r.registerManifest(clash), /id 'inline.table' is already registered/);
+  });
+
+  test("rejects re-registering the same manifest id", () => {
+    const r = createBioRegistry();
+    r.registerManifest(baseManifest());
+    assert.throws(() => r.registerManifest({ ...baseManifest(), provides: { operations: [] } }), /manifest id 'pack-a' is already registered/);
+  });
+
+  test("registration is atomic: a colliding manifest leaves the registry untouched", () => {
+    const r = createBioRegistry();
+    r.registerManifest(baseManifest());
+    // pack-b reuses resolver id inline.table (collision) but also brings a fresh op that must NOT leak in.
+    const partial: DomainPackManifest = { ...baseManifest(), id: "pack-b", provides: {
+      resolvers: [inlineResolver],
+      operations: [{ schema: "pi-bio.operation_spec.v1", id: "op.leak", version: "0.1.0", title: "L", description: "l", domains: ["genomics"], transport: "duckdb.sql", inputSchema: { type: "object" }, sql: { sqlTemplate: "SELECT 1", readOnly: true } }],
+    } };
+    assert.throws(() => r.registerManifest(partial), /already registered/);
+    assert.equal(r.getOperation("op.leak"), undefined); // nothing from the failed manifest committed
   });
 
   test("binding an impl for an unknown resolver throws", () => {
     const r = createBioRegistry();
     r.registerManifest(baseManifest());
     assert.throws(() => r.bindResolverImpl("ghost", inlineTableResolver), /no resolver spec 'ghost'/);
+  });
+
+  test("rejects rebinding a resolver impl unless replace is set", () => {
+    const r = createBioRegistry();
+    r.registerManifest(baseManifest());
+    r.bindResolverImpl("inline.table", inlineTableResolver);
+    assert.throws(() => r.bindResolverImpl("inline.table", inlineTableResolver), /already has a bound impl/);
+    assert.doesNotThrow(() => r.bindResolverImpl("inline.table", inlineTableResolver, { replace: true }));
   });
 
   test("registered specs are cloned + frozen (caller cannot mutate the registry after the fact)", () => {
