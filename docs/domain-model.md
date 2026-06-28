@@ -198,6 +198,22 @@ interface BioOperationSpec {
 
 Question logic lives **here or in the registered operation pack — never in core helpers.**
 
+## Typed judgment — the determinism gradient
+
+Some steps are irreducibly judgment (which ontology term grounds this free-text label?). Borrowed from
+metacurator: a model may **propose**, but the deterministic substrate **decides**. The candidate set is a
+registered `TermSet` (data); the model is a `BioJudgeImpl` **injected by the host** (core never calls a
+model); and `decideGrounding` validates the proposal against the candidates — grounding to the exact
+`TermRef`, **abstaining** on null or low confidence, and **rejecting an invented identifier** (`JudgeContractError`).
+
+```ts
+type BioJudgeImpl = (input: { question: string; candidates: TermRef[] }) => Promise<BioJudgeProposal>; // host-injected
+runGroundingJudgment(registry, { termSetId, question, minConfidence?, now }, judge): Promise<GroundingJudgment>;
+```
+
+This is a **pattern over existing primitives** (a term set + a thin validator), not a new registry kind:
+the model can choose or abstain, but it can never mint an id the substrate did not already register.
+
 ## Domain packs & the manifest
 
 A domain/operation pack is the registration boundary for concrete implementations. It declares
