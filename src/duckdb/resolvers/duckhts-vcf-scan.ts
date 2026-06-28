@@ -53,11 +53,12 @@ export const duckhtsVcfScanResolver: BioResolverImpl = async (resource, ctx) => 
 
   await ctx.conn.run(EXTRACT_SQL(table), [path]);
 
+  const sourceUri = path.includes("://") ? path : `file:${path}`; // a remote input is its own URI, not file:
   return {
     result: { schema: "pi-bio.resource_handle.v1", mode: "reference", name: table, pointer: { uri: `table:${table}`, format: "table" } },
     sourceSnapshots: [
       { source: "duckhts", version: duckhtsVersion, retrievedAt: now },
-      { source: `file:${path}`, version: inputDigest, retrievedAt: now },
+      { source: sourceUri, version: inputDigest, retrievedAt: now },
     ],
     provenance: [{ source: "duckhts.vcf_scan", retrievedAt: now }],
   };

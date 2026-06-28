@@ -48,10 +48,11 @@ export const duckdbFileScanResolver: BioResolverImpl = async (resource, ctx) => 
 
   await ctx.conn.run(`CREATE OR REPLACE TABLE ${table} AS SELECT * FROM ${fn}(?)`, [path]);
 
+  const sourceUri = path.includes("://") ? path : `file:${path}`; // a remote input is its own URI, not file:
   return {
     result: { schema: "pi-bio.resource_handle.v1", mode: "reference", name: table, pointer: { uri: `table:${table}`, format: "table" } },
     sourceSnapshots: [
-      { source: `file:${path}`, version: inputDigest, retrievedAt: now },
+      { source: sourceUri, version: inputDigest, retrievedAt: now },
       { source: `duckdb.${fn}`, retrievedAt: now },
     ],
     provenance: [{ source: "duckdb.file_scan", retrievedAt: now }],
