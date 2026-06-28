@@ -50,12 +50,12 @@ describe("validateDomainPackManifest: fail closed", () => {
     assert.ok(validateDomainPackManifest(m).some((e) => e.includes("undeclared resolver 'ghost'")));
   });
 
-  test("rejects an operation requiring an undeclared view/resource", () => {
+  test("rejects an operation requiring an undeclared resource", () => {
     const m = baseManifest({ operations: [{
       schema: "pi-bio.operation_spec.v1", id: "op.x", version: "0.1.0", title: "X", description: "x", domains: ["genomics"],
-      transport: "duckdb.sql", inputSchema: { type: "object" }, sql: { sqlTemplate: "SELECT 1", readOnly: true, requiredViews: ["missing"] },
+      transport: "duckdb.sql", inputSchema: { type: "object" }, sql: { sqlTemplate: "SELECT 1", readOnly: true, requiredResources: ["missing"] },
     }] });
-    assert.ok(validateDomainPackManifest(m).some((e) => e.includes("undeclared view/resource 'missing'")));
+    assert.ok(validateDomainPackManifest(m).some((e) => e.includes("undeclared resource 'missing'")));
   });
 
   test("rejects term sets with an untitled set, empty member id, or duplicate member id", () => {

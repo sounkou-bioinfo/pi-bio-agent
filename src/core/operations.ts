@@ -42,10 +42,20 @@ export async function runOperation(
   conn: SqlConn,
   opts: { operationId: string; resources?: string[]; params?: readonly unknown[]; runId: string; now: string },
 ): Promise<{ result: OperationResult; report?: BucketedOperationReport; run: BioRunRecord; receipts: ResolutionReceipt[] }> {
-  const { operationId, resources = [], params = [], runId, now } = opts;
+  const { operationId, params = [], runId, now } = opts;
   const op = registry.getOperation(operationId);
   if (!op?.sql) throw new Error(`operation '${operationId}' has no duckdb.sql request`);
   validateReadOnlySelect(op.sql.sqlTemplate); // declared read-only is enforced before we touch the conn
+
+  // The operation declares the resources it needs. Derive them when the caller omits an explicit list;
+  // when a list is given, it must cover the declared requirements (fail closed, not a deep SQL binder error).
+  const declared = op.sql.requiredResources ?? [];
+  const resources = opts.resources ?? declared;
+  if (opts.resources) {
+    const have = new Set(opts.resources);
+    const uncovered = declared.filter((d) => !have.has(d));
+    if (uncovered.length) throw new Error(`operation '${operationId}': provided resources do not cover required resource(s): ${uncovered.join(", ")}`);
+  }
 
   const receipts: ResolutionReceipt[] = [];
   for (const rid of resources) {

@@ -27,13 +27,6 @@ export interface TermSet {
   members: TermRef[];
 }
 
-export interface BioViewDef {
-  id: string;
-  name: string;
-  description: string;
-  columns: Array<{ name: string; type: "TEXT" | "INTEGER" | "DOUBLE" | "BOOLEAN" | "JSON"; nullable?: boolean; description?: string }>;
-}
-
 export interface ResolutionContext {
   conn: SqlConn;
   /** Injectable clock for deterministic receipts/tests. */
@@ -77,7 +70,6 @@ export interface DomainPackManifest {
   provides: {
     resources?: VirtualResourceSpec[];
     resolvers?: BioResolverSpec[];
-    views?: BioViewDef[];
     termSets?: TermSet[];
     operations?: BioOperationSpec[];
   };
@@ -88,7 +80,6 @@ export interface BioRegistrySnapshot {
   manifests: Array<Pick<DomainPackManifest, "id" | "version" | "title" | "domains">>;
   resources: VirtualResourceSpec[];
   resolvers: BioResolverSpec[];
-  views: BioViewDef[];
   termSets: TermSet[];
   operations: BioOperationSpec[];
 }
@@ -99,7 +90,6 @@ export interface BioRegistry {
   getResource(id: string): VirtualResourceSpec | undefined;
   getResolverSpec(id: string): BioResolverSpec | undefined;
   getTermSet(id: string): TermSet | undefined;
-  getView(id: string): BioViewDef | undefined;
   getOperation(id: string): BioOperationSpec | undefined;
   /** Resource-centered resolution. The registry stamps receipt metadata; impls only return resolved data. */
   resolveResource(resourceId: string, ctx: ResolutionContext): Promise<ResolutionReceipt>;
@@ -139,7 +129,6 @@ export function validateDomainPackManifest(manifest: DomainPackManifest): string
   const provides = manifest?.provides ?? {};
   const resources = provides.resources ?? [];
   const resolvers = provides.resolvers ?? [];
-  const views = provides.views ?? [];
   const termSets = provides.termSets ?? [];
   const operations = provides.operations ?? [];
 
@@ -153,7 +142,6 @@ export function validateDomainPackManifest(manifest: DomainPackManifest): string
   };
   dupCheck("resource", resources.map((r) => r.id));
   dupCheck("resolver", resolvers.map((r) => r.id));
-  dupCheck("view", views.map((v) => v.id));
   dupCheck("termSet", termSets.map((t) => t.id));
   dupCheck("operation", operations.map((o) => o.id));
 
@@ -176,11 +164,11 @@ export function validateDomainPackManifest(manifest: DomainPackManifest): string
       else seenMembers.add(m.id);
     }
   }
-  const tableNames = new Set<string>([...resources.map((r) => r.id), ...views.map((v) => v.id)]);
+  const resourceIds = new Set(resources.map((r) => r.id));
   for (const op of operations) {
     for (const e of validateBioOperationSpec(op)) errors.push(`operation '${op.id}': ${e}`);
-    for (const view of op.sql?.requiredViews ?? []) {
-      if (!tableNames.has(view)) errors.push(`operation '${op.id}' requires undeclared view/resource '${view}'`);
+    for (const rid of op.sql?.requiredResources ?? []) {
+      if (!resourceIds.has(rid)) errors.push(`operation '${op.id}' requires undeclared resource '${rid}'`);
     }
   }
   return errors;
@@ -193,7 +181,6 @@ export function createBioRegistry(): BioRegistry {
   const resolverSpecs = new Map<string, BioResolverSpec>();
   const resolverImpls = new Map<string, BioResolverImpl>();
   const termSets = new Map<string, TermSet>();
-  const views = new Map<string, BioViewDef>();
   const operations = new Map<string, BioOperationSpec>();
 
   return {
@@ -205,7 +192,6 @@ export function createBioRegistry(): BioRegistry {
       const collisions: Array<[Map<string, { id: string }>, string]> = [
         ...(manifest.provides.resolvers ?? []).map((r) => [resolverSpecs, r.id] as [Map<string, { id: string }>, string]),
         ...(manifest.provides.resources ?? []).map((r) => [resources, r.id] as [Map<string, { id: string }>, string]),
-        ...(manifest.provides.views ?? []).map((v) => [views, v.id] as [Map<string, { id: string }>, string]),
         ...(manifest.provides.termSets ?? []).map((t) => [termSets, t.id] as [Map<string, { id: string }>, string]),
         ...(manifest.provides.operations ?? []).map((o) => [operations, o.id] as [Map<string, { id: string }>, string]),
       ];
@@ -216,7 +202,6 @@ export function createBioRegistry(): BioRegistry {
       const frozen = deepFreeze(JSON.parse(JSON.stringify(manifest)) as DomainPackManifest);
       for (const r of frozen.provides.resolvers ?? []) resolverSpecs.set(r.id, r);
       for (const r of frozen.provides.resources ?? []) resources.set(r.id, r);
-      for (const v of frozen.provides.views ?? []) views.set(v.id, v);
       for (const t of frozen.provides.termSets ?? []) termSets.set(t.id, t);
       for (const o of frozen.provides.operations ?? []) operations.set(o.id, o);
       manifestIds.add(frozen.id);
@@ -230,7 +215,6 @@ export function createBioRegistry(): BioRegistry {
     getResource: (id) => resources.get(id),
     getResolverSpec: (id) => resolverSpecs.get(id),
     getTermSet: (id) => termSets.get(id),
-    getView: (id) => views.get(id),
     getOperation: (id) => operations.get(id),
     async resolveResource(resourceId, ctx) {
       const resource = resources.get(resourceId);
@@ -259,7 +243,6 @@ export function createBioRegistry(): BioRegistry {
         manifests: manifests.map(({ id, version, title, domains }) => ({ id, version, title, domains })),
         resources: [...resources.values()],
         resolvers: [...resolverSpecs.values()],
-        views: [...views.values()],
         termSets: [...termSets.values()],
         operations: [...operations.values()],
       };

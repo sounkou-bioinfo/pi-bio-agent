@@ -49,7 +49,7 @@ const flagshipManifest: DomainPackManifest = {
       schema: "pi-bio.operation_spec.v1", id: "rare_high_impact.report", version: "0.1.0",
       title: "Rare high-impact variant classification", description: "Classify variants, abstaining on unknown frequency.",
       domains: ["genomics"], transport: "duckdb.sql", inputSchema: { type: "object" },
-      sql: { sqlTemplate: RARE_HIGH_IMPACT_SQL, readOnly: true, singleStatement: true, requiredViews: ["annotated_variants", "so_loss_of_function"], requiredColumns: ["variant_key", "consequence", "allele_frequency", "clinical_significance"] },
+      sql: { sqlTemplate: RARE_HIGH_IMPACT_SQL, readOnly: true, singleStatement: true, requiredResources: ["annotated_variants", "so_loss_of_function"], requiredColumns: ["variant_key", "consequence", "allele_frequency", "clinical_significance"] },
       report: {
         kind: "bucketed_rows", idColumn: "variant_key", bucketColumn: "bucket", includedBucket: "included",
         caveats: [
@@ -71,7 +71,8 @@ function freshRegistry() {
   return r;
 }
 const runFlagship = (registry: ReturnType<typeof createBioRegistry>, conn: SqlConn) =>
-  runOperation(registry, conn, { operationId: "rare_high_impact.report", resources: ["annotated_variants", "so_loss_of_function"], runId: "flagship-run-1", now: "2026-06-28T00:00:00Z" });
+  // resources omitted on purpose — the runner derives them from the operation's requiredResources
+  runOperation(registry, conn, { operationId: "rare_high_impact.report", runId: "flagship-run-1", now: "2026-06-28T00:00:00Z" });
 const countBuckets = (rows: Array<Record<string, unknown>>) =>
   rows.reduce<Record<string, number>>((acc, r) => ({ ...acc, [String(r.bucket)]: (acc[String(r.bucket)] ?? 0) + 1 }), {});
 
@@ -83,12 +84,17 @@ describe("flagship: rare high-impact variants (data over generic primitives)", (
     assert.deepEqual(JSON.parse(JSON.stringify(snap)), snap);
   });
 
-  test("resolution fails closed: unknown resource, and declared-but-unbound resolver", async () => {
+  test("resolution fails closed: incomplete list, unknown resource, and declared-but-unbound resolver", async () => {
     const conn = await memoryConn();
     const r = createBioRegistry();
     r.registerManifest(flagshipManifest); // no impl bound
-    await assert.rejects(() => runOperation(r, conn, { operationId: "rare_high_impact.report", resources: ["nope"], runId: "x", now: "t" }), /unregistered resource/);
-    await assert.rejects(() => runOperation(r, conn, { operationId: "rare_high_impact.report", resources: ["annotated_variants"], runId: "x", now: "t" }), /no implementation is bound/);
+    const op = (resources?: string[]) => runOperation(r, conn, { operationId: "rare_high_impact.report", resources, runId: "x", now: "t" });
+    // an explicit list must cover the operation's declared requiredResources
+    await assert.rejects(() => op(["annotated_variants"]), /do not cover required resource\(s\): so_loss_of_function/);
+    // an explicit resource that isn't registered fails closed
+    await assert.rejects(() => op(["nope", "annotated_variants", "so_loss_of_function"]), /unregistered resource 'nope'/);
+    // with resources derived from requiredResources, an unbound resolver fails closed
+    await assert.rejects(() => op(), /no implementation is bound/);
   });
 
   test("the operation abstains/excludes: matches ClawBio rhi_01 (included = 1), no-frequency abstained, benign excluded", async () => {

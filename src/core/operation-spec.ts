@@ -37,7 +37,9 @@ export interface BioSqlOperationRequest {
   sqlTemplate: string;
   readOnly: true;
   singleStatement?: true;
-  requiredViews?: string[];
+  /** Resource ids this operation needs resolved into tables. The runner resolves these when the caller
+   *  omits an explicit resource list, and asserts an explicit list covers them. */
+  requiredResources?: string[];
   /** The few columns this operation needs from its resolved inputs — checked by schema discovery before
    *  the query runs. Consumer-local: it is THIS operation's input contract, not a global record type. */
   requiredColumns?: string[];
