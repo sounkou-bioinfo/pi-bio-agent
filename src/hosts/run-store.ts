@@ -68,9 +68,15 @@ export interface PersistedRun {
   files: { run: string; result: string; receipts: string };
 }
 
+// DuckDB returns BIGINT/HUGEINT (e.g. a bare `count(*)`) as a JS BigInt, which JSON.stringify cannot
+// serialize. The result IS the report and must be JSON, so a naive `count(*) AS n` must persist without the
+// user knowing to `CAST(... AS INTEGER)`. Coerce BigInt → Number on the way to disk (bio counts/positions/
+// frequencies are well within 2^53; a value needing exact larger-integer precision should be cast to text).
+const bigintToNumber = (_key: string, value: unknown): unknown => (typeof value === "bigint" ? Number(value) : value);
+
 async function writeRunFile(dir: string, name: string, data: unknown): Promise<string> {
   const path = join(dir, name);
-  await fs.writeFile(path, `${JSON.stringify(data, null, 2)}\n`, "utf8");
+  await fs.writeFile(path, `${JSON.stringify(data, bigintToNumber, 2)}\n`, "utf8");
   return path;
 }
 
