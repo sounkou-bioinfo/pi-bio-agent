@@ -158,8 +158,11 @@ Spec (build when driven by a concrete large-dataset example):
 
 ## Network opt-in hardening — pal review #4 follow-ups
 
-The host network opt-in is wired (extension gates `http.get`'s fetch on `PI_BIO_ENABLE_NETWORK=1`; pal #4
-confirmed env-gating is the safest surface — a tool param would let the model self-enable egress). Open,
+The host network opt-in is wired by COMPOSITION, not ambient env: `createBioExtension({ network })` takes the
+fetch port explicitly; the default entrypoint injects none (http.get fails closed), and `index-networked.ts` is
+the operator's explicit grant. (Pal #4 suggested an env gate, but env vars inherit across forks/embeddings and
+are invisible to the model — the substrate's injected-effect discipline forbids them; choosing the entrypoint is
+the visible, auditable, agent-inaccessible grant instead.) Open,
 freshness/provenance-correct refinements it surfaced, in priority order. Build each only with the named consumer
 in hand; none are speculative, but none should be half-built autonomously.
 

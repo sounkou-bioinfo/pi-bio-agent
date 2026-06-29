@@ -15,22 +15,19 @@ function text(payload: unknown) {
   return { content: [{ type: "text" as const, text: body }], details: payload };
 }
 
-// Network opt-in is the HOST's decision, not the agent's: the http.get resolver stays unbound (every networked
-// resource fails closed) UNLESS the operator who launches Pi sets PI_BIO_ENABLE_NETWORK=1. We gate on the env —
-// not a tool param — precisely so the model cannot turn its own egress on; the human running the process does.
-// When enabled we bind a thin adapter over the runtime's global fetch (the library never reaches for it itself).
-function hostNetwork(): { fetch: FetchLike } | undefined {
-  if (process.env.PI_BIO_ENABLE_NETWORK !== "1") return undefined;
-  const f = globalThis.fetch;
-  if (typeof f !== "function") return undefined;
-  const fetchLike: FetchLike = async (url, init) => {
-    const res = await f(url, init as RequestInit);
-    return { ok: res.ok, status: res.status, text: () => res.text(), headers: { get: (n) => res.headers.get(n) } };
-  };
-  return { fetch: fetchLike };
+// Network is an EXPLICIT injected capability, never ambient. createBioExtension takes the host's network port
+// (a fetch) by composition; nothing is read from process.env — an env var inherits across forks/embeddings, is
+// invisible to the model, and is exactly the hidden global the substrate's injected-effect discipline forbids.
+// The default entrypoint (index.ts) injects NO network, so http.get stays unbound and every networked manifest
+// fails closed. The operator grants network by loading the explicit networked entrypoint (index-networked.ts),
+// which composes a fetch in — a visible, auditable choice the agent can never make for itself.
+export interface BioExtensionOptions {
+  network?: { fetch: FetchLike };
 }
 
-export default function piBioAgentExtension(pi: ExtensionAPI): void {
+export function createBioExtension(options: BioExtensionOptions = {}): (pi: ExtensionAPI) => void {
+  const network = options.network;
+  return function piBioAgentExtension(pi: ExtensionAPI): void {
   pi.on("resources_discover", (event) => ({
     skillPaths: [runtimeSkillRoot(event.cwd)],
   }));
@@ -85,7 +82,7 @@ export default function piBioAgentExtension(pi: ExtensionAPI): void {
       runId: Type.Optional(Type.String({ description: "Stable run id; generated when omitted." })),
     }),
     async execute(_id, params: { dbPath: string; manifestPath: string; operationId: string; runId?: string }, _signal, _onUpdate, ctx) {
-      return text(await runBioOperationFromManifest({ cwd: ctx.cwd, ...params, network: hostNetwork() }));
+      return text(await runBioOperationFromManifest({ cwd: ctx.cwd, ...params, network }));
     },
   });
 
@@ -101,7 +98,7 @@ export default function piBioAgentExtension(pi: ExtensionAPI): void {
       runId: Type.Optional(Type.String({ description: "Stable run id; generated when omitted." })),
     }),
     async execute(_id, params: { dbPath: string; manifestPath: string; sql: string; resources?: string[]; runId?: string }, _signal, _onUpdate, ctx) {
-      return text(await runBioQueryFromManifest({ cwd: ctx.cwd, ...params, network: hostNetwork() }));
+      return text(await runBioQueryFromManifest({ cwd: ctx.cwd, ...params, network }));
     },
   });
 
@@ -226,4 +223,9 @@ export default function piBioAgentExtension(pi: ExtensionAPI): void {
       return text({ deleted: true, slug: params.slug });
     },
   });
+  };
 }
+
+// Default entrypoint: NO network injected — http.get stays unbound and every networked manifest fails closed.
+// Grant network by loading the explicit networked entrypoint: `pi -e extensions/pi-coding-agent/index-networked.ts`.
+export default createBioExtension();

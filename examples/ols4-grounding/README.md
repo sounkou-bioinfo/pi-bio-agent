@@ -21,20 +21,26 @@ manifest at a new URL and you have a new "skill", with **zero new TypeScript**. 
 
 ## Running it
 
-Network is the **host's** opt-in, never the agent's. The library injects `fetch`; nothing reaches the network
-ambiently. The Pi extension binds the runtime's `fetch` only when the operator sets `PI_BIO_ENABLE_NETWORK=1`,
-so the manifest **fails closed** by default:
+Network is the **host's** capability, never the agent's, and it is granted **by composition** — not by an
+ambient env var (which would inherit across forks/embeddings and is invisible to the model). The default
+entrypoint injects no `fetch`, so the manifest **fails closed**. The operator grants network by loading the
+explicit *networked* entrypoint:
 
 ```sh
-PI_BIO_ENABLE_NETWORK=1 pi -e extensions/pi-coding-agent/index.ts
+# default: no network — http.get is unbound, this manifest fails closed
+pi -e extensions/pi-coding-agent/index.ts
+
+# explicit grant: the operator chooses the networked entrypoint, which composes a fetch in
+pi -e extensions/pi-coding-agent/index-networked.ts
 ```
 
-**Scope of the gate (do not over-trust it):** `PI_BIO_ENABLE_NETWORK` only binds `http.get`'s fetch. It is *not*
-a general egress firewall — by design the library is not the network sandbox. Other resolvers
-(`duckdb.file_scan`, `duckhts.read_bcf`, `duckdb.sql_materialize`) can still read remote URIs if your host/DuckDB
-allows it, and `http.get` does no SSRF allowlisting. Enforce real egress control (allow/block lists, blocking
-internal-metadata IPs, a deny-by-default container) at the **host** boundary — and have your injected `fetch`
-enforce any URL policy you need.
+Choosing `index-networked.ts` is a visible, auditable decision the human running Pi makes; the agent can never
+turn its own egress on. **Scope (do not over-trust it):** that grant only binds `http.get`'s fetch. It is *not* a
+general egress firewall — by design the library is not the network sandbox. Other resolvers (`duckdb.file_scan`,
+`duckhts.read_bcf`, `duckdb.sql_materialize`) can still read remote URIs if your host/DuckDB allows it, and
+`http.get` does no SSRF allowlisting. Enforce real egress control (allow/block lists, blocking internal-metadata
+IPs, a deny-by-default container) at the **host** boundary — wrap the injected `fetch` in `index-networked.ts`
+with whatever URL policy you need.
 
 Then the agent calls `bio_query` with this manifest and grounds with ordinary SQL, e.g.:
 
