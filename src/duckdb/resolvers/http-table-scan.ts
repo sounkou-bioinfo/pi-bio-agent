@@ -41,8 +41,10 @@ export function httpTableResolver(fetchImpl: FetchLike): BioResolverImpl {
     const reader = READERS[format];
     if (!reader) throw new Error(`http resolver: unknown format '${format}' (expected json, ndjson, or csv)`);
     const headers = (p.headers && typeof p.headers === "object" ? p.headers : {}) as Record<string, string>;
-    // Read-only by policy: GET, or POST as a QUERY (a request body that READS — VEP batch annotation, GraphQL).
-    // PUT/DELETE/PATCH (mutations) are refused, so the effect surface can't silently widen to writes.
+    // This resolver materializes a response BODY into a table, so it allows the BODY-RETURNING READ methods:
+    // GET, or POST as a QUERY (a body that READS — VEP batch, GraphQL). PUT/DELETE/PATCH (mutations) are refused.
+    // HEAD/OPTIONS are also safe but return METADATA/capabilities, not a data body — they belong to API
+    // DISCOVERY (alongside OpenAPI specs), a separate concern from data-fetch, not this body->table resolver.
     const method = p.method === undefined ? "GET" : String(p.method).toUpperCase();
     if (method !== "GET" && method !== "POST") throw new Error("http.get supports GET or read-only POST (a query body); PUT/DELETE/PATCH are refused");
     const requestBody = method === "POST" && p.body !== undefined ? (typeof p.body === "string" ? p.body : JSON.stringify(p.body)) : undefined;

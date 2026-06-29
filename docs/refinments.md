@@ -289,6 +289,31 @@ Resolutions (these are ADDRESSABLE via known machinery, not open research):
   already-threaded `AbortSignal`). Drives stateful-async services.
 Each is a bounded resolver generalization within the bet, not a new transport. Build on a concrete consumer.
 
+## API discovery (OpenAPI/OPTIONS) + parameterized resources — the two pieces that de-toy the API examples
+
+Three user questions converge on the same gap. The variant-annotation example hard-codes 5 rsIDs in the request
+body — overfitting: a real skill doesn't bake the query data into the manifest. The two missing pieces:
+
+- **API DISCOVERY (don't hand-author the resource shape).** Many bio APIs (Ensembl, EBI, …) ship an OpenAPI/
+  Swagger spec. DERIVE http resources from it: the endpoint URL (server+path), method, parameters, request-body
+  schema, and RESPONSE schema all come from the spec — so the resource is GENERATED, not authored (matches
+  "hand-writing manifests should be banned"), and the response shape the agent unnests is grounded in the spec,
+  not guessed. `OPTIONS` is the *runtime* sibling of this (an endpoint's "what can I do here" probe) — which is
+  why OPTIONS/HEAD aren't in the body->table resolver: they're DISCOVERY, a separate concern from data-fetch.
+  Build: `openApiToResources(spec)` -> http resource templates (url/method/body-schema/format); the agent picks
+  an operation and fills its params.
+- **PARAMETERIZED RESOURCES (the query data comes from upstream/agent, not the manifest).** Today resource
+  params are STATIC manifest data; there is no way to template a resource's request from another table's
+  contents or agent input. The honest "discover variants then annotate" flow needs: stage-1 reads a VCF
+  (`duckhts.read_bcf`) -> a table of ids; stage-2's VEP request `body` is TEMPLATED from that table (`{ids: SELECT
+  id FROM variants}`). That is a real feature — a resource whose request is a function of upstream data — and it
+  is what turns the hardcoded-rsID toy into a composed skill. Until then, examples that bake query data into the
+  manifest must SAY so (variant-annotation's README now does).
+
+Together: OpenAPI gives the resource SHAPE + param schema (derived); parameterization lets the agent/upstream
+fill the params. Then the flow is real: discover the API (OpenAPI) -> read variants (VCF) -> annotate them (VEP
+with agent/upstream-provided ids), with nothing query-specific hardcoded.
+
 ## Machine studying — Fugu pieces 2 & 3 over the study-notes system
 
 Sakana Fugu (https://sakana.ai/fugu, arXiv 2606.21228) factors into: (1) a LEARNED orchestrator, (2) scaffold-
