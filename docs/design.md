@@ -249,6 +249,38 @@ DuckDB is the default local analytical store:
 
 DuckDB should hold hot structured facts and indexes. Large raw bytes stay in CAS/object storage or virtual resources unless there is a deliberate reason to import them.
 
+#### The SemanticSQL shape: statements + `entailed_edge` (one substrate for graph, ontology, and scales)
+
+The graph layer follows [SemanticSQL](https://github.com/INCATools/semantic-sql) (how Bioconductor's
+ontoProc2 serves OBO ontologies): a tiny fixed relational shape, queried by plain SQL, with no graph runtime.
+Two tables carry it, and **the same shape serves imported ontologies and our own committed graph** —
+distinguished only by scope:
+
+- **`bio_edges(from_id, predicate, to_id, attrs, trust)`** — the statement/edge base (`subject=from_id,
+  predicate, object=to_id`). Labels, synonyms, definitions, and relations are all just rows; the predicate is
+  an open CURIE vocabulary (`rdfs:subClassOf`, `BFO:0000050` part_of, our own `references`/`measures`/…).
+- **`entailed_edge(from_id, predicate, to_id)`** — the *precomputed transitive closure* over the transitive
+  predicates (`materializeEntailedEdges(conn, transitivePredicates)`, a recursive CTE). With it,
+  descendants / ancestors / subsumption / graph-walk are **one indexed JOIN**, no bespoke walker:
+  `SELECT from_id FROM entailed_edge WHERE to_id = ? AND predicate = 'rdfs:subClassOf'`.
+
+This makes **order the unifying idea, expressed as data and queried by SQL**, at three layers:
+
+```text
+analysis       operation SQL over resolver-materialized tables
+total order    an ordinal scale = a ranked TermSet -> scale_members(scale_id, member_id, rank)
+partial order  subsumption / graph = bio_edges + entailed_edge closure
+```
+
+A scale is a *total* order (`scale_members.rank`); an ontology or graph is a *partial* order (`entailed_edge`);
+`decideGrounding` membership is unchanged — closure and rank are just another table/column. We absorb the
+SemanticSQL *shape*, never a graph or ontology runtime.
+
+**Grounding has two tiers.** A *projection* tier — deterministic, offline, fail-closed: cached CURIEs +
+`entailed_edge` + FTS over labels/synonyms answer "text→CURIE (already known)" and "descendants of X" as pure
+SQL. A *judgment* tier — `decideGrounding` over a fresh OLS4/search candidate set, used only on a projection
+miss, which **abstains below threshold and never invents a CURIE**.
+
 ### 5. Provenance graph: every claim has a source path
 
 Every fact-like row should be able to answer:

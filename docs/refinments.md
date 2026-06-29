@@ -161,12 +161,24 @@ Open design issues and cleanup targets. Keep this file focused on what still nee
 
 ## KG and ontology substrate
 
-- Add a minimal concrete DuckDB schema for:
-  - ontology terms/edges/mappings
-  - KG nodes/edges/observations/evidence
-  - resource/artifact provenance
-- Add bounded graph-walk semantics with expansion handles so high-degree neighborhoods do not flood context.
-- Add trust/provenance fields consistently across facts, edges, and artifacts.
+**Direction settled (2026-06-29): the SemanticSQL shape.** The graph is `bio_edges(from_id, predicate,
+to_id)` (the statement/edge base) plus `entailed_edge` (the precomputed transitive closure). The same shape
+serves imported ontologies and our own committed graph; descendants/subsumption/graph-walk are one indexed
+JOIN, not a walker. See [`design.md`](./design.md#the-semanticsql-shape-statements--entailed_edge-one-substrate-for-graph-ontology-and-scales).
+
+- DONE: `entailed_edge` closure (`materializeEntailedEdges`, `src/duckdb/graph-closure.ts`) — per-predicate
+  transitive closure over `bio_edges`, indexed both directions; cycles terminate via UNION dedup.
+- DONE: ordinal scales as data (`scale_members` from a ranked `TermSet`) — total order to the graph's partial
+  order; `decideGrounding` membership unchanged.
+- NEXT (deferred until a real grounding/traversal consumer): an `ontology.semsql` resolver that lands an OBO
+  ontology's `statements` + `entailed_edge` into the same shape — ingest via `sqlite_scan -> parquet` (sidesteps
+  live ATTACH where unavailable), index `entailed_edge` on `(to_id,predicate)`+`(from_id,predicate)`, pin a
+  bbop-sqlite build date as source provenance, honor per-ontology CC-BY. OLS4 REST only for fresh text→CURIE
+  misses (judgment tier); cached CURIEs + FTS are the deterministic projection tier; ABSTAIN below threshold.
+- Add bounded graph-walk semantics with expansion handles so high-degree neighborhoods do not flood context
+  (now a bounded SQL query over `entailed_edge`, not a custom walker).
+- Add trust/provenance fields consistently across facts, edges, and artifacts (`bio_edges.trust` exists; keep
+  it uniform with receipts/artifacts).
 - Add as-of/known-at time lenses where variant reanalysis or changing knowledge releases matter.
 
 ## Biomedical workflow fixtures
