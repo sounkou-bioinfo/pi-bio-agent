@@ -1,4 +1,5 @@
 import { promises as fs } from "node:fs";
+import { systemClock } from "../core/clock.js";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { createBioRegistry, type BioRegistry, type DomainPackManifest, type ResolutionReceipt } from "../core/manifest.js";
@@ -187,7 +188,7 @@ export async function runBioOperationFromManifest(req: RunOperationRequest): Pro
   const op = registry.getOperation(req.operationId);
   if (!op) throw new Error(`operation '${req.operationId}' is not declared in the manifest`);
   if (op.transport !== "duckdb.sql" || !op.sql) throw new Error(`operation '${req.operationId}' is not a duckdb.sql operation`);
-  const now = req.now ?? new Date().toISOString();
+  const now = req.now ?? systemClock();
   const runId = req.runId ?? `${req.operationId.replace(/[^a-zA-Z0-9._-]/g, "_")}-${Date.now()}`;
   return runAndPersist(req.cwd, req.dbPath, runId, req.operationId, (conn) => runOperation(registry, conn, { operationId: req.operationId, runId, now }));
 }
@@ -219,7 +220,7 @@ export async function runBioQueryFromManifest(req: RunQueryRequest): Promise<Run
   }
   const { registry, manifest } = await prepareRegistry(req);
   const resources = req.resources ?? (manifest.provides?.resources ?? []).map((r) => r.id);
-  const now = req.now ?? new Date().toISOString();
+  const now = req.now ?? systemClock();
   const runId = req.runId ?? `query-${Date.now()}`;
   return runAndPersist(req.cwd, req.dbPath, runId, "ad-hoc.query", (conn) => runQuery(registry, conn, { sql: req.sql, resources, runId, now }));
 }

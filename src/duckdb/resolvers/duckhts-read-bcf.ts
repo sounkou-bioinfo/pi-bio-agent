@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { systemClock } from "../../core/clock.js";
 import { readFileSync } from "node:fs";
 import type { BioResolverImpl } from "../../core/ports.js";
 
@@ -17,7 +18,7 @@ export const duckhtsReadBcfResolver: BioResolverImpl = async (resource, ctx) => 
   const { path, table = "vcf_raw" } = resource.params as { path: string; table?: string };
   if (typeof path !== "string" || !path.trim()) throw new Error("duckhts.read_bcf: 'path' (string) is required");
   if (!IDENT_RE.test(table)) throw new Error("duckhts.read_bcf: 'table' must be a SQL identifier");
-  const now = ctx.now ?? new Date().toISOString();
+  const now = ctx.now ?? systemClock();
 
   // Fail closed if duckhts is not loadable. No INSTALL here — the host must provision the extension.
   try {

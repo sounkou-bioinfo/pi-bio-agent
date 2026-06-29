@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { systemClock } from "../../core/clock.js";
 import { validateReadOnlySelect } from "../../core/sql-guard.js";
 import type { BioResolverImpl } from "../../core/ports.js";
 
@@ -44,7 +45,7 @@ export const duckdbSqlMaterializeResolver: BioResolverImpl = async (resource, ct
   }
   await ctx.conn.run(`CREATE OR REPLACE TABLE ${p.table} AS ${inner}`);
 
-  const now = ctx.now ?? new Date().toISOString();
+  const now = ctx.now ?? systemClock();
   const sqlDigest = `sha256:${createHash("sha256").update(inner).digest("hex")}`;
   return {
     // the handle identifies the materialized table; we have no byte digest (the SQL/sources are the provenance)

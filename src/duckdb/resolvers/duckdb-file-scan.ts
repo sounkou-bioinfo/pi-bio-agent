@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { systemClock } from "../../core/clock.js";
 import { readFileSync } from "node:fs";
 import type { BioResolverImpl, ResolverOutput } from "../../core/ports.js";
 import { memoLookup, memoStore } from "../resolution-memo.js";
@@ -38,7 +39,7 @@ export const duckdbFileScanResolver: BioResolverImpl = async (resource, ctx) => 
   if (typeof path !== "string" || !path.trim()) throw new Error("duckdb.file_scan: 'path' (string) is required");
   if (!IDENT_RE.test(table)) throw new Error("duckdb.file_scan: 'table' must be a SQL identifier");
   const fn = readerFor(path, reader);
-  const now = ctx.now ?? new Date().toISOString();
+  const now = ctx.now ?? systemClock();
 
   // Memoization key = the file's CONTENT digest (not mtime+size, which false-hits on a same-size change with a
   // preserved/coarse mtime). Computing it re-reads the file, but a hit still skips the DuckDB load (the parse,

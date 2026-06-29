@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { systemClock } from "./clock.js";
 import { validateBioOperationSpec, type BioOperationSpec } from "./operation-spec.js";
 import type { BioResolverImpl, ResolutionContext } from "./ports.js";
 import type { BioResolverSpec, ResourceHandle, SourceSnapshot, VirtualResourceSpec } from "./resources.js";
@@ -256,7 +257,7 @@ export function createBioRegistry(): BioRegistry {
       if (!spec) throw new Error(`resource '${resourceId}' points to unregistered resolver '${resource.resolver}'`);
       const impl = resolverImpls.get(resource.resolver);
       if (!impl) throw new Error(`resolver '${resource.resolver}' is declared but no implementation is bound`); // fail closed
-      const now = ctx.now ?? new Date().toISOString();
+      const now = ctx.now ?? systemClock();
       const out = await impl(resource, ctx);
       return {
         schema: "pi-bio.resolution_receipt.v1",

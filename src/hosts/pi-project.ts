@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { systemClock } from "../core/clock.js";
 import { promises as fs } from "node:fs";
 import { join } from "node:path";
 import { bioProjectLayout } from "../core/storage.js";
@@ -71,7 +72,7 @@ export interface StudyNoteWriteResult {
   created: boolean;
 }
 
-export async function writeStudyNote(cwd: string, note: StudyNote, now = new Date().toISOString()): Promise<StudyNoteWriteResult> {
+export async function writeStudyNote(cwd: string, note: StudyNote, now = systemClock()): Promise<StudyNoteWriteResult> {
   const errors = validateStudyNote(note);
   if (errors.length) throw new Error(`invalid study note ${note.slug || "<unnamed>"}: ${errors.join("; ")}`);
   const root = runtimeStudyRoot(cwd);
@@ -127,7 +128,7 @@ export function makeStudyNote(params: {
   tags?: string[];
   links?: StudyNoteLink[];
   sources?: StudyNote["sources"];
-}, now = new Date().toISOString()): StudyNote {
+}, now = systemClock()): StudyNote {
   const note: StudyNote = {
     schema: "pi-bio.study_note.v1",
     slug: normalizeStudySlug(params.slug ?? params.title),

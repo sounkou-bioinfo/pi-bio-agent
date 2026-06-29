@@ -1,4 +1,5 @@
 import type { ResourceHandle } from "./resources.js";
+import { systemClock } from "./clock.js";
 import type { JsonValue } from "./tool-spec.js";
 import type { BioArtifact, Provenance } from "./types.js";
 
@@ -109,7 +110,7 @@ export function validateBioRunEvent(event: BioRunEvent): string[] {
   return errors;
 }
 
-export function newRunRecord(spec: BioRunSpec, now = new Date().toISOString()): BioRunRecord {
+export function newRunRecord(spec: BioRunSpec, now = systemClock()): BioRunRecord {
   const errors = validateBioRunSpec(spec);
   if (errors.length) throw new Error(`invalid BioRunSpec ${spec.id || "<unnamed>"}: ${errors.join("; ")}`);
   return {
@@ -123,7 +124,7 @@ export function newRunRecord(spec: BioRunSpec, now = new Date().toISOString()): 
 }
 
 export function appendRunEvent(record: BioRunRecord, event: Omit<BioRunEvent, "schema" | "runId" | "at"> & { at?: string }): BioRunRecord {
-  const at = event.at ?? new Date().toISOString();
+  const at = event.at ?? systemClock();
   const fullEvent: BioRunEvent = { schema: "pi-bio.run_event.v1", runId: record.spec.id, at, ...event };
   const errors = validateBioRunEvent(fullEvent);
   if (errors.length) throw new Error(`invalid BioRunEvent: ${errors.join("; ")}`);

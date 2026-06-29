@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { systemClock } from "../../core/clock.js";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -70,7 +71,7 @@ export function httpTableResolver(fetchImpl: FetchLike): BioResolverImpl {
       await fs.rm(dir, { recursive: true, force: true });
     }
 
-    const now = ctx.now ?? new Date().toISOString();
+    const now = ctx.now ?? systemClock();
     const output: ResolverOutput = {
       // the handle identifies what downstream SQL uses — the materialized table; the URL is provenance, below
       result: { schema: "pi-bio.resource_handle.v1", mode: "reference", name: p.table, pointer: { uri: `table:${p.table}`, format: "table" }, address: { algorithm: "sha256", digest } },
