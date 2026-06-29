@@ -219,13 +219,39 @@ Narrative: BASELINE = the SQL-REPL-over-addressable-data substrate + a process r
 executable MIDDLE of ClawBio as manifests. SPECULATIVE upside = the same substrate closing over Fugu/RLM/
 networked agents.
 
-Honest boundary (pal #9): "all of ClawBio for free" is too strong. The SQL path + process runtime cover a large
-executable middle, NOT everything. Classes that fit neither: (a) complex/stateful remote SERVICES — async jobs,
-polling/resume/cancel, server-side workflow state (may earn a new transport, `docs/design.md`); (b) non-GET /
-GraphQL / auth / pagination-heavy APIs (`http.get` is GET-only, JSON/CSV/NDJSON) — need operation-pack/resolver
-work; (c) SEMANTIC/judgment tasks (literature interpretation, phenotype disambiguation, narrative synthesis) —
-SQL/process FEED them, not replace them (the judgment boundary); (d) human/clinical review/policy workflows —
-host policy, not executable substrate. State the middle, do not overclaim the whole.
+Honest boundary (pal #9, corrected — most of pal's "fits neither" classes COLLAPSE; pushed back): "all of
+ClawBio for free" is too strong, but the gap is much smaller than pal claimed. Working through pal's classes:
+
+- **stateful-async services** (submit -> poll -> fetch): a sequence of HTTP calls with a `job_id` threaded
+  through + a poll-until-ready loop. That is http-with-session + a poll primitive driven by a process op /
+  conductor step — COMPOSITION, not a new transport. Collapses.
+- **GraphQL**: a `POST` with a JSON query body to one endpoint, JSON back -> table — a `method`+`body`
+  generalization of the http resolver. Collapses.
+- **auth**: a host-INJECTED header (Bearer/API key); the resolver already takes `headers`, secrets stay out of
+  the manifest like `fetch` does. Collapses, and matches the doctrine.
+- **pagination**: follow `next` cursors in a bounded loop, `UNION` each page into the table — a resolver loop /
+  conductor map. Collapses.
+- **human/clinical sign-off**: a host gate AROUND runs — out of executable scope by definition (the substrate
+  produces the auditable artifact a human approves), not a coverage gap.
+
+The ONLY genuinely irreducible thing is the LM's own SEMANTIC JUDGMENT (literature interpretation, phenotype
+disambiguation, narrative synthesis) — and that is not a gap, it is the judgment boundary we designed on purpose
+(two-tier grounding: deterministic SQL projection -> LM judgment). The substrate FEEDS it; the model does the
+semantic step. So the corrected claim: substrate + process runtime + judgment boundary cover ClawBio's
+COMPUTATIONAL surface; what isn't "free" is (i) the model's semantic judgment (the designed seam) and (ii) human
+sign-off (host policy). The collapse is ARCHITECTURAL (no new substrate class), but it does require real
+http-resolver generalization (POST/body, host-injected auth, pagination-follow, poll) that does not exist yet —
+that is pal's one accurate point. See "HTTP resolver generalization" below.
+
+### HTTP resolver generalization (the real build the collapse needs)
+`http.get` is today GET-only, JSON/CSV/NDJSON, single-shot. To make the classes above manifest-expressible:
+- `method` + `body` params (POST/PUT; GraphQL = POST + JSON query body). Keep read-only INTENT explicit (a
+  declared `mutates: false` or a separate `http.post` name) so the effect surface stays honest.
+- host-INJECTED auth headers (never in the manifest) — a host `authHeaders` capability composed like `network`.
+- pagination: a `paginate` spec (`next` JSONPath / `Link` header) the resolver follows, UNION-ing pages.
+- a poll primitive: submit -> poll `status` until ready -> fetch, with bounded backoff (cancellable via the
+  already-threaded `AbortSignal`). Drives stateful-async services.
+Each is a bounded resolver generalization within the bet, not a new transport. Build on a concrete consumer.
 
 ## Machine studying — Fugu pieces 2 & 3 over the study-notes system
 
