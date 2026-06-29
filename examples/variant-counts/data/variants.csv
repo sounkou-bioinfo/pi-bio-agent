@@ -1,0 +1,6 @@
+variant_key,consequence,allele_frequency
+1:1000:C:T,stop_gained,0.0003
+2:2000:G:A,missense,0.3
+3:3000:A:G,stop_gained,
+4:4000:T:C,missense,0.01
+5:5000:G:C,synonymous,0.2
