@@ -138,23 +138,40 @@ each lands only when a concrete consumer forces it, never ahead.
   |> collect()` — i.e. resolver(s) → operation SQL. A process-op producing Parquet artifacts that `file_scan`/
   `sql_materialize` then aggregate is exactly this; no bespoke combine step.
 
-## CAS-of-bytes — the next genuine advance (real consumer, bigger build)
+## CAS-of-bytes — BUILT (slices 1-2), and its honest scope
 
 Distinct from the resolution memo (which caches a materialized TABLE within one persistent db): CAS dedups the
-raw BYTES across dbs/projects, keyed by content hash, with rollback/audit. Consumer is ClawBio-shaped and easy:
-a skill pulling a large remote dataset (gnomAD VCF, an OpenTargets dump) that should be fetched ONCE and reused
-across runs/projects, not re-downloaded per db.
+raw BYTES across dbs/projects, keyed by content hash. BUILT:
+- `src/core/cas.ts` (`CasStore`: pathFor/has/put + a cross-db url->{etag,address} index) + `src/hosts/fs-cas.ts`
+  (filesystem, `<root>/<algo>/<digest>`, atomic).
+- Host opt-in by composition (`cas` threads RunRequest -> runQuery/runOperation -> `ResolutionContext.cas`),
+  default absent = fast mode.
+- `http.get` CAS mode: a 200 snapshots the body under its sha256 + seeds the url->ETag index; a DIFFERENT db
+  with an empty per-db memo sends If-None-Match from that index and on 304 materializes from CAS bytes with NO
+  re-download (test: body downloads exactly once across two dbs).
 
-Spec (build when driven by a concrete large-dataset example):
-- Store under `.pi/bio-agent/cas/<algo>/<digest>` (immutable; the receipt's `ResourceHandle.address` already
-  carries the content hash — `contentAddressUri`).
-- `http.get` / `file_scan` write fetched/source bytes to CAS and materialize FROM the CAS path; the receipt
-  records the CAS address. A second resolve whose source is content-unchanged (ETag 304 / file digest) reads the
-  bytes from CAS instead of re-downloading — even from a DIFFERENT db where the table doesn't persist.
-- Freshness still gates it (CAS is storage/dedup, not freshness): the ETag/content-digest decides whether the
-  CAS entry is current; CAS decides whether the bytes must be re-fetched.
-- Opt-in per host/profile (the "CAS mode" vs "fast mode" split): default fast (DuckDB scans the source directly);
-  CAS mode snapshots bytes first for byte-perfect provenance + cross-db reuse.
+### Honest scope — CAS is for WHOLE objects, not a universal remote cache (pal #7)
+CAS-of-whole-bytes is right for a REST/JSON API body or a moderate dump fetched by `http.get` itself. It is the
+WRONG granularity for two cases, which are separate tiers chosen by which resolver the manifest declares:
+
+- **Small-region joins over a huge indexed remote VCF (gnomAD):** use HTTP RANGE + tabix via htslib, not whole-
+  object CAS. Spec — region-scoped `duckhts.read_bcf` (an intentional extension; today it only takes
+  `{path,table}` and reads the whole file, `src/duckdb/resolvers/duckhts-read-bcf.ts`):
+  - params `{ path, index?, table, regions: [{chrom,start,end}] }`; resolver canonicalizes to htslib region
+    strings and reads only those blocks (`read_bcf(?, region := ?)`).
+  - Provenance: record the VCF URI + the INDEX (.tbi/.csi) URI + index/file ETag + the canonical region list;
+    do NOT record a whole-file sha256 that was never downloaded. CAS may cache the small INDEX bytes (reused,
+    tiny) and/or the derived region table — never the whole VCF.
+  - Traps: htslib regions are 1-based closed vs BED 0-based half-open; validate VCF+index as a pair (ETag skew);
+    split multiallelics + left-normalize REF/ALT + match contig naming/assembly before exact joins; prefer CSI
+    for large contigs.
+- **Remote columnar/large files DuckDB reads directly (parquet/csv on http/s3):** lean on DuckDB httpfs +
+  `cache_httpfs` block caching, NOT our CAS — those bytes never flow through our resolver (see pal #8 follow-up).
+
+### Decision rule for a manifest author
+- REST/JSON API body, whole moderate object, ETag-validated, reused across projects -> `http.get` (+ CAS).
+- Small genomic region of a huge indexed remote VCF/BCF -> region-scoped `duckhts.read_bcf` (tabix range).
+- Remote parquet/csv DuckDB can scan directly -> `duckdb.file_scan`/`sql_materialize` + httpfs (+ cache_httpfs).
 
 ## Effect discipline — pal review #5 follow-ups
 
