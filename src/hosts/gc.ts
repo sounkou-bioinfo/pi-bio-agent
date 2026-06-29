@@ -3,12 +3,20 @@ import { join } from "node:path";
 import { runsRoot } from "./run-store.js";
 
 // Garbage collection for the substrate's two unbounded stores: the CAS (content-addressed bytes) and the run
-// directory. The model makes GC simple and SAFE:
-//   - the CAS is a HEAP; a run's receipts are its ROOTS (every receipt records the digests it produced/used).
-//   - a run-retention policy (keep last N / TTL) decides which runs survive.
-//   - MARK-AND-SWEEP: any CAS entry not reachable from a SURVIVING run's receipts (or the CAS remote index) is
-//     garbage. Deleting it is safe because CAS is a cache + provenance snapshot, not the source of truth — a
-//     later resolve re-fetches on miss (the resolution memo / http.get ETag path).
+// directory. The model: the CAS is a HEAP; a run's receipts are its ROOTS; MARK-AND-SWEEP deletes CAS entries
+// unreachable from a surviving run (safe because CAS is a cache + provenance snapshot, re-derivable on miss).
+//
+// *** DISTRIBUTED-RUN SAFETY (load-bearing) ***
+// Mark-and-sweep is correct ONLY when the root set is COMPLETE. Two hazards once runs are distributed over a
+// SHARED CAS (object store / quack):
+//   1. INCOMPLETE ROOTS: a GC on one node sees only ITS local runs. Sweeping from local roots alone would
+//      delete bytes that ANOTHER node's runs still reference. => the caller MUST pass the union of ALL nodes'
+//      roots (`extraRoots`, e.g. scanned from a quack-shared run/receipt index) before sweeping a shared CAS.
+//      Without that, restrict GC to a NODE-LOCAL CAS (the default, single-node case, which IS safe).
+//   2. WRITE RACE: a concurrent/remote run can write CAS bytes that are not yet in any committed receipt. The
+//      `minAgeMs` grace retains entries younger than the longest possible in-flight run, so they are never
+//      swept out from under a writer.
+// collectGarbage is single-node-safe by default; pass extraRoots + minAgeMs for the distributed case.
 
 /** Every 64-hex content digest mentioned anywhere in these receipt JSON blobs — sourceSnapshot versions,
  *  provenance digests, result-handle addresses. These name the CAS files retained runs still reference. */
@@ -20,10 +28,14 @@ export function liveDigests(receiptJsons: string[]): Set<string> {
 
 export interface CasGcResult { swept: string[]; retained: number; }
 
-/** Mark-and-sweep the filesystem CAS: delete every `<root>/<algo>/<digest>` whose digest is not a live root.
- *  The `remote/` index dir is left to `gcRemoteIndex`. */
-export async function gcCas(casRoot: string, live: Set<string>): Promise<CasGcResult> {
+/** Mark-and-sweep the filesystem CAS: delete every `<root>/<algo>/<digest>` whose digest is not a live root AND
+ *  is older than `minAgeMs` (the write-race grace — a too-new entry may be an in-flight/remote writer's bytes
+ *  not yet in any receipt). `live` MUST be the COMPLETE root set (all nodes) for a shared CAS. The `remote/`
+ *  index dir is left to `gcRemoteIndex`. */
+export async function gcCas(casRoot: string, live: Set<string>, opts: { minAgeMs?: number; now?: number } = {}): Promise<CasGcResult> {
   const result: CasGcResult = { swept: [], retained: 0 };
+  const minAgeMs = opts.minAgeMs ?? 0;
+  const now = opts.now ?? Date.now();
   let algos: string[];
   try {
     algos = (await fs.readdir(casRoot, { withFileTypes: true })).filter((d) => d.isDirectory() && d.name !== "remote").map((d) => d.name);
@@ -32,6 +44,10 @@ export async function gcCas(casRoot: string, live: Set<string>): Promise<CasGcRe
     const dir = join(casRoot, algo);
     for (const name of await fs.readdir(dir)) {
       if (live.has(name)) { result.retained++; continue; }
+      if (minAgeMs > 0) {
+        const age = now - (await fs.stat(join(dir, name))).mtimeMs;
+        if (age < minAgeMs) { result.retained++; continue; } // too new to safely sweep (a concurrent/remote writer)
+      }
       await fs.rm(join(dir, name), { force: true });
       result.swept.push(`${algo}/${name}`);
     }
@@ -85,16 +101,20 @@ export async function pruneRuns(runsDir: string, opts: PruneOpts = {}): Promise<
 }
 
 /** End-to-end GC for a project: prune runs first, then mark-and-sweep the CAS rooted at the SURVIVING runs'
- *  receipts. Returns what was reclaimed. The CAS root is the host's choice (default `.pi/bio-agent/cas`). */
-export async function collectGarbage(cwd: string, opts: { runs?: PruneOpts; casRoot?: string } = {}): Promise<{ runsPruned: string[]; casSwept: string[]; remoteDropped: number }> {
+ *  receipts. SINGLE-NODE-SAFE by default. For DISTRIBUTED runs over a SHARED CAS, pass `extraRoots` — the union
+ *  of every OTHER node's live digests (e.g. scanned from a quack-shared receipt index) — and `minAgeMs` (a grace
+ *  >= the longest possible in-flight run) so a local sweep cannot delete another node's or an in-flight run's
+ *  bytes. Without extraRoots, only run this against a node-LOCAL CAS. */
+export async function collectGarbage(cwd: string, opts: { runs?: PruneOpts; casRoot?: string; extraRoots?: Iterable<string>; minAgeMs?: number } = {}): Promise<{ runsPruned: string[]; casSwept: string[]; remoteDropped: number }> {
   const runsDir = runsRoot(cwd);
   const { pruned, kept } = await pruneRuns(runsDir, opts.runs ?? {});
   const receiptJsons = await Promise.all(kept.map(async (name) => {
     try { return await fs.readFile(join(runsDir, name, "receipts.json"), "utf8"); } catch { return ""; }
   }));
   const live = liveDigests(receiptJsons);
+  for (const r of opts.extraRoots ?? []) live.add(r); // cross-node roots: the union of all nodes' live digests
   const casRoot = opts.casRoot ?? join(cwd, ".pi", "bio-agent", "cas");
-  const { swept } = await gcCas(casRoot, live);
+  const { swept } = await gcCas(casRoot, live, { minAgeMs: opts.minAgeMs });
   const { dropped } = await gcRemoteIndex(casRoot, live);
   return { runsPruned: pruned, casSwept: swept, remoteDropped: dropped };
 }
