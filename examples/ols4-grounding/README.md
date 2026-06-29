@@ -1,13 +1,18 @@
-# Example: an API skill as a manifest (OLS4 term grounding)
+# Example: a grounding skill as a manifest (metacurator `disambiguate`, over OLS4)
 
-A ClawBio skill that "looks up an ontology term against [OLS4](https://www.ebi.ac.uk/ols4/)" is, in this
-substrate, **a manifest plus one SQL query** — not a bespoke client. `manifest.json` declares the OLS4 search
-URL as an `http.get` resource; the agent resolves it into a `ols4_candidates` table and writes the grounding
-SQL itself.
+This folds in [metacurator](https://github.com/seandavi/metacurator)'s `disambiguate` discipline — ground a text
+term to **one** of the provided grounded CURIEs, or abstain (`None`) — expressed as **a manifest plus one SQL
+query**, not a bespoke client. `manifest.json` declares an [OLS4](https://www.ebi.ac.uk/ols4/) search URL as an
+`http.get` resource; the agent resolves it into a `ols4_candidates` table and grounds with SQL itself.
+
+> **Honest tag:** this is a **metacurator** concrete, *not* a ClawBio skill. ClawBio has no standalone OLS /
+> ontology-grounding skill — its API skills are things like *Variant Annotation* (Ensembl VEP REST / ClinVar /
+> gnomAD) and *GWAS Lookup*. The named concrete reproduced here is metacurator's `disambiguate`. (The named
+> ClawBio concretes we reproduce live in `examples/rare-high-impact/` → ClawBio `rhi_01`.)
 
 ## The skill is data, not code
 
-The whole "OLS4 grounding skill" is the resource declaration:
+The whole grounding skill is the resource declaration:
 
 ```json
 { "id": "ols4_candidates", "resolver": "http.get",
@@ -49,6 +54,9 @@ SELECT obo_id, label
 FROM ols4_candidates
 WHERE lower(label) = 'asthma'      -- exact-match projection tier; synonym/closure tiers are just more SQL
 ```
+
+Per `disambiguate`, this returns **one** grounded CURIE or zero rows (abstain) — never an invented id. The
+candidate set comes from the source; SQL only chooses among provided CURIEs or returns nothing.
 
 The OLS4 `search` response is materialized as-is by `read_json_auto`; if the endpoint returns a nested
 `{ response: { docs: [...] } }` envelope the agent unnests it in SQL (`SELECT unnest(response.docs) ...`) — that

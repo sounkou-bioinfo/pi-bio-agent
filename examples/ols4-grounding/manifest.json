@@ -3,7 +3,7 @@
   "id": "ols4-grounding",
   "version": "0.1.0",
   "title": "OLS4 term grounding",
-  "description": "A ClawBio-shaped API skill expressed as DATA. It declares an OLS4 search endpoint as an http.get resource; the agent does schema discovery and writes the grounding SQL over the resulting candidate table. There is NO OLS4-specific TypeScript — the URL and response shape live in the manifest, the same generic http.get resolver serves any JSON/CSV endpoint (OpenTargets, gnomAD, an arbitrary REST API), and the resolver memoizes by ETag so repeated grounding does not re-download. Network is the host's opt-in: this manifest fails closed until a host binds a fetch (the Pi extension gates that on PI_BIO_ENABLE_NETWORK=1).",
+  "description": "A metacurator-shaped grounding skill expressed as DATA — this folds in metacurator's `disambiguate` (https://github.com/seandavi/metacurator): ground a text term to ONE of the provided grounded CURIEs, or abstain (None). It declares an OLS4 search endpoint as an http.get resource that returns candidate CURIEs; the agent then grounds deterministically in SQL (exact/synonym match -> one CURIE, else abstain). NOT a ClawBio skill — ClawBio has no standalone OLS/ontology-grounding skill; the named concrete here is metacurator. There is NO OLS4-specific TypeScript — the URL and response shape live in the manifest, the same generic http.get resolver serves any JSON/CSV endpoint, and the resolver memoizes by ETag so repeated grounding does not re-download. Network is the host's opt-in: this manifest fails closed until a host injects a fetch (load the explicit index-networked.ts entrypoint).",
   "domains": ["ontology"],
   "provides": {
     "resolvers": [

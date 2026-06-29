@@ -16,7 +16,8 @@ async function memoryConn(): Promise<SqlConn> {
 }
 const resource = (params: Record<string, unknown>): VirtualResourceSpec => ({ id: "r", title: "R", kind: "virtual", resolver: "http.get", params });
 const okJson = (body: unknown): FetchLike => async () => ({ ok: true, status: 200, text: async () => JSON.stringify(body) });
-// a server that returns an ETag and answers 304 to a matching If-None-Match (the ClawBio re-grounding consumer)
+// a server that returns an ETag and answers 304 to a matching If-None-Match (the re-fetch consumer: ClawBio
+// Variant Annotation re-hitting gnomAD/OpenTargets, metacurator disambiguate re-hitting OLS4)
 const etagFetch = (etag: string, body: unknown): FetchLike => async (_url, init) => {
   const h = { get: (n: string) => (n.toLowerCase() === "etag" ? etag : null) };
   if (init?.headers?.["If-None-Match"] === etag) return { ok: false, status: 304, text: async () => "", headers: h };

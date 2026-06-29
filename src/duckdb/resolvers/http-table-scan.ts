@@ -19,9 +19,10 @@ export type FetchLike = (url: string, init?: { method?: string; headers?: Record
 
 // A remote resource is a time-varying thunk; its memo is HTTP cache validation, not a precomputed token. We
 // store the response's ETag and replay the cached receipt on a `304 Not Modified` to a conditional
-// `If-None-Match` — no body re-download, no re-materialize. The consumer is ClawBio-shaped: a skill that
-// grounds/looks up the same remote endpoint (OLS4, OpenTargets, gnomAD) repeatedly. Correctness: ETag only
-// (Last-Modified would need If-Modified-Since), and only when there are no custom request headers (Vary).
+// `If-None-Match` — no body re-download, no re-materialize. Named consumers: ClawBio's Variant Annotation skill
+// (repeated OpenTargets/gnomAD/ClinVar lookups) and metacurator's `disambiguate` (repeated OLS4 grounding).
+// Correctness: ETag only (Last-Modified would need If-Modified-Since), and only when there are no custom request
+// headers (Vary).
 
 const READERS: Record<string, string> = { json: "read_json_auto", ndjson: "read_json_auto", csv: "read_csv_auto" };
 

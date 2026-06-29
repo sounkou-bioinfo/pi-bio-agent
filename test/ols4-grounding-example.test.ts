@@ -6,11 +6,13 @@ import { join, resolve } from "node:path";
 import type { FetchLike } from "../src/duckdb/resolvers/http-table-scan.js";
 import { runBioQueryFromManifest } from "../src/hosts/run-store.js";
 
-// The bet, made concrete: a ClawBio "ground a term against OLS4" skill is just examples/ols4-grounding/
-// manifest.json + one SQL query — no OLS4-specific code. This runs that REAL example manifest end-to-end
-// through the host with an INJECTED mock fetch (no live network), proving the API-skill collapses to DATA:
-// http.get resource -> materialized candidate table -> grounding SQL the agent writes. Network is the host's
-// opt-in (here the test passes one; the Pi extension gates it on PI_BIO_ENABLE_NETWORK=1).
+// Honest tag: this folds in metacurator's `disambiguate` (https://github.com/seandavi/metacurator) — ground a
+// text term to ONE provided CURIE or abstain — NOT a ClawBio skill (ClawBio has no standalone OLS skill). The
+// bet made concrete: that grounding skill is just examples/ols4-grounding/manifest.json + one SQL query, no
+// OLS4-specific code. This runs the REAL example manifest end-to-end through the host with an INJECTED mock
+// fetch (no live network): http.get resource -> materialized candidate table -> grounding SQL the agent writes.
+// Network is the host's opt-in by COMPOSITION (here the test injects a fetch; the Pi extension's networked
+// entrypoint does in production).
 
 // repo-root-anchored: npm test compiles to dist-test/ and runs from the repo root, so cwd is the repo root
 // in both the compiled and the tsx runners (import.meta.dirname differs between them).
