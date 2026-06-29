@@ -192,6 +192,31 @@ WRONG granularity for two cases, which are separate tiers chosen by which resolv
 - Small genomic region of a huge indexed remote VCF/BCF -> region-scoped `duckhts.read_bcf` (tabix range).
 - Remote parquet/csv DuckDB can scan directly -> `duckdb.file_scan`/`sql_materialize` + httpfs (+ cache_httpfs).
 
+## What the substrate closes over — Fugu, RLM, networked agents reduce to one property
+
+Three frontier ideas, one foundation. The load-bearing realization: each reduces to **data living addressably
+OUTSIDE the prompt (DuckDB tables + CAS + receipts), navigated by BOUNDED queries + content-addressed shared
+memory.** That single property — our bet — is what closes over all three, which is why the *baseline* (reproduce
+ClawBio for free) and the *speculative upside* share one substrate rather than being separate efforts.
+
+- **[RLM — Recursive Language Models](https://alexzhang13.github.io/blog/2025/rlm/)** (Zhang & Khattab, MIT
+  CSAIL; [arXiv 2512.24601](https://arxiv.org/abs/2512.24601)): store the unbounded context as a *variable in a
+  Python REPL*; the LM peeks/greps/partitions/maps/summarizes it and launches recursive LM sub-calls — dodging
+  "context rot" because no call holds the whole context. **We close over it: `bio_query` over DuckDB is the same
+  loop with context as TABLES, not a string var.** peek=`LIMIT`/schema discovery; grep=`WHERE LIKE`/`regexp`/
+  FTS; partition+map=`GROUP BY` + per-partition sub-operations; summarize=SQL aggregates; the agent only ever
+  sees BOUNDED results. Sharper: RLM's OOLONG benchmark ("among these user IDs, how many label X over 6000
+  rows") is literally a `GROUP BY` — RLM recurses and makes counting errors at long context; we one-shot it
+  deterministically. Semantic-only sub-calls ("label each row") fall back to the judgment boundary
+  (`decideGrounding`/sub-agent); recursion depth = nested sub-operations.
+- **[Sakana Fugu](https://sakana.ai/fugu)**: its "shared memory so agents don't re-discover artifacts" = our
+  CAS + `studyNoteIndex`; workflow-as-data with access lists = a conductor manifest / `StudyScaffold` (below).
+- **Networked agents**: stigmergy via a shared CAS root — agents communicate by content-addressed receipted
+  artifacts, not live chat.
+
+Narrative: BASELINE = the SQL-REPL-over-addressable-data substrate IS the API that reproduces ClawBio for free.
+SPECULATIVE upside = the same substrate closing over Fugu/RLM/networked agents.
+
 ## Machine studying — Fugu pieces 2 & 3 over the study-notes system
 
 Sakana Fugu (https://sakana.ai/fugu, arXiv 2606.21228) factors into: (1) a LEARNED orchestrator, (2) scaffold-
