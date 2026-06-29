@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { BioResolverImpl } from "../../core/ports.js";
+import type { BioResolverImpl, ResolverOutput } from "../../core/ports.js";
+import { memoGet, memoStore } from "../resolution-memo.js";
 
 // ONE generic HTTP resolver — not a per-API client. It GETs a declared URL and materializes the response into
 // a DuckDB table via a native reader (json/csv), so any HTTP/JSON source (OLS4 search, OpenTargets, gnomAD,
@@ -13,8 +14,14 @@ import type { BioResolverImpl } from "../../core/ports.js";
 // Fail-closed: only http(s) URLs, non-2xx throws, no retry/fallback. The receipt stamps the URL + a sha256 of
 // the exact bytes fetched, so the run records precisely what came back.
 
-export type FetchResponse = { ok: boolean; status: number; text(): Promise<string> };
+export type FetchResponse = { ok: boolean; status: number; text(): Promise<string>; headers?: { get(name: string): string | null } };
 export type FetchLike = (url: string, init?: { method?: string; headers?: Record<string, string> }) => Promise<FetchResponse>;
+
+// A remote resource is a time-varying thunk; its memo is HTTP cache validation, not a precomputed token. We
+// store the response's ETag (or Last-Modified) and replay the cached receipt on a `304 Not Modified` to a
+// conditional `If-None-Match` — no body re-download, no re-materialize. The consumer is ClawBio-shaped: a skill
+// that grounds/looks up the same remote endpoint (OLS4, OpenTargets, gnomAD) repeatedly.
+const validatorOf = (res: FetchResponse): string | undefined => res.headers?.get("etag") ?? res.headers?.get("last-modified") ?? undefined;
 
 const READERS: Record<string, string> = { json: "read_json_auto", ndjson: "read_json_auto", csv: "read_csv_auto" };
 
@@ -37,7 +44,12 @@ export function httpTableResolver(fetchImpl: FetchLike): BioResolverImpl {
     const method = p.method === undefined ? "GET" : p.method;
     if (method !== "GET") throw new Error("http.get supports GET only");
 
-    const res = await fetchImpl(p.url, { method: "GET", headers });
+    // Conditional request: if we have a stored validator (ETag/Last-Modified) for this table and the table is
+    // still present, send If-None-Match so the server can answer 304 Not Modified — a cache hit with no body.
+    const memo = await memoGet(ctx.conn, p.table);
+    const conditional = memo ? { ...headers, "If-None-Match": memo.freshness } : headers;
+    const res = await fetchImpl(p.url, { method: "GET", headers: conditional });
+    if (memo && res.status === 304) return memo.receipt; // unchanged: replay the cached receipt, skip body + materialize
     if (!res.ok) throw new Error(`http resolver: GET ${p.url} returned status ${res.status}`); // fail closed, no retry/fallback
     const body = await res.text();
     const digest = createHash("sha256").update(body).digest("hex");
@@ -54,11 +66,16 @@ export function httpTableResolver(fetchImpl: FetchLike): BioResolverImpl {
     }
 
     const now = ctx.now ?? new Date().toISOString();
-    return {
+    const output: ResolverOutput = {
       // the handle identifies what downstream SQL uses — the materialized table; the URL is provenance, below
       result: { schema: "pi-bio.resource_handle.v1", mode: "reference", name: p.table, pointer: { uri: `table:${p.table}`, format: "table" }, address: { algorithm: "sha256", digest } },
       sourceSnapshots: [{ source: p.url, retrievedAt: now, version: `sha256:${digest}` }],
       provenance: [{ source: p.url, retrievedAt: now, digest: `sha256:${digest}`, notes: ["http.get"] }],
     };
+    // Memoize only when the server gave a validator (ETag/Last-Modified) — without one a future conditional
+    // request can't 304, so there is nothing to cache against.
+    const validator = validatorOf(res);
+    if (validator !== undefined) await memoStore(ctx.conn, p.table, validator, output);
+    return output;
   };
 }

@@ -16,6 +16,12 @@ async function memoryConn(): Promise<SqlConn> {
 }
 const resource = (params: Record<string, unknown>): VirtualResourceSpec => ({ id: "r", title: "R", kind: "virtual", resolver: "http.get", params });
 const okJson = (body: unknown): FetchLike => async () => ({ ok: true, status: 200, text: async () => JSON.stringify(body) });
+// a server that returns an ETag and answers 304 to a matching If-None-Match (the ClawBio re-grounding consumer)
+const etagFetch = (etag: string, body: unknown): FetchLike => async (_url, init) => {
+  const h = { get: (n: string) => (n.toLowerCase() === "etag" ? etag : null) };
+  if (init?.headers?.["If-None-Match"] === etag) return { ok: false, status: 304, text: async () => "", headers: h };
+  return { ok: true, status: 200, text: async () => JSON.stringify(body), headers: h };
+};
 
 describe("http.get: one generic HTTP resolver (injected fetch, no ambient network)", () => {
   test("materializes a JSON response into a queryable candidate table + stamps a digest receipt", async () => {
@@ -41,6 +47,18 @@ describe("http.get: one generic HTTP resolver (injected fetch, no ambient networ
     await assert.rejects(() => httpTableResolver(notFound)(resource({ url: "https://x/y", table: "t", format: "json" }), { conn, now: "t" }), /status 404/);
     await assert.rejects(() => httpTableResolver(okJson([]))(resource({ url: "file:///etc/passwd", table: "t" }), { conn, now: "t" }), /http\(s\) URL/);
     await assert.rejects(() => httpTableResolver(okJson([]))(resource({ url: "https://x/y", table: "t", format: "xml" }), { conn, now: "t" }), /unknown format/);
+  });
+
+  test("conditional GET: a 304 to the stored ETag replays the cached receipt (no re-download / re-materialize)", async () => {
+    const conn = await memoryConn();
+    const fetchImpl = etagFetch("etag-v1", [{ obo_id: "MONDO:0004979" }]);
+    const res = resource({ url: "https://www.ebi.ac.uk/ols4/api/search?q=asthma", table: "candidates", format: "json" });
+    const first = await httpTableResolver(fetchImpl)(res, { conn, now: "T1" });
+    assert.equal(first.sourceSnapshots[0]!.retrievedAt, "T1"); // first GET: 200, stores the ETag
+
+    // second resolve sends If-None-Match: etag-v1 -> server 304 -> the cached receipt is replayed (resolvedAt T1)
+    const second = await httpTableResolver(fetchImpl)(res, { conn, now: "T2" });
+    assert.equal(second.sourceSnapshots[0]!.retrievedAt, "T1", "a 304 must replay the cached resolution");
   });
 
   test("never reaches the network on its own — fetch is injected; a throwing fetch surfaces, nothing ambient", async () => {

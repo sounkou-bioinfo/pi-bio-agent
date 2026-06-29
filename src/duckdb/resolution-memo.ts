@@ -17,15 +17,33 @@ async function ensureMemo(conn: SqlConn): Promise<void> {
   await conn.run(`CREATE TABLE IF NOT EXISTS ${MEMO_TABLE} (table_name TEXT PRIMARY KEY, freshness TEXT, receipt TEXT)`);
 }
 
-/** Cache hit iff a row matches (table_name, freshness) AND the materialized table still exists. */
+async function tablePresent(conn: SqlConn, tableName: string): Promise<boolean> {
+  const present = await conn.all<{ n: number }>(`SELECT count(*) AS n FROM information_schema.tables WHERE table_name = ?`, [tableName]);
+  return Number(present[0]?.n ?? 0) > 0;
+}
+
+/** Cache hit iff a row matches (table_name, freshness) AND the materialized table still exists. For resolvers
+ *  that can compute a cheap freshness token up front (e.g. a file content digest). */
 export async function memoLookup(conn: SqlConn, tableName: string, freshness: string): Promise<ResolverOutput | undefined> {
   await ensureMemo(conn);
   const rows = await conn.all<{ receipt: string }>(`SELECT receipt FROM ${MEMO_TABLE} WHERE table_name = ? AND freshness = ?`, [tableName, freshness]);
-  if (rows.length === 0) return undefined;
-  const present = await conn.all<{ n: number }>(`SELECT count(*) AS n FROM information_schema.tables WHERE table_name = ?`, [tableName]);
-  if (Number(present[0]?.n ?? 0) === 0) return undefined; // table was dropped out from under the memo
+  if (rows.length === 0 || !(await tablePresent(conn, tableName))) return undefined;
   try {
     return JSON.parse(rows[0]!.receipt) as ResolverOutput;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Get the stored (freshness, receipt) for a table without matching — for VALIDATOR-based resolvers that must
+ *  re-validate freshness against the source themselves (e.g. http.get sending the stored ETag in a conditional
+ *  request). Returns the entry only if the materialized table still exists. */
+export async function memoGet(conn: SqlConn, tableName: string): Promise<{ freshness: string; receipt: ResolverOutput } | undefined> {
+  await ensureMemo(conn);
+  const rows = await conn.all<{ freshness: string; receipt: string }>(`SELECT freshness, receipt FROM ${MEMO_TABLE} WHERE table_name = ?`, [tableName]);
+  if (rows.length === 0 || !(await tablePresent(conn, tableName))) return undefined;
+  try {
+    return { freshness: rows[0]!.freshness, receipt: JSON.parse(rows[0]!.receipt) as ResolverOutput };
   } catch {
     return undefined;
   }
