@@ -7,6 +7,7 @@ import { OperationRunError, runOperation, type OperationResult } from "../core/o
 import type { BioRunRecord } from "../core/run-spec.js";
 import { duckdbNodeConn } from "../duckdb/node-api.js";
 import { duckdbFileScanResolver } from "../duckdb/resolvers/duckdb-file-scan.js";
+import { duckdbSqlMaterializeResolver } from "../duckdb/resolvers/duckdb-sql-materialize.js";
 import { duckhtsReadBcfResolver } from "../duckdb/resolvers/duckhts-read-bcf.js";
 import { httpTableResolver, type FetchLike } from "../duckdb/resolvers/http-table-scan.js";
 
@@ -16,6 +17,7 @@ import { httpTableResolver, type FetchLike } from "../duckdb/resolvers/http-tabl
 
 const BUILTIN_RESOLVERS: Record<string, BioResolverImpl> = {
   "duckdb.file_scan": duckdbFileScanResolver,
+  "duckdb.sql_materialize": duckdbSqlMaterializeResolver, // the general resolver: materialization is declared SQL
   "duckhts.read_bcf": duckhtsReadBcfResolver, // bound always; fails closed at resolve time if duckhts is not provisioned
 };
 
