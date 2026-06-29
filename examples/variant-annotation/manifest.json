@@ -1,0 +1,16 @@
+{
+  "schema": "pi-bio.domain_pack_manifest.v1",
+  "id": "variant-annotation",
+  "version": "0.1.0",
+  "title": "Variant annotation (Ensembl VEP REST)",
+  "description": "ClawBio's 'Variant Annotation' skill (Annotate VCF variants with Ensembl VEP REST, ClinVar significance, gnomAD frequencies — https://github.com/ClawBio/ClawBio) expressed as DATA. It declares the Ensembl VEP REST endpoint as an http.get resource; VEP's colocated_variants carry gnomAD allele frequencies and ClinVar clinical significance, so one annotated table answers 'rare, high-impact, pathogenic' with ordinary SQL the agent writes. There is NO VEP/ClinVar/gnomAD-specific TypeScript — the URL and response shape live in the manifest, the same generic http.get resolver serves any JSON/CSV endpoint, and the resolver memoizes by ETag so re-annotating the same variants does not re-download. Network is the host's opt-in by composition: this manifest fails closed until a host injects a fetch (load the explicit index-networked.ts entrypoint).",
+  "domains": ["genomics"],
+  "provides": {
+    "resolvers": [
+      { "id": "http.get", "version": "0.1.0", "title": "HTTP GET", "description": "GET a declared URL and materialize the JSON/CSV response into a table.", "output": { "mode": "table" } }
+    ],
+    "resources": [
+      { "id": "vep_annotations", "title": "VEP annotations", "kind": "virtual", "resolver": "http.get", "params": { "url": "https://rest.ensembl.org/vep/human/id/rs699?content-type=application/json", "table": "vep_annotations", "format": "json" } }
+    ]
+  }
+}
