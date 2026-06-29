@@ -370,9 +370,13 @@ table**, not just storage. Derived tables (`entailed_edge`, `scale_members`) are
 The discipline is the same as everywhere else: **the laziness lives in DATA** (the declared manifest/SQL is the
 lazy expression), interpreted by thin TS. It is **dbplyr/targets, not Effect-TS / fp-ts** — pulling in a TS
 lazy/effect monad would be the idealist move (a monad with no instances we need; the laziness is already in the
-data). The frame is useful because it makes the deferred work *obvious rather than invented*: caching is
-memoization keyed on the receipt digest; "as_of" is a parameter to the lazy graph; lazy resolution forces only
-the resources a query names. Each lands when a concrete re-run forces it, not before.
+data). The frame is useful because it makes the deferred work *obvious rather than invented*: caching is memoization,
+"as_of" is a parameter to the lazy graph, lazy resolution forces only the resources a query names. Each lands
+when a concrete re-run forces it, not before. One correctness caveat for when it does: a resolved resource's
+memo key must capture **content freshness, not just the request** — params/URL is the *call*, not the *value*.
+Local files key on the content digest `file_scan` already records; remote resources need HTTP cache validation
+(ETag / Last-Modified via a conditional `If-None-Match` → `304`), captured into the receipt; derived tables are
+pure and trivially safe. A params-only memo is a stale-cache footgun.
 
 ### 5. Provenance graph: every claim has a source path
 
