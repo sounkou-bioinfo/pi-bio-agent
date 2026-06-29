@@ -120,12 +120,13 @@ each lands only when a concrete consumer forces it, never ahead.
 - **Format/repository split → our resolver already collapses the combinatorics.** `targets` split `format`
   (serialization) from `repository` (location) to avoid the format×provider explosion. `duckdb.sql_materialize`
   is the same move taken further: one resolver, declared SQL, any reader/source — no resolver-per-format zoo.
-- **CAS = store by content hash, versioned** (one entry per content version). Use it for collaboration /
-  reproducibility / rollback / audit; skip it for large, frequently-changing outputs. It is the memo table of
-  the lazy graph — build it when a re-run should hit cache.
-- **Remote freshness needs ETag/Last-Modified**, not a re-download — `file_scan` already omits the content
-  digest for a remote path (can't `readFileSync` a URL), exactly the gap the marker pattern fills. Capture the
-  validators WHEN caching is built (needs widening the `FetchLike` port).
+- **Resolution memoization — BUILT** (`src/duckdb/resolution-memo.ts`): the lazy graph's memo table, keyed on
+  content FRESHNESS (`file_scan` content digest; `http.get` ETag/Last-Modified via conditional `If-None-Match` →
+  `304`). `sql_materialize` deliberately opts out (arbitrary SQL has undeclared/volatile determinants). The
+  remaining layer is CAS-of-bytes (cross-db reuse) — see the section above. CAS = store by content hash,
+  versioned; use it for collaboration / reproducibility / rollback / audit; skip it for large churny outputs.
+- **Remote freshness via ETag/Last-Modified — DONE in `http.get`** (the `FetchLike` port now exposes response
+  headers; a stored validator drives a conditional request and a `304` replays the cached receipt).
 - **An audit pass re-validates external state**: a separate run comparing stored vs current validators (ETags)
   to catch data that changed outside the pipeline. Relevant once remote resources + caching exist.
 - **Error handling for the future `process` executor + `http.get`**: `targets` offers stop / continue / null /
@@ -136,6 +137,24 @@ each lands only when a concrete consumer forces it, never ahead.
   inputs → a value" is: write Parquet per branch, then `duckdbfs::open_dataset(files) |> group_by |> summarise
   |> collect()` — i.e. resolver(s) → operation SQL. A process-op producing Parquet artifacts that `file_scan`/
   `sql_materialize` then aggregate is exactly this; no bespoke combine step.
+
+## CAS-of-bytes — the next genuine advance (real consumer, bigger build)
+
+Distinct from the resolution memo (which caches a materialized TABLE within one persistent db): CAS dedups the
+raw BYTES across dbs/projects, keyed by content hash, with rollback/audit. Consumer is ClawBio-shaped and easy:
+a skill pulling a large remote dataset (gnomAD VCF, an OpenTargets dump) that should be fetched ONCE and reused
+across runs/projects, not re-downloaded per db.
+
+Spec (build when driven by a concrete large-dataset example):
+- Store under `.pi/bio-agent/cas/<algo>/<digest>` (immutable; the receipt's `ResourceHandle.address` already
+  carries the content hash — `contentAddressUri`).
+- `http.get` / `file_scan` write fetched/source bytes to CAS and materialize FROM the CAS path; the receipt
+  records the CAS address. A second resolve whose source is content-unchanged (ETag 304 / file digest) reads the
+  bytes from CAS instead of re-downloading — even from a DIFFERENT db where the table doesn't persist.
+- Freshness still gates it (CAS is storage/dedup, not freshness): the ETag/content-digest decides whether the
+  CAS entry is current; CAS decides whether the bytes must be re-fetched.
+- Opt-in per host/profile (the "CAS mode" vs "fast mode" split): default fast (DuckDB scans the source directly);
+  CAS mode snapshots bytes first for byte-perfect provenance + cross-db reuse.
 
 ## Storage refinements
 
