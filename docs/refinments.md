@@ -320,6 +320,28 @@ enforces allow/block lists. Both are documented at the opt-in site so a reader d
 
 ## Code execution runtime
 
+The COMPUTE pillar of "ClawBio for free": the data/lookup/annotation/query skills are the SQL-REPL + resolver
+tiers, but ClawBio's compute skills (Ancestry PCA, Fine-Mapping SuSiE/ABF, scRNA, nf-core/Galaxy wrappers,
+R/shell) need to run external code. Design grounded in two local prior-art projects (`~/nf-r-ipc`, `~/DuckTinyCC`):
+
+- **Spawn external processes from Node** (`child_process`; detached for long-running, like the pal launches) —
+  NOT in-DuckDB FFI (`~/DuckTinyCC` JIT-compiles C into SQL UDFs at runtime; wild, but the wrong risk surface
+  for the process path) and NOT a JVM/Nextflow plugin. The host owns process spawning = a host-injected effect,
+  matching the doctrine; it is sandboxable and simple. (DuckTinyCC stays a niche later option for hot-path UDFs.)
+- **Arrow IPC as the interchange** (the lingua franca): DuckDB exports Arrow natively; R reads via
+  `nanoarrow`/`arrow`, Python via `pyarrow`. DuckDB -> Arrow -> process -> Arrow -> DuckDB (read via arrow scan).
+  This is exactly `~/nf-r-ipc`'s transport (Nextflow<->R over Arrow IPC), but Node-hosted.
+- **A strict contract** modeled on `~/nf-r-ipc/CONTRACT.md`: the invocation is DATA in a manifest (a "process
+  operation": `{executable, script: path|inline, inputs: [table], output: schema|kind, args}`); typed request/
+  response; typed error classes; fail-closed. Provenance RECEIPT (same model as resolvers): script digest +
+  input digests + exit code + stdout/stderr + output digest + wall time.
+- **Result shape:** rectangular results (PCA loadings, credible sets, summary stats) -> Arrow tables directly.
+  Non-tabular R values -> adopt nf-r-ipc's `value_graph` (a FLAT Arrow table encoding a tree via
+  `value_id/parent_id/key/index/tag/v_*`, with distinct typed-NA tags + R-class normalization) — the SAME
+  flat-table-encodes-a-tree pattern as our SemanticSQL statements (a real convergence, not a new abstraction).
+
+The restricted-runtime contract (build before exposing powerful execution):
+
 - Define the restricted code runtime contract before exposing powerful execution:
   - allowed clients only, no ambient network by default
   - no raw secrets
