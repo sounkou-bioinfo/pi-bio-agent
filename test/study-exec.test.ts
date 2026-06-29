@@ -45,6 +45,29 @@ describe("study scaffold executor: orchestration over workers", () => {
     assert.deepEqual(index.links?.map((l) => l.to), ["corpus-map", "contracts", "concept-map", "probes"]);
   });
 
+  test("runs a TREE topology (Fugu's signature): two independent leaves + an aggregator that sees both", async () => {
+    // Fugu's actual contribution is non-trivial topologies (best-of-N / debate / aggregation), not a chain. A
+    // tree: two leaves attempt independently (no deps, ISOLATED from each other), an aggregator synthesizes both.
+    const scaffold = {
+      schema: "pi-bio.study_scaffold.v1" as const, corpusId: "c", objective: "aggregate two independent attempts",
+      steps: [
+        { id: "leaf-a", subtask: "attempt A", produces: "worked_example" as const, accessList: {} },
+        { id: "leaf-b", subtask: "attempt B", produces: "worked_example" as const, accessList: {} },
+        { id: "aggregator", subtask: "synthesize the two attempts", produces: "index" as const, accessList: { notes: ["leaf-a", "leaf-b"] } },
+      ],
+    };
+    const seen: Record<string, string[]> = {};
+    const worker: StudyWorker = async ({ step, notes }) => { seen[step.id] = notes.map((n) => n.slug); return { body: `${step.id}:[${notes.map((n) => n.slug).join(",")}]`, hook: "h" }; };
+    const result = await runStudyScaffold(scaffold, worker, { now: "T1" });
+
+    // leaves are isolated from each other; the aggregator fans IN both leaves
+    assert.deepEqual(seen["leaf-a"], []);
+    assert.deepEqual(seen["leaf-b"], []);
+    assert.deepEqual(seen["aggregator"], ["leaf-a", "leaf-b"]);
+    assert.equal(result.order[result.order.length - 1], "aggregator"); // aggregator runs after both leaves
+    assert.match(result.notes.find((n) => n.slug === "aggregator")!.body, /\[leaf-a,leaf-b\]/);
+  });
+
   test("fails closed on an invalid scaffold (does not execute any worker)", async () => {
     let called = false;
     const worker: StudyWorker = async () => { called = true; return { body: "x", hook: "y" }; };
