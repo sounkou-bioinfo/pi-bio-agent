@@ -1,16 +1,30 @@
 # pi-bio-agent
 
-Lean provider-agnostic bioinformatics primitives for Pi agents.
+Lean, provider-agnostic bioinformatics **substrate** for Pi agents — not a pile of bespoke genomics scripts.
 
-This repo is an early core plus Pi coding-agent integration. The goal is not a pile of bespoke genomics scripts. The goal is the right substrate:
+The bet: **manifests, SQL, resources, and ontology data are the PROGRAM; TypeScript is only the interpreter.**
+A new bio question or data source is a new *manifest* (data), never a new `.ts` file. The substrate ships a
+small set of generic primitives and the agent writes the SQL.
 
-- `BioToolSpec` contracts for executable domain tools
-- content-addressed and virtual resources
-- ontology tables and term sets
-- typed knowledge graphs with provenance/trust blocks
-- DuckDB-backed SQL surfaces over bio-data
-- indexed study notes for machine studying
-- project-local skill authoring when a workflow stabilizes
+## What the substrate provides
+
+- **Resolvers** — turn a declared resource into a DuckDB table: `duckdb.file_scan` (csv/tsv/parquet/json,
+  native), `duckhts.read_bcf` (VCF/BCF), `http.get` (any REST/JSON endpoint; fetch is injected, opt-in,
+  fail-closed). Each stamps a **resolution receipt** (resolver version, params digest, source snapshot).
+- **Operations** — an operation is a read-only `SELECT`/`WITH` over the resolved tables; the result IS the
+  report. A single guard rejects writes/DDL and any unreceipted I/O (external readers, remote URIs).
+- **Runs** — `runOperation` → `run` + `result` + `receipts` (a failed run still persists an auditable
+  receipt); the host writes them under `.pi/bio-agent/runs/<runId>/`.
+- **Ordinal scales** — an `ordered` TermSet (ranked members) projects to a `scale_members` table, so SQL
+  thresholds/compares on rank (ACMG, variant impact, clinical stage, …) with no per-scale code.
+- **Graph + ontology (SemanticSQL shape)** — `bio_edges(from_id, predicate, to_id)` is the statement/edge
+  base; `entailed_edge` is its transitive closure, so descendants/subsumption/graph-walk are one indexed JOIN.
+  The same SQL grounds an imported ontology and walks our own graph.
+- **Grounding** — two tiers feeding `decideGrounding`: a deterministic *projection* tier (exact/synonym
+  match + closure, all SQL) and a *judgment* tier (fresh `http.get` candidates ranked by a model that may
+  propose but never invent a CURIE — abstain below threshold).
+- **Strict, fail-closed admission** — a manifest is validated against a strict allowlist; unknown/sprawl keys
+  are rejected, not silently honored.
 
 ## Install in Pi
 
@@ -21,15 +35,13 @@ pi install git:github.com/sounkou-bioinfo/pi-bio-agent
 
 ## Pi tools
 
+- `bio_run_operation` — run a declared `duckdb.sql` operation from a manifest, persisting run/result/receipts
 - `bio_describe_model`
 - `bio_list_tool_specs`
 - `bio_list_duckdb_extensions`
 - `bio_validate_select`
 - `bio_study_plan`
-- `bio_write_study_note`
-- `bio_list_study_notes`
-- `bio_read_study_note`
-- `bio_delete_study_note`
+- `bio_write_study_note` · `bio_list_study_notes` · `bio_read_study_note` · `bio_delete_study_note`
 - `bio_create_skill`
 
 Generated project-local skills and study notes live under `.pi/bio-agent/` in the current project.
@@ -53,13 +65,14 @@ for Pi to consume directly.
 
 See the generated [docs index](docs/INDEX.md) — one line per doc, from each doc's frontmatter
 (regenerate with `npm run docs:index`; `npm run check` fails if it is stale). Start with the
-[roadmap](docs/roadmap.md).
+[roadmap](docs/roadmap.md) and [design notes](docs/design.md).
 
 ## Development
 
 ```sh
 npm install
-npm run typecheck
+npm run check     # typecheck + tests + docs-index staleness gate (the single gate)
 ```
 
-Runtime Pi APIs are peer dependencies supplied by Pi itself.
+`npm run provision:duckhts` installs the DuckHTS community extension for the `duckhts.read_bcf` resolver
+(explicit; never auto-installed during `check`). Runtime Pi APIs are peer dependencies supplied by Pi itself.
