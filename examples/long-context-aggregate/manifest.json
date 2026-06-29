@@ -1,0 +1,16 @@
+{
+  "schema": "pi-bio.domain_pack_manifest.v1",
+  "id": "long-context-aggregate",
+  "version": "0.1.0",
+  "title": "Long-context aggregate (RLM, as SQL)",
+  "description": "Closes over RLM (Recursive Language Models, arXiv 2512.24601): instead of stuffing thousands of rows into the prompt and recursively sub-querying an LM, the rows live as a DuckDB TABLE and the agent answers the distributional query with one GROUP BY. This is RLM's OOLONG task ('among instances for these user IDs, how many are label X') expressed as deterministic SQL — the agent never sees the whole context (no context rot) and the count is exact (where RLM recurses and miscounts at long context). The manifest declares only the resource; the agent writes the SQL.",
+  "domains": ["long-context"],
+  "provides": {
+    "resolvers": [
+      { "id": "duckdb.file_scan", "version": "0.1.0", "title": "DuckDB file scan", "description": "Read a file into a table.", "output": { "mode": "table" } }
+    ],
+    "resources": [
+      { "id": "entries", "title": "Entries", "kind": "virtual", "resolver": "duckdb.file_scan", "params": { "path": "data/entries.csv", "table": "entries" } }
+    ]
+  }
+}

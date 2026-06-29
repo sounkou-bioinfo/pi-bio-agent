@@ -1,0 +1,14 @@
+user_id,instance,label
+1,How old is Benny Carter,number
+1,What war saw battles at Parrots Beak,entity
+1,Where is the Metropolis landmark,location
+2,Who invented Calypso music,human
+2,What war saw battles at Black Virgin,entity
+2,How many years in a decade,number
+3,Where is the nearest river,location
+3,What landmark was in the cartoons,entity
+3,When was Calypso music invented,number
+4,Define a covalent bond,description
+4,Who painted the ceiling,human
+5,What is the capital city,entity
+5,How many moons orbit Mars,number
