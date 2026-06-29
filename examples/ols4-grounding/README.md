@@ -29,6 +29,13 @@ so the manifest **fails closed** by default:
 PI_BIO_ENABLE_NETWORK=1 pi -e extensions/pi-coding-agent/index.ts
 ```
 
+**Scope of the gate (do not over-trust it):** `PI_BIO_ENABLE_NETWORK` only binds `http.get`'s fetch. It is *not*
+a general egress firewall — by design the library is not the network sandbox. Other resolvers
+(`duckdb.file_scan`, `duckhts.read_bcf`, `duckdb.sql_materialize`) can still read remote URIs if your host/DuckDB
+allows it, and `http.get` does no SSRF allowlisting. Enforce real egress control (allow/block lists, blocking
+internal-metadata IPs, a deny-by-default container) at the **host** boundary — and have your injected `fetch`
+enforce any URL policy you need.
+
 Then the agent calls `bio_query` with this manifest and grounds with ordinary SQL, e.g.:
 
 ```sql

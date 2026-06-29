@@ -156,6 +156,31 @@ Spec (build when driven by a concrete large-dataset example):
 - Opt-in per host/profile (the "CAS mode" vs "fast mode" split): default fast (DuckDB scans the source directly);
   CAS mode snapshots bytes first for byte-perfect provenance + cross-db reuse.
 
+## Network opt-in hardening — pal review #4 follow-ups
+
+The host network opt-in is wired (extension gates `http.get`'s fetch on `PI_BIO_ENABLE_NETWORK=1`; pal #4
+confirmed env-gating is the safest surface — a tool param would let the model self-enable egress). Open,
+freshness/provenance-correct refinements it surfaced, in priority order. Build each only with the named consumer
+in hand; none are speculative, but none should be half-built autonomously.
+
+- **Cancellation + bounds (the realest gap).** `FetchLike` has no `signal`, timeout, or byte cap, and the Pi
+  tool's `_signal` is unused. A runaway/huge fetch can't be aborted or bounded. Consumer: any large remote
+  dataset, and a tool call the agent aborts. Build: add `signal?: AbortSignal` (+ optional `maxBytes`) to
+  `FetchLike`'s init, thread the extension's `_signal` through. Bounded, immanent.
+- **304 revalidation provenance.** A `304` replays the stored receipt with the original `retrievedAt` — honest
+  about the BYTES (unchanged) but silent that freshness was reconfirmed later. Optional enhancement: stamp a
+  `revalidatedAt` note so the receipt shows "T1 bytes, revalidated current at T2". Not a correctness bug.
+- **Redirect provenance.** The receipt records the declared `p.url`, not the final response URL after redirects.
+  `FetchResponse` has no `.url`; widen it and record the final URL when it differs.
+- **Per-call acknowledgement (optional, never sufficient alone).** An `allowNetwork: true` tool param as an
+  ADDITIONAL per-call acknowledgement on top of the env gate — visible in the transcript — but the env gate
+  stays the hard requirement.
+
+NOT bugs, by doctrine (the library is not the egress firewall — the host sandbox is): the env gate governs only
+`http.get`'s bound fetch, not other resolvers' remote reads (`file_scan`/`read_bcf`/`sql_materialize` may read
+remote URIs if the host/DuckDB allows); and `http.get` does no SSRF allowlisting — the host's injected fetch
+enforces allow/block lists. Both are documented at the opt-in site so a reader does not over-trust the gate.
+
 ## Storage refinements
 
 - Keep the documented default on-disk layout in sync with `bioProjectLayout()`:
