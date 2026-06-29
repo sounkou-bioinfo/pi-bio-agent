@@ -1,0 +1,6 @@
+subject,predicate,value
+MONDO:0004979,rdfs:label,asthma
+MONDO:0004979,oio:hasExactSynonym,bronchial asthma
+MONDO:0004784,rdfs:label,allergic asthma
+MONDO:0005405,rdfs:label,childhood onset asthma
+MONDO:0004766,rdfs:label,status asthmaticus

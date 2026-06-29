@@ -1,0 +1,4 @@
+subject,predicate,object
+MONDO:0004784,rdfs:subClassOf,MONDO:0004979
+MONDO:0005405,rdfs:subClassOf,MONDO:0004979
+MONDO:0004766,rdfs:subClassOf,MONDO:0004784
