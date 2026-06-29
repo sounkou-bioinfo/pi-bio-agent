@@ -73,6 +73,11 @@ describe("host: bio_run_operation end-to-end", () => {
     const result = JSON.parse(await fs.readFile(join(dir, "result.json"), "utf8"));
     const receipts = JSON.parse(await fs.readFile(join(dir, "receipts.json"), "utf8"));
     assert.equal(run_.status, "succeeded");
+    // the run record's output artifact points at the file the host actually persisted (result.json), not a
+    // phantom <operationId>.json — run provenance must reference a file that exists on disk
+    const outArtifact = run_.artifacts.find((a: { role: string }) => a.role === "output");
+    assert.equal(outArtifact.path, "runs/run-1/result.json");
+    await fs.access(join(dir, "result.json")); // the path the artifact names actually exists
     const included = result.rows.find((r: { bucket: string }) => r.bucket === "included");
     assert.equal(Number(included.n), 1); // ClawBio rhi_01 ground truth, via the host — counts come from SQL
     const avReceipt = receipts.find((r: { resourceId: string }) => r.resourceId === "annotated_variants");

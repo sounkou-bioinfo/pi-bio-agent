@@ -63,7 +63,9 @@ export async function runOperation(
   const artifact: BioArtifact = {
     kind: "artifact",
     role: "output",
-    path: `runs/${runId}/${operationId}.json`,
+    // The host persists the result as result.json; the run record must point at the file that exists on
+    // disk, not a per-operation name. Keep this in lockstep with persistRun()'s result.json.
+    path: `runs/${runId}/result.json`,
     format: "json",
     provenance: [
       { source: op.id, notes: ["operation"] },

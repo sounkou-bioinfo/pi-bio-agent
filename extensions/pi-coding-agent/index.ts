@@ -61,7 +61,7 @@ export default function piBioAgentExtension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "bio_run_operation",
     label: "Run a bio operation",
-    description: "Run a declared duckdb.sql operation from a domain-pack manifest JSON against an explicit DuckDB database, persisting run/result/report/receipts under .pi/bio-agent/runs/<runId>. Resolvers are bound from built-ins (duckdb.file_scan, duckhts.vcf_scan); any other resolver fails closed. The manifest must pass registry validation and the operation must be duckdb.sql.",
+    description: "Run a declared duckdb.sql operation from a domain-pack manifest JSON against an explicit DuckDB database, persisting run/result/receipts under .pi/bio-agent/runs/<runId>. Resolvers are bound from built-ins (duckdb.file_scan, duckhts.read_bcf); any other resolver fails closed. The manifest must pass registry validation and the operation must be duckdb.sql.",
     parameters: Type.Object({
       dbPath: Type.String({ description: "Explicit DuckDB database path, or ':memory:'." }),
       manifestPath: Type.String({ description: "Path to a domain-pack manifest JSON file (relative to cwd or absolute)." }),
