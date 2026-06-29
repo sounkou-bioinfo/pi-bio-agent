@@ -28,3 +28,15 @@ server: FINAL shared table (rows written by SEPARATE client processes via quack)
 — it observed `agentA`'s write, i.e. genuinely *shared* state. This is the complement to CAS: quack = a live
 shared **mutable** db (one owner, many client agents); CAS = durable **immutable** content-addressed sharing.
 Together they cover the multi-agent state-sharing space across the process boundary.
+
+## Multi-machine (verified, but testing-only here)
+
+quack is **HTTP-based RPC**, so it spans *machines*, not just processes. localhost uses plain HTTP (the demo
+above). For a non-local bind you pass a named param — `quack_serve('quack:0.0.0.0:PORT', token=..., allow_other_hostname=true)` (token ≥ 4 chars) — which we confirmed **binds all interfaces, reachable from other
+hosts**. quack then **forces TLS for any non-localhost address** (`enable_ssl = !uri.IsLocal()`) and recommends
+reverse-proxying when public. So a *distributed* agent collective is real: a quack server holds shared mutable
+state (a KG) across machines, CAS-on-object-store holds immutable artifacts across machines, each agent runs the
+substrate locally. **This is the speculative frontier, not the baseline** — and exposing a writable db on a
+network is a real attack surface: TLS + reverse-proxy + token are the *host's* security boundary (our doctrine).
+The committed dogfood stays localhost-only on purpose.
+
