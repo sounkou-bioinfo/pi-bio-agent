@@ -10,7 +10,7 @@
       { "id": "http.get", "version": "0.1.0", "title": "HTTP GET", "description": "GET a declared URL and materialize the JSON/CSV response into a table.", "output": { "mode": "table" } }
     ],
     "resources": [
-      { "id": "ols4_candidates", "title": "OLS4 search candidates", "kind": "virtual", "resolver": "http.get", "params": { "url": "https://www.ebi.ac.uk/ols4/api/search?q=asthma&ontology=mondo&fieldList=obo_id,label", "table": "ols4_candidates", "format": "json" } }
+      { "id": "ols4_candidates", "title": "OLS4 search candidates", "kind": "virtual", "resolver": "http.get", "params": { "url": "https://www.ebi.ac.uk/ols4/api/search?q={query}&ontology={ontology:mondo}&fieldList={fieldList:obo_id,label}", "table": "ols4_candidates", "format": "json" } }
     ]
   }
 }

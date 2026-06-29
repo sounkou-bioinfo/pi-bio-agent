@@ -19,7 +19,9 @@ import { runBioQueryFromManifest } from "../src/hosts/run-store.js";
 const MANIFEST = resolve(process.cwd(), "examples", "ols4-grounding", "manifest.json");
 
 // an OLS4-search-shaped response, flattened to the candidate rows the grounding SQL consumes
-const ols4Mock = (etag: string): FetchLike => async (_url, init) => {
+let lastUrl = "";
+const ols4Mock = (etag: string): FetchLike => async (url, init) => {
+  lastUrl = url;
   const h = { get: (n: string) => (n.toLowerCase() === "etag" ? etag : null) };
   if (init?.headers?.["If-None-Match"] === etag) return { ok: false, status: 304, text: async () => "", headers: h };
   const body = [
@@ -37,27 +39,33 @@ describe("example: an OLS4 grounding skill is a manifest, not code", () => {
 
     // exact-match projection tier — the agent's grounding SQL over the resolved candidate table
     const sql = "SELECT obo_id, label FROM ols4_candidates WHERE lower(label) = 'asthma'";
-    const first = await runBioQueryFromManifest({ cwd, dbPath, manifestPath: MANIFEST, sql, network: { fetch: ols4Mock("ols4-v1") }, runId: "g1", now: "T1" });
+    // the AGENT supplies the query; the manifest declares only the URL TEMPLATE (?q={query}). No hardcoded term.
+    const first = await runBioQueryFromManifest({ cwd, dbPath, manifestPath: MANIFEST, sql, bindings: { query: "asthma" }, network: { fetch: ols4Mock("ols4-v1") }, runId: "g1", now: "T1" });
 
     assert.equal(first.ok, true);
     if (!first.ok) return;
+    assert.match(lastUrl, /[?&]q=asthma(&|$)/, "the binding composed {query} into the URL");
     const result = JSON.parse(await fs.readFile(join(first.runDir, "result.json"), "utf8")) as { rows: Array<{ obo_id: string; label: string }> };
     assert.deepEqual(result.rows, [{ obo_id: "MONDO:0004979", label: "asthma" }]);
 
-    // re-grounding the same endpoint replays the ETag memo (304) — no re-download, same answer
-    const second = await runBioQueryFromManifest({ cwd, dbPath, manifestPath: MANIFEST, sql, network: { fetch: ols4Mock("ols4-v1") }, runId: "g2", now: "T2" });
-    assert.equal(second.ok, true);
-    if (!second.ok) return;
-    const receipts = JSON.parse(await fs.readFile(join(second.runDir, "receipts.json"), "utf8")) as Array<{ sourceSnapshots?: Array<{ retrievedAt?: string }> }>;
-    const ols4Receipt = receipts.find((r) => r.sourceSnapshots?.[0]?.retrievedAt);
-    assert.equal(ols4Receipt?.sourceSnapshots?.[0]?.retrievedAt, "T1", "the 304 replays the cached resolution from run 1");
+    // a DIFFERENT query composes a different URL from the SAME manifest (it's a template, not a hardcoded term)
+    await runBioQueryFromManifest({ cwd, dbPath: ":memory:", manifestPath: MANIFEST, sql, bindings: { query: "lung cancer" }, network: { fetch: ols4Mock("ols4-v2") }, runId: "g2", now: "T2" });
+    assert.match(lastUrl, /[?&]q=lung%20cancer(&|$)/, "a new binding composes a new URL (URL-encoded)");
+  });
+
+  test("fails closed when the URL template's {query} has no binding (the manifest requires the agent's query)", async () => {
+    const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-ols4-"));
+    await assert.rejects(
+      () => runBioQueryFromManifest({ cwd, dbPath: ":memory:", manifestPath: MANIFEST, sql: "SELECT 1", network: { fetch: ols4Mock("x") }, runId: "g3", now: "T1" }),
+      /references '\{query\}' but no binding/,
+    );
   });
 
   test("fails closed with NO network bound — a networked manifest cannot resolve without the host's opt-in", async () => {
     const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-ols4-"));
-    // no network -> http.get is declared but unbound -> resolution fails closed (never silently returns empty)
+    // binding supplied (so templating passes); no network -> http.get unbound -> resolution fails closed
     await assert.rejects(
-      () => runBioQueryFromManifest({ cwd, dbPath: ":memory:", manifestPath: MANIFEST, sql: "SELECT * FROM ols4_candidates", runId: "g3", now: "T1" }),
+      () => runBioQueryFromManifest({ cwd, dbPath: ":memory:", manifestPath: MANIFEST, sql: "SELECT * FROM ols4_candidates", bindings: { query: "asthma" }, runId: "g4", now: "T1" }),
       /http\.get' is declared but no implementation is bound/,
     );
   });

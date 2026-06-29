@@ -99,12 +99,13 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
       manifestPath: Type.String({ description: "Path to a domain-pack manifest JSON file (relative to cwd or absolute)." }),
       sql: Type.String({ description: "A single read-only SELECT/WITH over the manifest's resolved resource tables." }),
       resources: Type.Optional(Type.Array(Type.String(), { description: "Which declared resource ids to resolve first. Defaults to ALL declared; pass the subset your SQL uses to avoid resolving unrelated resources (e.g. a remote one you don't need)." })),
+      bindings: Type.Optional(Type.Record(Type.String(), Type.Unknown(), { description: "Values for {name} slots in a resource's url/body template (e.g. {\"query\":\"asthma\"}). The manifest declares the API SHAPE; you supply the query. Required where the template has no default." })),
       runId: Type.Optional(Type.String({ description: "Stable run id; generated when omitted." })),
     }),
-    async execute(_id, params: { dbPath: string; manifestPath: string; sql: string; resources?: string[]; runId?: string }, signal, _onUpdate, ctx) {
+    async execute(_id, params: { dbPath: string; manifestPath: string; sql: string; resources?: string[]; bindings?: Record<string, unknown>; runId?: string }, signal, _onUpdate, ctx) {
       // Only schema-approved fields (see bio_run_operation): never spread untrusted params into the host runner.
-      const { dbPath, manifestPath, sql, resources, runId } = params;
-      return text(await runBioQueryFromManifest({ cwd: ctx.cwd, dbPath, manifestPath, sql, resources, runId, network, signal }));
+      const { dbPath, manifestPath, sql, resources, bindings, runId } = params;
+      return text(await runBioQueryFromManifest({ cwd: ctx.cwd, dbPath, manifestPath, sql, resources, bindings, runId, network, signal }));
     },
   });
 

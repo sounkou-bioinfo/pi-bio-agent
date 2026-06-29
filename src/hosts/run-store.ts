@@ -5,6 +5,7 @@ import { DuckDBInstance } from "@duckdb/node-api";
 import { createBioRegistry, type BioRegistry, type DomainPackManifest, type ResolutionReceipt } from "../core/manifest.js";
 import type { CasStore } from "../core/cas.js";
 import type { BioResolverImpl, SqlConn } from "../core/ports.js";
+import { bindManifestResources } from "./resource-bindings.js";
 import { OperationRunError, runOperation, runQuery, type OperationResult } from "../core/operations.js";
 import type { BioRunRecord } from "../core/run-spec.js";
 import { duckdbNodeConn } from "../duckdb/node-api.js";
@@ -129,6 +130,8 @@ export interface RunOperationRequest {
   /** Host-owned connection bootstrap SQL (INSTALL/LOAD/SET), run once before resolution — e.g. enabling
    *  httpfs + cache_httpfs so file_scan/sql_materialize remote reads get block caching. NOT agent SQL. */
   duckdbInitSql?: string[];
+  /** Agent-supplied bindings filling {name} slots in resource url/body templates (url composition over params). */
+  bindings?: Record<string, unknown>;
 }
 
 export type RunOperationResponse =
@@ -141,10 +144,13 @@ function resolveInCwd(cwd: string, p: string): string {
 
 /** Load + validate + register a manifest and bind the built-in resolver impls it declares. Shared by the
  *  operation and the ad-hoc query entry points. */
-async function prepareRegistry(req: { cwd: string; manifestPath: string; network?: { fetch: FetchLike } }): Promise<{ registry: BioRegistry; manifest: DomainPackManifest }> {
+async function prepareRegistry(req: { cwd: string; manifestPath: string; network?: { fetch: FetchLike }; bindings?: Record<string, unknown> }): Promise<{ registry: BioRegistry; manifest: DomainPackManifest }> {
   const manifestPath = resolveInCwd(req.cwd, req.manifestPath);
   const raw = JSON.parse(await fs.readFile(manifestPath, "utf8")) as DomainPackManifest;
-  const manifest = resolveResourcePaths(raw, dirname(manifestPath)); // relative resource paths -> manifest dir
+  const located = resolveResourcePaths(raw, dirname(manifestPath)); // relative resource paths -> manifest dir
+  // Parameterized resources: fill {name} slots in resource url/body from agent-supplied bindings (url composition
+  // over params). Fails closed on an unfilled slot, so a manifest that declares a query template requires a value.
+  const manifest = bindManifestResources(located, req.bindings ?? {});
   const registry = createBioRegistry();
   registry.registerManifest(manifest); // throws on an invalid manifest (fail closed)
   const httpImpl = req.network ? httpTableResolver(req.network.fetch) : undefined;
@@ -226,6 +232,8 @@ export interface RunQueryRequest {
   cas?: CasStore;
   /** Host-owned connection bootstrap SQL (INSTALL/LOAD/SET), run once before resolution. NOT agent SQL. */
   duckdbInitSql?: string[];
+  /** Agent-supplied bindings filling {name} slots in resource url/body templates (url composition over params). */
+  bindings?: Record<string, unknown>;
 }
 
 /**
