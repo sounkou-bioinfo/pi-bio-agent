@@ -82,7 +82,11 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
       runId: Type.Optional(Type.String({ description: "Stable run id; generated when omitted." })),
     }),
     async execute(_id, params: { dbPath: string; manifestPath: string; operationId: string; runId?: string }, signal, _onUpdate, ctx) {
-      return text(await runBioOperationFromManifest({ cwd: ctx.cwd, ...params, network, signal }));
+      // Pass ONLY schema-approved fields — never spread untrusted params. Spreading would let an agent smuggle
+      // host-only capabilities the tool schema omits (duckdbInitSql / now / cwd) if the schema validator does
+      // not strip unknown keys. network/signal are host-composed, never agent-supplied.
+      const { dbPath, manifestPath, operationId, runId } = params;
+      return text(await runBioOperationFromManifest({ cwd: ctx.cwd, dbPath, manifestPath, operationId, runId, network, signal }));
     },
   });
 
@@ -98,7 +102,9 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
       runId: Type.Optional(Type.String({ description: "Stable run id; generated when omitted." })),
     }),
     async execute(_id, params: { dbPath: string; manifestPath: string; sql: string; resources?: string[]; runId?: string }, signal, _onUpdate, ctx) {
-      return text(await runBioQueryFromManifest({ cwd: ctx.cwd, ...params, network, signal }));
+      // Only schema-approved fields (see bio_run_operation): never spread untrusted params into the host runner.
+      const { dbPath, manifestPath, sql, resources, runId } = params;
+      return text(await runBioQueryFromManifest({ cwd: ctx.cwd, dbPath, manifestPath, sql, resources, runId, network, signal }));
     },
   });
 
