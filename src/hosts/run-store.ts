@@ -130,20 +130,28 @@ export async function runBioOperationFromManifest(req: RunOperationRequest): Pro
   const now = req.now ?? new Date().toISOString();
   const runId = req.runId ?? `${req.operationId.replace(/[^a-zA-Z0-9._-]/g, "_")}-${Date.now()}`;
 
+  // Acquire → use → release: the DuckDB instance/connection are owned for the duration of this run and closed
+  // on EVERY path (success, failed run, or rethrow) so a run never leaks a handle or holds a file-db lock.
   const instance = await DuckDBInstance.create(resolveInCwd(req.cwd, req.dbPath));
-  const conn = duckdbNodeConn(await instance.connect());
+  const connection = await instance.connect();
+  const conn = duckdbNodeConn(connection);
 
   try {
-    const { run, result, receipts } = await runOperation(registry, conn, { operationId: req.operationId, runId, now });
-    const persisted = await persistRun(req.cwd, runId, { run, result, receipts });
-    return { ok: true, runId, operationId: req.operationId, status: run.status, rowCount: result.rows.length, artifacts: persisted.files, runDir: persisted.dir };
-  } catch (error) {
-    // A run that started and failed at runtime persists a failed-run receipt and returns ok:false — the
-    // failure is auditable, not lost. Pre-flight/config errors (which never became a run) still throw.
-    if (error instanceof OperationRunError) {
-      const persisted = await persistFailedRun(req.cwd, runId, { run: error.run, receipts: error.receipts });
-      return { ok: false, runId, operationId: req.operationId, status: error.run.status, error: error.message, runDir: persisted.dir };
+    try {
+      const { run, result, receipts } = await runOperation(registry, conn, { operationId: req.operationId, runId, now });
+      const persisted = await persistRun(req.cwd, runId, { run, result, receipts });
+      return { ok: true, runId, operationId: req.operationId, status: run.status, rowCount: result.rows.length, artifacts: persisted.files, runDir: persisted.dir };
+    } catch (error) {
+      // A run that started and failed at runtime persists a failed-run receipt and returns ok:false — the
+      // failure is auditable, not lost. Pre-flight/config errors (which never became a run) still throw.
+      if (error instanceof OperationRunError) {
+        const persisted = await persistFailedRun(req.cwd, runId, { run: error.run, receipts: error.receipts });
+        return { ok: false, runId, operationId: req.operationId, status: error.run.status, error: error.message, runDir: persisted.dir };
+      }
+      throw error;
     }
-    throw error;
+  } finally {
+    connection.closeSync();
+    instance.closeSync();
   }
 }
