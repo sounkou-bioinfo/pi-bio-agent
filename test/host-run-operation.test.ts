@@ -198,6 +198,21 @@ describe("host: bio_run_operation end-to-end", () => {
     assert.equal(bad.ok, false);
   });
 
+  test("resolution memoization: a second run over the same file db replays the cached resolution", async () => {
+    const cwd = await tmpProject(manifest);
+    const base = { cwd, dbPath: "cache.duckdb", manifestPath: "manifest.json", operationId: "rare_high_impact.report" };
+    const r1 = await runBioOperationFromManifest({ ...base, runId: "warm-1", now: "2026-06-28T00:00:01Z" });
+    assert.equal(r1.ok, true);
+    const r2 = await runBioOperationFromManifest({ ...base, runId: "warm-2", now: "2026-06-28T00:00:02Z" });
+    assert.equal(r2.ok, true);
+    // the second run hit the memo (file unchanged, table persisted in the file db): the resolver's source
+    // snapshot carries the ORIGINAL retrievedAt, not run-2's now — the re-read + re-load was skipped.
+    const receipts2 = JSON.parse(await fs.readFile(join(runsRoot(cwd), "warm-2", "receipts.json"), "utf8"));
+    const av = receipts2.find((r: { resourceId: string }) => r.resourceId === "annotated_variants");
+    const fileSnap = av.sourceSnapshots.find((s: { source: string }) => s.source.startsWith("file:"));
+    assert.equal(fileSnap.retrievedAt, "2026-06-28T00:00:01Z");
+  });
+
   test("persistRun refuses a runId that would escape the runs directory (path-safe even called directly)", async () => {
     const cwd = await fs.mkdtemp(join(tmpdir(), "biorun-"));
     await assert.rejects(
