@@ -8,6 +8,7 @@ import type { SqlConn } from "../src/core/ports.js";
 import type { VirtualResourceSpec } from "../src/core/resources.js";
 import { duckdbNodeConn } from "../src/duckdb/node-api.js";
 import { duckdbFileScanResolver } from "../src/duckdb/resolvers/duckdb-file-scan.js";
+import { duckdbSqlMaterializeResolver } from "../src/duckdb/resolvers/duckdb-sql-materialize.js";
 
 // Resolution memoization (the lazy graph's memo table): re-resolving an UNCHANGED file skips the re-read +
 // re-load and replays the receipt — proven by resolvedAt staying the ORIGINAL value, not the new now. Changing
@@ -35,6 +36,26 @@ describe("resolution memoization (file_scan): unchanged file hits, changed file 
     const third = await duckdbFileScanResolver(resource, { conn, now: "T3" });
     assert.equal(third.sourceSnapshots[0]!.retrievedAt, "T3", "modified file must miss the memo and re-resolve");
     const [{ n }] = await conn.all<{ n: number }>("SELECT count(*) AS n FROM v");
+    assert.equal(Number(n), 2);
+  });
+
+  test("the memo is a shared primitive: sql_materialize over local declaredSources hits/misses the same way", async () => {
+    const dir = await fs.mkdtemp(join(tmpdir(), "memo-sql-"));
+    const csv = join(dir, "s.csv");
+    await fs.writeFile(csv, "g,n\nBRCA1,1\n", "utf8");
+    const conn: SqlConn = duckdbNodeConn(await (await DuckDBInstance.create(":memory:")).connect());
+    const r = (): VirtualResourceSpec => ({ id: "m", title: "M", kind: "virtual", resolver: "duckdb.sql_materialize", params: { table: "m", sql: `SELECT * FROM read_csv_auto('${csv}')`, declaredSources: [`file:${csv}`] } });
+
+    const first = await duckdbSqlMaterializeResolver(r(), { conn, now: "T1" });
+    assert.equal(first.sourceSnapshots[0]!.retrievedAt, "T1");
+    const second = await duckdbSqlMaterializeResolver(r(), { conn, now: "T2" });
+    assert.equal(second.sourceSnapshots[0]!.retrievedAt, "T1", "unchanged source -> memo hit");
+
+    await new Promise((res) => setTimeout(res, 5));
+    await fs.writeFile(csv, "g,n\nBRCA1,1\nTP53,2\n", "utf8");
+    const third = await duckdbSqlMaterializeResolver(r(), { conn, now: "T3" });
+    assert.equal(third.sourceSnapshots[0]!.retrievedAt, "T3", "changed source -> miss");
+    const [{ n }] = await conn.all<{ n: number }>("SELECT count(*) AS n FROM m");
     assert.equal(Number(n), 2);
   });
 });

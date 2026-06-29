@@ -43,11 +43,13 @@ export const duckdbFileScanResolver: BioResolverImpl = async (resource, ctx) => 
   // Memoization: a cheap freshness token (mtime+size) for a LOCAL file lets a re-resolve over a persistent db
   // skip the re-read + re-load when the file is unchanged. Remote/unstatable paths get no token -> never memo
   // (always re-resolve) — the safe default. Keyed on content freshness, so it never serves stale data.
+  // Token captures every determinant of the table content (resolver + reader + path + file freshness), so a
+  // different recipe to the same table name can never false-hit.
   let freshness: string | undefined;
   if (!path.includes("://")) {
     try {
       const s = statSync(path);
-      freshness = `${s.mtimeMs}:${s.size}`;
+      freshness = `file_scan:${fn}:${path}:${s.mtimeMs}:${s.size}`;
     } catch {
       /* unstatable -> no memo */
     }
