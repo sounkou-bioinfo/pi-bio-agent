@@ -170,16 +170,40 @@ JOIN, not a walker. See [`design.md`](./design.md#the-semanticsql-shape-statemen
   transitive closure over `bio_edges`, indexed both directions; cycles terminate via UNION dedup.
 - DONE: ordinal scales as data (`scale_members` from a ranked `TermSet`) — total order to the graph's partial
   order; `decideGrounding` membership unchanged.
-- NEXT (deferred until a real grounding/traversal consumer): an `ontology.semsql` resolver that lands an OBO
-  ontology's `statements` + `entailed_edge` into the same shape — ingest via `sqlite_scan -> parquet` (sidesteps
-  live ATTACH where unavailable), index `entailed_edge` on `(to_id,predicate)`+`(from_id,predicate)`, pin a
-  bbop-sqlite build date as source provenance, honor per-ontology CC-BY. OLS4 REST only for fresh text→CURIE
-  misses (judgment tier); cached CURIEs + FTS are the deterministic projection tier; ABSTAIN below threshold.
+- NEXT (deferred until a real grounding/traversal consumer): a thin ontology-ingest resolver that projects an
+  OBO ontology into our `statements` + `bio_edges` shape. NO DuckDB sqlite extension — the real SemanticSQL
+  schema is four flat all-TEXT triple tables (`statements(subject,predicate,object,value,datatype,language)`,
+  `edge(s,p,o)`, `entailed_edge(s,p,o)`, `prefix`); their `edge` IS our `bio_edges`. Ingest from a
+  NATIVE-readable format: OBO Graphs JSON via `read_json`, or build TSVs / triple parquet via
+  `duckdb.file_scan`, or an optional one-time `sqlite3` CLI dump → parquet (the sqlite3 binary, not DuckDB's
+  extension). Compute the closure with `materializeEntailedEdges` (we don't need their `entailed_edge`). Pin a
+  build date as provenance, honor per-ontology CC-BY. OLS4 REST only for fresh text→CURIE misses (judgment
+  tier); cached CURIEs + FTS are the deterministic projection tier; ABSTAIN below threshold.
 - Add bounded graph-walk semantics with expansion handles so high-degree neighborhoods do not flood context
   (now a bounded SQL query over `entailed_edge`, not a custom walker).
 - Add trust/provenance fields consistently across facts, edges, and artifacts (`bio_edges.trust` exists; keep
   it uniform with receipts/artifacts).
 - Add as-of/known-at time lenses where variant reanalysis or changing knowledge releases matter.
+
+## Retrieval and semantic search
+
+Settled direction (2026-06-29): a **tiered retrieval ladder, cheapest deterministic tier first**. Search
+returns *candidates (data)* that feed `decideGrounding` (rank, ABSTAIN below threshold, never invent a CURIE);
+the engine is a swappable adapter. Climb a tier only when a real corpus/recall failure forces it.
+
+- Tier 0 — exact: SQL equality on label/exact-synonym (`statements`). Deterministic, offline. HAVE.
+- Tier 1 — lexical BM25: DuckDB FTS over labels/synonyms/notes/docs. In-DB, offline. NEXT real add (already
+  planned for grounding misses).
+- Tier 2 — dense single-vector: DuckDB VSS (HNSW) over an embedding column for paraphrase recall. Still in-DB.
+  Add only if Tier 1 recall is insufficient on a real corpus.
+- Tier 3 — late-interaction multivector (ColBERT / TACHIOM-style): SOTA high-recall, but a large-corpus /
+  research-grade runtime (TACHIOM exists to fix the k-means index bottleneck at ~600M-vector scale). OVERKILL
+  for ontology grounding (MONDO ~25k, HPO ~17k, SO ~2k terms — tiny candidate spaces) and for our notes. If
+  literature-scale retrieval ever forces it, it enters as an EXTERNAL retrieval SERVICE behind a resolver/HTTP
+  boundary returning ranked candidates as DATA — never a multivector engine baked into core. Absorb the
+  function (ranked candidates), not the runtime.
+
+Tiers 0–2 live IN the DuckDB substrate (SQL/FTS/VSS), consistent with graph-as-SQL; only Tier 3 goes external.
 
 ## Biomedical workflow fixtures
 
