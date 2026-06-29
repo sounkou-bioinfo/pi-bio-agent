@@ -48,6 +48,7 @@ fails if it is stale.
 - `bio_list_duckdb_extensions` — List bio DuckDB extensions
 - `bio_list_study_notes` — List bio study notes
 - `bio_list_tool_specs` — List BioToolSpec contracts
+- `bio_query` — Run an ad-hoc bio query
 - `bio_read_study_note` — Read bio study note
 - `bio_run_operation` — Run a bio operation
 - `bio_study_plan` — Plan bio study

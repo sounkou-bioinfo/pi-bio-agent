@@ -37,44 +37,44 @@ export class OperationRunError extends Error {
 
 
 /**
- * Generic operation runner: resolve the named required resources (materializing their tables/views), run
- * the operation's declared SQL, and emit result + run record + provenance. No question logic here — that is
- * the operation's SQL and the registered data. This is ClawBio's uniform `run(input) -> result`, factored
- * once. `now`/`runId` are injected for deterministic receipts/records.
+ * The general runner: resolve the named resources (materializing their tables), run a read-only SQL query
+ * over them, and emit result + run record + provenance. The SQL is the CALLER's — usually the agent's, written
+ * live after schema discovery (`describeTable`). A declared operation is just the special case where the SQL +
+ * resources came from a registered, named, tested spec (see `runOperation`); most questions need no declared
+ * operation, only declared resources. `now`/`runId` are injected for deterministic receipts.
  */
-export async function runOperation(
+export async function runQuery(
   registry: BioRegistry,
   conn: SqlConn,
-  opts: { operationId: string; resources?: string[]; params?: readonly unknown[]; runId: string; now: string },
+  opts: {
+    sql: string;
+    resources: string[];
+    runId: string;
+    now: string;
+    params?: readonly unknown[];
+    /** Identity for the run/result/provenance. A registered operation passes its id+version; an ad-hoc agent
+     *  query defaults to "ad-hoc.query". */
+    id?: string;
+    version?: string;
+    title?: string;
+    description?: string;
+  },
 ): Promise<{ result: OperationResult; run: BioRunRecord; receipts: ResolutionReceipt[] }> {
-  const { operationId, params = [], runId, now } = opts;
-  const op = registry.getOperation(operationId);
-  if (!op?.sql) throw new Error(`operation '${operationId}' has no duckdb.sql request`);
-  const safeSql = validateReadOnlySelect(op.sql.sqlTemplate); // enforced before we touch the conn; run the validated text
+  const { resources, runId, now, params = [] } = opts;
+  const id = opts.id ?? "ad-hoc.query";
+  const isNamed = opts.id !== undefined;
+  const safeSql = validateReadOnlySelect(opts.sql); // enforced before we touch the conn; run the validated text
 
-  // The operation declares the resources it needs. Derive them when the caller omits an explicit list;
-  // when a list is given, it must cover the declared requirements (fail closed, not a deep SQL binder error).
-  const declared = op.sql.requiredResources ?? [];
-  const resources = opts.resources ?? declared;
-  if (opts.resources) {
-    const have = new Set(opts.resources);
-    const uncovered = declared.filter((d) => !have.has(d));
-    if (uncovered.length) throw new Error(`operation '${operationId}': provided resources do not cover required resource(s): ${uncovered.join(", ")}`);
-  }
-
-  // Pre-flight: the request must be RUNNABLE before it becomes a run — every required resource is registered
-  // and its resolver has a bound impl. These are config errors (a host lacking the resolver can't run this),
-  // thrown plainly; they are NOT failed runs. Runtime failures (a resolver that errors, or the SQL) happen
-  // below, after the run has started, and ARE recorded as a failed run.
+  // Pre-flight: the request must be RUNNABLE before it becomes a run — every named resource is registered and
+  // its resolver has a bound impl. These are config errors (thrown plainly, NOT failed runs). Runtime failures
+  // (a resolver that errors, or the SQL) happen below, after the run has started, and ARE recorded as failed.
   for (const rid of resources) {
     const resource = registry.getResource(rid);
-    if (!resource) throw new Error(`operation '${operationId}' requires unregistered resource '${rid}'`);
+    if (!resource) throw new Error(`query '${id}' requires unregistered resource '${rid}'`);
     if (!registry.hasResolverImpl(resource.resolver)) throw new Error(`resolver '${resource.resolver}' is declared but no implementation is bound`);
   }
 
-  // From here a run EXISTS: any runtime failure (resolution or the SQL) is recorded on it as a "failed" event
-  // and surfaced as an OperationRunError so the host can persist a failed-run receipt rather than lose it.
-  const runSpec: BioRunSpec = { schema: "pi-bio.run_spec.v1", id: runId, title: op.title, description: op.description, tool: { name: op.id, version: op.version }, mode: "inline", inputs: [] };
+  const runSpec: BioRunSpec = { schema: "pi-bio.run_spec.v1", id: runId, title: opts.title ?? "ad-hoc query", description: opts.description ?? "Read-only query over resolved resources.", tool: { name: id, version: opts.version ?? "0.1.0" }, mode: "inline", inputs: [] };
   let run = newRunRecord(runSpec, now);
   run = appendRunEvent(run, { type: "started", at: now });
 
@@ -83,8 +83,8 @@ export async function runOperation(
     for (const rid of resources) {
       receipts.push(await registry.resolveResource(rid, { conn, now }));
     }
-    // Ordinal scales as data: project every ordered TermSet into `scale_members` so operation SQL can JOIN
-    // and threshold/ORDER BY on rank. Derived from declared manifest data (no external source, no receipt).
+    // Ordinal scales as data: project every ordered TermSet into `scale_members` so the SQL can JOIN and
+    // threshold/ORDER BY on rank. Derived from declared manifest data (no external source, no receipt).
     await materializeScaleMembers(registry, conn);
 
     // No column pre-declaration: the SQL the agent wrote references its columns, and DuckDB's binder is the
@@ -92,22 +92,19 @@ export async function runOperation(
     // is a primitive the agent CALLS to decide what SQL to write, not a contract the runner enforces.
     const rows = await conn.all<Record<string, unknown>>(safeSql, params);
     const sourceSnapshots = receipts.flatMap((r) => r.sourceSnapshots);
-    const result: OperationResult = { schema: "pi-bio.operation_result.v1", operationId, runId, sourceSnapshots, rows };
+    const result: OperationResult = { schema: "pi-bio.operation_result.v1", operationId: id, runId, sourceSnapshots, rows };
 
-    // The result IS the report: whatever the operation's SQL returns (classified rows, or a GROUP BY count).
-    // No TS reducer, no report-kind taxonomy — counts/aggregation are the operation's SQL when it wants them.
-    // Reproducibility pin: the run record carries the exact operation version + a digest of the SQL that
-    // produced this result, so a receipt identifies precisely what ran (defends "provenance correct").
-    const sqlDigest = `sha256:${createHash("sha256").update(op.sql.sqlTemplate).digest("hex")}`;
+    // The result IS the report: whatever the SQL returns. Reproducibility pin: the run record carries the
+    // identity + version + a digest of the exact SQL that produced this result (defends "provenance correct").
+    const sqlDigest = `sha256:${createHash("sha256").update(safeSql).digest("hex")}`;
     const artifact: BioArtifact = {
       kind: "artifact",
       role: "output",
-      // The host persists the result as result.json; the run record must point at the file that exists on
-      // disk, not a per-operation name. Keep this in lockstep with persistRun()'s result.json.
+      // Host persists the result as result.json; the run record must point at the file that exists on disk.
       path: `runs/${runId}/result.json`,
       format: "json",
       provenance: [
-        { source: op.id, version: op.version, digest: sqlDigest, notes: ["operation"] },
+        { source: id, version: opts.version, digest: sqlDigest, notes: [isNamed ? "operation" : "query"] },
         ...receipts.map((r) => ({ source: `${r.resolverId}@${r.resolverVersion}`, retrievedAt: r.resolvedAt, notes: ["resolver receipt"] })),
       ],
     };
@@ -120,4 +117,32 @@ export async function runOperation(
     run = { ...run, error: message };
     throw new OperationRunError(message, run, receipts);
   }
+}
+
+/**
+ * Run a *declared* operation — a named, versioned, tested query that earned a spec (subtle/reused/safety-
+ * critical, like the abstention flagship). It is just `runQuery` with the SQL + resources taken from the
+ * registered spec. For everything else, the agent writes SQL live and calls `runQuery` directly; a manifest
+ * needs to declare only its resources, not an operation per question.
+ */
+export async function runOperation(
+  registry: BioRegistry,
+  conn: SqlConn,
+  opts: { operationId: string; resources?: string[]; params?: readonly unknown[]; runId: string; now: string },
+): Promise<{ result: OperationResult; run: BioRunRecord; receipts: ResolutionReceipt[] }> {
+  const { operationId } = opts;
+  const op = registry.getOperation(operationId);
+  if (!op?.sql) throw new Error(`operation '${operationId}' has no duckdb.sql request`);
+
+  const declared = op.sql.requiredResources ?? [];
+  const resources = opts.resources ?? declared;
+  if (opts.resources) {
+    const have = new Set(opts.resources);
+    const uncovered = declared.filter((d) => !have.has(d));
+    if (uncovered.length) throw new Error(`operation '${operationId}': provided resources do not cover required resource(s): ${uncovered.join(", ")}`);
+  }
+  return runQuery(registry, conn, {
+    sql: op.sql.sqlTemplate, resources, runId: opts.runId, now: opts.now, params: opts.params,
+    id: op.id, version: op.version, title: op.title, description: op.description,
+  });
 }

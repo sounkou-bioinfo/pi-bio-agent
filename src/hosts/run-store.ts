@@ -1,9 +1,9 @@
 import { promises as fs } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { DuckDBInstance } from "@duckdb/node-api";
-import { createBioRegistry, type DomainPackManifest, type ResolutionReceipt } from "../core/manifest.js";
-import type { BioResolverImpl } from "../core/ports.js";
-import { OperationRunError, runOperation, type OperationResult } from "../core/operations.js";
+import { createBioRegistry, type BioRegistry, type DomainPackManifest, type ResolutionReceipt } from "../core/manifest.js";
+import type { BioResolverImpl, SqlConn } from "../core/ports.js";
+import { OperationRunError, runOperation, runQuery, type OperationResult } from "../core/operations.js";
 import type { BioRunRecord } from "../core/run-spec.js";
 import { duckdbNodeConn } from "../duckdb/node-api.js";
 import { duckdbFileScanResolver } from "../duckdb/resolvers/duckdb-file-scan.js";
@@ -129,19 +129,12 @@ function resolveInCwd(cwd: string, p: string): string {
   return p === ":memory:" || isAbsolute(p) ? p : resolve(cwd, p);
 }
 
-/**
- * Host entry: load a manifest, register it (validated, fail closed), bind the built-in resolver impls it
- * declares, run a duckdb.sql operation against an explicit DuckDB database, and persist the run. Core is
- * unchanged — it returns { run, result, receipts }; binding + persistence are the host's job.
- */
-export async function runBioOperationFromManifest(req: RunOperationRequest): Promise<RunOperationResponse> {
-  if (req.runId !== undefined && !/^[A-Za-z0-9._-]+$/.test(req.runId)) {
-    throw new Error("runId must contain only [A-Za-z0-9._-] (no path separators)"); // no run-dir traversal
-  }
+/** Load + validate + register a manifest and bind the built-in resolver impls it declares. Shared by the
+ *  operation and the ad-hoc query entry points. */
+async function prepareRegistry(req: { cwd: string; manifestPath: string; network?: { fetch: FetchLike } }): Promise<{ registry: BioRegistry; manifest: DomainPackManifest }> {
   const manifestPath = resolveInCwd(req.cwd, req.manifestPath);
   const raw = JSON.parse(await fs.readFile(manifestPath, "utf8")) as DomainPackManifest;
   const manifest = resolveResourcePaths(raw, dirname(manifestPath)); // relative resource paths -> manifest dir
-
   const registry = createBioRegistry();
   registry.registerManifest(manifest); // throws on an invalid manifest (fail closed)
   const httpImpl = req.network ? httpTableResolver(req.network.fetch) : undefined;
@@ -149,31 +142,29 @@ export async function runBioOperationFromManifest(req: RunOperationRequest): Pro
     const impl = BUILTIN_RESOLVERS[r.id] ?? (r.id === NETWORK_RESOLVER ? httpImpl : undefined);
     if (impl) registry.bindResolverImpl(r.id, impl);
   }
+  return { registry, manifest };
+}
 
-  const op = registry.getOperation(req.operationId);
-  if (!op) throw new Error(`operation '${req.operationId}' is not declared in the manifest`);
-  if (op.transport !== "duckdb.sql" || !op.sql) throw new Error(`operation '${req.operationId}' is not a duckdb.sql operation`);
-
-  const now = req.now ?? new Date().toISOString();
-  const runId = req.runId ?? `${req.operationId.replace(/[^a-zA-Z0-9._-]/g, "_")}-${Date.now()}`;
-
-  // Acquire → use → release: the DuckDB instance/connection are owned for the duration of this run and closed
-  // on EVERY path (success, failed run, or rethrow) so a run never leaks a handle or holds a file-db lock.
-  const instance = await DuckDBInstance.create(resolveInCwd(req.cwd, req.dbPath));
+/** Acquire → use → release: own a DuckDB instance/connection for one run, persist the result (or a failed-run
+ *  receipt), and close on EVERY path so no handle leaks. `body` does the actual core run. */
+async function runAndPersist(
+  cwd: string, dbPath: string, runId: string, identity: string,
+  body: (conn: SqlConn) => Promise<{ run: BioRunRecord; result: OperationResult; receipts: ResolutionReceipt[] }>,
+): Promise<RunOperationResponse> {
+  const instance = await DuckDBInstance.create(resolveInCwd(cwd, dbPath));
   const connection = await instance.connect();
   const conn = duckdbNodeConn(connection);
-
   try {
     try {
-      const { run, result, receipts } = await runOperation(registry, conn, { operationId: req.operationId, runId, now });
-      const persisted = await persistRun(req.cwd, runId, { run, result, receipts });
-      return { ok: true, runId, operationId: req.operationId, status: run.status, rowCount: result.rows.length, artifacts: persisted.files, runDir: persisted.dir };
+      const { run, result, receipts } = await body(conn);
+      const persisted = await persistRun(cwd, runId, { run, result, receipts });
+      return { ok: true, runId, operationId: identity, status: run.status, rowCount: result.rows.length, artifacts: persisted.files, runDir: persisted.dir };
     } catch (error) {
-      // A run that started and failed at runtime persists a failed-run receipt and returns ok:false — the
+      // A run that started and failed at runtime persists a failed-run receipt and returns ok:false; the
       // failure is auditable, not lost. Pre-flight/config errors (which never became a run) still throw.
       if (error instanceof OperationRunError) {
-        const persisted = await persistFailedRun(req.cwd, runId, { run: error.run, receipts: error.receipts });
-        return { ok: false, runId, operationId: req.operationId, status: error.run.status, error: error.message, runDir: persisted.dir };
+        const persisted = await persistFailedRun(cwd, runId, { run: error.run, receipts: error.receipts });
+        return { ok: false, runId, operationId: identity, status: error.run.status, error: error.message, runDir: persisted.dir };
       }
       throw error;
     }
@@ -181,4 +172,54 @@ export async function runBioOperationFromManifest(req: RunOperationRequest): Pro
     connection.closeSync();
     instance.closeSync();
   }
+}
+
+/**
+ * Host entry: run a *declared* operation from a manifest and persist the run. A declared operation is a named,
+ * tested, pinned query (the special case). For most questions use `runBioQueryFromManifest` — the agent writes
+ * the SQL after schema discovery and the manifest declares only resources.
+ */
+export async function runBioOperationFromManifest(req: RunOperationRequest): Promise<RunOperationResponse> {
+  if (req.runId !== undefined && !/^[A-Za-z0-9._-]+$/.test(req.runId)) {
+    throw new Error("runId must contain only [A-Za-z0-9._-] (no path separators)"); // no run-dir traversal
+  }
+  const { registry } = await prepareRegistry(req);
+  const op = registry.getOperation(req.operationId);
+  if (!op) throw new Error(`operation '${req.operationId}' is not declared in the manifest`);
+  if (op.transport !== "duckdb.sql" || !op.sql) throw new Error(`operation '${req.operationId}' is not a duckdb.sql operation`);
+  const now = req.now ?? new Date().toISOString();
+  const runId = req.runId ?? `${req.operationId.replace(/[^a-zA-Z0-9._-]/g, "_")}-${Date.now()}`;
+  return runAndPersist(req.cwd, req.dbPath, runId, req.operationId, (conn) => runOperation(registry, conn, { operationId: req.operationId, runId, now }));
+}
+
+export interface RunQueryRequest {
+  cwd: string;
+  dbPath: string;
+  manifestPath: string;
+  /** The read-only SQL to run — usually the AGENT's, written after schema discovery over the resolved tables. */
+  sql: string;
+  /** Which declared resources to materialize first; defaults to ALL the manifest declares, so the SQL may
+   *  reference any of their tables. */
+  resources?: string[];
+  runId?: string;
+  now?: string;
+  network?: { fetch: FetchLike };
+}
+
+/**
+ * Host entry: resolve a manifest's declared resources and run an AD-HOC read-only query over them — the
+ * general path. The manifest needs to declare only resources (no operation per question); the agent does
+ * schema discovery (e.g. a `SELECT … FROM information_schema.columns` or a `LIMIT` probe through this same
+ * entry) and writes the SQL. Persists run/result/receipts exactly like an operation, with the SQL digest
+ * pinned in provenance.
+ */
+export async function runBioQueryFromManifest(req: RunQueryRequest): Promise<RunOperationResponse> {
+  if (req.runId !== undefined && !/^[A-Za-z0-9._-]+$/.test(req.runId)) {
+    throw new Error("runId must contain only [A-Za-z0-9._-] (no path separators)");
+  }
+  const { registry, manifest } = await prepareRegistry(req);
+  const resources = req.resources ?? (manifest.provides?.resources ?? []).map((r) => r.id);
+  const now = req.now ?? new Date().toISOString();
+  const runId = req.runId ?? `query-${Date.now()}`;
+  return runAndPersist(req.cwd, req.dbPath, runId, "ad-hoc.query", (conn) => runQuery(registry, conn, { sql: req.sql, resources, runId, now }));
 }

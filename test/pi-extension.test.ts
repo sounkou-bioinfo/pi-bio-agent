@@ -40,6 +40,7 @@ describe("Pi coding-agent extension", () => {
       "bio_list_duckdb_extensions",
       "bio_list_study_notes",
       "bio_list_tool_specs",
+      "bio_query",
       "bio_read_study_note",
       "bio_run_operation",
       "bio_study_plan",

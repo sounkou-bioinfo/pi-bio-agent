@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DomainPackManifest } from "../src/core/manifest.js";
 import type { FetchLike } from "../src/duckdb/resolvers/http-table-scan.js";
-import { persistRun, runBioOperationFromManifest, runsRoot } from "../src/hosts/run-store.js";
+import { persistRun, runBioOperationFromManifest, runBioQueryFromManifest, runsRoot } from "../src/hosts/run-store.js";
 
 // End-to-end through the host: a manifest JSON on disk -> validated registry -> built-in resolvers -> a
 // duckdb.sql operation -> persisted run/result/receipts. Both resources use duckdb.file_scan (a
@@ -159,6 +159,43 @@ describe("host: bio_run_operation end-to-end", () => {
   test("fails closed on an invalid manifest", async () => {
     const cwd = await tmpProject({ ...manifest, schema: "nope" as never });
     await assert.rejects(() => run(cwd), /invalid manifest/);
+  });
+
+  test("bio_query: resolve declared resources and run the AGENT's SQL — no declared operation needed", async () => {
+    // a resource-only manifest: it declares WHERE the data is, not HOW to count it. The agent writes the SQL.
+    const resourceOnly: DomainPackManifest = {
+      schema: "pi-bio.domain_pack_manifest.v1", id: "ad-hoc-pack", version: "0.1.0",
+      title: "Ad-hoc", description: "Resource-only manifest; the agent writes the SQL after schema discovery.", domains: ["genomics"],
+      provides: {
+        resolvers: [{ id: "duckdb.file_scan", version: "0.1.0", title: "DuckDB file scan", description: "Read a file.", output: { mode: "table" } }],
+        resources: [{ id: "annotated_variants", title: "AV", kind: "virtual", resolver: "duckdb.file_scan", params: { path: "data/annotated_variants.csv", table: "annotated_variants" } }],
+      },
+    };
+    const cwd = await tmpProject(resourceOnly);
+    const q = (sql: string, runId: string) => runBioQueryFromManifest({ cwd, dbPath: ":memory:", manifestPath: "manifest.json", sql, runId, now: "2026-06-28T00:00:00Z" });
+
+    // 1. schema discovery — the agent inspects the resolved table's columns via plain SQL
+    const schema = await q("SELECT column_name FROM information_schema.columns WHERE table_name = 'annotated_variants' ORDER BY column_name", "q-schema");
+    assert.equal(schema.ok, true);
+    const schemaRows = JSON.parse(await fs.readFile(join(schema.runDir, "result.json"), "utf8")).rows.map((r: { column_name: string }) => r.column_name);
+    assert.ok(schemaRows.includes("consequence") && schemaRows.includes("allele_frequency"));
+
+    // 2. the agent then writes the SQL that answers the actual question — counts as a BigInt persist fine
+    const res = await q("SELECT consequence, count(*) AS n FROM annotated_variants GROUP BY consequence ORDER BY consequence", "q-1");
+    assert.equal(res.ok, true);
+    if (!res.ok) throw new Error("unreachable");
+    const result = JSON.parse(await fs.readFile(join(res.runDir, "result.json"), "utf8"));
+    assert.equal(result.operationId, "ad-hoc.query");
+    assert.ok(result.rows.length >= 1 && result.rows.every((r: { n: number }) => Number(r.n) >= 1));
+    // the run still carries the resolver receipt + a digest of the ad-hoc SQL (provenance, no operation declared)
+    const run_ = JSON.parse(await fs.readFile(join(res.runDir, "run.json"), "utf8"));
+    const prov = run_.artifacts[0].provenance;
+    assert.ok(prov.some((p: { source: string }) => p.source === "ad-hoc.query"));
+    assert.match(prov.find((p: { source: string }) => p.source === "ad-hoc.query").digest, /^sha256:/);
+
+    // 3. a failed ad-hoc query (missing column) still persists a failed run, returns ok:false
+    const bad = await q("SELECT nope FROM annotated_variants", "q-bad");
+    assert.equal(bad.ok, false);
   });
 
   test("persistRun refuses a runId that would escape the runs directory (path-safe even called directly)", async () => {

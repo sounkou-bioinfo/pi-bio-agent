@@ -7,7 +7,7 @@ import { deriveStudyPlan, studyNoteIndex, type StudyArtifactKind, type StudyCorp
 import { deleteStudyNote, listStudyNotes, makeStudyNote, readStudyNotes, runtimeSkillRoot, runtimeStudyRoot, writeProjectSkill, writeStudyNote } from "../../src/hosts/pi-project.js";
 import { defaultDuckDbExtensionCatalog, findDuckDbExtensions } from "../../src/duckdb/extensions.js";
 import { defaultBioToolRegistry } from "../../src/primitives/bio-tool-specs.js";
-import { runBioOperationFromManifest } from "../../src/hosts/run-store.js";
+import { runBioOperationFromManifest, runBioQueryFromManifest } from "../../src/hosts/run-store.js";
 
 function text(payload: unknown) {
   const body = typeof payload === "string" ? payload : JSON.stringify(payload, null, 2);
@@ -70,6 +70,21 @@ export default function piBioAgentExtension(pi: ExtensionAPI): void {
     }),
     async execute(_id, params: { dbPath: string; manifestPath: string; operationId: string; runId?: string }, _signal, _onUpdate, ctx) {
       return text(await runBioOperationFromManifest({ cwd: ctx.cwd, ...params }));
+    },
+  });
+
+  pi.registerTool({
+    name: "bio_query",
+    label: "Run an ad-hoc bio query",
+    description: "Resolve a domain-pack manifest's declared resources into DuckDB tables and run YOUR read-only SQL over them, persisting run/result/receipts under .pi/bio-agent/runs/<runId>. This is the general path: the manifest declares only resources; you do schema discovery (e.g. SELECT column_name, data_type FROM information_schema.columns WHERE table_name = '<resource table>', or SELECT * FROM <table> LIMIT 5) and write the SQL that answers the actual question. No need for a declared operation per question. SQL must be a single read-only SELECT/WITH. result.json holds the rows.",
+    parameters: Type.Object({
+      dbPath: Type.String({ description: "Explicit DuckDB database path, or ':memory:'." }),
+      manifestPath: Type.String({ description: "Path to a domain-pack manifest JSON file (relative to cwd or absolute)." }),
+      sql: Type.String({ description: "A single read-only SELECT/WITH over the manifest's resolved resource tables." }),
+      runId: Type.Optional(Type.String({ description: "Stable run id; generated when omitted." })),
+    }),
+    async execute(_id, params: { dbPath: string; manifestPath: string; sql: string; runId?: string }, _signal, _onUpdate, ctx) {
+      return text(await runBioQueryFromManifest({ cwd: ctx.cwd, ...params }));
     },
   });
 
