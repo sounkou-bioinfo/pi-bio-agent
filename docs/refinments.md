@@ -187,10 +187,12 @@ the visible, auditable, agent-inaccessible grant instead.) Open,
 freshness/provenance-correct refinements it surfaced, in priority order. Build each only with the named consumer
 in hand; none are speculative, but none should be half-built autonomously.
 
-- **Cancellation + bounds (the realest gap).** `FetchLike` has no `signal`, timeout, or byte cap, and the Pi
-  tool's `_signal` is unused. A runaway/huge fetch can't be aborted or bounded. Consumer: any large remote
-  dataset, and a tool call the agent aborts. Build: add `signal?: AbortSignal` (+ optional `maxBytes`) to
-  `FetchLike`'s init, thread the extension's `_signal` through. Bounded, immanent.
+- **Cancellation — DONE.** `AbortSignal` now threads Pi tool -> RunQuery/RunOperationRequest -> runQuery/
+  runOperation -> `ResolutionContext.signal` -> http.get's injected fetch. An aborted tool call tears the
+  request down (best-effort; a resolver that can't honor it ignores it).
+- **Byte cap / timeout (still open).** `maxBytes`/timeout need streaming: the current `FetchResponse.text()`
+  reads the whole body. To cap, the response contract would expose a byte stream the resolver reads with a
+  limit, aborting via the (now-threaded) signal when exceeded. Consumer: a huge/unbounded remote response.
 - **304 revalidation provenance.** A `304` replays the stored receipt with the original `retrievedAt` — honest
   about the BYTES (unchanged) but silent that freshness was reconfirmed later. Optional enhancement: stamp a
   `revalidatedAt` note so the receipt shows "T1 bytes, revalidated current at T2". Not a correctness bug.
