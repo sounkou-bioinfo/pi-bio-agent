@@ -196,8 +196,9 @@ WRONG granularity for two cases, which are separate tiers chosen by which resolv
 
 Three frontier ideas, one foundation. The load-bearing realization: each reduces to **data living addressably
 OUTSIDE the prompt (DuckDB tables + CAS + receipts), navigated by BOUNDED queries + content-addressed shared
-memory.** That single property — our bet — is what closes over all three, which is why the *baseline* (reproduce
-ClawBio for free) and the *speculative upside* share one substrate rather than being separate efforts.
+memory.** That single property — our bet — is what closes over all three, which is why the *baseline* (the large
+executable middle of ClawBio as manifests) and the *speculative upside* share one substrate rather than being
+separate efforts.
 
 - **[RLM — Recursive Language Models](https://alexzhang13.github.io/blog/2025/rlm/)** (Zhang & Khattab, MIT
   CSAIL; [arXiv 2512.24601](https://arxiv.org/abs/2512.24601)): store the unbounded context as a *variable in a
@@ -214,8 +215,17 @@ ClawBio for free) and the *speculative upside* share one substrate rather than b
 - **Networked agents**: stigmergy via a shared CAS root — agents communicate by content-addressed receipted
   artifacts, not live chat.
 
-Narrative: BASELINE = the SQL-REPL-over-addressable-data substrate IS the API that reproduces ClawBio for free.
-SPECULATIVE upside = the same substrate closing over Fugu/RLM/networked agents.
+Narrative: BASELINE = the SQL-REPL-over-addressable-data substrate + a process runtime reproduce the large
+executable MIDDLE of ClawBio as manifests. SPECULATIVE upside = the same substrate closing over Fugu/RLM/
+networked agents.
+
+Honest boundary (pal #9): "all of ClawBio for free" is too strong. The SQL path + process runtime cover a large
+executable middle, NOT everything. Classes that fit neither: (a) complex/stateful remote SERVICES — async jobs,
+polling/resume/cancel, server-side workflow state (may earn a new transport, `docs/design.md`); (b) non-GET /
+GraphQL / auth / pagination-heavy APIs (`http.get` is GET-only, JSON/CSV/NDJSON) — need operation-pack/resolver
+work; (c) SEMANTIC/judgment tasks (literature interpretation, phenotype disambiguation, narrative synthesis) —
+SQL/process FEED them, not replace them (the judgment boundary); (d) human/clinical review/policy workflows —
+host policy, not executable substrate. State the middle, do not overclaim the whole.
 
 ## Machine studying — Fugu pieces 2 & 3 over the study-notes system
 
@@ -339,6 +349,33 @@ R/shell) need to run external code. Design grounded in two local prior-art proje
   Non-tabular R values -> adopt nf-r-ipc's `value_graph` (a FLAT Arrow table encoding a tree via
   `value_id/parent_id/key/index/tag/v_*`, with distinct typed-NA tags + R-class normalization) — the SAME
   flat-table-encodes-a-tree pattern as our SemanticSQL statements (a real convergence, not a new abstraction).
+- **Out-of-process is the robust choice (3rd confirming instance, `~/mangoro`):** R<->Go IPC over nanomsg
+  (mangos) + Arrow (nanoarrow), explicitly AVOIDING in-process FFI (cgo c-shared's multiple-runtime problems) —
+  the same call as avoiding DuckTinyCC. Two execution modes: SPAWN-PER-CALL (simple, stateless) vs a PERSISTENT
+  WORKER messaged via nanomsg+Arrow (amortizes R/Python startup, stateful) — the latter fits long-running or
+  per-tissue-repeated compute (e.g. coloc over GTEx tissues). Node-hosted: child_process + Arrow files/stdio,
+  or a held-open worker over a socket.
+- **CLI composition layer (`~/BLIT`, [WangLabCSU/blit](https://github.com/WangLabCSU/blit)):** command-line
+  tools as COMPOSABLE OBJECTS, not strings — `exec()` -> a structured object; pipe translation (`|>` -> `|`);
+  `cmd_run`/`cmd_parallel`; LIFECYCLE HOOKS (`on_start`/`on_exit`/`on_succeed`/`on_fail`) -> adopt as receipt
+  events + fault-tolerant branching; MICROMAMBA/Conda env management -> a process op should DECLARE + PIN its
+  env (tool versions) in the receipt for reproducibility; auto native-data->CLI-input (df->tsv->temp->cleanup)
+  for tools that don't speak Arrow (our `http.get` temp-materialize already has this shape). So: nf-r-ipc =
+  Arrow/nanoarrow transport + typed contract; BLIT = CLI composition + env pinning + lifecycle; mangoro =
+  out-of-process generalizes (R/Go) + persistent-worker option; Node = the host that spawns + owns lifecycle.
+- **Init non-transactional caveat (pal #9):** `duckdbInitSql` runs statement-by-statement, not in a transaction;
+  on a persistent DB a later failure can leave earlier side effects with no failed-run receipt. Fine for
+  idempotent INSTALL/LOAD/SET (its intended use); keep DDL/DML out of init.
+
+### Flagship: post-GWAS colocalization (`~/PostGWAS` + `~/coloclize`) — the two-pillar proof
+PostGWAS independently arrives at our architecture: provider CONTRACTS (`SumstatProvider`, `LDProvider` returning
+a provenance-bearing `DatasetLD` object, `AncestryWeightsProvider`, `ColocEngine`, `FineMapResultProvider`) with
+DuckDB/PlinkingDuck/coloc/HyPrColoc/ColocBoost as ADAPTERS — i.e. our resolver/port + receipt model in R/S7. The
+agent solves coloc as a manifest: DATA pillar = tabix region-extract per GTEx tissue + SQL harmonization
+(SumstatProvider) + LD from PLINK2 reference via PlinkingDuck (LDProvider); COMPUTE pillar = ColocEngine /
+fine-mapping as Arrow-IPC process ops; COMPOSITION = a DAG with per-tissue partition+map. Receipts at every step
+(allele basis, harmonization, LD provenance, coloc posteriors). This is the "fruitfulness in speculative new
+areas" demonstration — the bet generalizing from ClawBio lookups to real statistical-genetics research.
 
 The restricted-runtime contract (build before exposing powerful execution):
 
