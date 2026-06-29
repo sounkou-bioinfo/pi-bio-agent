@@ -78,8 +78,9 @@ the abstraction abstracts, never the future ones it might serve.**
 > scans (`FROM 'x.parquet'`), httpfs remote reads, and extension autoloading are **features to ride, not
 > threats to police**; fighting them with brittle SQL regexes is fighting the substrate.
 
-What the library *does* enforce is **accountability, not access**: every answer-producing run records the SQL
-that ran (digest), the resources/sources it declared, the resolver receipts, and the artifacts it produced.
+What the library *does* enforce is **accountability, not access**: every answer-producing run records the query
+that ran (a digest of the SQL **and** its bound params), the resources/sources it declared, the resolver
+receipts, and the artifacts it produced.
 `validateReadOnlySelect` is therefore **statement-class only** (one read-only `SELECT`/`WITH`, no writes/DDL —
 because that is what an "operation" *is*), not an egress firewall. Network is a **host-injected capability**
 (`http.get` needs a host-supplied `fetch`; `file_scan`/`read_bcf` may read remote URIs if the environment
@@ -367,8 +368,10 @@ the whole design is **lazy evaluation**: a manifest is a *lazy expression*, a re
 `runQuery`/`runOperation` is the **force** — the `collect()` boundary that resolves the referenced thunks and
 runs the SQL. Receipts (`paramsDigest` + source content digest) are **memoization keys**: a resource is a pure
 function of its params plus source state, so an unchanged digest is a cache hit — which means **CAS is the memo
-table**, not just storage. Derived tables (`entailed_edge`, `scale_members`) are pure lazy derivations
-(recomputed on force, like a `mutate`), which is precisely why they carry no receipt. Composition
+table**, not just storage. Derived tables are pure lazy derivations (recomputed from inputs, like a `mutate`),
+which is precisely why they carry no receipt — `scale_members` is recomputed on every force (the runner
+materializes it before the SQL), while `entailed_edge` is materialized on demand by `materializeEntailedEdges`
+when a graph query needs it. Composition
 (`op → artifact → resource → op`) is a lazy DAG — [targets](https://docs.ropensci.org/targets/) /
 [Nextflow](https://www.nextflow.io)-shaped.
 

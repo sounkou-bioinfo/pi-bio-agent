@@ -24,8 +24,14 @@ export const duckdbSqlMaterializeResolver: BioResolverImpl = async (resource, ct
   if (typeof p.table !== "string" || !IDENT.test(p.table)) throw new Error("duckdb.sql_materialize requires params.table to be a valid SQL identifier");
   if (typeof p.sql !== "string" || !p.sql.trim()) throw new Error("duckdb.sql_materialize requires params.sql (a single read-only SELECT/WITH)");
   const inner = validateReadOnlySelect(p.sql); // single read-only query; remote/httpfs reads are allowed (host controls egress)
-  const extensions = Array.isArray(p.extensions) ? p.extensions.filter((e): e is string => typeof e === "string") : [];
-  const declaredSources = Array.isArray(p.declaredSources) ? p.declaredSources.filter((s): s is string => typeof s === "string") : [];
+  // Fail closed, not silently drop: a non-string entry would otherwise lose LOAD intent / provenance.
+  const stringArray = (v: unknown, label: string): string[] => {
+    if (v === undefined) return [];
+    if (!Array.isArray(v) || !v.every((x) => typeof x === "string")) throw new Error(`duckdb.sql_materialize: ${label} must be an array of strings`);
+    return v;
+  };
+  const extensions = stringArray(p.extensions, "extensions");
+  const declaredSources = stringArray(p.declaredSources, "declaredSources");
 
   for (const ext of extensions) {
     if (!IDENT.test(ext)) throw new Error(`duckdb.sql_materialize: invalid extension name '${ext}'`);

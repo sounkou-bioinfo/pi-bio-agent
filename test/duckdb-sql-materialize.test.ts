@@ -57,4 +57,10 @@ describe("duckdb.sql_materialize: materialization as declared SQL (the general r
     await assert.rejects(() => duckdbSqlMaterializeResolver(resource({ table: "t", sql: "DROP TABLE x" }), { conn, now: "t" }), /SELECT/);
     await assert.rejects(() => duckdbSqlMaterializeResolver(resource({ table: "t", sql: "SELECT 1; DROP TABLE x" }), { conn, now: "t" }), /one statement/);
   });
+
+  test("fails closed on non-string extensions/declaredSources — never silently drops LOAD/provenance intent", async () => {
+    const conn = await memoryConn();
+    await assert.rejects(() => duckdbSqlMaterializeResolver(resource({ table: "t", sql: "SELECT 1 AS n", extensions: ["httpfs", 7] }), { conn, now: "t" }), /extensions must be an array of strings/);
+    await assert.rejects(() => duckdbSqlMaterializeResolver(resource({ table: "t", sql: "SELECT 1 AS n", declaredSources: "not-an-array" }), { conn, now: "t" }), /declaredSources must be an array of strings/);
+  });
 });
