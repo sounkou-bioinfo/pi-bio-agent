@@ -37,9 +37,14 @@ orchestrator (piece 1); the agent conducts.
 | **live:** [`scripts/live-multi-agent.ts`](../scripts/live-multi-agent.md) | **real multi-agent run** (chain): each step spawns a *separate `pi` process*; they communicate only via access-list artifacts the host threads — no shared db, so the process lock is never touched. `npx tsx scripts/live-multi-agent.ts` |
 | **live:** [`scripts/live-debate.ts`](../scripts/live-debate.md) | **real best-of-N debate** (survey topology): two agents answer the same question independently, an aggregator synthesizes both. `npx tsx scripts/live-debate.ts` |
 
-Topologies are a **scaffold choice, not an executor change** — `req/rep` star (the coordinator), `pub/sub`
-(blackboard), `push/pull` (pipeline), `survey` (debate, above), `bus` (mesh). The DuckDB-native transport for
-all of these is [`~/ducknng`](https://nng.nanomsg.org/) (NNG + Arrow + manifest methods + mTLS policy).
+| `test/blackboard.test.ts` | **pub/sub blackboard** (`src/core/blackboard.ts`): DECENTRALIZED — steps launched concurrently, each awaits its deps from a shared blackboard and publishes its note; order emerges from data deps, **no coordinator** (stigmergy) |
+| `test/pipeline.test.ts` | **push/pull pipeline** (`src/core/pipeline.ts`): N-worker load-balanced pool — the RLM labeling map as a self-balancing queue |
+
+Topologies are a **scaffold choice, not an executor change** — `req/rep` star (the coordinator), `survey`
+(debate), `pub/sub` (decentralized blackboard), `push/pull` (pipeline) are all built; `bus` (mesh) is noted. The
+DuckDB-native transport for the real cross-machine versions is [`~/ducknng`](https://nng.nanomsg.org/) (NNG +
+Arrow + manifest methods + mTLS), which also ships `ducknng_ncurl` (an HTTP client) — so the http-resolver
+generalization and the agent topologies converge in one extension.
 
 ## 4. The process boundary — sharing state across agent processes
 DuckDB's file lock is **process-exclusive-writer** (verified). So state-sharing across agent processes is either

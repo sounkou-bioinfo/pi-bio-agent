@@ -257,6 +257,16 @@ claim; **production SEMANTICS are NOT free** and are real engineering, not archi
 So: the bet is "the substrate absorbs the request/response API SHAPE as data"; the durable effect/auth/rate-
 limit/streaming/write machinery is genuine work the process runtime + host capabilities must provide.
 
+Resolutions (these are ADDRESSABLE via known machinery, not open research):
+- **auth / OAuth refresh** -> lean on **pi's auth storage + token-refresh ops** (the host already has credential
+  storage + refresh lifecycle; inject it as the host `authHeaders` capability, never in the manifest).
+- **rate limits** -> exponential backoff with `Retry-After`/`429` awareness in the resolver's retry policy.
+- **streaming / binary / SSE / websockets** -> **pi-mono has reusable patterns** for these transports; widen
+  `FetchResponse` beyond `text()` to a byte stream and adopt them.
+- **the HTTP carrier itself** -> **`ducknng_ncurl`** (ducknng ships an HTTP/curl client + `ducknng_ncurl_table`):
+  the http-resolver generalization (POST/body/auth/streaming) AND the nng agent topologies live in ONE DuckDB
+  extension, both Arrow-native. So the request/response generalization and the multi-agent transport converge.
+
 ### HTTP resolver generalization (the real build the collapse needs)
 `http.get` is today GET-only, JSON/CSV/NDJSON, single-shot. To make the classes above manifest-expressible:
 - `method` + `body` params (POST/PUT; GraphQL = POST + JSON query body). Keep read-only INTENT explicit (a
