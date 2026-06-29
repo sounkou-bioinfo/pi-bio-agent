@@ -217,13 +217,24 @@ Three things keep this consistent with the rest of the substrate:
   `background`/`batch` run whose record accrues progress + checkpoints and ends in output artifacts. The run
   substrate was built for this; only the executor is missing.
 
+**One general backend, not a backend zoo.** When the first executor is built, it is `process` (run an argv
+command in a run dir, capture stdout/stderr/exit, register declared outputs as artifacts). `Rscript`,
+`python`, `nextflow`, `snakemake` are **argv presets over `process`** (`["Rscript", script, …]`,
+`["nextflow", "run", …]`), *not* separate transports — exactly as `duckdb.sql_materialize` subsumed the
+reader resolvers rather than spawning one per format. One backend per tool (`runDeseq2()`, `runGatk()`,
+`runNextflowRnaseq()`) would recreate the skill/API sprawl the substrate exists to avoid; the tool-specific
+part stays **manifest data** (command template, inputs, expected outputs, version probes, post-load SQL,
+fixtures). A genuinely new *transport* (beyond `duckdb.sql` and `process`) is earned only when execution needs
+semantics `process` cannot express — polling/resume/cancel of a remote job — and even then proven against ≥2
+instances, not imagined.
+
 **Discipline — do not build the transport ahead idealistically.** Speculative non-SQL transports were already
-deleted once (http/graphql/mcp/local with no runner). "Transport" is an *idealist* abstraction while
-`duckdb.sql` is the only instance; the first executor is built when a **concrete** pipeline forces it (e.g. run
-a VCF through VEP), and the abstraction *over* executors (a `process` transport family) becomes real only once
-≥2 exist and can be named — the same test `duckdb.sql_materialize` passed against the three resolvers. That
-first executor is also what finally forces **CAS materialization** (today spec-only): a code op's outputs are
-exactly the bytes CAS exists to address.
+deleted once (http/graphql/mcp/local with no runner). `BioOperationTransport` stays `duckdb.sql` until a real
+pipeline forces the first `process` executor (e.g. run a VCF through VEP / an `Rscript` DESeq2 / a Snakemake
+step). A full `BioExecutionSpec` (a backend enum, `container`/`env`/`resources`/`effects`/`capture` fields) is
+the *sketch of the destination*, not core surface — add fields when an executor consumes them. That first
+executor is also what finally forces **CAS materialization** (today spec-only): a code op's outputs are exactly
+the bytes CAS exists to address.
 
 ## Storage story
 
