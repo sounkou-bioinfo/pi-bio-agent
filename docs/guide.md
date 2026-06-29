@@ -11,7 +11,7 @@ You do not write TypeScript to ask a bioinformatics question here. You write a *
 declares the data you want resolved into tables and the SQL that answers your question — and run an operation
 from it. The substrate resolves the resources, runs your SQL, and writes the answer plus a provenance receipt.
 
-## 1. A minimal manifest
+## 1. A manifest declares data, not questions
 
 Put a CSV somewhere, say `data/variants.csv`:
 
@@ -22,15 +22,15 @@ variant_key,consequence,allele_frequency
 3:3000:A:G,stop_gained,
 ```
 
-Then a manifest, `manifest.json`:
+Then a manifest, `manifest.json`, that declares only **where the data is** — not how to query it:
 
 ```json
 {
   "schema": "pi-bio.domain_pack_manifest.v1",
-  "id": "variant-counts",
+  "id": "variants",
   "version": "0.1.0",
-  "title": "Variant counts",
-  "description": "Count variants by consequence from a CSV.",
+  "title": "Variants",
+  "description": "Declares a variants table; the agent writes the SQL.",
   "domains": ["genomics"],
   "provides": {
     "resolvers": [
@@ -40,50 +40,50 @@ Then a manifest, `manifest.json`:
     "resources": [
       { "id": "variants", "title": "Variants", "kind": "virtual", "resolver": "duckdb.file_scan",
         "params": { "path": "data/variants.csv", "table": "variants" } }
-    ],
-    "operations": [
-      { "schema": "pi-bio.operation_spec.v1", "id": "counts.by_consequence", "version": "0.1.0",
-        "title": "Counts by consequence", "description": "Count variants per consequence.",
-        "domains": ["genomics"], "transport": "duckdb.sql", "inputSchema": { "type": "object" },
-        "sql": {
-          "sqlTemplate": "SELECT consequence, count(*) AS n FROM variants GROUP BY consequence ORDER BY consequence",
-          "readOnly": true,
-          "requiredResources": ["variants"]
-        } }
     ]
   }
 }
 ```
 
-That is the whole program. A **resource** names some data and the **resolver** that turns it into a table; an
-**operation** is a single read-only `SELECT`/`WITH` over those tables. Resource `path`s are resolved relative
-to the manifest's directory.
+A **resource** names some data and the **resolver** that turns it into a table; resource `path`s are resolved
+relative to the manifest's directory. Note there is **no operation** — declaring one count, one filter, one
+threshold per question is overfitting (it is ClawBio skill-sprawl in manifest form). The substrate's bet is
+that the agent does schema discovery and writes the SQL.
 
-## 2. Run it
+## 2. Run a query (the agent writes the SQL)
 
-From Pi, call the `bio_run_operation` tool with `dbPath` (use `:memory:` or a file), `manifestPath`, and
-`operationId`. From the library directly:
+Call the `bio_query` tool: it resolves the manifest's declared resources into tables and runs **your** read-only
+SQL over them. First discover the schema, then ask the real question. From the library directly:
 
 ```ts
-import { runBioOperationFromManifest } from "pi-bio-agent";
+import { runBioQueryFromManifest } from "pi-bio-agent";
 
-const res = await runBioOperationFromManifest({
-  cwd: process.cwd(),
-  dbPath: ":memory:",
-  manifestPath: "manifest.json",
-  operationId: "counts.by_consequence",
-});
+// 1. schema discovery — plain SQL over information_schema (the resource is resolved first)
+await runBioQueryFromManifest({ cwd: process.cwd(), dbPath: ":memory:", manifestPath: "manifest.json",
+  sql: "SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'variants'" });
+
+// 2. the actual question, written from the discovered columns
+const res = await runBioQueryFromManifest({ cwd: process.cwd(), dbPath: ":memory:", manifestPath: "manifest.json",
+  sql: "SELECT consequence, count(*) AS n, avg(allele_frequency) AS avg_af FROM variants GROUP BY consequence ORDER BY consequence" });
 // res: { ok: true, runId, status: "succeeded", rowCount, artifacts, runDir }
 ```
 
-The run is written under `.pi/bio-agent/runs/<runId>/`:
+Each run is written under `.pi/bio-agent/runs/<runId>/`:
 
 - `result.json` — the answer; `result.rows` is exactly what your SQL returned (there is no separate report).
-- `run.json` — the run record (status, events, the operation version + a digest of the SQL that ran).
-- `receipts.json` — one resolution receipt per resource (resolver version, params digest, source snapshot).
+- `run.json` — the run record (status, events, a digest of the SQL that ran).
+- `receipts.json` — one resolution receipt per resolved resource (resolver version, params digest, source snapshot).
 
-A run that fails at runtime (e.g. the SQL references a missing column) returns `{ ok: false, error, runDir }`
-and still persists `run.json` + `receipts.json` — the failure is auditable.
+A query that fails at runtime (e.g. a missing column) returns `{ ok: false, error, runDir }` and still persists
+`run.json` + `receipts.json` — the failure is auditable.
+
+### When to declare an operation
+
+An **operation** is a *pinned, named, versioned, tested* query — the special case worth saving when a query is
+subtle, reused, or safety-critical (the flagship "rare high-impact variants" abstention is the canonical
+example: getting "unknown frequency ≠ rare" right deserves a tested spec, not re-derivation each time). Declare
+it under `provides.operations` and run it with `bio_run_operation` / `runBioOperationFromManifest({ …,
+operationId })`. For everything exploratory, prefer `bio_query` — most manifests declare only resources.
 
 ## 3. Resolvers (how data becomes a table)
 
@@ -134,10 +134,10 @@ CURIE by exact/synonym match in SQL first; on a miss, a model may propose a cand
 ## 6. What the substrate refuses
 
 A manifest is validated against a strict allowlist: unknown keys are rejected, not ignored, so cut surface
-(`reportKind`, `requiredColumns`, `columnRoles`, …) cannot ride back in as inert config. An operation must be
-a single read-only `SELECT`/`WITH`. Resolvers fail closed when an implementation is not bound. Everything an
-operation reads, it reads through a resolved resource that leaves a receipt — so a run is reproducible and
-every answer has a source path.
+(`reportKind`, `requiredColumns`, `columnRoles`, …) cannot ride back in as inert config. A query — ad-hoc or a
+declared operation — must be a single read-only `SELECT`/`WITH`. Resolvers fail closed when an implementation
+is not bound. Everything a query reads, it reads through a resolved resource that leaves a receipt — so a run
+is reproducible and every answer has a source path.
 
 ## 7. Study notes (the CLI)
 

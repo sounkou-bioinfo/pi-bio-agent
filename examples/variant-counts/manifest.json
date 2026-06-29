@@ -2,8 +2,8 @@
   "schema": "pi-bio.domain_pack_manifest.v1",
   "id": "variant-counts",
   "version": "0.1.0",
-  "title": "Variant counts",
-  "description": "Count variants by consequence from a CSV.",
+  "title": "Variants",
+  "description": "Declares a variants table. The agent writes the SQL to answer a question.",
   "domains": ["genomics"],
   "provides": {
     "resolvers": [
@@ -11,9 +11,6 @@
     ],
     "resources": [
       { "id": "variants", "title": "Variants", "kind": "virtual", "resolver": "duckdb.file_scan", "params": { "path": "data/variants.csv", "table": "variants" } }
-    ],
-    "operations": [
-      { "schema": "pi-bio.operation_spec.v1", "id": "counts.by_consequence", "version": "0.1.0", "title": "Counts by consequence", "description": "Count variants per consequence.", "domains": ["genomics"], "transport": "duckdb.sql", "inputSchema": { "type": "object" }, "sql": { "sqlTemplate": "SELECT consequence, count(*) AS n FROM variants GROUP BY consequence ORDER BY consequence", "readOnly": true, "requiredResources": ["variants"] } }
     ]
   }
 }

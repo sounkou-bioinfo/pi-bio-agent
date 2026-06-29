@@ -356,6 +356,24 @@ closure vs flat rank insert), so unifying them in code would be the idealist mov
 **output artifact** is a third kind — *produced*, CAS-addressed — which re-enters as a *resolved* resource
 downstream.)
 
+#### The substrate is a lazy, content-addressed evaluation graph
+
+Seen from the R/dbplyr/targets world, the whole design is **lazy evaluation**: a manifest is a *lazy
+expression*, a resource is a **thunk** (`resolver + params` is a recipe for a table, not the table), and
+`runQuery`/`runOperation` is the **force** — the `collect()` boundary that resolves the referenced thunks and
+runs the SQL. Receipts (`paramsDigest` + source content digest) are **memoization keys**: a resource is a pure
+function of its params plus source state, so an unchanged digest is a cache hit — which means **CAS is the memo
+table**, not just storage. Derived tables (`entailed_edge`, `scale_members`) are pure lazy derivations
+(recomputed on force, like a `mutate`), which is precisely why they carry no receipt. Composition
+(`op → artifact → resource → op`) is a lazy DAG — targets/Nextflow-shaped.
+
+The discipline is the same as everywhere else: **the laziness lives in DATA** (the declared manifest/SQL is the
+lazy expression), interpreted by thin TS. It is **dbplyr/targets, not Effect-TS / fp-ts** — pulling in a TS
+lazy/effect monad would be the idealist move (a monad with no instances we need; the laziness is already in the
+data). The frame is useful because it makes the deferred work *obvious rather than invented*: caching is
+memoization keyed on the receipt digest; "as_of" is a parameter to the lazy graph; lazy resolution forces only
+the resources a query names. Each lands when a concrete re-run forces it, not before.
+
 ### 5. Provenance graph: every claim has a source path
 
 Every fact-like row should be able to answer:
