@@ -126,6 +126,9 @@ export interface RunOperationRequest {
   /** CAS mode (host opt-in): a content-addressed byte store. Present = resolvers snapshot bytes into it and
    *  reuse them across dbs/runs; absent = fast mode. */
   cas?: CasStore;
+  /** Host-owned connection bootstrap SQL (INSTALL/LOAD/SET), run once before resolution — e.g. enabling
+   *  httpfs + cache_httpfs so file_scan/sql_materialize remote reads get block caching. NOT agent SQL. */
+  duckdbInitSql?: string[];
 }
 
 export type RunOperationResponse =
@@ -157,11 +160,17 @@ async function prepareRegistry(req: { cwd: string; manifestPath: string; network
 async function runAndPersist(
   cwd: string, dbPath: string, runId: string, identity: string,
   body: (conn: SqlConn) => Promise<{ run: BioRunRecord; result: OperationResult; receipts: ResolutionReceipt[] }>,
+  initSql?: string[],
 ): Promise<RunOperationResponse> {
   const instance = await DuckDBInstance.create(resolveInCwd(cwd, dbPath));
   const connection = await instance.connect();
   const conn = duckdbNodeConn(connection);
   try {
+    // Host-owned connection bootstrap: INSTALL/LOAD/SET (e.g. httpfs + cache_httpfs, an extension dir, a memory
+    // limit) run ONCE on this connection before any resolution. A failure here is a config/pre-flight error
+    // (thrown, not a failed run): the run never started. This is HOST config, not agent SQL — no read-only
+    // guard, by construction the agent cannot supply it (it is composed in at the host, like network/cas).
+    if (initSql) for (const stmt of initSql) await conn.run(stmt);
     try {
       const { run, result, receipts } = await body(conn);
       const persisted = await persistRun(cwd, runId, { run, result, receipts });
@@ -196,7 +205,7 @@ export async function runBioOperationFromManifest(req: RunOperationRequest): Pro
   if (op.transport !== "duckdb.sql" || !op.sql) throw new Error(`operation '${req.operationId}' is not a duckdb.sql operation`);
   const now = req.now ?? systemClock();
   const runId = req.runId ?? `${req.operationId.replace(/[^a-zA-Z0-9._-]/g, "_")}-${Date.now()}`;
-  return runAndPersist(req.cwd, req.dbPath, runId, req.operationId, (conn) => runOperation(registry, conn, { operationId: req.operationId, runId, now, signal: req.signal, cas: req.cas }));
+  return runAndPersist(req.cwd, req.dbPath, runId, req.operationId, (conn) => runOperation(registry, conn, { operationId: req.operationId, runId, now, signal: req.signal, cas: req.cas }), req.duckdbInitSql);
 }
 
 export interface RunQueryRequest {
@@ -215,6 +224,8 @@ export interface RunQueryRequest {
   signal?: AbortSignal;
   /** CAS mode (host opt-in): a content-addressed byte store for cross-db byte reuse. */
   cas?: CasStore;
+  /** Host-owned connection bootstrap SQL (INSTALL/LOAD/SET), run once before resolution. NOT agent SQL. */
+  duckdbInitSql?: string[];
 }
 
 /**
@@ -232,5 +243,5 @@ export async function runBioQueryFromManifest(req: RunQueryRequest): Promise<Run
   const resources = req.resources ?? (manifest.provides?.resources ?? []).map((r) => r.id);
   const now = req.now ?? systemClock();
   const runId = req.runId ?? `query-${Date.now()}`;
-  return runAndPersist(req.cwd, req.dbPath, runId, "ad-hoc.query", (conn) => runQuery(registry, conn, { sql: req.sql, resources, runId, now, signal: req.signal, cas: req.cas }));
+  return runAndPersist(req.cwd, req.dbPath, runId, "ad-hoc.query", (conn) => runQuery(registry, conn, { sql: req.sql, resources, runId, now, signal: req.signal, cas: req.cas }), req.duckdbInitSql);
 }
