@@ -73,6 +73,14 @@ export const bioDuckDbExtensions: DuckDbExtensionDescriptor[] = [
     loadSql: "LOAD httpfs;",
   },
   {
+    name: "cache_httpfs",
+    source: "community",
+    purpose: "Transparent local block/range caching for httpfs remote reads (read_parquet/read_csv over http/s3 via duckdb.file_scan / duckdb.sql_materialize). This is the right reuse layer for DuckDB-OWNED remote I/O — a mutable, evictable PERFORMANCE cache, NOT a receipted artifact. It is complementary to, not a substitute for, our http.get CAS-of-bytes (which is whole-object provenance/reuse for bytes WE fetch). Set cache_httpfs_cache_directory to a host-owned dir.",
+    domains: ["remote-io", "object-store", "cache"],
+    installSql: "INSTALL cache_httpfs FROM community;",
+    loadSql: "LOAD cache_httpfs;",
+  },
+  {
     name: "fts",
     source: "core",
     purpose: "Full-text indexes over local catalogs, ontology labels/synonyms, documents, and skill/capability descriptions.",

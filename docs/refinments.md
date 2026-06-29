@@ -166,7 +166,26 @@ WRONG granularity for two cases, which are separate tiers chosen by which resolv
     split multiallelics + left-normalize REF/ALT + match contig naming/assembly before exact joins; prefer CSI
     for large contigs.
 - **Remote columnar/large files DuckDB reads directly (parquet/csv on http/s3):** lean on DuckDB httpfs +
-  `cache_httpfs` block caching, NOT our CAS — those bytes never flow through our resolver (see pal #8 follow-up).
+  `cache_httpfs` block caching, NOT our CAS — those bytes never flow through our resolver (pal #8 confirmed).
+  `cache_httpfs` is a mutable/evictable PERFORMANCE cache, NOT a receipted artifact — do not conflate it with
+  provenance. Enable recipe (a host bootstraps the connection BEFORE resolving):
+  ```sql
+  INSTALL httpfs; LOAD httpfs;
+  INSTALL cache_httpfs FROM community; LOAD cache_httpfs;
+  SET cache_httpfs_cache_directory = '/var/cache/pi-bio-agent/duckdb-httpfs';  -- host-owned
+  -- version-specific knobs: SELECT name,value,description FROM duckdb_settings() WHERE name LIKE 'cache_httpfs%';
+  ```
+  Then `read_parquet('https://…')` etc. used by `duckdb.file_scan`/`duckdb.sql_materialize` benefit
+  transparently. `cache_httpfs` is now in the extension catalog (`src/duckdb/extensions.ts`).
+  - GAP (pal #8): the host runner (`src/hosts/run-store.ts`) has no connection-INIT hook. `sql_materialize` can
+    `LOAD` declared `params.extensions` but cannot `INSTALL` or `SET`. A real host needs a small
+    connection-bootstrap layer — a `duckdbInitSql` / `beforeRun(conn)` option on the run request that runs
+    INSTALL/LOAD/SET once per connection. Spec'd; build when a remote-parquet example drives it (do NOT
+    half-build — it touches the run-store acquire path).
+  - Provenance note: for DuckDB-internal remote reads the receipt records the URI + SQL/params + resolver +
+    time, but NO byte digest (we never saw the bytes). That is correct for fast/lazy/range mode. Byte-perfect
+    replay would require snapshot mode (download whole object into CAS first), which forfeits lazy/range reads —
+    a bad trade for large parquet/HTS; offer it only when regulatory provenance demands it.
 
 ### Decision rule for a manifest author
 - REST/JSON API body, whole moderate object, ETag-validated, reused across projects -> `http.get` (+ CAS).
