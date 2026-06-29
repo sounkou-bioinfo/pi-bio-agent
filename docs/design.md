@@ -215,7 +215,8 @@ resource/artifact chain *is* the composition, no DAG engine required.
 
 Three things keep this consistent with the rest of the substrate:
 
-- **Invoke, don't reimplement.** A Nextflow/Snakemake run is a command that runs a DAG; an R analysis is
+- **Invoke, don't reimplement.** A [Nextflow](https://www.nextflow.io)/[Snakemake](https://snakemake.github.io)
+  run is a command that runs a DAG; an R analysis is
   `Rscript x.R`. We shell out, receipt it, and ingest the outputs — we never embed a workflow engine or an R
   runtime, exactly as we never embed an ontology runtime (we read its SQL) or a graph engine (we materialize
   closure). Absorb the function, not the runtime.
@@ -308,7 +309,8 @@ DuckDB should hold hot structured facts and indexes. Large raw bytes stay in CAS
 #### The SemanticSQL shape: statements + `entailed_edge` (one substrate for graph, ontology, and scales)
 
 The graph layer follows [SemanticSQL](https://github.com/INCATools/semantic-sql) (how Bioconductor's
-ontoProc2 serves OBO ontologies): a tiny fixed relational shape, queried by plain SQL, with no graph runtime.
+[ontoProc2](https://github.com/vjcitn/ontoProc2) serves OBO ontologies): a tiny fixed relational shape, queried
+by plain SQL, with no graph runtime.
 Two tables carry it, and **the same shape serves imported ontologies and our own committed graph** —
 distinguished only by scope:
 
@@ -334,8 +336,8 @@ SemanticSQL *shape*, never a graph or ontology runtime.
 
 **Grounding has two tiers.** A *projection* tier — deterministic, offline, fail-closed: cached CURIEs +
 `entailed_edge` + FTS over labels/synonyms answer "text→CURIE (already known)" and "descendants of X" as pure
-SQL. A *judgment* tier — `decideGrounding` over a fresh OLS4/search candidate set, used only on a projection
-miss, which **abstains below threshold and never invents a CURIE**.
+SQL. A *judgment* tier — `decideGrounding` over a fresh [OLS4](https://www.ebi.ac.uk/ols4)/search candidate
+set, used only on a projection miss, which **abstains below threshold and never invents a CURIE**.
 
 #### Resolved vs derived tables (and why only one kind carries a receipt)
 
@@ -358,17 +360,21 @@ downstream.)
 
 #### The substrate is a lazy, content-addressed evaluation graph
 
-Seen from the R/dbplyr/targets world, the whole design is **lazy evaluation**: a manifest is a *lazy
-expression*, a resource is a **thunk** (`resolver + params` is a recipe for a table, not the table), and
+Seen from the R / [dbplyr](https://dbplyr.tidyverse.org) / [targets](https://docs.ropensci.org/targets/) world
+(the latter's design rationale collected in [targeted-learning](https://github.com/mdsumner/targeted-learning)),
+the whole design is **lazy evaluation**: a manifest is a *lazy expression*, a resource is a **thunk**
+(`resolver + params` is a recipe for a table, not the table), and
 `runQuery`/`runOperation` is the **force** — the `collect()` boundary that resolves the referenced thunks and
 runs the SQL. Receipts (`paramsDigest` + source content digest) are **memoization keys**: a resource is a pure
 function of its params plus source state, so an unchanged digest is a cache hit — which means **CAS is the memo
 table**, not just storage. Derived tables (`entailed_edge`, `scale_members`) are pure lazy derivations
 (recomputed on force, like a `mutate`), which is precisely why they carry no receipt. Composition
-(`op → artifact → resource → op`) is a lazy DAG — targets/Nextflow-shaped.
+(`op → artifact → resource → op`) is a lazy DAG — [targets](https://docs.ropensci.org/targets/) /
+[Nextflow](https://www.nextflow.io)-shaped.
 
 The discipline is the same as everywhere else: **the laziness lives in DATA** (the declared manifest/SQL is the
-lazy expression), interpreted by thin TS. It is **dbplyr/targets, not Effect-TS / fp-ts** — pulling in a TS
+lazy expression), interpreted by thin TS. It is **dbplyr/targets, not [Effect-TS](https://effect.website) /
+fp-ts** — pulling in a TS
 lazy/effect monad would be the idealist move (a monad with no instances we need; the laziness is already in the
 data). The frame is useful because it makes the deferred work *obvious rather than invented*: caching is memoization,
 "as_of" is a parameter to the lazy graph, lazy resolution forces only the resources a query names. Each lands
@@ -498,3 +504,18 @@ Test what matters:
 - KG lineage/trust/as-of behavior
 - skill boundaries and frontmatter
 - synthetic biomedical workflow fixtures with no diagnosis claim
+
+## Sources
+
+External projects and references cited above, with URLs (cite sources as links, not bare prose):
+
+- [SemanticSQL](https://github.com/INCATools/semantic-sql) — OBO ontologies as flat SQL (`statements` + `entailed_edge`); the graph shape we borrow.
+- [ontoProc2](https://github.com/vjcitn/ontoProc2) — Bioconductor ontology access over SemanticSQL.
+- [OLS4](https://www.ebi.ac.uk/ols4) (EBI Ontology Lookup Service) — fresh text→CURIE search (the grounding judgment tier).
+- [MONDO](https://mondo.monarchinitiative.org), [HPO](https://hpo.jax.org), [Sequence Ontology](http://www.sequenceontology.org), [OBO Graphs](https://github.com/geneontology/obographs) — ontologies / interchange formats.
+- [targets](https://docs.ropensci.org/targets/) + [targeted-learning](https://github.com/mdsumner/targeted-learning), [dbplyr](https://dbplyr.tidyverse.org) — the lazy / content-addressed evaluation precedents.
+- [Effect-TS](https://effect.website) — typed effect system; we steal the discipline, not the monad.
+- [Nextflow](https://www.nextflow.io), [Snakemake](https://snakemake.github.io) — workflow engines a `process` operation would invoke, not reimplement.
+- [DuckDB](https://duckdb.org) + [DuckDB community extensions](https://community-extensions.duckdb.org) (incl. DuckHTS) — the execution substrate.
+- [ColBERT](https://github.com/stanford-futuredata/ColBERT), [TACHIOM](https://github.com/TusKANNy/tachiom) — late-interaction retrieval (Tier 3; deferred).
+- [Machine Studying](https://jacobxli.com/blog/2026/machine-studying/) — the studying/expertise-per-budget framing.

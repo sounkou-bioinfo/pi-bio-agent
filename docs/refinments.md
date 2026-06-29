@@ -106,9 +106,10 @@ Open design issues and cleanup targets. Keep this file focused on what still nee
 
 ## Prior art: {targets} — lessons for CAS, caching, and the executor
 
-We are building a `targets`-shaped lazy, content-addressed substrate (see
+We are building a [`targets`](https://docs.ropensci.org/targets/)-shaped lazy, content-addressed substrate (see
 [design.md](./design.md#the-substrate-is-a-lazy-content-addressed-evaluation-graph)). The hard-won lessons
-from `targets` (mdsumner/targeted-learning) mostly **validate** our design and **sharpen the deferred specs**;
+from `targets` ([mdsumner/targeted-learning](https://github.com/mdsumner/targeted-learning)) mostly
+**validate** our design and **sharpen the deferred specs**;
 each lands only when a concrete consumer forces it, never ahead.
 
 - **Receipt = marker file; never conflate "what to hash" with "what to pass."** `targets`'s `tar_format()`
@@ -193,7 +194,7 @@ each lands only when a concrete consumer forces it, never ahead.
 
 ## KG and ontology substrate
 
-**Direction settled (2026-06-29): the SemanticSQL shape.** The graph is `bio_edges(from_id, predicate,
+**Direction settled (2026-06-29): the [SemanticSQL](https://github.com/INCATools/semantic-sql) shape.** The graph is `bio_edges(from_id, predicate,
 to_id)` (the statement/edge base) plus `entailed_edge` (the precomputed transitive closure). The same shape
 serves imported ontologies and our own committed graph; descendants/subsumption/graph-walk are one indexed
 JOIN, not a walker. See [`design.md`](./design.md#the-semanticsql-shape-statements--entailed_edge-one-substrate-for-graph-ontology-and-scales).
@@ -228,8 +229,9 @@ the engine is a swappable adapter. Climb a tier only when a real corpus/recall f
   planned for grounding misses).
 - Tier 2 — dense single-vector: DuckDB VSS (HNSW) over an embedding column for paraphrase recall. Still in-DB.
   Add only if Tier 1 recall is insufficient on a real corpus.
-- Tier 3 — late-interaction multivector (ColBERT / TACHIOM-style): SOTA high-recall, but a large-corpus /
-  research-grade runtime (TACHIOM exists to fix the k-means index bottleneck at ~600M-vector scale). OVERKILL
+- Tier 3 — late-interaction multivector ([ColBERT](https://github.com/stanford-futuredata/ColBERT) /
+  [TACHIOM](https://github.com/TusKANNy/tachiom)-style): SOTA high-recall, but a large-corpus / research-grade
+  runtime (TACHIOM exists to fix the k-means index bottleneck at ~600M-vector scale). OVERKILL
   for ontology grounding (MONDO ~25k, HPO ~17k, SO ~2k terms — tiny candidate spaces) and for our notes. If
   literature-scale retrieval ever forces it, it enters as an EXTERNAL retrieval SERVICE behind a resolver/HTTP
   boundary returning ranked candidates as DATA — never a multivector engine baked into core. Absorb the

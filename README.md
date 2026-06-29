@@ -20,7 +20,8 @@ manifest shape, and receipt integrity, but it is not a network or filesystem san
 replacement scans, and extensions are features; whether egress is possible is the host's decision (container,
 seccomp, the Pi runtime). The library records what ran; the host decides what may run.
 
-Ontologies and the knowledge graph share one shape, borrowed from SemanticSQL: `bio_edges(from_id, predicate,
+Ontologies and the knowledge graph share one shape, borrowed from
+[SemanticSQL](https://github.com/INCATools/semantic-sql): `bio_edges(from_id, predicate,
 to_id)` is the statement/edge base and `entailed_edge` is its transitive closure, so descendants, subsumption,
 and graph-walks are a single indexed join — the same SQL grounds an imported ontology and walks our own graph.
 Grounding a free-text term runs deterministically first (exact and synonym match plus closure, all SQL) and
