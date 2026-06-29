@@ -12,7 +12,9 @@ small set of generic primitives and the agent writes the SQL.
   native), `duckhts.read_bcf` (VCF/BCF), `http.get` (any REST/JSON endpoint; fetch is injected, opt-in,
   fail-closed). Each stamps a **resolution receipt** (resolver version, params digest, source snapshot).
 - **Operations** — an operation is a read-only `SELECT`/`WITH` over the resolved tables; the result IS the
-  report. A single guard rejects writes/DDL and any unreceipted I/O (external readers, remote URIs).
+  report. One guard enforces statement class only (single read-only SELECT/WITH, no writes/DDL). It is **not**
+  a network/filesystem firewall — egress (remote reads, httpfs, extensions) is the host's sandbox decision; the
+  library's job is provenance, not policy.
 - **Runs** — `runOperation` → `run` + `result` + `receipts` (a failed run still persists an auditable
   receipt); the host writes them under `.pi/bio-agent/runs/<runId>/`.
 - **Ordinal scales** — an `ordered` TermSet (ranked members) projects to a `scale_members` table, so SQL

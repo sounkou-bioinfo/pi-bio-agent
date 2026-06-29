@@ -50,7 +50,7 @@ export async function runOperation(
   const { operationId, params = [], runId, now } = opts;
   const op = registry.getOperation(operationId);
   if (!op?.sql) throw new Error(`operation '${operationId}' has no duckdb.sql request`);
-  validateReadOnlySelect(op.sql.sqlTemplate); // declared read-only is enforced before we touch the conn
+  const safeSql = validateReadOnlySelect(op.sql.sqlTemplate); // enforced before we touch the conn; run the validated text
 
   // The operation declares the resources it needs. Derive them when the caller omits an explicit list;
   // when a list is given, it must cover the declared requirements (fail closed, not a deep SQL binder error).
@@ -90,7 +90,7 @@ export async function runOperation(
     // No column pre-declaration: the SQL the agent wrote references its columns, and DuckDB's binder is the
     // arbiter — a missing column fails closed here with a clear binder error. Schema discovery (describeTable)
     // is a primitive the agent CALLS to decide what SQL to write, not a contract the runner enforces.
-    const rows = await conn.all<Record<string, unknown>>(op.sql.sqlTemplate, params);
+    const rows = await conn.all<Record<string, unknown>>(safeSql, params);
     const sourceSnapshots = receipts.flatMap((r) => r.sourceSnapshots);
     const result: OperationResult = { schema: "pi-bio.operation_result.v1", operationId, runId, sourceSnapshots, rows };
 

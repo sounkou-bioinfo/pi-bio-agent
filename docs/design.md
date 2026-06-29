@@ -60,6 +60,22 @@ reason; the question-level builders were removed.)
 > with tests (DuckDB sync/report, Pi extension, CLI, project helpers). Everything else is removed until a
 > real consumer demands it.
 
+### Powerful by default, host-controlled effects, provenance-aware not policy-obsessed
+
+> **The library is a substrate + receipt system, not a network/filesystem sandbox.** Like Pi, it gives
+> powerful local execution and leaves the *risk boundary* to the host/deployment — container, seccomp,
+> Firecracker, the Pi runtime, corporate egress, or a user-supplied sandbox extension. DuckDB's replacement
+> scans (`FROM 'x.parquet'`), httpfs remote reads, and extension autoloading are **features to ride, not
+> threats to police**; fighting them with brittle SQL regexes is fighting the substrate.
+
+What the library *does* enforce is **accountability, not access**: every answer-producing run records the SQL
+that ran (digest), the resources/sources it declared, the resolver receipts, and the artifacts it produced.
+`validateReadOnlySelect` is therefore **statement-class only** (one read-only `SELECT`/`WITH`, no writes/DDL —
+because that is what an "operation" *is*), not an egress firewall. Network is a **host-injected capability**
+(`http.get` needs a host-supplied `fetch`; `file_scan`/`read_bcf` may read remote URIs if the environment
+allows) — the host decides whether egress is possible, the library records that it happened. A strict
+"no external I/O / CAS-snapshot-first" profile is an **optional host policy**, not the default stance.
+
 ## Integration surfaces
 
 `pi-bio-agent` should not be Pi-only. Pi is the first and most important host adapter because it is where this package is used today, but the stable product is a small core library with multiple thin surfaces over the same registries.

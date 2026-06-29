@@ -32,8 +32,12 @@ export function httpTableResolver(fetchImpl: FetchLike): BioResolverImpl {
     const reader = READERS[format];
     if (!reader) throw new Error(`http resolver: unknown format '${format}' (expected json, ndjson, or csv)`);
     const headers = (p.headers && typeof p.headers === "object" ? p.headers : {}) as Record<string, string>;
+    // http.get is read-only by name and policy: GET only, so the effect surface can't silently widen to
+    // writes via params.method.
+    const method = p.method === undefined ? "GET" : p.method;
+    if (method !== "GET") throw new Error("http.get supports GET only");
 
-    const res = await fetchImpl(p.url, { method: typeof p.method === "string" ? p.method : "GET", headers });
+    const res = await fetchImpl(p.url, { method: "GET", headers });
     if (!res.ok) throw new Error(`http resolver: GET ${p.url} returned status ${res.status}`); // fail closed, no retry/fallback
     const body = await res.text();
     const digest = createHash("sha256").update(body).digest("hex");
@@ -51,7 +55,8 @@ export function httpTableResolver(fetchImpl: FetchLike): BioResolverImpl {
 
     const now = ctx.now ?? new Date().toISOString();
     return {
-      result: { schema: "pi-bio.resource_handle.v1", mode: "reference", name: p.table, pointer: { uri: p.url, format }, address: { algorithm: "sha256", digest } },
+      // the handle identifies what downstream SQL uses — the materialized table; the URL is provenance, below
+      result: { schema: "pi-bio.resource_handle.v1", mode: "reference", name: p.table, pointer: { uri: `table:${p.table}`, format: "table" }, address: { algorithm: "sha256", digest } },
       sourceSnapshots: [{ source: p.url, retrievedAt: now, version: `sha256:${digest}` }],
       provenance: [{ source: p.url, retrievedAt: now, digest: `sha256:${digest}`, notes: ["http.get"] }],
     };

@@ -22,6 +22,9 @@ const BUILTIN_RESOLVERS: Record<string, BioResolverImpl> = {
 // http.get is NOT a default built-in: it is bound only when the caller passes a fetch (req.network), which IS
 // the network opt-in. Without it, a manifest that declares http.get leaves it unbound and fails closed — no
 // ambient network from a host run.
+// http.get needs a host-supplied fetch to run at all (req.network) — that injection IS the network control,
+// by construction, not a library egress firewall. file_scan / read_bcf may read remote URIs freely; whether
+// egress is possible is the host's sandbox decision (container/seccomp/Pi/OS), not ours.
 const NETWORK_RESOLVER = "http.get";
 
 // Built-in resolvers whose params.path is a file location to resolve relative to the manifest's directory.
