@@ -1,5 +1,6 @@
 import { parseArgs } from "node:util";
-import { reportStudyNoteGraph, type KgSqlConn, type StudyNoteGraphReport, type SyncStudyNoteGraphResult } from "../duckdb/kg-sync.js";
+import type { SqlConn } from "../core/ports.js";
+import { reportStudyNoteGraph, type StudyNoteGraphReport, type SyncStudyNoteGraphResult } from "../duckdb/kg-sync.js";
 import { syncProjectStudyNotes } from "../hosts/study-sync.js";
 
 export interface NotesSyncArgs {
@@ -112,7 +113,7 @@ function formatReport(r: StudyNoteGraphReport): string {
 }
 
 /** Run a parsed command against an injected connection. Effectful via the connection only. */
-export async function runNotesCommand(args: NotesArgs, deps: { conn: KgSqlConn; cwd: string }): Promise<{ data: SyncStudyNoteGraphResult | StudyNoteGraphReport; text: string }> {
+export async function runNotesCommand(args: NotesArgs, deps: { conn: SqlConn; cwd: string }): Promise<{ data: SyncStudyNoteGraphResult | StudyNoteGraphReport; text: string }> {
   if (args.command === "sync") {
     const data = await syncProjectStudyNotes(deps.conn, deps.cwd, { createSchema: args.createSchema, dryRun: !args.write, allowWrite: args.write });
     return { data, text: formatSync(data) };
@@ -123,8 +124,8 @@ export async function runNotesCommand(args: NotesArgs, deps: { conn: KgSqlConn; 
 
 export interface NotesCliDeps {
   cwd: string;
-  /** Open a `KgSqlConn` for the `--db` path. Injected so the command is testable without a real driver. */
-  openConn: (db: string) => Promise<KgSqlConn>;
+  /** Open a `SqlConn` for the `--db` path. Injected so the command is testable without a real driver. */
+  openConn: (db: string) => Promise<SqlConn>;
   /** Successful output (the report/summary, or `--json`) → stdout. */
   out: (line: string) => void;
   /** Usage and errors → stderr, so stdout stays clean for piping (`notes report --json | jq`). */
@@ -140,7 +141,7 @@ export async function mainNotes(argv: string[], deps: NotesCliDeps): Promise<num
     deps.err((error as Error).message);
     return 2;
   }
-  let conn: KgSqlConn;
+  let conn: SqlConn;
   try {
     conn = await deps.openConn(args.db);
   } catch (error) {

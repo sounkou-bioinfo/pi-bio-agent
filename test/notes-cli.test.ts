@@ -6,7 +6,7 @@ import { describe, test } from "node:test";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { makeStudyNote, writeStudyNote } from "../src/hosts/pi-project.js";
 import { duckdbNodeConn } from "../src/duckdb/node-api.js";
-import type { KgSqlConn } from "../src/duckdb/kg-sync.js";
+import type { SqlConn } from "../src/core/ports.js";
 import { DEFAULT_NOTES_REPORT_LIMIT, mainNotes, parseNotesArgs } from "../src/cli/notes.js";
 
 describe("parseNotesArgs", () => {
@@ -41,7 +41,7 @@ describe("mainNotes (end to end against in-memory DuckDB)", () => {
     const conn = duckdbNodeConn(await (await DuckDBInstance.create(":memory:")).connect());
     const out: string[] = [];
     const errs: string[] = [];
-    const deps = { cwd, openConn: async (_db: string): Promise<KgSqlConn> => conn, out: (l: string) => out.push(l), err: (l: string) => errs.push(l) };
+    const deps = { cwd, openConn: async (_db: string): Promise<SqlConn> => conn, out: (l: string) => out.push(l), err: (l: string) => errs.push(l) };
     return { cwd, conn, out, errs, deps };
   }
 

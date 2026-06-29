@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import type { BioResolverImpl } from "../../core/manifest.js";
+import type { BioResolverImpl } from "../../core/ports.js";
 
 // Generic DuckDB-native file resolver. A *variant record* (or any record) is an abstraction over a table
 // shape — the source FORMAT is a swappable provider. VCF/BCF is one provider (duckhts.read_bcf); CSV, TSV,

@@ -1,7 +1,8 @@
 import { promises as fs } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { DuckDBInstance } from "@duckdb/node-api";
-import { createBioRegistry, type BioResolverImpl, type DomainPackManifest, type ResolutionReceipt } from "../core/manifest.js";
+import { createBioRegistry, type DomainPackManifest, type ResolutionReceipt } from "../core/manifest.js";
+import type { BioResolverImpl } from "../core/ports.js";
 import { runOperation, type OperationResult } from "../core/operations.js";
 import type { BioRunRecord } from "../core/run-spec.js";
 import { duckdbNodeConn } from "../duckdb/node-api.js";

@@ -1,7 +1,8 @@
 import type { BioArtifact } from "./types.js";
 import { appendRunEvent, newRunRecord, type BioRunRecord, type BioRunSpec } from "./run-spec.js";
 import { validateReadOnlySelect } from "./sql-guard.js";
-import type { BioRegistry, ResolutionReceipt, SourceSnapshot, SqlConn } from "./manifest.js";
+import type { BioRegistry, ResolutionReceipt, SourceSnapshot } from "./manifest.js";
+import type { SqlConn } from "./ports.js";
 
 // Generic execution primitives — the factored, reusable core of what ClawBio writes as a bespoke ~12 KB
 // Python program per question. A skill there = parse a format + filter by a rule + write a report + tests.

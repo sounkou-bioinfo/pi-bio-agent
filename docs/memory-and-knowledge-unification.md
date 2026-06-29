@@ -197,9 +197,10 @@ and returns the persisted note plus a `created` flag.
 
 The pure projection (`studyNoteGraph`) hands off to `syncStudyNoteGraph` in
 `src/duckdb/kg-sync.ts`. It is the first **effectful** surface, kept policy-explicit per
-`design.md`. The sync writes through a minimal `KgSqlConn` port (`all`/`run`) so the sync logic
-stays testable (fake port) and injectable (a host passes its own connection); the concrete
-`@duckdb/node-api` binding is a separate file (see below).
+`design.md`. The sync writes through the one execution port, `SqlConn` (`all`/`run`, declared in
+`src/core/ports.ts` and shared with the operation runner), so the sync logic stays testable (fake
+port) and injectable (a host passes its own connection); the concrete `@duckdb/node-api` binding is
+a separate file (see below).
 
 - **Ownership scope (exact).** It owns, and only ever deletes:
   - `bio_nodes WHERE family = 'memory'`
@@ -222,7 +223,7 @@ stays testable (fake port) and injectable (a host passes its own connection); th
   scans/join the sync runs (`family`, `from_id`, `to_id`). **No foreign keys** — dangling link
   targets are allowed, so an edge may reference an absent node id.
 - **Concrete DuckDB binding.** `duckdbNodeConn(connection)` (`src/duckdb/node-api.ts`) adapts a
-  live `@duckdb/node-api` connection to `KgSqlConn`. **The core and sync logic stay
+  live `@duckdb/node-api` connection to `SqlConn`. **The core and sync logic stay
   driver-agnostic** (`node-api.ts` imports the driver only as a *type*; the host creates and owns
   the `DuckDBInstance`/connection); the concrete binding, and the package, depend on
   `@duckdb/node-api` as a direct dependency — DuckDB is a first-class substrate here. The port

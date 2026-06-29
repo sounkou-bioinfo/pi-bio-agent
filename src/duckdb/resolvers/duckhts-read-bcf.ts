@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import type { BioResolverImpl } from "../../core/manifest.js";
+import type { BioResolverImpl } from "../../core/ports.js";
 
 // Generic DuckHTS reader: materialize an HTS file (VCF/BCF) into a RAW table via read_bcf(tidy_format) and
 // nothing more — the parallel of duckdb.file_scan, for HTS formats. There is deliberately NO source-specific

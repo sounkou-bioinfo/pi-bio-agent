@@ -1,4 +1,4 @@
-import type { BioResolverImpl } from "../../src/core/manifest.js";
+import type { BioResolverImpl } from "../../src/core/ports.js";
 
 // Fixture/demo resolver — NOT core. It mutates a SQL connection (CREATE TABLE + INSERT) and assumes a
 // table backend, so it is a concrete implementation, not a contract. Core defines the resolver contract

@@ -1,21 +1,17 @@
 import { createHash } from "node:crypto";
 import { validateBioOperationSpec, type BioOperationSpec } from "./operation-spec.js";
+import type { BioResolverImpl, ResolutionContext } from "./ports.js";
 import type { BioResolverSpec, ResourceHandle, SourceSnapshot, VirtualResourceSpec } from "./resources.js";
 import type { Provenance } from "./types.js";
 
 // The registration boundary: domain/operation packs declare serializable SPECS; a host binds executable
 // IMPLS at runtime. Core never holds vendor logic or function refs in the snapshot — declarations are data
-// (introspectable, graph-recordable), implementations are runtime bindings. No ambient globals: a registry
-// is an explicit object passed into runners/tests/hosts. Resolution is resource-centered: the registry
-// owns receipt metadata so a resolver impl cannot forge identity/provenance of what it resolved.
+// (introspectable, graph-recordable), implementations are runtime bindings. The injection seams themselves
+// (SqlConn, ResolutionContext, ResolverOutput, BioResolverImpl) live in ./ports.ts, the DI spine; this file
+// orchestrates them. Resolution is resource-centered: the registry owns receipt metadata so a resolver impl
+// cannot forge identity/provenance of what it resolved.
 
 export type { BioResolverSpec, SourceSnapshot, VirtualResourceSpec } from "./resources.js";
-
-/** Minimal SQL execution port (the execution-backend contract). A DuckDB connection is structurally one. */
-export interface SqlConn {
-  all<T = Record<string, unknown>>(sql: string, params?: readonly unknown[]): Promise<T[]>;
-  run(sql: string, params?: readonly unknown[]): Promise<void>;
-}
 
 export interface TermRef {
   id: string;
@@ -26,25 +22,6 @@ export interface TermSet {
   title: string;
   members: TermRef[];
 }
-
-export interface ResolutionContext {
-  conn: SqlConn;
-  /** Injectable clock for deterministic receipts/tests. */
-  now?: string;
-}
-
-/**
- * What a resolver impl returns — the data it actually resolved, nothing more. The registry stamps the
- * identity/provenance metadata (resourceId, resolverId/version, resolvedAt, paramsDigest) into the receipt,
- * so an impl cannot misattribute what it produced.
- */
-export interface ResolverOutput {
-  result: ResourceHandle;
-  sourceSnapshots: SourceSnapshot[];
-  provenance: Provenance[];
-}
-
-export type BioResolverImpl = (resource: VirtualResourceSpec, ctx: ResolutionContext) => Promise<ResolverOutput>;
 
 export interface ResolutionReceipt {
   schema: "pi-bio.resolution_receipt.v1";

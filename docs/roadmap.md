@@ -68,7 +68,7 @@ A pyramid, plus a conformance cross-cut. Layers 1–3 substantially exist today;
    `ResourceHandle`, `StudyNote`, `studyNoteGraph`, ontology/KG helpers, interval/variant primitives).
    Deterministic, fail-closed, no I/O.
 2. **SQL/KG tests** — schema DDL, constraints, indexes, dangling links, external-inbound guard, report
-   limits, read-only SQL validation. Both a fake `KgSqlConn` and a real in-memory DuckDB.
+   limits, read-only SQL validation. Both a fake `SqlConn` and a real in-memory DuckDB.
 3. **Effect tests** — real local effects: filesystem notes, CAS paths, run ledger, DuckDB sync, CLI
    commands. No ambient env/process activation; explicit write flags.
 4. **Operation-pack tests** — API clients: mock-network by default, request-shape golden tests,

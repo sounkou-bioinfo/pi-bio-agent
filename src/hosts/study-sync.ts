@@ -1,5 +1,6 @@
 import { studyNoteGraph } from "../core/study.js";
-import { createBioGraphSchema, syncStudyNoteGraph, type KgSqlConn, type SyncStudyNoteGraphOptions, type SyncStudyNoteGraphResult } from "../duckdb/kg-sync.js";
+import type { SqlConn } from "../core/ports.js";
+import { createBioGraphSchema, syncStudyNoteGraph, type SyncStudyNoteGraphOptions, type SyncStudyNoteGraphResult } from "../duckdb/kg-sync.js";
 import { readStudyNotes } from "./pi-project.js";
 
 export interface SyncProjectStudyNotesOptions extends SyncStudyNoteGraphOptions {
@@ -22,7 +23,7 @@ export interface SyncProjectStudyNotesOptions extends SyncStudyNoteGraphOptions 
  * needs `allowWrite`).
  */
 export async function syncProjectStudyNotes(
-  conn: KgSqlConn,
+  conn: SqlConn,
   cwd: string,
   options: SyncProjectStudyNotesOptions = {},
 ): Promise<SyncStudyNoteGraphResult> {

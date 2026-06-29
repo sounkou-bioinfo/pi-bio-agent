@@ -1,4 +1,4 @@
-import type { SqlConn } from "./manifest.js";
+import type { SqlConn } from "./ports.js";
 
 // Lean on SQL's own advantage — schema DISCOVERY — instead of pre-declaring a taxonomy of table types.
 // A resolver materializes some table; DuckDB discovers its schema; an operation declares only the few

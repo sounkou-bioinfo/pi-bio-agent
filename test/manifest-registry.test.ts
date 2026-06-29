@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { DuckDBInstance } from "@duckdb/node-api";
-import { createBioRegistry, validateDomainPackManifest, type DomainPackManifest, type SqlConn } from "../src/core/manifest.js";
+import { createBioRegistry, validateDomainPackManifest, type DomainPackManifest } from "../src/core/manifest.js";
+import type { SqlConn } from "../src/core/ports.js";
 import { duckdbNodeConn } from "../src/duckdb/node-api.js";
 import { inlineTableResolver } from "./support/inline-table-resolver.js";
 

@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { DuckDBInstance } from "@duckdb/node-api";
-import { createBioRegistry, type DomainPackManifest, type SqlConn } from "../src/core/manifest.js";
+import { createBioRegistry, type DomainPackManifest } from "../src/core/manifest.js";
+import type { SqlConn } from "../src/core/ports.js";
 import { runOperation } from "../src/core/operations.js";
 import { defineBioOperationSpec } from "../src/core/operation-spec.js";
 import { duckdbNodeConn } from "../src/duckdb/node-api.js";

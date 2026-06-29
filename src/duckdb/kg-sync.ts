@@ -1,16 +1,10 @@
 import type { BioGraphEdge, BioGraphNode, BioGraphSnapshot } from "../core/knowledge-graph.js";
+import type { SqlConn } from "../core/ports.js";
 
-/**
- * Minimal SQL port the KG-sync adapter writes through, implemented by a concrete DuckDB connection
- * exposing the `bio_nodes`/`bio_edges` contract. The sync logic writes through this port so it stays
- * testable (fake port) and injectable (a host can pass its own connection); the concrete
- * `@duckdb/node-api` binding (`duckdbNodeConn`) is separate. The adapter emits DuckDB-dialect SQL
- * (e.g. `?::JSON` casts), so the port is not dialect-neutral.
- */
-export interface KgSqlConn {
-  all<T = Record<string, unknown>>(sql: string, params?: readonly unknown[]): Promise<T[]>;
-  run(sql: string, params?: readonly unknown[]): Promise<void>;
-}
+// The KG sync writes through the one execution port, SqlConn (core/ports.ts) — there is no separate KG
+// connection type. The adapter emits DuckDB-dialect SQL (e.g. `?::JSON` casts) against the
+// `bio_nodes`/`bio_edges` contract, so it is not dialect-neutral; the host injects a concrete connection
+// (duckdbNodeConn) or a fake port in tests.
 
 export interface SyncStudyNoteGraphOptions {
   /** Default true: compute counts only and write nothing. */
@@ -75,7 +69,7 @@ function assertMemorySubgraph(snapshot: BioGraphSnapshot): void {
 }
 
 /** Private helper: read the owned-subgraph delete counts plus the non-owned external-inbound count. */
-async function countOwned(conn: KgSqlConn): Promise<Pick<SyncStudyNoteGraphResult, "nodesToDelete" | "edgesToDelete" | "externalInboundEdges">> {
+async function countOwned(conn: SqlConn): Promise<Pick<SyncStudyNoteGraphResult, "nodesToDelete" | "edgesToDelete" | "externalInboundEdges">> {
   const [nodeRow] = await conn.all<{ n: number }>(`SELECT count(*) AS n FROM ${OWNED_NODES}`);
   const [edgeRow] = await conn.all<{ n: number }>(`SELECT count(*) AS n FROM ${OWNED_EDGES}`);
   const [externalInboundRow] = await conn.all<{ n: number }>(`SELECT count(*) AS n FROM ${EXTERNAL_INBOUND_EDGES}`);
@@ -96,7 +90,7 @@ async function countOwned(conn: KgSqlConn): Promise<Pick<SyncStudyNoteGraphResul
  * Files remain the source of truth; this projects them into DuckDB as an index/cache.
  */
 export async function syncStudyNoteGraph(
-  conn: KgSqlConn,
+  conn: SqlConn,
   snapshot: BioGraphSnapshot,
   options: SyncStudyNoteGraphOptions = {},
 ): Promise<SyncStudyNoteGraphResult> {
@@ -134,14 +128,14 @@ export async function syncStudyNoteGraph(
   }
 }
 
-async function insertNode(conn: KgSqlConn, node: BioGraphNode): Promise<void> {
+async function insertNode(conn: SqlConn, node: BioGraphNode): Promise<void> {
   await conn.run(
     "INSERT INTO bio_nodes (node_id, family, type, label, description, attrs, trust) VALUES (?, ?, ?, ?, ?, ?::JSON, ?::JSON)",
     [node.id, node.family, node.type, node.label, node.description ?? null, jsonParam(node.attrs), jsonParam(node.trust)],
   );
 }
 
-async function insertEdge(conn: KgSqlConn, edge: BioGraphEdge): Promise<void> {
+async function insertEdge(conn: SqlConn, edge: BioGraphEdge): Promise<void> {
   await conn.run(
     "INSERT INTO bio_edges (from_id, to_id, predicate, attrs, trust) VALUES (?, ?, ?, ?::JSON, ?::JSON)",
     [edge.from, edge.to, edge.predicate, jsonParam(edge.attrs), jsonParam(edge.trust)],
@@ -166,7 +160,7 @@ export interface CreateBioGraphSchemaOptions {
  * - No foreign keys — dangling link targets are allowed by design, so an edge may reference a node id
  *   that does not exist.
  */
-export async function createBioGraphSchema(conn: KgSqlConn, options: CreateBioGraphSchemaOptions = {}): Promise<void> {
+export async function createBioGraphSchema(conn: SqlConn, options: CreateBioGraphSchemaOptions = {}): Promise<void> {
   const ifNotExists = options.ifNotExists ? "IF NOT EXISTS " : "";
   await conn.run(
     `CREATE TABLE ${ifNotExists}bio_nodes (` +
@@ -222,7 +216,7 @@ function limitClause(limit?: number): string {
  * problem sets, plus the actual problem rows capped at `limit` (progressive disclosure — summarize totals,
  * sample the fixable rows). No writes, no transaction; safe to run any time.
  */
-export async function reportStudyNoteGraph(conn: KgSqlConn, options: ReportStudyNoteGraphOptions = {}): Promise<StudyNoteGraphReport> {
+export async function reportStudyNoteGraph(conn: SqlConn, options: ReportStudyNoteGraphOptions = {}): Promise<StudyNoteGraphReport> {
   const lim = limitClause(options.limit);
   const [nodeRow] = await conn.all<{ n: number }>(`SELECT count(*) AS n FROM ${OWNED_NODES}`);
   const [edgeRow] = await conn.all<{ n: number }>(`SELECT count(*) AS n FROM ${OWNED_EDGES}`);

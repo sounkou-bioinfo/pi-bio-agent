@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { studyNoteGraph, type StudyNote } from "../src/core/study.js";
-import { createBioGraphSchema, syncStudyNoteGraph, type KgSqlConn } from "../src/duckdb/kg-sync.js";
+import { createBioGraphSchema, syncStudyNoteGraph } from "../src/duckdb/kg-sync.js";
+import type { SqlConn } from "../src/core/ports.js";
 
 function note(slug: string, body: string, links?: StudyNote["links"]): StudyNote {
   return {
@@ -22,7 +23,7 @@ function note(slug: string, body: string, links?: StudyNote["links"]): StudyNote
 
 function fakeConn(counts: { nodes: number; edges: number; externalInbound?: number }) {
   const statements: Array<{ sql: string; params?: readonly unknown[] }> = [];
-  const conn: KgSqlConn = {
+  const conn: SqlConn = {
     async all(sql: string) {
       statements.push({ sql });
       // The external-inbound query also reads bio_edges, so match it first by its distinguishing clause.
@@ -89,7 +90,7 @@ describe("syncStudyNoteGraph", () => {
 
   test("rolls back and rethrows if a write fails mid-transaction", async () => {
     const calls: string[] = [];
-    const conn: KgSqlConn = {
+    const conn: SqlConn = {
       async all() {
         return [{ n: 0 }] as never;
       },
