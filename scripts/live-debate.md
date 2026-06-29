@@ -1,0 +1,35 @@
+# Live survey/debate topology — evidence
+
+`scripts/live-debate.ts` is a **dogfood** running the **survey/respondent** (nng) pattern as a Fugu best-of-N
+debate: two respondent agents answer the *same* question **independently** (isolated from each other via the
+access-list), and an aggregator agent **surveys both and synthesizes**. Same proven executor + direct-spawn
+worker as `live-multi-agent.ts` — only the scaffold *topology* changes (fan-in, not a chain).
+
+Run: `npx tsx scripts/live-debate.ts` (requires the `pi` CLI + a configured provider).
+
+## Recorded run (2026-06-30)
+
+```
+=== LIVE debate (survey topology): 2 independent respondents + 1 aggregator, all real pi agents ===
+  [host] spawned pi pid=1607916 for 'respondent-a'
+  [host] spawned pi pid=1607965 for 'respondent-b'
+  [host] spawned pi pid=1608018 for 'aggregator'
+
+### respondent-a (independent)
+Sample identity/relatedness checks and variant-level QC (missingness, Hardy–Weinberg equilibrium, allele frequency/call rate).
+
+### respondent-b (independent)
+Sample identity/relatedness checks; variant-level missingness and Hardy–Weinberg equilibrium checks.
+
+### aggregator (synthesizes: respondent-a, respondent-b)
+Sample-level identity/relatedness checks; variant-level QC for missingness/call rate, Hardy–Weinberg equilibrium, and allele frequency.
+
+order: respondent-a -> respondent-b -> aggregator
+```
+
+**What it proves:** three distinct OS processes; the two respondents answered *independently* (the aggregator's
+input was the only shared channel — neither respondent saw the other); the aggregator genuinely **reconciled**
+them — `a` contributed allele-frequency/call-rate, `b` contributed missingness/HWE, and the synthesis is the
+de-duplicated union, not a copy of either. This is the survey/respondent topology (best-of-N + aggregation),
+live, on the same executor as the chain run — confirming the **topology is a scaffold choice, not an executor
+change**. The deterministic mechanics are proven in `test/study-exec.test.ts` (the SURVEY/DEBATE test).

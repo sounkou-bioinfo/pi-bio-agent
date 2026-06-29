@@ -33,8 +33,13 @@ orchestrator (piece 1); the agent conducts.
 | Example | Proof |
 |---|---|
 | `test/study-scaffold.test.ts` | `StudyScaffold` = a DAG of `(subtask, produces, accessList)`; fail-closed validation (access refs only to earlier steps → acyclic); Kahn topo-order |
-| `test/study-exec.test.ts` | the **executor** runs workers in topo order with per-step **access-list isolation** + downstream **shared memory**; includes a **TREE** topology (two isolated leaves + an aggregator that fans both in — Fugu's signature) |
-| **live:** [`scripts/live-multi-agent.ts`](../scripts/live-multi-agent.md) | **real multi-agent run**: each step spawns a *separate `pi` process*; they communicate only via access-list artifacts the host threads — no shared db, so the process lock is never touched. `npx tsx scripts/live-multi-agent.ts` |
+| `test/study-exec.test.ts` | the **executor** runs workers in topo order with per-step **access-list isolation** + downstream **shared memory**; includes a **TREE** and a **SURVEY/DEBATE** topology (N isolated respondents + an aggregator that fans them in — Fugu's signature) |
+| **live:** [`scripts/live-multi-agent.ts`](../scripts/live-multi-agent.md) | **real multi-agent run** (chain): each step spawns a *separate `pi` process*; they communicate only via access-list artifacts the host threads — no shared db, so the process lock is never touched. `npx tsx scripts/live-multi-agent.ts` |
+| **live:** [`scripts/live-debate.ts`](../scripts/live-debate.md) | **real best-of-N debate** (survey topology): two agents answer the same question independently, an aggregator synthesizes both. `npx tsx scripts/live-debate.ts` |
+
+Topologies are a **scaffold choice, not an executor change** — `req/rep` star (the coordinator), `pub/sub`
+(blackboard), `push/pull` (pipeline), `survey` (debate, above), `bus` (mesh). The DuckDB-native transport for
+all of these is [`~/ducknng`](https://nng.nanomsg.org/) (NNG + Arrow + manifest methods + mTLS policy).
 
 ## 4. The process boundary — sharing state across agent processes
 DuckDB's file lock is **process-exclusive-writer** (verified). So state-sharing across agent processes is either
