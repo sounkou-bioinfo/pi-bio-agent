@@ -44,12 +44,15 @@ export function httpTableResolver(fetchImpl: FetchLike): BioResolverImpl {
     const method = p.method === undefined ? "GET" : p.method;
     if (method !== "GET") throw new Error("http.get supports GET only");
 
-    // Conditional request: if we have a stored validator (ETag/Last-Modified) for this table and the table is
-    // still present, send If-None-Match so the server can answer 304 Not Modified — a cache hit with no body.
+    // Conditional request: if we have a stored validator (ETag/Last-Modified) for this table, the table is
+    // still present, AND the cached receipt is for THIS url (the memo is keyed on table name, so a different
+    // url to the same table must not reuse a stale validator), send If-None-Match so the server can answer
+    // 304 Not Modified — a cache hit with no body.
     const memo = await memoGet(ctx.conn, p.table);
-    const conditional = memo ? { ...headers, "If-None-Match": memo.freshness } : headers;
+    const sameUrl = memo?.receipt.sourceSnapshots[0]?.source === p.url;
+    const conditional = memo && sameUrl ? { ...headers, "If-None-Match": memo.freshness } : headers;
     const res = await fetchImpl(p.url, { method: "GET", headers: conditional });
-    if (memo && res.status === 304) return memo.receipt; // unchanged: replay the cached receipt, skip body + materialize
+    if (memo && sameUrl && res.status === 304) return memo.receipt; // unchanged: replay the cached receipt, skip body + materialize
     if (!res.ok) throw new Error(`http resolver: GET ${p.url} returned status ${res.status}`); // fail closed, no retry/fallback
     const body = await res.text();
     const digest = createHash("sha256").update(body).digest("hex");
