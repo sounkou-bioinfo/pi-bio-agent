@@ -31,11 +31,20 @@ const READERS: Record<string, string> = { json: "read_json_auto", ndjson: "read_
 export function httpTableResolver(fetchImpl: FetchLike): BioResolverImpl {
   return async (resource, ctx) => {
     const p = resource.params as { url?: unknown; table?: unknown; format?: unknown; method?: unknown; headers?: unknown; body?: unknown };
-    if (typeof p.url !== "string" || !/^https?:\/\//i.test(p.url)) {
-      throw new Error("http resolver requires params.url to be an http(s) URL (explicit remote; no local/file fetch)");
+    if (typeof p.url !== "string" || !p.url.trim()) {
+      throw new Error("http resolver requires params.url (a string: an http(s) URL, or a SQL expression that composes one)");
     }
     if (typeof p.table !== "string" || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(p.table)) {
       throw new Error("http resolver requires params.table to be a valid SQL identifier");
+    }
+    // URL composition is SQL, not a bespoke template DSL: a literal http(s) URL is used as-is; otherwise `url` is
+    // a SQL EXPRESSION evaluated against the conn — `getvariable('query')` for agent params (SET VARIABLE),
+    // subqueries / string_agg over upstream tables for upstream data. DuckDB does the composition.
+    let composedUrl: string = p.url;
+    if (!/^https?:\/\//i.test(composedUrl)) {
+      const rows = await ctx.conn.all<{ u: unknown }>(`SELECT (${composedUrl}) AS u`);
+      composedUrl = String(rows[0]?.u ?? "");
+      if (!/^https?:\/\//i.test(composedUrl)) throw new Error(`http resolver: the url expression composed '${composedUrl}', which is not an http(s) URL`);
     }
     const format = typeof p.format === "string" ? p.format : "json";
     const reader = READERS[format];
@@ -49,7 +58,7 @@ export function httpTableResolver(fetchImpl: FetchLike): BioResolverImpl {
     if (method !== "GET" && method !== "POST") throw new Error("http.get supports GET or read-only POST (a query body); PUT/DELETE/PATCH are refused");
     const requestBody = method === "POST" && p.body !== undefined ? (typeof p.body === "string" ? p.body : JSON.stringify(p.body)) : undefined;
     // Capture the now-narrowed string values: TS drops property narrowing inside the closures below.
-    const url: string = p.url;
+    const url: string = composedUrl;
     const table: string = p.table;
 
     // Memoize only when there are NO custom request headers — Accept/auth/etc. (Vary) could otherwise make a

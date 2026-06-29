@@ -5,7 +5,6 @@ import { DuckDBInstance } from "@duckdb/node-api";
 import { createBioRegistry, type BioRegistry, type DomainPackManifest, type ResolutionReceipt } from "../core/manifest.js";
 import type { CasStore } from "../core/cas.js";
 import type { BioResolverImpl, SqlConn } from "../core/ports.js";
-import { bindManifestResources } from "./resource-bindings.js";
 import { OperationRunError, runOperation, runQuery, type OperationResult } from "../core/operations.js";
 import type { BioRunRecord } from "../core/run-spec.js";
 import { duckdbNodeConn } from "../duckdb/node-api.js";
@@ -130,7 +129,7 @@ export interface RunOperationRequest {
   /** Host-owned connection bootstrap SQL (INSTALL/LOAD/SET), run once before resolution — e.g. enabling
    *  httpfs + cache_httpfs so file_scan/sql_materialize remote reads get block caching. NOT agent SQL. */
   duckdbInitSql?: string[];
-  /** Agent-supplied bindings filling {name} slots in resource url/body templates (url composition over params). */
+  /** Agent params as DuckDB session variables: each becomes `SET VARIABLE name = value`, so a resource url/body composes them with plain SQL (getvariable(name)) and upstream data with subqueries — no bespoke template DSL. */
   bindings?: Record<string, unknown>;
 }
 
@@ -144,13 +143,10 @@ function resolveInCwd(cwd: string, p: string): string {
 
 /** Load + validate + register a manifest and bind the built-in resolver impls it declares. Shared by the
  *  operation and the ad-hoc query entry points. */
-async function prepareRegistry(req: { cwd: string; manifestPath: string; network?: { fetch: FetchLike }; bindings?: Record<string, unknown> }): Promise<{ registry: BioRegistry; manifest: DomainPackManifest }> {
+async function prepareRegistry(req: { cwd: string; manifestPath: string; network?: { fetch: FetchLike } }): Promise<{ registry: BioRegistry; manifest: DomainPackManifest }> {
   const manifestPath = resolveInCwd(req.cwd, req.manifestPath);
   const raw = JSON.parse(await fs.readFile(manifestPath, "utf8")) as DomainPackManifest;
-  const located = resolveResourcePaths(raw, dirname(manifestPath)); // relative resource paths -> manifest dir
-  // Parameterized resources: fill {name} slots in resource url/body from agent-supplied bindings (url composition
-  // over params). Fails closed on an unfilled slot, so a manifest that declares a query template requires a value.
-  const manifest = bindManifestResources(located, req.bindings ?? {});
+  const manifest = resolveResourcePaths(raw, dirname(manifestPath)); // relative resource paths -> manifest dir
   const registry = createBioRegistry();
   registry.registerManifest(manifest); // throws on an invalid manifest (fail closed)
   const httpImpl = req.network ? httpTableResolver(req.network.fetch) : undefined;
@@ -167,6 +163,7 @@ async function runAndPersist(
   cwd: string, dbPath: string, runId: string, identity: string,
   body: (conn: SqlConn) => Promise<{ run: BioRunRecord; result: OperationResult; receipts: ResolutionReceipt[] }>,
   initSql?: string[],
+  bindings?: Record<string, unknown>,
 ): Promise<RunOperationResponse> {
   const instance = await DuckDBInstance.create(resolveInCwd(cwd, dbPath));
   const connection = await instance.connect();
@@ -177,6 +174,14 @@ async function runAndPersist(
     // (thrown, not a failed run): the run never started. This is HOST config, not agent SQL — no read-only
     // guard, by construction the agent cannot supply it (it is composed in at the host, like network/cas).
     if (initSql) for (const stmt of initSql) await conn.run(stmt);
+    // Agent params are DuckDB SESSION VARIABLES, not a bespoke template DSL: the agent's bindings become
+    // `SET VARIABLE name = value`, so a resource url/body composes them with plain SQL (`'…?q=' ||
+    // getvariable('query')`) and upstream data with subqueries. The host sets them (bio_query is a single SELECT,
+    // it can't); values are parameter-bound, so no injection.
+    if (bindings) for (const [name, value] of Object.entries(bindings)) {
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) throw new Error(`binding name '${name}' must be a SQL identifier`);
+      await conn.run(`SET VARIABLE ${name} = ?`, [value as never]);
+    }
     try {
       const { run, result, receipts } = await body(conn);
       const persisted = await persistRun(cwd, runId, { run, result, receipts });
@@ -211,7 +216,7 @@ export async function runBioOperationFromManifest(req: RunOperationRequest): Pro
   if (op.transport !== "duckdb.sql" || !op.sql) throw new Error(`operation '${req.operationId}' is not a duckdb.sql operation`);
   const now = req.now ?? systemClock();
   const runId = req.runId ?? `${req.operationId.replace(/[^a-zA-Z0-9._-]/g, "_")}-${Date.now()}`;
-  return runAndPersist(req.cwd, req.dbPath, runId, req.operationId, (conn) => runOperation(registry, conn, { operationId: req.operationId, runId, now, signal: req.signal, cas: req.cas }), req.duckdbInitSql);
+  return runAndPersist(req.cwd, req.dbPath, runId, req.operationId, (conn) => runOperation(registry, conn, { operationId: req.operationId, runId, now, signal: req.signal, cas: req.cas }), req.duckdbInitSql, req.bindings);
 }
 
 export interface RunQueryRequest {
@@ -232,7 +237,7 @@ export interface RunQueryRequest {
   cas?: CasStore;
   /** Host-owned connection bootstrap SQL (INSTALL/LOAD/SET), run once before resolution. NOT agent SQL. */
   duckdbInitSql?: string[];
-  /** Agent-supplied bindings filling {name} slots in resource url/body templates (url composition over params). */
+  /** Agent params as DuckDB session variables: each becomes `SET VARIABLE name = value`, so a resource url/body composes them with plain SQL (getvariable(name)) and upstream data with subqueries — no bespoke template DSL. */
   bindings?: Record<string, unknown>;
 }
 
@@ -251,5 +256,5 @@ export async function runBioQueryFromManifest(req: RunQueryRequest): Promise<Run
   const resources = req.resources ?? (manifest.provides?.resources ?? []).map((r) => r.id);
   const now = req.now ?? systemClock();
   const runId = req.runId ?? `query-${Date.now()}`;
-  return runAndPersist(req.cwd, req.dbPath, runId, "ad-hoc.query", (conn) => runQuery(registry, conn, { sql: req.sql, resources, runId, now, signal: req.signal, cas: req.cas }), req.duckdbInitSql);
+  return runAndPersist(req.cwd, req.dbPath, runId, "ad-hoc.query", (conn) => runQuery(registry, conn, { sql: req.sql, resources, runId, now, signal: req.signal, cas: req.cas }), req.duckdbInitSql, req.bindings);
 }

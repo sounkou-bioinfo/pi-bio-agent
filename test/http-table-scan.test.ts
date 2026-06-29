@@ -46,7 +46,8 @@ describe("http.get: one generic HTTP resolver (injected fetch, no ambient networ
     const conn = await memoryConn();
     const notFound: FetchLike = async () => ({ ok: false, status: 404, text: async () => "" });
     await assert.rejects(() => httpTableResolver(notFound)(resource({ url: "https://x/y", table: "t", format: "json" }), { conn, now: "t" }), /status 404/);
-    await assert.rejects(() => httpTableResolver(okJson([]))(resource({ url: "file:///etc/passwd", table: "t" }), { conn, now: "t" }), /http\(s\) URL/);
+    // a url that COMPOSES (via SQL) to a non-http(s) string fails closed (here a SQL literal -> file://)
+    await assert.rejects(() => httpTableResolver(okJson([]))(resource({ url: "'file:///etc/passwd'", table: "t" }), { conn, now: "t" }), /not an http\(s\) URL/);
     await assert.rejects(() => httpTableResolver(okJson([]))(resource({ url: "https://x/y", table: "t", format: "xml" }), { conn, now: "t" }), /unknown format/);
   });
 

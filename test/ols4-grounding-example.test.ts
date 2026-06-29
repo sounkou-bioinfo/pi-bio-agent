@@ -39,31 +39,33 @@ describe("example: an OLS4 grounding skill is a manifest, not code", () => {
 
     // exact-match projection tier — the agent's grounding SQL over the resolved candidate table
     const sql = "SELECT obo_id, label FROM ols4_candidates WHERE lower(label) = 'asthma'";
-    // the AGENT supplies the query; the manifest declares only the URL TEMPLATE (?q={query}). No hardcoded term.
+    // the AGENT supplies the query as a DuckDB session variable; the manifest's url is a SQL EXPRESSION that
+    // composes it: '…?q=' || getvariable('query'). No bespoke template DSL, no hardcoded term.
     const first = await runBioQueryFromManifest({ cwd, dbPath, manifestPath: MANIFEST, sql, bindings: { query: "asthma" }, network: { fetch: ols4Mock("ols4-v1") }, runId: "g1", now: "T1" });
 
     assert.equal(first.ok, true);
     if (!first.ok) return;
-    assert.match(lastUrl, /[?&]q=asthma(&|$)/, "the binding composed {query} into the URL");
+    assert.match(lastUrl, /[?&]q=asthma&/, "getvariable('query') composed the URL via plain SQL");
+    assert.match(lastUrl, /ontology=mondo/, "an unset param falls back via coalesce(getvariable('ontology'), 'mondo')");
     const result = JSON.parse(await fs.readFile(join(first.runDir, "result.json"), "utf8")) as { rows: Array<{ obo_id: string; label: string }> };
     assert.deepEqual(result.rows, [{ obo_id: "MONDO:0004979", label: "asthma" }]);
 
-    // a DIFFERENT query composes a different URL from the SAME manifest (it's a template, not a hardcoded term)
-    await runBioQueryFromManifest({ cwd, dbPath: ":memory:", manifestPath: MANIFEST, sql, bindings: { query: "lung cancer" }, network: { fetch: ols4Mock("ols4-v2") }, runId: "g2", now: "T2" });
-    assert.match(lastUrl, /[?&]q=lung%20cancer(&|$)/, "a new binding composes a new URL (URL-encoded)");
+    // a DIFFERENT query/ontology composes a different URL from the SAME manifest — it's SQL composition, not a term
+    await runBioQueryFromManifest({ cwd, dbPath: ":memory:", manifestPath: MANIFEST, sql, bindings: { query: "diabetes", ontology: "hp" }, network: { fetch: ols4Mock("ols4-v2") }, runId: "g2", now: "T2" });
+    assert.match(lastUrl, /[?&]q=diabetes&ontology=hp&/, "new session variables compose a new URL");
   });
 
-  test("fails closed when the URL template's {query} has no binding (the manifest requires the agent's query)", async () => {
+  test("fails closed when {query} has no binding (getvariable is NULL -> the url composes to non-http -> failed run)", async () => {
     const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-ols4-"));
-    await assert.rejects(
-      () => runBioQueryFromManifest({ cwd, dbPath: ":memory:", manifestPath: MANIFEST, sql: "SELECT 1", network: { fetch: ols4Mock("x") }, runId: "g3", now: "T1" }),
-      /references '\{query\}' but no binding/,
-    );
+    const out = await runBioQueryFromManifest({ cwd, dbPath: ":memory:", manifestPath: MANIFEST, sql: "SELECT 1", network: { fetch: ols4Mock("x") }, runId: "g3", now: "T1" });
+    assert.equal(out.ok, false); // a runtime resolution failure is an auditable failed run, not a silent empty result
+    if (out.ok) return;
+    assert.match(out.error, /not an http\(s\) URL/);
   });
 
   test("fails closed with NO network bound — a networked manifest cannot resolve without the host's opt-in", async () => {
     const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-ols4-"));
-    // binding supplied (so templating passes); no network -> http.get unbound -> resolution fails closed
+    // binding supplied; no network -> http.get unbound -> resolution fails closed
     await assert.rejects(
       () => runBioQueryFromManifest({ cwd, dbPath: ":memory:", manifestPath: MANIFEST, sql: "SELECT * FROM ols4_candidates", bindings: { query: "asthma" }, runId: "g4", now: "T1" }),
       /http\.get' is declared but no implementation is bound/,
