@@ -104,6 +104,38 @@ Open design issues and cleanup targets. Keep this file focused on what still nee
 - Test structured evidence assembly, provenance, and expert-review framing.
 - Promote stable workflow instructions into skills only after fixtures pass.
 
+## Prior art: {targets} — lessons for CAS, caching, and the executor
+
+We are building a `targets`-shaped lazy, content-addressed substrate (see
+[design.md](./design.md#the-substrate-is-a-lazy-content-addressed-evaluation-graph)). The hard-won lessons
+from `targets` (mdsumner/targeted-learning) mostly **validate** our design and **sharpen the deferred specs**;
+each lands only when a concrete consumer forces it, never ahead.
+
+- **Receipt = marker file; never conflate "what to hash" with "what to pass."** `targets`'s `tar_format()`
+  conflated the change-detection hash with the value passed downstream, so external-file tracking uses a
+  *marker file*: a local file holding the reference (path/URI) + a content validator (ETag), separate from the
+  bytes. Our **receipt already is that marker** — `{ source (where), version=content digest (what), retrievedAt
+  (when) }`, separate from the materialized table (the value). Keep that separation; it is what avoids the trap.
+- **Format/repository split → our resolver already collapses the combinatorics.** `targets` split `format`
+  (serialization) from `repository` (location) to avoid the format×provider explosion. `duckdb.sql_materialize`
+  is the same move taken further: one resolver, declared SQL, any reader/source — no resolver-per-format zoo.
+- **CAS = store by content hash, versioned** (one entry per content version). Use it for collaboration /
+  reproducibility / rollback / audit; skip it for large, frequently-changing outputs. It is the memo table of
+  the lazy graph — build it when a re-run should hit cache.
+- **Remote freshness needs ETag/Last-Modified**, not a re-download — `file_scan` already omits the content
+  digest for a remote path (can't `readFileSync` a URL), exactly the gap the marker pattern fills. Capture the
+  validators WHEN caching is built (needs widening the `FetchLike` port).
+- **An audit pass re-validates external state**: a separate run comparing stored vs current validators (ETags)
+  to catch data that changed outside the pipeline. Relevant once remote resources + caching exist.
+- **Error handling for the future `process` executor + `http.get`**: `targets` offers stop / continue / null /
+  trim plus transient-error retry/backoff for cloud. For us these are **policy (host/manifest data), not baked
+  in**; failed-run receipts already enable "re-run only the failed." Design the executor for transient errors
+  (retry as a host fetch/exec decorator), per host-controlled effects.
+- **The DuckDB-over-files aggregation pattern is the validated substrate.** `targets` users' go-to for "many
+  inputs → a value" is: write Parquet per branch, then `duckdbfs::open_dataset(files) |> group_by |> summarise
+  |> collect()` — i.e. resolver(s) → operation SQL. A process-op producing Parquet artifacts that `file_scan`/
+  `sql_materialize` then aggregate is exactly this; no bespoke combine step.
+
 ## Storage refinements
 
 - Keep the documented default on-disk layout in sync with `bioProjectLayout()`:
