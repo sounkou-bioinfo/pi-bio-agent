@@ -192,6 +192,41 @@ WRONG granularity for two cases, which are separate tiers chosen by which resolv
 - Small genomic region of a huge indexed remote VCF/BCF -> region-scoped `duckhts.read_bcf` (tabix range).
 - Remote parquet/csv DuckDB can scan directly -> `duckdb.file_scan`/`sql_materialize` + httpfs (+ cache_httpfs).
 
+## Machine studying — Fugu pieces 2 & 3 over the study-notes system
+
+Sakana Fugu (https://sakana.ai/fugu, arXiv 2606.21228) factors into: (1) a LEARNED orchestrator, (2) scaffold-
+as-data — workflow steps `(subtask, worker, access_list)` where the access list is which prior outputs enter a
+worker's context, and (3) a memory discipline — intra-workflow ISOLATION + inter-workflow SHARED MEMORY so
+agents don't redundantly re-discover artifacts. We drop (1) — we won't train an orchestrator; the agent (or a
+static scaffold) conducts. Pieces (2) and (3) map onto our study-notes system as a "machine studying" loop:
+
+- **(3) is already built.** `studyNoteIndex` (`src/core/study.ts`) is the cheap index scanned BEFORE re-deriving
+  — Fugu's shared memory that prevents redundant re-discovery. `hook` is a per-note retrieval predicate; notes
+  project into a traversable KG (`studyNoteGraph`: `memory` nodes + `depends_on`/`references`/`contrasts_with`
+  edges). CAS-of-bytes is the same discipline for corpus BYTES (don't re-fetch). Intra-isolation = keep
+  independent probes (`question_bank`/`worked_example`/`failure_case`/`expertise_probe`) from being railroaded
+  by the first note's framing, then synthesize into a `concept_map`/`index`.
+- **(2) is the one real gap.** `deriveStudyPlan` returns a flat `string[]`; Fugu's scaffold is a DAG. Note
+  `links: depends_on` + `sources` (`path/url/locator/quote`) ARE the access-list primitives — but the PLAN
+  doesn't use them. Lift the plan to a `StudyScaffold`.
+
+### Buildable kernel (non-breaking; awaiting user steer — touches the study contract)
+```ts
+interface StudyStep {
+  id: string;                       // step/slug
+  subtask: string;                  // what to study/extract
+  produces: StudyArtifactKind;      // the note kind this step writes
+  accessList: { notes?: string[];   // upstream note slugs whose bodies feed this step's context
+                sources?: StudyNote["sources"] }; // + external sources
+}
+interface StudyScaffold { schema: "pi-bio.study_scaffold.v1"; corpusId: string; objective: string; steps: StudyStep[]; }
+// deriveStudyScaffold(corpus, objective): StudyScaffold  — a DAG, leaving deriveStudyPlan intact (non-breaking)
+```
+The accessList edges are the same shape as note `links: depends_on` — so a scaffold step and the note it
+produces share one dependency model; execution = topological order, each step reads only its accessList (the
+isolation boundary), writes its note (the shared memory). Provenance composes: each note's `sources` already
+records what fed it. Build only on explicit go — it changes `deriveStudyPlan`'s consumers and needs a test.
+
 ## Effect discipline — pal review #5 follow-ups
 
 Pal #5 audited for ambient/hidden effects. One real finding fixed: wall-clock reads now funnel through the one
