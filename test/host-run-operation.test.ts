@@ -205,8 +205,8 @@ describe("host: bio_run_operation end-to-end", () => {
     assert.equal(r1.ok, true);
     const r2 = await runBioOperationFromManifest({ ...base, runId: "warm-2", now: "2026-06-28T00:00:02Z" });
     assert.equal(r2.ok, true);
-    // the second run hit the memo (file unchanged, table persisted in the file db): the resolver's source
-    // snapshot carries the ORIGINAL retrievedAt, not run-2's now — the re-read + re-load was skipped.
+    // the second run hit the memo (file content unchanged, table persisted in the file db): the resolver's
+    // source snapshot carries the ORIGINAL retrievedAt, not run-2's now — the DuckDB re-load was skipped.
     const receipts2 = JSON.parse(await fs.readFile(join(runsRoot(cwd), "warm-2", "receipts.json"), "utf8"));
     const av = receipts2.find((r: { resourceId: string }) => r.resourceId === "annotated_variants");
     const fileSnap = av.sourceSnapshots.find((s: { source: string }) => s.source.startsWith("file:"));

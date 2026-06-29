@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import type { BioResolverImpl, ResolverOutput } from "../../core/ports.js";
 import { memoLookup, memoStore } from "../resolution-memo.js";
 
@@ -40,30 +40,21 @@ export const duckdbFileScanResolver: BioResolverImpl = async (resource, ctx) => 
   const fn = readerFor(path, reader);
   const now = ctx.now ?? new Date().toISOString();
 
-  // Memoization: a cheap freshness token (mtime+size) for a LOCAL file lets a re-resolve over a persistent db
-  // skip the re-read + re-load when the file is unchanged. Remote/unstatable paths get no token -> never memo
-  // (always re-resolve) — the safe default. Keyed on content freshness, so it never serves stale data.
-  // Token captures every determinant of the table content (resolver + reader + path + file freshness), so a
-  // different recipe to the same table name can never false-hit.
-  let freshness: string | undefined;
-  if (!path.includes("://")) {
-    try {
-      const s = statSync(path);
-      freshness = `file_scan:${fn}:${path}:${s.mtimeMs}:${s.size}`;
-    } catch {
-      /* unstatable -> no memo */
-    }
-  }
-  if (freshness !== undefined) {
-    const hit = await memoLookup(ctx.conn, table, freshness);
-    if (hit) return hit; // file unchanged + table present: replay the receipt, skip read + DuckDB load
-  }
-
+  // Memoization key = the file's CONTENT digest (not mtime+size, which false-hits on a same-size change with a
+  // preserved/coarse mtime). Computing it re-reads the file, but a hit still skips the DuckDB load (the parse,
+  // the expensive part for csv/json/text). The token captures every determinant — resolver + reader + path +
+  // content — so a different recipe to the same table name can never false-hit. Remote/unreadable paths yield
+  // no digest -> no memo (always re-resolve), the safe default; the reader fails closed below if truly missing.
   let inputDigest: string | undefined;
   try {
     inputDigest = `sha256:${createHash("sha256").update(readFileSync(path)).digest("hex")}`;
   } catch {
-    /* non-local or unreadable path: the reader fails closed below if the input is truly missing */
+    /* non-local or unreadable path -> no content digest, no memo */
+  }
+  const freshness = inputDigest === undefined ? undefined : `file_scan:${fn}:${path}:${inputDigest}`;
+  if (freshness !== undefined) {
+    const hit = await memoLookup(ctx.conn, table, freshness);
+    if (hit) return hit; // identical content + table present: replay the receipt, skip the DuckDB load
   }
 
   await ctx.conn.run(`CREATE OR REPLACE TABLE ${table} AS SELECT * FROM ${fn}(?)`, [path]);

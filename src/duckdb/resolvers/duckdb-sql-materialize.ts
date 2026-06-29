@@ -1,8 +1,6 @@
 import { createHash } from "node:crypto";
-import { statSync } from "node:fs";
 import { validateReadOnlySelect } from "../../core/sql-guard.js";
-import type { BioResolverImpl, ResolverOutput } from "../../core/ports.js";
-import { memoLookup, memoStore } from "../resolution-memo.js";
+import type { BioResolverImpl } from "../../core/ports.js";
 
 // The general resolver: materialization is DECLARED SQL, not bespoke TypeScript. This is the anti-sprawl
 // endpoint — a new source is a manifest with declared SQL + declaredSources, never a new .ts file. It
@@ -35,27 +33,11 @@ export const duckdbSqlMaterializeResolver: BioResolverImpl = async (resource, ct
   const extensions = stringArray(p.extensions, "extensions");
   const declaredSources = stringArray(p.declaredSources, "declaredSources");
 
-  // Memoization: only when EVERY declared source is a local statable file — then those files' freshness, plus
-  // the SQL, fully determine the table, so an unchanged set is a safe cache hit. Empty or any remote/unstatable
-  // source -> no token (always re-resolve), because we cannot cheaply validate freshness of what we did not see.
-  let freshness: string | undefined;
-  if (declaredSources.length > 0 && declaredSources.every((s) => !s.includes("://"))) {
-    try {
-      const parts = declaredSources.map((s) => {
-        const path = s.startsWith("file:") ? s.slice(5) : s;
-        const st = statSync(path);
-        return `${path}:${st.mtimeMs}:${st.size}`;
-      });
-      freshness = `sql_materialize:${createHash("sha256").update(inner).digest("hex")}:${parts.sort().join("|")}`;
-    } catch {
-      freshness = undefined; // a declared source not statable -> no memo
-    }
-  }
-  if (freshness !== undefined) {
-    const hit = await memoLookup(ctx.conn, p.table, freshness);
-    if (hit) return hit; // sources + SQL unchanged, table present: replay the receipt, skip LOAD + materialize
-  }
-
+  // NOT memoized: the inner SQL is arbitrary. Its determinants are not provably the declaredSources — it can
+  // read undeclared tables or call volatile functions (random(), current_timestamp), so a freshness token over
+  // declaredSources could serve a stale/wrong cache hit. Memoization is only safe where the input is fully
+  // captured (file_scan's content digest). A future `cacheable: true` opt-in could let a manifest assert the
+  // SQL is a pure function of its declaredSources; until then sql_materialize always re-resolves.
   for (const ext of extensions) {
     if (!IDENT.test(ext)) throw new Error(`duckdb.sql_materialize: invalid extension name '${ext}'`);
     await ctx.conn.run(`LOAD ${ext}`); // LOAD only; fails closed if the host has not provisioned it
@@ -64,12 +46,10 @@ export const duckdbSqlMaterializeResolver: BioResolverImpl = async (resource, ct
 
   const now = ctx.now ?? new Date().toISOString();
   const sqlDigest = `sha256:${createHash("sha256").update(inner).digest("hex")}`;
-  const output: ResolverOutput = {
+  return {
     // the handle identifies the materialized table; we have no byte digest (the SQL/sources are the provenance)
     result: { schema: "pi-bio.resource_handle.v1", mode: "reference", name: p.table, pointer: { uri: `table:${p.table}`, format: "table" } },
     sourceSnapshots: declaredSources.map((source) => ({ source, retrievedAt: now })),
     provenance: [{ source: "duckdb.sql_materialize", retrievedAt: now, digest: sqlDigest, notes: ["sql_materialize", ...extensions.map((e) => `ext:${e}`)] }],
   };
-  if (freshness !== undefined) await memoStore(ctx.conn, p.table, freshness, output);
-  return output;
 };
