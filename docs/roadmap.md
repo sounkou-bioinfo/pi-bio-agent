@@ -124,8 +124,11 @@ Phase 0 (done)   Flagship walking skeleton: manifest #1, runOperation -> run/res
                  persistence. Three contracts became real producers.
 Phase 1 (partial) Run/provenance substrate: run+receipt persistence DONE; CAS materialization +
                  temporal anchoring still pending, driven by a real consumer.
-Phase 2          First networked resolver (OpenTargets/gnomAD) as ONE generic HTTP resolver, not a
-                 custom client: mock-network tests, explicit network policy, provenance receipt.
+Phase 2 (partial) ONE generic HTTP resolver DONE (http.get, src/duckdb/resolvers/http-table-scan.ts):
+                 GETs a declared URL -> materializes the response into a table via a native reader;
+                 fetch is INJECTED (mock in tests, no ambient network), fail-closed (http(s) only,
+                 non-2xx throws), digest receipt over the exact bytes. Remaining: host opt-in binding
+                 (not a default built-in) + a real OLS4/OpenTargets manifest as the consumer.
 Phase 3          Bounded code composition: scoped clients only, no raw fetch/secrets/DB handle,
                  timeout/output caps, a receipt per code-exec call.
 Phase 4          Safe harness-adaptation surface: extension/spec/skill scaffold implementing
