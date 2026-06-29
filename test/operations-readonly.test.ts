@@ -26,4 +26,26 @@ describe("validateReadOnlySelect: the single read-only SQL guard", () => {
       assert.throws(() => validateReadOnlySelect(sql), re, sql);
     }
   });
+
+  // The receipt-bypass hole: a SELECT that reads a file or the network itself sidesteps resolver +
+  // provenance. External data must enter only through a resolver (which stamps a receipt), so reader/scan
+  // table functions and remote URI literals fail closed even though they are valid read-only SELECTs.
+  test("fails closed on external readers and remote URIs (no unreceipted I/O)", () => {
+    for (const [sql, re] of [
+      ["SELECT * FROM read_parquet('s3://bucket/x.parquet')", /external reader/],
+      ["SELECT * FROM read_csv_auto('/etc/passwd')", /external reader/],
+      ["WITH x AS (SELECT * FROM read_bcf('a.bcf')) SELECT * FROM x", /external reader/],
+      ["SELECT * FROM parquet_scan('x.parquet')", /external reader/],
+      ["SELECT * FROM 'https://example.com/data.csv'", /remote URI/],
+      ["SELECT * FROM t WHERE src = 'gs://bucket/o'", /remote URI/],
+    ] as const) {
+      assert.throws(() => validateReadOnlySelect(sql), re, sql);
+    }
+  });
+
+  test("still accepts ordinary analytic SQL over already-materialized tables", () => {
+    // the flagship shape: classify rows from a resolver-materialized table, no I/O of its own
+    const sql = "WITH classified AS (SELECT variant_key, CASE WHEN allele_frequency IS NULL THEN 'no_frequency' ELSE 'included' END AS bucket FROM annotated_variants) SELECT bucket, count(*) AS n FROM classified GROUP BY bucket";
+    assert.equal(validateReadOnlySelect(sql), sql);
+  });
 });
