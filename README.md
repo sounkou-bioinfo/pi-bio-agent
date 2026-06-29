@@ -6,27 +6,28 @@ The bet: **manifests, SQL, resources, and ontology data are the PROGRAM; TypeScr
 A new bio question or data source is a new *manifest* (data), never a new `.ts` file. The substrate ships a
 small set of generic primitives and the agent writes the SQL.
 
-## What the substrate provides
+## How it works
 
-- **Resolvers** — turn a declared resource into a DuckDB table: `duckdb.file_scan` (csv/tsv/parquet/json,
-  native), `duckhts.read_bcf` (VCF/BCF), `http.get` (any REST/JSON endpoint; fetch is injected, opt-in,
-  fail-closed). Each stamps a **resolution receipt** (resolver version, params digest, source snapshot).
-- **Operations** — an operation is a read-only `SELECT`/`WITH` over the resolved tables; the result IS the
-  report. One guard enforces statement class only (single read-only SELECT/WITH, no writes/DDL). It is **not**
-  a network/filesystem firewall — egress (remote reads, httpfs, extensions) is the host's sandbox decision; the
-  library's job is provenance, not policy.
-- **Runs** — `runOperation` → `run` + `result` + `receipts` (a failed run still persists an auditable
-  receipt); the host writes them under `.pi/bio-agent/runs/<runId>/`.
-- **Ordinal scales** — an `ordered` TermSet (ranked members) projects to a `scale_members` table, so SQL
-  thresholds/compares on rank (ACMG, variant impact, clinical stage, …) with no per-scale code.
-- **Graph + ontology (SemanticSQL shape)** — `bio_edges(from_id, predicate, to_id)` is the statement/edge
-  base; `entailed_edge` is its transitive closure, so descendants/subsumption/graph-walk are one indexed JOIN.
-  The same SQL grounds an imported ontology and walks our own graph.
-- **Grounding** — two tiers feeding `decideGrounding`: a deterministic *projection* tier (exact/synonym
-  match + closure, all SQL) and a *judgment* tier (fresh `http.get` candidates ranked by a model that may
-  propose but never invent a CURIE — abstain below threshold).
-- **Strict, fail-closed admission** — a manifest is validated against a strict allowlist; unknown/sprawl keys
-  are rejected, not silently honored.
+A resolver turns a declared resource into a DuckDB table and stamps a receipt (resolver version, params
+digest, source snapshot). Today that means reading a file natively (`duckdb.file_scan` over csv/tsv/parquet/
+json), a VCF/BCF (`duckhts.read_bcf`), or an HTTP/JSON endpoint (`http.get`, whose fetch is host-supplied).
+An operation is then a single read-only `SELECT`/`WITH` over those tables, and whatever it returns is the
+result — there is no separate report layer. A run bundles the result with its run record and the resolver
+receipts (a failed run still leaves an auditable receipt), written under `.pi/bio-agent/runs/<runId>/`.
+
+The substrate is deliberately thin: it enforces statement class (a read-only query with no writes or DDL),
+manifest shape, and receipt integrity, but it is not a network or filesystem sandbox. DuckDB's remote reads,
+replacement scans, and extensions are features; whether egress is possible is the host's decision (container,
+seccomp, the Pi runtime). The library records what ran; the host decides what may run.
+
+Ontologies and the knowledge graph share one shape, borrowed from SemanticSQL: `bio_edges(from_id, predicate,
+to_id)` is the statement/edge base and `entailed_edge` is its transitive closure, so descendants, subsumption,
+and graph-walks are a single indexed join — the same SQL grounds an imported ontology and walks our own graph.
+Grounding a free-text term runs deterministically first (exact and synonym match plus closure, all SQL) and
+falls back to a model only on a miss, where the model may propose a candidate but never invent a CURIE and
+abstains below a confidence threshold. Ordered TermSets become a `scale_members` table so SQL can threshold on
+rank (ACMG, variant impact, clinical stage). Manifests are validated against a strict allowlist, so cut
+surface cannot ride back in as inert keys.
 
 ## Install in Pi
 
