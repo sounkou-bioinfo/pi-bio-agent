@@ -1,0 +1,16 @@
+{
+  "schema": "pi-bio.domain_pack_manifest.v1",
+  "id": "ols4-grounding",
+  "version": "0.1.0",
+  "title": "OLS4 term grounding",
+  "description": "A ClawBio-shaped API skill expressed as DATA. It declares an OLS4 search endpoint as an http.get resource; the agent does schema discovery and writes the grounding SQL over the resulting candidate table. There is NO OLS4-specific TypeScript — the URL and response shape live in the manifest, the same generic http.get resolver serves any JSON/CSV endpoint (OpenTargets, gnomAD, an arbitrary REST API), and the resolver memoizes by ETag so repeated grounding does not re-download. Network is the host's opt-in: this manifest fails closed until a host binds a fetch (the Pi extension gates that on PI_BIO_ENABLE_NETWORK=1).",
+  "domains": ["ontology"],
+  "provides": {
+    "resolvers": [
+      { "id": "http.get", "version": "0.1.0", "title": "HTTP GET", "description": "GET a declared URL and materialize the JSON/CSV response into a table.", "output": { "mode": "table" } }
+    ],
+    "resources": [
+      { "id": "ols4_candidates", "title": "OLS4 search candidates", "kind": "virtual", "resolver": "http.get", "params": { "url": "https://www.ebi.ac.uk/ols4/api/search?q=asthma&ontology=mondo&fieldList=obo_id,label", "table": "ols4_candidates", "format": "json" } }
+    ]
+  }
+}
