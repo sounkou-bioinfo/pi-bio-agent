@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DomainPackManifest } from "../src/core/manifest.js";
 import type { FetchLike } from "../src/duckdb/resolvers/http-table-scan.js";
-import { runBioOperationFromManifest, runsRoot } from "../src/hosts/run-store.js";
+import { persistRun, runBioOperationFromManifest, runsRoot } from "../src/hosts/run-store.js";
 
 // End-to-end through the host: a manifest JSON on disk -> validated registry -> built-in resolvers -> a
 // duckdb.sql operation -> persisted run/result/receipts. Both resources use duckdb.file_scan (a
@@ -159,6 +159,14 @@ describe("host: bio_run_operation end-to-end", () => {
   test("fails closed on an invalid manifest", async () => {
     const cwd = await tmpProject({ ...manifest, schema: "nope" as never });
     await assert.rejects(() => run(cwd), /invalid manifest/);
+  });
+
+  test("persistRun refuses a runId that would escape the runs directory (path-safe even called directly)", async () => {
+    const cwd = await fs.mkdtemp(join(tmpdir(), "biorun-"));
+    await assert.rejects(
+      () => persistRun(cwd, "../../etc/evil", { run: {} as never, result: {} as never, receipts: [] }),
+      /no path separators/,
+    );
   });
 
   test("fails closed when a declared resolver is not a host built-in", async () => {

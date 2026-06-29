@@ -54,6 +54,15 @@ describe("validateDomainPackManifest: fail closed", () => {
     assert.deepEqual(validateDomainPackManifest(opaqueOk), []);
   });
 
+  test("requires root title/description/domains and reports malformed collections cleanly (no TypeError)", () => {
+    const m = baseManifest();
+    assert.ok(validateDomainPackManifest({ ...m, title: "" }).some((e) => /title is required/.test(e)));
+    assert.ok(validateDomainPackManifest({ ...m, domains: [] }).some((e) => /domains must be a non-empty array/.test(e)));
+    assert.ok(validateDomainPackManifest({ ...m, provides: { resources: "nope" } } as never).some((e) => /resources must be an array/.test(e)));
+    // a malformed JSON shape returns errors rather than throwing while mapping a non-array
+    assert.doesNotThrow(() => validateDomainPackManifest({ schema: "pi-bio.domain_pack_manifest.v1", id: "x", version: "1", title: "t", description: "d", domains: ["genomics"], provides: { operations: 5 } } as never));
+  });
+
   test("rejects missing/wrong schema", () => {
     const m = baseManifest();
     assert.ok(validateDomainPackManifest({ ...m, schema: "nope" as never }).some((e) => e.includes("schema must be")));

@@ -124,14 +124,26 @@ export function validateDomainPackManifest(manifest: DomainPackManifest): string
   if (manifest?.schema !== DOMAIN_PACK_MANIFEST_SCHEMA) errors.push(`schema must be ${DOMAIN_PACK_MANIFEST_SCHEMA}`);
   if (typeof manifest?.id !== "string" || !manifest.id.trim()) errors.push("manifest id is required");
   if (typeof manifest?.version !== "string" || !manifest.version.trim()) errors.push("manifest version is required");
+  if (typeof manifest?.title !== "string" || !manifest.title.trim()) errors.push("manifest title is required");
+  if (typeof manifest?.description !== "string" || !manifest.description.trim()) errors.push("manifest description is required");
+  if (!Array.isArray(manifest?.domains) || manifest.domains.length === 0) errors.push("manifest domains must be a non-empty array");
   rejectUnknownKeys(manifest, ["schema", "id", "version", "title", "description", "domains", "provides"], "manifest", errors);
 
-  const provides = manifest?.provides ?? {};
+  // Manifests come from JSON files — a malformed shape must produce a clean error, never a TypeError from
+  // mapping a non-array. Treat a present-but-wrong-typed collection as an error and fall back to [] for the
+  // rest of validation.
+  const provides = manifest?.provides && typeof manifest.provides === "object" ? manifest.provides : {};
+  if (manifest?.provides !== undefined && (typeof manifest.provides !== "object" || Array.isArray(manifest.provides))) errors.push("manifest.provides must be an object");
   rejectUnknownKeys(provides, ["resources", "resolvers", "termSets", "operations"], "manifest.provides", errors);
-  const resources = provides.resources ?? [];
-  const resolvers = provides.resolvers ?? [];
-  const termSets = provides.termSets ?? [];
-  const operations = provides.operations ?? [];
+  const asArray = (v: unknown, label: string): unknown[] => {
+    if (v === undefined) return [];
+    if (!Array.isArray(v)) { errors.push(`manifest.provides.${label} must be an array`); return []; }
+    return v;
+  };
+  const resources = asArray(provides.resources, "resources") as VirtualResourceSpec[];
+  const resolvers = asArray(provides.resolvers, "resolvers") as BioResolverSpec[];
+  const termSets = asArray(provides.termSets, "termSets") as TermSet[];
+  const operations = asArray(provides.operations, "operations") as BioOperationSpec[];
 
   const dupCheck = (kind: string, ids: string[]) => {
     const seen = new Set<string>();

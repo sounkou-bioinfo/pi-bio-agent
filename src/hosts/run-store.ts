@@ -21,9 +21,6 @@ const BUILTIN_RESOLVERS: Record<string, BioResolverImpl> = {
   "duckhts.read_bcf": duckhtsReadBcfResolver, // bound always; fails closed at resolve time if duckhts is not provisioned
 };
 
-// http.get is NOT a default built-in: it is bound only when the caller passes a fetch (req.network), which IS
-// the network opt-in. Without it, a manifest that declares http.get leaves it unbound and fails closed — no
-// ambient network from a host run.
 // http.get needs a host-supplied fetch to run at all (req.network) — that injection IS the network control,
 // by construction, not a library egress firewall. file_scan / read_bcf may read remote URIs freely; whether
 // egress is possible is the host's sandbox decision (container/seccomp/Pi/OS), not ours.
@@ -51,6 +48,15 @@ export function runsRoot(cwd: string): string {
   return join(cwd, ".pi", "bio-agent", "runs");
 }
 
+const RUN_DIR_ID_RE = /^[A-Za-z0-9._-]+$/;
+
+/** Resolve a run's directory, refusing a runId that could escape runsRoot. Centralized so every persistence
+ *  path (and the host runner) is path-safe, including the exported persist* helpers called directly. */
+function runDir(cwd: string, runId: string): string {
+  if (!RUN_DIR_ID_RE.test(runId)) throw new Error("runId must contain only [A-Za-z0-9._-] (no path separators)");
+  return join(runsRoot(cwd), runId);
+}
+
 export interface RunPayload {
   run: BioRunRecord;
   result: OperationResult;
@@ -71,7 +77,7 @@ async function writeRunFile(dir: string, name: string, data: unknown): Promise<s
 /** Host-level persistence: write run/result/receipts under .pi/bio-agent/runs/<runId>/. result.json IS the
  *  report — whatever the operation's SQL returned. */
 export async function persistRun(cwd: string, runId: string, payload: RunPayload): Promise<PersistedRun> {
-  const dir = join(runsRoot(cwd), runId);
+  const dir = runDir(cwd, runId);
   await fs.mkdir(dir, { recursive: true });
   return {
     dir,
@@ -86,7 +92,7 @@ export async function persistRun(cwd: string, runId: string, payload: RunPayload
 /** Persist a FAILED run: run.json (status "failed", carrying the error) + receipts.json for whatever resolved
  *  before the failure. No result.json — there is no answer. A failed run is still an auditable receipt. */
 export async function persistFailedRun(cwd: string, runId: string, payload: { run: BioRunRecord; receipts: ResolutionReceipt[] }): Promise<{ dir: string; files: { run: string; receipts: string } }> {
-  const dir = join(runsRoot(cwd), runId);
+  const dir = runDir(cwd, runId);
   await fs.mkdir(dir, { recursive: true });
   return {
     dir,
