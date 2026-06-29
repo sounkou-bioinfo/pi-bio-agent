@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { BioArtifact } from "./types.js";
 import { appendRunEvent, newRunRecord, type BioRunRecord, type BioRunSpec } from "./run-spec.js";
 import { validateReadOnlySelect } from "./sql-guard.js";
@@ -61,6 +62,9 @@ export async function runOperation(
 
   // The result IS the report: whatever the operation's SQL returns (classified rows, or a GROUP BY count).
   // No TS reducer, no report-kind taxonomy — counts/aggregation are the operation's SQL when it wants them.
+  // Reproducibility pin: the run record carries the exact operation version + a digest of the SQL that
+  // produced this result, so a receipt identifies precisely what ran (defends "provenance correct").
+  const sqlDigest = `sha256:${createHash("sha256").update(op.sql.sqlTemplate).digest("hex")}`;
   const artifact: BioArtifact = {
     kind: "artifact",
     role: "output",
@@ -69,7 +73,7 @@ export async function runOperation(
     path: `runs/${runId}/result.json`,
     format: "json",
     provenance: [
-      { source: op.id, notes: ["operation"] },
+      { source: op.id, version: op.version, digest: sqlDigest, notes: ["operation"] },
       ...receipts.map((r) => ({ source: `${r.resolverId}@${r.resolverVersion}`, retrievedAt: r.resolvedAt, notes: ["resolver receipt"] })),
     ],
   };

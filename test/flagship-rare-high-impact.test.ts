@@ -138,9 +138,15 @@ describe("flagship: rare high-impact variants (data over generic primitives)", (
     assert.deepEqual(a.result, b.result);
     assert.equal(a.run.status, "succeeded");
     assert.deepEqual(a.run.events.map((e) => e.type), ["created", "started", "artifact", "completed"]);
-    const sources = (a.run.artifacts?.[0]?.provenance ?? []).map((p) => p.source);
+    const provenance = a.run.artifacts?.[0]?.provenance ?? [];
+    const sources = provenance.map((p) => p.source);
     assert.ok(sources.includes("rare_high_impact.report"));
     assert.ok(sources.some((s) => s.startsWith("inline.table@")));
     assert.equal(a.receipts.length, 2);
+    // reproducibility pin: the operation provenance carries the version + a digest of the exact SQL that ran
+    const opProv = provenance.find((p) => p.source === "rare_high_impact.report")!;
+    assert.equal(opProv.version, "0.1.0");
+    assert.match(opProv.digest ?? "", /^sha256:[0-9a-f]{64}$/);
+    assert.equal(a.run.artifacts?.[0]?.provenance?.[0]?.digest, b.run.artifacts?.[0]?.provenance?.[0]?.digest); // stable across runs
   });
 });
