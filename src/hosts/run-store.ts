@@ -8,6 +8,7 @@ import type { BioRunRecord } from "../core/run-spec.js";
 import { duckdbNodeConn } from "../duckdb/node-api.js";
 import { duckdbFileScanResolver } from "../duckdb/resolvers/duckdb-file-scan.js";
 import { duckhtsReadBcfResolver } from "../duckdb/resolvers/duckhts-read-bcf.js";
+import { httpTableResolver, type FetchLike } from "../duckdb/resolvers/http-table-scan.js";
 
 // Host-level run runner + store. Core returns { run, result, receipts }; persistence and resolver binding
 // live HERE, not in core. Only built-in resolver impls are bound; a manifest that declares any other
@@ -17,6 +18,11 @@ const BUILTIN_RESOLVERS: Record<string, BioResolverImpl> = {
   "duckdb.file_scan": duckdbFileScanResolver,
   "duckhts.read_bcf": duckhtsReadBcfResolver, // bound always; fails closed at resolve time if duckhts is not provisioned
 };
+
+// http.get is NOT a default built-in: it is bound only when the caller passes a fetch (req.network), which IS
+// the network opt-in. Without it, a manifest that declares http.get leaves it unbound and fails closed — no
+// ambient network from a host run.
+const NETWORK_RESOLVER = "http.get";
 
 // Built-in resolvers whose params.path is a file location to resolve relative to the manifest's directory.
 const FILE_PATH_RESOLVERS = new Set(["duckdb.file_scan", "duckhts.read_bcf"]);
@@ -93,6 +99,9 @@ export interface RunOperationRequest {
   operationId: string;
   runId?: string;
   now?: string;
+  /** Network opt-in: pass a fetch to enable the http.get resolver. Absent = http.get stays unbound and any
+   *  networked resource fails closed. The host (not core) owns this policy; nothing is read from ambient state. */
+  network?: { fetch: FetchLike };
 }
 
 export type RunOperationResponse =
@@ -118,8 +127,9 @@ export async function runBioOperationFromManifest(req: RunOperationRequest): Pro
 
   const registry = createBioRegistry();
   registry.registerManifest(manifest); // throws on an invalid manifest (fail closed)
+  const httpImpl = req.network ? httpTableResolver(req.network.fetch) : undefined;
   for (const r of manifest.provides?.resolvers ?? []) {
-    const impl = BUILTIN_RESOLVERS[r.id];
+    const impl = BUILTIN_RESOLVERS[r.id] ?? (r.id === NETWORK_RESOLVER ? httpImpl : undefined);
     if (impl) registry.bindResolverImpl(r.id, impl);
   }
 

@@ -127,8 +127,10 @@ Phase 1 (partial) Run/provenance substrate: run+receipt persistence DONE; CAS ma
 Phase 2 (partial) ONE generic HTTP resolver DONE (http.get, src/duckdb/resolvers/http-table-scan.ts):
                  GETs a declared URL -> materializes the response into a table via a native reader;
                  fetch is INJECTED (mock in tests, no ambient network), fail-closed (http(s) only,
-                 non-2xx throws), digest receipt over the exact bytes. Remaining: host opt-in binding
-                 (not a default built-in) + a real OLS4/OpenTargets manifest as the consumer.
+                 non-2xx throws), digest receipt over the exact bytes. Host opt-in DONE: pass
+                 runBioOperationFromManifest({ network: { fetch } }) to bind http.get; absent = it
+                 stays unbound and fails closed. Two-tier grounding proven (projection + judgment).
+                 Remaining: a real OLS4/OpenTargets manifest as the live consumer (pass real fetch).
 Phase 3          Bounded code composition: scoped clients only, no raw fetch/secrets/DB handle,
                  timeout/output caps, a receipt per code-exec call.
 Phase 4          Safe harness-adaptation surface: extension/spec/skill scaffold implementing

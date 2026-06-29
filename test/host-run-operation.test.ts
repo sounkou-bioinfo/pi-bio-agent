@@ -4,6 +4,7 @@ import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DomainPackManifest } from "../src/core/manifest.js";
+import type { FetchLike } from "../src/duckdb/resolvers/http-table-scan.js";
 import { runBioOperationFromManifest, runsRoot } from "../src/hosts/run-store.js";
 
 // End-to-end through the host: a manifest JSON on disk -> validated registry -> built-in resolvers -> a
@@ -127,6 +128,32 @@ describe("host: bio_run_operation end-to-end", () => {
     const receipts = JSON.parse(await fs.readFile(join(dir, "receipts.json"), "utf8"));
     assert.equal(receipts.length, 1);
     assert.equal(receipts[0].resourceId, "annotated_variants");
+  });
+
+  test("network is opt-in: http.get fails closed without a fetch, runs when one is injected", async () => {
+    const netManifest: DomainPackManifest = {
+      schema: "pi-bio.domain_pack_manifest.v1", id: "net-host", version: "0.1.0",
+      title: "Net", description: "An HTTP-sourced operation.", domains: ["genomics"],
+      provides: {
+        resolvers: [{ id: "http.get", version: "0.1.0", title: "HTTP get", description: "Fetch a URL into a table.", output: { mode: "table" } }],
+        resources: [{ id: "candidates", title: "Candidates", kind: "virtual", resolver: "http.get", params: { url: "https://example.org/api?q=asthma", table: "candidates", format: "json" } }],
+        operations: [{
+          schema: "pi-bio.operation_spec.v1", id: "list.candidates", version: "0.1.0", title: "List", description: "List candidates.",
+          domains: ["genomics"], transport: "duckdb.sql", inputSchema: { type: "object" },
+          sql: { sqlTemplate: "SELECT obo_id FROM candidates ORDER BY obo_id", readOnly: true, requiredResources: ["candidates"] },
+        }],
+      },
+    };
+    const cwd = await tmpProject(netManifest);
+    const base = { cwd, dbPath: ":memory:", manifestPath: "manifest.json", operationId: "list.candidates", now: "2026-06-28T00:00:00Z" };
+    // no network -> http.get is unbound -> fails closed (pre-flight), no ambient network
+    await assert.rejects(() => runBioOperationFromManifest({ ...base, runId: "net-1" }), /no implementation is bound/);
+    // inject a fetch -> the network opt-in -> the run succeeds over the fetched rows
+    const fetchImpl: FetchLike = async () => ({ ok: true, status: 200, text: async () => JSON.stringify([{ obo_id: "MONDO:0004979" }, { obo_id: "MONDO:0004784" }]) });
+    const res = await runBioOperationFromManifest({ ...base, runId: "net-2", network: { fetch: fetchImpl } });
+    assert.equal(res.ok, true);
+    if (!res.ok) throw new Error("unreachable");
+    assert.equal(res.rowCount, 2);
   });
 
   test("fails closed on an invalid manifest", async () => {
