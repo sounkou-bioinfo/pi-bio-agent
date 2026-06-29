@@ -267,6 +267,18 @@ Resolutions (these are ADDRESSABLE via known machinery, not open research):
   the http-resolver generalization (POST/body/auth/streaming) AND the nng agent topologies live in ONE DuckDB
   extension, both Arrow-native. So the request/response generalization and the multi-agent transport converge.
 
+### Streaming transports (decided — not either/or, three needs, three tools)
+- **Pull-streaming HTTP** (large bodies; byte-cap so a runaway response can't exhaust memory): read the runtime
+  `fetch` body (a `ReadableStream`) with a cap. BUILT: `src/duckdb/resolvers/http-stream.ts` `readCapped(stream,
+  maxBytes)` — the byte-cap half of pal #4. DuckDB-native equivalent: `ducknng_ncurl`.
+- **SSE** (server-sent events: LLM token streams, progress): parse `data:` frames off the same chunked stream.
+  **pi-mono** ([github.com/badlogic/pi-mono](https://github.com/badlogic/pi-mono)) has these exact parsing
+  patterns (it streams LLM output) — adopt them for an SSE transport.
+- **Bidirectional / server-push / live subscriptions** -> **wss over nng** (ducknng's `ws://`/`wss://`
+  transport). THE tie-in: the pub/sub blackboard's `awaitNote` currently POLLS (SELECT loop); over wss-over-nng
+  it becomes a real PUSH subscription (no polling). ducknng unifies `ncurl` (HTTP) + ws/wss + the nng
+  topologies, Arrow-native — so the streaming carriers and the agent transport are again one extension.
+
 ### HTTP resolver generalization (the real build the collapse needs)
 `http.get` is today GET-only, JSON/CSV/NDJSON, single-shot. To make the classes above manifest-expressible:
 - `method` + `body` params (POST/PUT; GraphQL = POST + JSON query body). Keep read-only INTENT explicit (a
