@@ -96,14 +96,28 @@ function deepFreeze<T>(value: T): T {
   return value;
 }
 
+// Strict admission: a manifest is the program, so only declared keys are allowed at every structural level
+// — an unknown key fails closed rather than being silently ignored. This is what keeps cut sprawl OUT: a
+// smuggled `reportKind`, `requiredColumns`, `columnRoles`, `mapper`, or `client` key is rejected here instead
+// of riding along as inert JSON that a future reader might honor. Opacity is allowed in exactly two places:
+// `resource.params` (opaque to core, handed to the resolver) and JSON Schemas (`inputSchema`/`outputSchema`).
+function rejectUnknownKeys(obj: unknown, allowed: readonly string[], label: string, errors: string[]): void {
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return; // wrong-type is reported by the field checks
+  for (const k of Object.keys(obj as Record<string, unknown>)) {
+    if (!allowed.includes(k)) errors.push(`${label} has unknown key '${k}' (allowed: ${allowed.join(", ")})`);
+  }
+}
+
 /** Fail-closed structural validation of a manifest. Returns a list of errors ([] = valid). */
 export function validateDomainPackManifest(manifest: DomainPackManifest): string[] {
   const errors: string[] = [];
   if (manifest?.schema !== DOMAIN_PACK_MANIFEST_SCHEMA) errors.push(`schema must be ${DOMAIN_PACK_MANIFEST_SCHEMA}`);
   if (typeof manifest?.id !== "string" || !manifest.id.trim()) errors.push("manifest id is required");
   if (typeof manifest?.version !== "string" || !manifest.version.trim()) errors.push("manifest version is required");
+  rejectUnknownKeys(manifest, ["schema", "id", "version", "title", "description", "domains", "provides"], "manifest", errors);
 
   const provides = manifest?.provides ?? {};
+  rejectUnknownKeys(provides, ["resources", "resolvers", "termSets", "operations"], "manifest.provides", errors);
   const resources = provides.resources ?? [];
   const resolvers = provides.resolvers ?? [];
   const termSets = provides.termSets ?? [];
@@ -126,24 +140,34 @@ export function validateDomainPackManifest(manifest: DomainPackManifest): string
   for (const r of resolvers) {
     if (!r.title?.trim() || !r.description?.trim() || !r.version?.trim()) errors.push(`resolver '${r.id}' requires title, description, version`);
     if (!r.output?.mode) errors.push(`resolver '${r.id}' requires output.mode`);
+    rejectUnknownKeys(r, ["id", "version", "title", "description", "output", "temporal"], `resolver '${r.id}'`, errors);
+    rejectUnknownKeys(r.output, ["mode", "mediaType", "schemaRef"], `resolver '${r.id}'.output`, errors);
+    if (r.temporal) rejectUnknownKeys(r.temporal, ["kind", "source", "versionRequired"], `resolver '${r.id}'.temporal`, errors);
   }
   for (const res of resources) {
     if (res.kind !== "virtual") errors.push(`resource '${res.id}' must have kind 'virtual'`);
     if (!res.params || typeof res.params !== "object") errors.push(`resource '${res.id}' requires params object`);
     if (!resolverIds.has(res.resolver)) errors.push(`resource '${res.id}' points to undeclared resolver '${res.resolver}'`);
+    // params is OPAQUE to core (resolver's contract) — deliberately not key-checked.
+    rejectUnknownKeys(res, ["id", "title", "kind", "resolver", "params", "schemaRef"], `resource '${res.id}'`, errors);
   }
   for (const ts of termSets) {
     if (!ts.title?.trim()) errors.push(`termSet '${ts.id}' requires a title`);
+    rejectUnknownKeys(ts, ["id", "title", "members"], `termSet '${ts.id}'`, errors);
     const seenMembers = new Set<string>();
     for (const m of ts.members ?? []) {
       if (typeof m.id !== "string" || !m.id.trim()) errors.push(`termSet '${ts.id}' has a member with an empty id`);
       else if (seenMembers.has(m.id)) errors.push(`termSet '${ts.id}' has a duplicate member id '${m.id}'`);
       else seenMembers.add(m.id);
+      rejectUnknownKeys(m, ["id", "label"], `termSet '${ts.id}' member`, errors);
     }
   }
   const resourceIds = new Set(resources.map((r) => r.id));
   for (const op of operations) {
     for (const e of validateBioOperationSpec(op)) errors.push(`operation '${op.id}': ${e}`);
+    // inputSchema/outputSchema are JSON Schemas — opaque, not key-checked.
+    rejectUnknownKeys(op, ["schema", "id", "version", "title", "description", "domains", "transport", "inputSchema", "outputSchema", "identifiers", "sql", "cache", "provenance", "notes"], `operation '${op.id}'`, errors);
+    if (op.sql) rejectUnknownKeys(op.sql, ["sqlTemplate", "readOnly", "singleStatement", "requiredResources"], `operation '${op.id}'.sql`, errors);
     for (const rid of op.sql?.requiredResources ?? []) {
       if (!resourceIds.has(rid)) errors.push(`operation '${op.id}' requires undeclared resource '${rid}'`);
     }

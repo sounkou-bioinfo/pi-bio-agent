@@ -33,6 +33,27 @@ describe("validateDomainPackManifest: fail closed", () => {
     assert.deepEqual(validateDomainPackManifest(baseManifest()), []);
   });
 
+  test("strict admission: rejects smuggled sprawl keys at every level (no inert JSON)", () => {
+    // a manifest is the program — cut surface (reportKind/requiredColumns/columnRoles/mapper) must not ride
+    // along as ignored keys that a future reader might honor; an unknown key fails closed.
+    const topLevel = { ...baseManifest(), reportKind: "bucketed" } as never;
+    assert.ok(validateDomainPackManifest(topLevel).some((e) => e.includes("unknown key 'reportKind'")));
+
+    const onResource = baseManifest({ resources: [{ id: "t1", title: "T1", kind: "virtual", resolver: "inline.table", params: tableParams("t1"), columnRoles: { af: "x" } } as never] });
+    assert.ok(validateDomainPackManifest(onResource).some((e) => e.includes("unknown key 'columnRoles'")));
+
+    const onSql = baseManifest({ operations: [{
+      schema: "pi-bio.operation_spec.v1", id: "op1", version: "0.1.0", title: "Op", description: "d", domains: ["genomics"],
+      transport: "duckdb.sql", inputSchema: { type: "object" },
+      sql: { sqlTemplate: "SELECT 1 AS x FROM t1", readOnly: true, requiredResources: ["t1"], requiredColumns: ["x"] } as never,
+    }] });
+    assert.ok(validateDomainPackManifest(onSql).some((e) => e.includes("unknown key 'requiredColumns'")));
+
+    // opacity is still allowed where core declared it: resource.params and the operation's JSON inputSchema
+    const opaqueOk = baseManifest({ resources: [{ id: "t1", title: "T1", kind: "virtual", resolver: "inline.table", params: { ...tableParams("t1"), anything: { nested: true } } }] });
+    assert.deepEqual(validateDomainPackManifest(opaqueOk), []);
+  });
+
   test("rejects missing/wrong schema", () => {
     const m = baseManifest();
     assert.ok(validateDomainPackManifest({ ...m, schema: "nope" as never }).some((e) => e.includes("schema must be")));

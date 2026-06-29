@@ -36,6 +36,8 @@ describe("validateReadOnlySelect: the single read-only SQL guard", () => {
       ["SELECT * FROM read_csv_auto('/etc/passwd')", /external reader/],
       ["WITH x AS (SELECT * FROM read_bcf('a.bcf')) SELECT * FROM x", /external reader/],
       ["SELECT * FROM parquet_scan('x.parquet')", /external reader/],
+      ["SELECT * FROM glob('/data/*.csv')", /external reader/],
+      ["SELECT * FROM sniff_csv('x.csv')", /external reader/],
       ["SELECT * FROM 'https://example.com/data.csv'", /remote URI/],
       ["SELECT * FROM t WHERE src = 'gs://bucket/o'", /remote URI/],
     ] as const) {

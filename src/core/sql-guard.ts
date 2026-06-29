@@ -9,7 +9,7 @@ const forbiddenSql = /\b(insert|update|delete|drop|alter|create|attach|detach|co
 // `FROM 'https://…'`, or a URI passed to a reader). Both would pull external data with zero provenance.
 // This bites only SELECT/WITH (operation SQL, graph reads); a resolver's own DDL is `CREATE … AS SELECT
 // read_*(…)`, which is rejected earlier by the `create` keyword and so never reaches this guard.
-const externalReader = /\b(read_(csv|csv_auto|parquet|json|json_auto|json_objects|ndjson|ndjson_objects|text|blob|bcf|xlsx)|parquet_scan|iceberg_scan|delta_scan|postgres_scan|sqlite_scan|mysql_scan|st_read)\s*\(/i;
+const externalReader = /\b(read_(csv|csv_auto|parquet|json|json_auto|json_objects|json_objects_auto|ndjson|ndjson_auto|ndjson_objects|ndjson_objects_auto|text|blob|bcf|xlsx)|parquet_scan|iceberg_scan|delta_scan|postgres_scan|sqlite_scan|mysql_scan|st_read|sniff_csv|glob)\s*\(/i;
 const remoteUri = /\b(https?|s3|gs|gcs|r2|az|azure|abfss|hf|ftp|ftps):\/\//i;
 
 /** Assert `sql` is a single read-only SELECT/WITH statement; returns it trimmed (sans trailing `;`). Throws otherwise. */
