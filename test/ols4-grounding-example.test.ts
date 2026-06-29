@@ -50,9 +50,9 @@ describe("example: an OLS4 grounding skill is a manifest, not code", () => {
     const result = JSON.parse(await fs.readFile(join(first.runDir, "result.json"), "utf8")) as { rows: Array<{ obo_id: string; label: string }> };
     assert.deepEqual(result.rows, [{ obo_id: "MONDO:0004979", label: "asthma" }]);
 
-    // a DIFFERENT query/ontology composes a different URL from the SAME manifest — it's SQL composition, not a term
-    await runBioQueryFromManifest({ cwd, dbPath: ":memory:", manifestPath: MANIFEST, sql, bindings: { query: "diabetes", ontology: "hp" }, network: { fetch: ols4Mock("ols4-v2") }, runId: "g2", now: "T2" });
-    assert.match(lastUrl, /[?&]q=diabetes&ontology=hp&/, "new session variables compose a new URL");
+    // a DIFFERENT query/ontology composes a new URL from the SAME manifest, URL-ENCODED in pure SQL (url_encode)
+    await runBioQueryFromManifest({ cwd, dbPath: ":memory:", manifestPath: MANIFEST, sql, bindings: { query: "lung cancer", ontology: "hp" }, network: { fetch: ols4Mock("ols4-v2") }, runId: "g2", now: "T2" });
+    assert.match(lastUrl, /[?&]q=lung%20cancer&ontology=hp&/, "url_encode(getvariable('query')) encoded the space — all in SQL");
   });
 
   test("fails closed when {query} has no binding (getvariable is NULL -> the url composes to non-http -> failed run)", async () => {

@@ -311,8 +311,9 @@ body — overfitting: a real skill doesn't bake the query data into the manifest
   - **upstream data = SQL subqueries.** "Discover then annotate": stage-1 reads a VCF (`duckhts.read_bcf`) -> a
     `variants` table; stage-2's request composes from it in SQL — a url with a subquery, or a body built with
     `json_group_array((SELECT id FROM variants))`. The request is a function of upstream data, in SQL.
-  - **GAP:** SQL URL composition needs a `url_encode` for values with spaces/specials. `ducknng_ncurl` provides
-    it (and makes the fetch itself SQL); else register a small UDF. Today's examples use already-safe terms.
+  - **Encoding: solved in pure SQL.** DuckDB has `url_encode` built in, so values compose safely:
+    `'…?q=' || url_encode(getvariable('query'))` turns `lung cancer` into `lung%20cancer`. No UDF, no ducknng
+    needed for encoding (ducknng_ncurl would still make the fetch itself SQL).
 - **BATCH HTTP = a chunked, rate-limited PIPELINE, not one request.** VEP caps the batch (~200-1000 ids) and
   rate-limits (~15 req/s, `429`+`Retry-After`, hourly quota). Annotating a real VCF: chunk the variant list (SQL)
   into batches <= the limit, run them through `runPipeline` (the push/pull pool) with `withRetry` (429/backoff),
