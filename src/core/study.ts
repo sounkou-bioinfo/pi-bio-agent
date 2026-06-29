@@ -218,3 +218,95 @@ export function deriveStudyPlan(corpus: StudyCorpus, objective = "develop operat
     `Objective: ${objective}`,
   ];
 }
+
+// ── Study scaffold: "machine studying" as a DAG (Fugu piece 2 — scaffold-as-data with access lists) ──────────
+// deriveStudyPlan is a flat list of strings. A scaffold lifts it to a DAG: each step produces a note of a given
+// kind and declares an ACCESS LIST — which upstream notes + sources feed its context (Sakana Fugu's
+// communication topology). Execution: topological order; each step reads ONLY its access list (the isolation
+// boundary) and writes its note (the shared memory = studyNoteIndex). The accessList.notes edges are the SAME
+// shape as a produced note's `links: depends_on` — a scaffold step and its note share one dependency model.
+
+export interface StudyStep {
+  /** Step identity AND the slug of the note it will produce (kebab-case). */
+  id: string;
+  /** What to study/extract in this step. */
+  subtask: string;
+  /** The note kind this step writes. */
+  produces: StudyArtifactKind;
+  /** Which upstream step ids (their produced notes) + external sources feed this step's context. */
+  accessList: { notes?: string[]; sources?: StudyNote["sources"] };
+}
+
+export interface StudyScaffold {
+  schema: "pi-bio.study_scaffold.v1";
+  corpusId: string;
+  objective: string;
+  steps: StudyStep[];
+}
+
+/** Fail-closed validator (validateX pattern). Enforces: valid step slugs, known kinds, unique ids, and that every
+ *  accessList note reference points at an EARLIER step — so the DAG is acyclic by construction. */
+export function validateStudyScaffold(scaffold: unknown): string[] {
+  if (!scaffold || typeof scaffold !== "object") return ["study scaffold must be an object"];
+  const s = scaffold as Partial<StudyScaffold>;
+  const errors: string[] = [];
+  if (s.schema !== "pi-bio.study_scaffold.v1") errors.push("schema must be pi-bio.study_scaffold.v1");
+  if (typeof s.corpusId !== "string" || !s.corpusId.trim()) errors.push("corpusId is required");
+  if (typeof s.objective !== "string" || !s.objective.trim()) errors.push("objective is required");
+  if (!Array.isArray(s.steps) || s.steps.length === 0) return [...errors, "steps must be a non-empty array"];
+  const seen = new Set<string>();
+  s.steps.forEach((step, i) => {
+    const st = step as Partial<StudyStep>;
+    if (typeof st.id !== "string" || !STUDY_SLUG_RE.test(st.id) || st.id.length > 64) errors.push(`step[${i}].id must be a kebab-case slug`);
+    else if (seen.has(st.id)) errors.push(`step[${i}].id '${st.id}' is duplicated`);
+    if (typeof st.subtask !== "string" || !st.subtask.trim()) errors.push(`step[${i}].subtask is required`);
+    if (typeof st.produces !== "string" || !STUDY_ARTIFACT_KINDS.includes(st.produces as StudyArtifactKind)) errors.push(`step[${i}].produces is not a valid note kind`);
+    if (!st.accessList || typeof st.accessList !== "object") errors.push(`step[${i}].accessList must be an object`);
+    else if (st.accessList.notes !== undefined) {
+      if (!Array.isArray(st.accessList.notes)) errors.push(`step[${i}].accessList.notes must be an array`);
+      else for (const ref of st.accessList.notes) {
+        // a forward/self/unknown reference would allow a cycle — only earlier steps are visible
+        if (!seen.has(ref)) errors.push(`step[${i}] accessList references '${ref}' which is not an earlier step`);
+      }
+    }
+    if (typeof st.id === "string") seen.add(st.id);
+  });
+  return errors;
+}
+
+/** Topological execution order (Kahn). Returns step ids so every step's accessList notes precede it; throws on a
+ *  cycle (which validateStudyScaffold already precludes for scaffolds it accepts). */
+export function scaffoldExecutionOrder(scaffold: StudyScaffold): string[] {
+  const ids = scaffold.steps.map((s) => s.id);
+  const deps = new Map(scaffold.steps.map((s) => [s.id, new Set((s.accessList.notes ?? []).filter((n) => ids.includes(n)))]));
+  const order: string[] = [];
+  const ready = ids.filter((id) => deps.get(id)!.size === 0);
+  while (ready.length) {
+    const id = ready.shift()!;
+    order.push(id);
+    for (const [other, d] of deps) if (d.delete(id) && d.size === 0 && !order.includes(other) && !ready.includes(other)) ready.push(other);
+  }
+  if (order.length !== ids.length) throw new Error("study scaffold has a cycle");
+  return order;
+}
+
+/** The depends_on links a step's produced note carries — making explicit that a scaffold step's access list IS
+ *  the produced note's dependency edges (Fugu piece 2 meeting our existing note graph, one dependency model). */
+export function stepNoteLinks(step: StudyStep): StudyNoteLink[] {
+  return (step.accessList.notes ?? []).map((to) => ({ to, predicate: "depends_on" }));
+}
+
+/** Derive a study scaffold (the DAG form of deriveStudyPlan): map -> contracts/concepts -> probes -> synthesize,
+ *  each step's access list naming the upstream notes + corpus sources that feed it. Non-breaking: deriveStudyPlan
+ *  is unchanged; this is the structured sibling. */
+export function deriveStudyScaffold(corpus: StudyCorpus, objective = "develop operational expertise over this corpus"): StudyScaffold {
+  const sources = corpus.roots.map((r) => ({ path: (r as { path?: string }).path })).filter((src): src is { path: string } => typeof src.path === "string");
+  const steps: StudyStep[] = [
+    { id: "corpus-map", subtask: `Map corpus '${corpus.label}' into source families and authoritative entry points.`, produces: "corpus_map", accessList: { sources } },
+    { id: "contracts", subtask: "Extract stable contracts: schemas, typed objects, APIs, CLI/tool surfaces, data layouts, and invariants.", produces: "cheatsheet", accessList: { notes: ["corpus-map"], sources } },
+    { id: "concept-map", subtask: "Build ontology/concept maps for domain terms, synonym sets, identifiers, and versioned definitions.", produces: "concept_map", accessList: { notes: ["corpus-map"] } },
+    { id: "probes", subtask: "Generate expertise probes that require the corpus-specific abstractions, not generic recall.", produces: "question_bank", accessList: { notes: ["contracts", "concept-map"] } },
+    { id: "study-index", subtask: `Synthesize an index of what was learned and what to distrust. Objective: ${objective}`, produces: "index", accessList: { notes: ["corpus-map", "contracts", "concept-map", "probes"] } },
+  ];
+  return { schema: "pi-bio.study_scaffold.v1", corpusId: corpus.id, objective, steps };
+}
