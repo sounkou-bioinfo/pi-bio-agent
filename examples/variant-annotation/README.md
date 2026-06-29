@@ -1,13 +1,15 @@
-# Example: a ClawBio API skill as a manifest (Variant Annotation, Ensembl VEP REST)
+# Example: a ClawBio-shaped API skill as a manifest (Variant Annotation, Ensembl VEP REST)
 
-> **Honest tag:** this reproduces a **real, named ClawBio skill** —
+> **Honest tag:** this is the **same shape** as a real, named ClawBio skill —
 > [*Variant Annotation*](https://github.com/ClawBio/ClawBio): "Annotate VCF variants with Ensembl VEP REST,
-> ClinVar significance, gnomAD frequencies." This is the ClawBio half of the API bet (the
-> [`ols4-grounding`](../ols4-grounding/) example reproduces *metacurator*'s `disambiguate`, not ClawBio).
+> ClinVar significance, gnomAD frequencies." It is *not* a faithful reproduction: it annotates **one variant by
+> id**, not a whole VCF (a VCF is the same skill scaled — one resource per variant, or VEP's region endpoint).
+> This is the ClawBio half of the API bet; the [`ols4-grounding`](../ols4-grounding/) example reproduces
+> *metacurator*'s `disambiguate`, not ClawBio.
 
-A ClawBio skill that annotates variants against [Ensembl VEP REST](https://rest.ensembl.org/) and filters for
-rare, high-impact, pathogenic ones is, in this substrate, **a manifest plus one SQL query** — not a bespoke
-client. `manifest.json` declares the VEP REST URL as an `http.get` resource; the agent resolves it into a
+A skill that annotates a variant against [Ensembl VEP REST](https://rest.ensembl.org/) and filters for rare,
+high-impact, pathogenic results is, in this substrate, **a manifest plus one SQL query** — not a bespoke client.
+`manifest.json` declares the VEP REST URL as an `http.get` resource; the agent resolves it into a
 `vep_annotations` table and writes the filter SQL itself.
 
 ## The skill is data, not code
@@ -45,19 +47,28 @@ the network sandbox). Enforce real egress control (allow/block lists, blocking i
 deny-by-default container) at the **host** boundary; wrap the injected `fetch` in `index-networked.ts` with
 whatever URL policy you need.
 
-Then the agent calls `bio_query` with this manifest and filters with ordinary SQL, e.g. "rare, high-impact,
-pathogenic":
+The VEP REST response is a nested JSON array — gene/impact under `transcript_consequences`, ClinVar `clin_sig`
+and gnomAD frequency under `colocated_variants`. The agent **unnests it in SQL** and applies all three
+predicates (rare, high-impact, pathogenic) — that is the agent's SQL job, not the resolver's:
 
 ```sql
-SELECT input, gene_symbol, most_severe_consequence
-FROM vep_annotations
-WHERE gnomad_af < 0.01                 -- rare (gnomAD frequency)
-  AND clinvar_clin_sig = 'pathogenic'  -- ClinVar significance
+WITH exploded AS (
+  SELECT input, most_severe_consequence,
+         UNNEST(transcript_consequences) AS tc,    -- gene_symbol, impact
+         UNNEST(colocated_variants)      AS cv      -- clin_sig[], gnomad_af
+  FROM vep_annotations
+)
+SELECT input, tc.gene_symbol AS gene_symbol, most_severe_consequence
+FROM exploded
+WHERE cv.gnomad_af < 0.01                          -- rare (gnomAD frequency)
+  AND tc.impact = 'HIGH'                           -- high-impact (VEP impact)
+  AND list_contains(cv.clin_sig, 'pathogenic')     -- pathogenic (ClinVar significance)
 ORDER BY gene_symbol
 ```
 
-The real VEP REST response is a nested JSON array (`transcript_consequences`, `colocated_variants` …); the
-agent unnests it in SQL (`SELECT ... unnest(colocated_variants) ...`) — that is the agent's SQL job, not the
-resolver's. `test/variant-annotation-example.test.ts` runs this manifest end-to-end through the host with an
-**injected mock fetch** returning flattened VEP/ClinVar/gnomAD rows (no live network), proving the manifest →
-resolved table → filter SQL path works as data.
+`test/variant-annotation-example.test.ts` runs this manifest end-to-end through the host with an **injected mock
+fetch** returning a realistic nested VEP envelope (no live network). Its assertions prove each predicate is
+load-bearing: a benign common variant, a common pathogenic one, **and a rare pathogenic *moderate*-impact one
+(excluded only by the high-impact filter)** are all dropped, leaving the rare high-impact pathogenic hits. (The
+mock simplifies VEP's gnomAD frequency map to one `gnomad_af` field so the example stays about the
+unnest-and-filter pattern, not VEP frequency-map wrangling.)
