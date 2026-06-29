@@ -81,6 +81,14 @@ export const bioDuckDbExtensions: DuckDbExtensionDescriptor[] = [
     loadSql: "LOAD cache_httpfs;",
   },
   {
+    name: "quack",
+    source: "core",
+    purpose: "Client/server protocol for DuckDB: one instance runs quack_serve() and OWNS the database file (and its process-exclusive RW lock); other instances ATTACH 'quack:host' over the network and read AND write remote tables without opening the file themselves — so NO per-client lock conflict. This is how MULTIPLE AGENT PROCESSES share one LIVE mutable database (e.g. a common knowledge graph): a single quack server owns it, agents attach as clients via the connection-init hook (CREATE SECRET (TYPE quack ...); ATTACH ...). Complements CAS-of-bytes (immutable content-addressed artifacts, cross-host, lock-free): quack = a live shared mutable db; CAS = durable immutable sharing. Native cross-process DuckDB without quack is reads-only (concurrent READ_ONLY openers; any RW holder blocks all).",
+    domains: ["remote-io", "client-server", "concurrency", "multi-agent"],
+    installSql: "INSTALL quack;",
+    loadSql: "LOAD quack;",
+  },
+  {
     name: "fts",
     source: "core",
     purpose: "Full-text indexes over local catalogs, ontology labels/synonyms, documents, and skill/capability descriptions.",
