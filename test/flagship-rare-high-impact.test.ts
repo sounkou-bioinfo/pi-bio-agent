@@ -116,6 +116,22 @@ describe("flagship: rare high-impact variants (data over generic primitives)", (
     assert.equal(op?.notes?.length, 2); // caveats travel with the operation as manifest data
   });
 
+  test("safety gate: the flagship carries no diagnosis / clinical-recommendation framing", () => {
+    // A headline gate (roadmap §2): a run must never frame its answer as diagnosis or clinical advice. The
+    // only natural-language surface that travels with a run is the manifest/operation prose (title,
+    // description, notes) — the result itself is bucket counts. Assert that prose stays classificatory and
+    // abstaining, never clinical-directive. (A flagship safety-framing assertion, not a core validator —
+    // policing prose in the runner would be bio-logic in code; here it guards the canonical example.)
+    const r = freshRegistry();
+    const op = r.getOperation("rare_high_impact.report")!;
+    const snap = r.snapshot();
+    const prose = [snap.manifests[0]?.title, flagshipManifest.description, op.title, op.description, ...(op.notes ?? [])].join("\n").toLowerCase();
+    const clinicalFraming = /\b(diagnos\w*|prescrib\w*|treatment|disease-causing|medical advice|actionable variant|you (?:have|should|are at|may have)|consult (?:a|your) (?:doctor|physician|clinician|provider)|risk of (?:disease|cancer))\b/;
+    assert.ok(!clinicalFraming.test(prose), `flagship prose must not carry clinical framing, found in: ${prose}`);
+    // present, not merely absent-of-harm: the abstention caveat (the safety thesis) actually rides along
+    assert.ok(op.notes?.some((n) => /abstain|unknown allele frequency/i.test(n)), "the abstention caveat must be present in operation notes");
+  });
+
   test("the result + report are stable and the run links operation + resolver receipts", async () => {
     const a = await runFlagship(freshRegistry(), await memoryConn());
     const b = await runFlagship(freshRegistry(), await memoryConn());
