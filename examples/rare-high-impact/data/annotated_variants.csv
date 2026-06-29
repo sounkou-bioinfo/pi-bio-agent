@@ -1,0 +1,6 @@
+variant_key,consequence,allele_frequency,clinical_significance
+1:1000:C:T,SO:0001587,0.0003,
+2:2000:G:A,SO:0001575,0.3,
+3:3000:A:G,SO:0001583,0.0002,
+4:4000:T:C,SO:0001587,,
+5:5000:G:C,SO:0001587,0.0001,Benign

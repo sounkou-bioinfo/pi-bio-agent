@@ -1,0 +1,34 @@
+{
+  "schema": "pi-bio.domain_pack_manifest.v1",
+  "id": "rare-high-impact",
+  "version": "0.1.0",
+  "title": "Rare high-impact variants",
+  "description": "The abstention flagship: count rare loss-of-function variants, abstaining on unknown frequency. A subtle, safety-critical query — so it is PINNED as a declared, tested operation, not left ad hoc.",
+  "domains": ["genomics"],
+  "provides": {
+    "resolvers": [
+      { "id": "duckdb.file_scan", "version": "0.1.0", "title": "DuckDB file scan", "description": "Read a DuckDB-native file into a table.", "output": { "mode": "table" } }
+    ],
+    "resources": [
+      { "id": "annotated_variants", "title": "Annotated variants", "kind": "virtual", "resolver": "duckdb.file_scan", "params": { "path": "data/annotated_variants.csv", "table": "annotated_variants" } },
+      { "id": "so_loss_of_function", "title": "LoF SO terms", "kind": "virtual", "resolver": "duckdb.file_scan", "params": { "path": "data/so_loss_of_function.csv", "table": "so_loss_of_function" } }
+    ],
+    "operations": [
+      {
+        "schema": "pi-bio.operation_spec.v1", "id": "rare_high_impact.report", "version": "0.1.0",
+        "title": "Rare high-impact variant classification",
+        "description": "Classify each variant; the 'included' bucket is the defensible count. Unknown allele frequency is abstained from (NOT counted as rare); benign LoF is excluded.",
+        "domains": ["genomics"], "transport": "duckdb.sql", "inputSchema": { "type": "object" },
+        "notes": [
+          "Unknown allele frequency is abstained from, not counted as rare.",
+          "Benign-annotated variants are excluded regardless of frequency or consequence."
+        ],
+        "sql": {
+          "sqlTemplate": "WITH classified AS (SELECT variant_key, CASE WHEN allele_frequency IS NULL THEN 'no_frequency' WHEN consequence NOT IN (SELECT id FROM so_loss_of_function) THEN 'not_high_impact' WHEN clinical_significance = 'Benign' THEN 'benign' WHEN allele_frequency >= 0.01 THEN 'not_rare' ELSE 'included' END AS bucket FROM annotated_variants) SELECT bucket, CAST(count(*) AS INTEGER) AS n FROM classified GROUP BY bucket ORDER BY bucket",
+          "readOnly": true,
+          "requiredResources": ["annotated_variants", "so_loss_of_function"]
+        }
+      }
+    ]
+  }
+}
