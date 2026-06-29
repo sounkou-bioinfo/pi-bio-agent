@@ -379,13 +379,16 @@ The discipline is the same as everywhere else: **the laziness lives in DATA** (t
 lazy expression), interpreted by thin TS. It is **dbplyr/targets, not [Effect-TS](https://effect.website) /
 fp-ts** — pulling in a TS
 lazy/effect monad would be the idealist move (a monad with no instances we need; the laziness is already in the
-data). The frame is useful because it makes the deferred work *obvious rather than invented*: caching is memoization,
-"as_of" is a parameter to the lazy graph, lazy resolution forces only the resources a query names. Each lands
-when a concrete re-run forces it, not before. One correctness caveat for when it does: a resolved resource's
-memo key must capture **content freshness, not just the request** — params/URL is the *call*, not the *value*.
-Local files key on the content digest `file_scan` already records; remote resources need HTTP cache validation
-(ETag / Last-Modified via a conditional `If-None-Match` → `304`), captured into the receipt; derived tables are
-pure and trivially safe. A params-only memo is a stale-cache footgun.
+data). The frame makes the deferred work *obvious rather than invented*, and the first piece is now **built**:
+**resolution memoization** (`src/duckdb/resolution-memo.ts`) — a per-table freshness token + stored receipt;
+on re-resolve over a persistent `dbPath`, an unchanged token + a still-present table replays the receipt and
+skips the work. `file_scan` opts in with `mtime+size`. It is correct, not a stale-cache footgun, because the
+memo key is **content freshness, not the request** — params/URL is the *call*, not the *value*. The remaining
+pieces land when a concrete re-run forces them: content-addressed byte storage (CAS) for cross-db reuse; remote
+freshness via HTTP cache validation (ETag / Last-Modified, `If-None-Match` → `304`) once the `FetchLike` port
+exposes headers; `sql_materialize` freshness over its `declaredSources`' mtimes. Derived tables (`scale_members`,
+`entailed_edge`) are pure and trivially safe (recompute). Also pending: "as_of" as a graph parameter, and lazy
+resolution forcing only the resources a query names.
 
 ### 5. Provenance graph: every claim has a source path
 
