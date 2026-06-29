@@ -35,14 +35,22 @@ pi install git:github.com/sounkou-bioinfo/pi-bio-agent
 
 ## Pi tools
 
-- `bio_run_operation` — run a declared `duckdb.sql` operation from a manifest, persisting run/result/receipts
-- `bio_describe_model`
-- `bio_list_tool_specs`
-- `bio_list_duckdb_extensions`
-- `bio_validate_select`
-- `bio_study_plan`
-- `bio_write_study_note` · `bio_list_study_notes` · `bio_read_study_note` · `bio_delete_study_note`
-- `bio_create_skill`
+This list is generated from the extension's `registerTool()` calls (`npm run readme`); `npm run check`
+fails if it is stale.
+
+<!-- BEGIN GENERATED:tools (scripts/generate-readme.mjs — do not edit by hand) -->
+- `bio_create_skill` — Create bio skill
+- `bio_delete_study_note` — Delete bio study note
+- `bio_describe_model` — Describe Pi Bio model
+- `bio_list_duckdb_extensions` — List bio DuckDB extensions
+- `bio_list_study_notes` — List bio study notes
+- `bio_list_tool_specs` — List BioToolSpec contracts
+- `bio_read_study_note` — Read bio study note
+- `bio_run_operation` — Run a bio operation
+- `bio_study_plan` — Plan bio study
+- `bio_validate_select` — Validate bio SQL SELECT
+- `bio_write_study_note` — Write bio study note
+<!-- END GENERATED:tools -->
 
 Generated project-local skills and study notes live under `.pi/bio-agent/` in the current project.
 
