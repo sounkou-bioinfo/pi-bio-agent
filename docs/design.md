@@ -86,6 +86,18 @@ because that is what an "operation" *is*), not an egress firewall. Network is a 
 allows) — the host decides whether egress is possible, the library records that it happened. A strict
 "no external I/O / CAS-snapshot-first" profile is an **optional host policy**, not the default stance.
 
+**The host-control surface is the injected ports — not a separate hook framework.** Pi-agent-core makes
+lifecycle hooks (before/after, context transforms) central, and that pattern is real — but in *our* shape it is
+already spelled as dependency injection, so a second hook system would be sugar over composition we have. A
+host that wants policy wraps the port it already supplies: decorate `SqlConn` and you have `validateSql` /
+`beforeQuery` over every execution (a strict no-external-I/O profile is a ~5-line `SqlConn` decorator —
+[`host-policy-via-ports.test.ts`](../test/host-policy-via-ports.test.ts) proves it enforces what the library
+deliberately stopped enforcing); decorate a bound `BioResolverImpl` for `beforeResolve` / `afterResolve`;
+`runOperation` returns `{run, result, receipts}`, so before/after the call *is* `beforeRun` / `afterRun`. An
+explicit `ExecutionPolicy` facade earns its place only when a real host needs cross-cutting, phase-aware policy
+across all resolves + SQL + runs at once that decorating individual ports cannot express cleanly — and then it
+is a thin facade over those ports, with a named consumer, not a speculative interface.
+
 ## Integration surfaces
 
 `pi-bio-agent` should not be Pi-only. Pi is the first and most important host adapter because it is where this package is used today, but the stable product is a small core library with multiple thin surfaces over the same registries.
