@@ -72,11 +72,12 @@ pi-bio-agent notes report --db graph.duckdb --json            # counts + danglin
 The bin is compiled to `dist/` via `npm run build` (run by `prepare`); the package also ships `src`
 for Pi to consume directly.
 
-## Design notes
+## Docs
 
-See the generated [docs index](docs/INDEX.md) — one line per doc, from each doc's frontmatter
-(regenerate with `npm run docs:index`; `npm run check` fails if it is stale). Start with the
-[roadmap](docs/roadmap.md) and [design notes](docs/design.md).
+New here? Start with the [user guide](docs/guide.md) — write a manifest, run an operation. For the why,
+see the [design notes](docs/design.md) and the [roadmap](docs/roadmap.md). The full
+[docs index](docs/INDEX.md) is generated from each doc's frontmatter (`npm run docs:index`; `npm run check`
+fails if it is stale).
 
 ## Development
 

@@ -3,6 +3,19 @@
   "note": "generated from docs/*.md frontmatter by scripts/generate-docs-index.mjs — do not edit by hand",
   "docs": [
     {
+      "slug": "guide",
+      "path": "docs/guide.md",
+      "type": "Guide",
+      "title": "User guide — write a manifest, run an operation",
+      "description": "Practical walkthrough: declare resources/operations as a manifest and run them; resolvers, ordinal scales, grounding, runs, and network.",
+      "tags": [
+        "guide",
+        "manifest",
+        "operations",
+        "usage"
+      ]
+    },
+    {
       "slug": "memory-and-knowledge-unification",
       "path": "docs/memory-and-knowledge-unification.md",
       "type": "Proposal",

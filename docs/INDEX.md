@@ -1,6 +1,10 @@
 <!-- generated from docs/*.md frontmatter by scripts/generate-docs-index.mjs; do not edit by hand -->
 # Docs index
 
+## Guide
+
+- [User guide — write a manifest, run an operation](guide.md) — Practical walkthrough: declare resources/operations as a manifest and run them; resolvers, ordinal scales, grounding, runs, and network. _(guide, manifest, operations, usage)_
+
 ## Proposal
 
 - [Memory and knowledge unification](memory-and-knowledge-unification.md) — Read before changing study notes, the note-to-graph projection, or the KG-ingest adapter. _(memory, study-notes, knowledge-unit, kg-sync)_
