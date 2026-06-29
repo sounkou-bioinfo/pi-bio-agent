@@ -156,6 +156,27 @@ Spec (build when driven by a concrete large-dataset example):
 - Opt-in per host/profile (the "CAS mode" vs "fast mode" split): default fast (DuckDB scans the source directly);
   CAS mode snapshots bytes first for byte-perfect provenance + cross-db reuse.
 
+## Effect discipline — pal review #5 follow-ups
+
+Pal #5 audited for ambient/hidden effects. One real finding fixed: wall-clock reads now funnel through the one
+`systemClock()` adapter (`src/core/clock.ts`) instead of scattered `?? new Date()` fallbacks. Open, in priority:
+
+- **Strict `now` (the endpoint, deferred).** The funnel removes the *hidden* scattered reads but keeps a
+  last-resort fallback. The strict version makes `now` required on `ResolutionContext`, `RunOperationRequest`,
+  `newRunRecord`, etc., so the only wall-clock read is at the host entrypoint (extension/CLI) — pushing the
+  clock to the OS-adapter boundary like `index-networked.ts` does for fetch. Deferred: it ripples into ~46 test
+  call sites; do it when a determinism/replay need (a reproducible run) drives it.
+- **Run/note ID generation.** `runId` (`Date.now()`) and study-note `randomUUID()` are nondeterministic host-
+  boundary effects. Inject an `idFactory` (or require `runId`) when reproducible run identity is needed.
+- **Memo cache opt-out.** The resolution memo silently changes whether a resolver re-fetches (freshness-correct
+  — it replays the SAME receipt, so results are identical, only perf differs). Add `cache?: false` to the run
+  request / resolver ctx for callers who want to force a cold re-resolve.
+
+By doctrine, NOT bugs (recorded so we don't re-litigate): pal #1-4/#10-12 — DuckDB replacement scans / httpfs /
+htslib / direct fs reaching local files and remote URLs. The library is deliberately NOT the network/filesystem
+sandbox; egress + fs confinement are the HOST's boundary (container/seccomp/Pi/OS). `validateReadOnlySelect`
+governs statement CLASS (single read-only SELECT), not reachability.
+
 ## Network opt-in hardening — pal review #4 follow-ups
 
 The host network opt-in is wired by COMPOSITION, not ambient env: `createBioExtension({ network })` takes the
