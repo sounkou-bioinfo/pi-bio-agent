@@ -171,6 +171,23 @@ describe("registry.resolveResource: resource-centered, registry-stamped receipts
     assert.notEqual(a.paramsDigest, b.paramsDigest); // same resolver, different params -> distinguishable in provenance
   });
 
+  test("paramsDigest is canonical: identical params in different key order yield the same digest", async () => {
+    // identity must be content-based, not key-order-based — otherwise a trivial reordering would look like a
+    // different resource (breaking caching/dedup) even though it resolves the same thing.
+    const r = createBioRegistry();
+    const columns = [{ name: "id", type: "TEXT" }];
+    const rows = [{ id: "x" }];
+    r.registerManifest(baseManifest({ resources: [
+      { id: "ord1", title: "Ordered 1", kind: "virtual", resolver: "inline.table", params: { table: "same", columns, rows } },
+      { id: "ord2", title: "Ordered 2", kind: "virtual", resolver: "inline.table", params: { rows, columns, table: "same" } },
+    ] }));
+    r.bindResolverImpl("inline.table", inlineTableResolver);
+    const conn = await memoryConn();
+    const a = await r.resolveResource("ord1", { conn, now: "t" });
+    const b = await r.resolveResource("ord2", { conn, now: "t" });
+    assert.equal(a.paramsDigest, b.paramsDigest);
+  });
+
   test("fails closed on unknown resource and declared-but-unbound resolver", async () => {
     const r = createBioRegistry();
     r.registerManifest(baseManifest());

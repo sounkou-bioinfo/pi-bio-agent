@@ -84,6 +84,14 @@ describe("host: bio_run_operation end-to-end", () => {
     assert.equal(avReceipt.resolverId, "duckdb.file_scan");
     // the relative manifest path was resolved to an absolute file under the project, not the process cwd
     assert.ok(avReceipt.sourceSnapshots.some((s: { source: string }) => s.source === `file:${join(cwd, "data", "annotated_variants.csv")}`));
+
+    // the receipts ARE the provenance footprint: exactly the operation's requiredResources, no more, no less
+    const receiptIds = receipts.map((r: { resourceId: string }) => r.resourceId).sort();
+    assert.deepEqual(receiptIds, ["annotated_variants", "so_loss_of_function"]);
+
+    // exactly three artifacts — the result IS the report; there is no report.json (deleted) and no extras
+    const onDisk = (await fs.readdir(dir)).sort();
+    assert.deepEqual(onDisk, ["receipts.json", "result.json", "run.json"]);
   });
 
   test("fails closed on an invalid manifest", async () => {
