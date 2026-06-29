@@ -60,6 +60,16 @@ reason; the question-level builders were removed.)
 > with tests (DuckDB sync/report, Pi extension, CLI, project helpers). Everything else is removed until a
 > real consumer demands it.
 
+**Real abstraction, not idealist abstraction** (this sharpens "until a real consumer demands it", which is too
+crude). An abstraction may be built *ahead of any downstream consumer* when it is **immanent in the concrete** —
+the expressed essence of ≥2–3 things already built and nameable. `duckdb.sql_materialize` qualified: it was
+latent in `file_scan` + `read_bcf` + `http.get` (shared form = "materialize a table from a declared read"), so
+building it was *revealing* a real general, not imagining one. An *idealist* abstraction is imagined a priori
+from outside the work — a shape you can merely picture future things fitting (`ExecutionPolicy` hooks,
+`validateSql` mode-enums, fast/CAS/airgapped "modes", a `process` transport with one instance). Those are the
+sprawl to refuse. The discipline that stops "emergent" from becoming a loophole: **name the existing instances
+the abstraction abstracts, never the future ones it might serve.**
+
 ### Powerful by default, host-controlled effects, provenance-aware not policy-obsessed
 
 > **The library is a substrate + receipt system, not a network/filesystem sandbox.** Like Pi, it gives
@@ -181,32 +191,39 @@ BioOperationSpec
 
 The thin description is still valuable when it encodes identifier namespaces, provenance expectations, versioning, cache policy, query limits, and whether patient-specific data may be sent. It should not become hand-written client sprawl.
 
-## Code execution as the composition layer
+## Execution beyond SQL: shell, R, and workflows as process operations
 
-A mature agent substrate should not force the model to reason over giant raw API responses in prose. Many workflows are better expressed as small code fragments that call trusted clients, page/loop/filter/join in the execution environment, and return only the compact result.
+A `duckdb.sql` operation is one transport. Long-running external work — a shell command, an `Rscript`, a
+Nextflow/Snakemake pipeline, an alignment or a variant caller — enters the **same way the question always
+does: as DATA, not a new TypeScript client.** A *process operation* declares a **command + inputs + declared
+outputs + tool/version**; a host-bound **executor** runs it; the result is **artifacts** (files → CAS), a
+streamed run record, and a receipt — not rows. Those artifacts re-enter as resolved resources for a downstream
+`file_scan` / `sql_materialize` → SQL operation, so a pipeline is just `op → artifact → resource → op`: the
+resource/artifact chain *is* the composition, no DAG engine required.
 
-Target pattern:
+Three things keep this consistent with the rest of the substrate:
 
-```ts
-const hits = await bio.opentargets.search({ query: "BRCA1", entities: ["target"] });
-const evidence = await bio.opentargets.geneDiseaseEvidence({ targetId, diseaseId });
-return evidence.rows
-  .filter((row) => row.score > 0.3)
-  .map((row) => ({ source: row.datasourceId, score: row.score }));
-```
+- **Invoke, don't reimplement.** A Nextflow/Snakemake run is a command that runs a DAG; an R analysis is
+  `Rscript x.R`. We shell out, receipt it, and ingest the outputs — we never embed a workflow engine or an R
+  runtime, exactly as we never embed an ontology runtime (we read its SQL) or a graph engine (we materialize
+  closure). Absorb the function, not the runtime.
+- **Host-bound and host-gated effects.** The executor is injected by the host (like `http.get`'s `fetch`), and
+  whether shell/R/containers/SLURM are even possible — and any timeout, output cap, or egress — is the
+  **host's sandbox decision** (container, namespace, seccomp, cluster). The library **records** what ran
+  (command digest, tool + version, input handles, output CAS digests, exit code, duration); it does **not**
+  impose the limits. Same posture as the network: accountability, not access control.
+- **Long-running is already modeled.** `BioRunSpec.mode` is `inline | background | subagent | service | batch`
+  and `BioRunRecord` streams `started → progress → checkpoint → completed/failed`. A six-hour job is a
+  `background`/`batch` run whose record accrues progress + checkpoints and ends in output artifacts. The run
+  substrate was built for this; only the executor is missing.
 
-This is not trust in arbitrary ambient code. It is trust in **bounded, inspectable, replayable code over scoped clients**.
-
-Code runtime requirements:
-
-- no ambient raw `fetch` unless explicitly granted through registered operation clients
-- no ambient secrets
-- no raw DuckDB handle; use scoped read-only clients or views
-- no filesystem except an explicit workspace/artifact API
-- fixed timeout and output cap
-- provenance receipt for every operation call
-- result filtering before model context
-- live network only under explicit network policy
+**Discipline — do not build the transport ahead idealistically.** Speculative non-SQL transports were already
+deleted once (http/graphql/mcp/local with no runner). "Transport" is an *idealist* abstraction while
+`duckdb.sql` is the only instance; the first executor is built when a **concrete** pipeline forces it (e.g. run
+a VCF through VEP), and the abstraction *over* executors (a `process` transport family) becomes real only once
+≥2 exist and can be named — the same test `duckdb.sql_materialize` passed against the three resolvers. That
+first executor is also what finally forces **CAS materialization** (today spec-only): a code op's outputs are
+exactly the bytes CAS exists to address.
 
 ## Storage story
 
@@ -296,6 +313,25 @@ SemanticSQL *shape*, never a graph or ontology runtime.
 `entailed_edge` + FTS over labels/synonyms answer "text→CURIE (already known)" and "descendants of X" as pure
 SQL. A *judgment* tier — `decideGrounding` over a fresh OLS4/search candidate set, used only on a projection
 miss, which **abstains below threshold and never invents a CURIE**.
+
+#### Resolved vs derived tables (and why only one kind carries a receipt)
+
+Every table the operation SQL sees is one of two kinds, and the distinction *is* the provenance model:
+
+- **Resolved** — produced by a resolver from an **external source** (`file_scan`, `sql_materialize`,
+  `read_bcf`, `http.get`, an ingested ontology's `statements`/`bio_edges`). It touched the world, so it carries
+  a **receipt** (resolver version, params digest, source snapshot).
+- **Derived** — a **pure function of the program plus already-resolved tables** (`scale_members` from ordered
+  TermSets, `entailed_edge` as the closure of `bio_edges`). It touched nothing external, so it carries **no
+  receipt** — it is fully **recomputable** from the manifest + the resolved inputs, and that recomputability is
+  its provenance.
+
+The operation SQL does not care which it queries — that is the point. This is a real distinction *immanent in
+what we built* (two derived tables already exist), and it earns documentation, not a `Projection` framework:
+the two derivations share a lifecycle (runner materializes them, idempotent) but not a computation (recursive
+closure vs flat rank insert), so unifying them in code would be the idealist move. (A process operation's
+**output artifact** is a third kind — *produced*, CAS-addressed — which re-enters as a *resolved* resource
+downstream.)
 
 ### 5. Provenance graph: every claim has a source path
 
