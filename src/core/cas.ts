@@ -17,4 +17,14 @@ export interface CasStore {
   /** Store bytes under their content address. Idempotent + immutable: a present entry is left untouched (the
    *  address IS the content, so re-putting identical bytes is a no-op). */
   put(address: ContentAddress, bytes: Buffer | string): Promise<void>;
+
+  // Cross-db remote-fetch index. The per-db resolution memo lives in ONE database and replays a materialized
+  // table; this index is global to the CAS root, so ANY db can do a conditional GET with the last-seen ETag for
+  // a URL and, on 304, materialize from the CAS bytes WITHOUT re-downloading — even where the table never
+  // persisted. CAS stays storage/dedup, not freshness: the server's 304 (against this ETag) is what proves the
+  // bytes are still current.
+  /** The validator (ETag) + content address last stored for a URL, if any. */
+  getRemote(url: string): Promise<{ etag: string; address: ContentAddress } | undefined>;
+  /** Record the validator + content address for a URL after a real fetch. */
+  putRemote(url: string, etag: string, address: ContentAddress): Promise<void>;
 }

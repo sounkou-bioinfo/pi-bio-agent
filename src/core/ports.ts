@@ -1,3 +1,4 @@
+import type { CasStore } from "./cas.js";
 import type { ResourceHandle, SourceSnapshot, VirtualResourceSpec } from "./resources.js";
 import type { Provenance } from "./types.js";
 
@@ -54,6 +55,11 @@ export interface ResolutionContext {
    *  tool call / a runaway request is torn down instead of running to completion. A resolver that can't honor
    *  it ignores it — cancellation is best-effort, not a correctness guarantee. */
   signal?: AbortSignal;
+  /** CAS mode (host opt-in, like network). Present = a resolver snapshots its materialized bytes into the
+   *  content-addressed store and scans FROM it (byte-perfect provenance + cross-db reuse). Absent = fast mode:
+   *  scan the source directly, no snapshot. Reuse is for WHOLE objects (an API JSON response, a dump) — NOT a
+   *  substitute for range/tabix access to a small region of a huge indexed file (that is duckhts' job). */
+  cas?: CasStore;
 }
 
 /**

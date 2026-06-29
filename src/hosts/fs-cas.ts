@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { join } from "node:path";
 import type { CasStore } from "../core/cas.js";
@@ -28,6 +29,22 @@ export function fsCasStore(root: string): CasStore {
         await fs.rm(tmp, { force: true });
         if (!(await this.has(a))) throw err;
       }
+    },
+    // Cross-db remote index: <root>/remote/<sha256(url)>.json. Keyed by URL hash (not the raw URL) so the
+    // filename is path-safe regardless of the URL's characters.
+    async getRemote(url) {
+      const p = join(root, "remote", `${createHash("sha256").update(url).digest("hex")}.json`);
+      try {
+        const { etag, address } = JSON.parse(await fs.readFile(p, "utf8")) as { etag: string; address: ContentAddress };
+        return { etag, address };
+      } catch { return undefined; }
+    },
+    async putRemote(url, etag, address) {
+      await fs.mkdir(join(root, "remote"), { recursive: true });
+      const p = join(root, "remote", `${createHash("sha256").update(url).digest("hex")}.json`);
+      const tmp = `${p}.tmp-${process.pid}-${Date.now()}`;
+      await fs.writeFile(tmp, JSON.stringify({ url, etag, address }));
+      await fs.rename(tmp, p); // the validator is mutable (last-seen) — overwrite is correct
     },
   };
 }

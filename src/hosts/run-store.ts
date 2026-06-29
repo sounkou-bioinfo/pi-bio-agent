@@ -3,6 +3,7 @@ import { systemClock } from "../core/clock.js";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { createBioRegistry, type BioRegistry, type DomainPackManifest, type ResolutionReceipt } from "../core/manifest.js";
+import type { CasStore } from "../core/cas.js";
 import type { BioResolverImpl, SqlConn } from "../core/ports.js";
 import { OperationRunError, runOperation, runQuery, type OperationResult } from "../core/operations.js";
 import type { BioRunRecord } from "../core/run-spec.js";
@@ -122,6 +123,9 @@ export interface RunOperationRequest {
   network?: { fetch: FetchLike };
   /** Cooperative cancellation, forwarded to each resolver (e.g. http.get's fetch). */
   signal?: AbortSignal;
+  /** CAS mode (host opt-in): a content-addressed byte store. Present = resolvers snapshot bytes into it and
+   *  reuse them across dbs/runs; absent = fast mode. */
+  cas?: CasStore;
 }
 
 export type RunOperationResponse =
@@ -192,7 +196,7 @@ export async function runBioOperationFromManifest(req: RunOperationRequest): Pro
   if (op.transport !== "duckdb.sql" || !op.sql) throw new Error(`operation '${req.operationId}' is not a duckdb.sql operation`);
   const now = req.now ?? systemClock();
   const runId = req.runId ?? `${req.operationId.replace(/[^a-zA-Z0-9._-]/g, "_")}-${Date.now()}`;
-  return runAndPersist(req.cwd, req.dbPath, runId, req.operationId, (conn) => runOperation(registry, conn, { operationId: req.operationId, runId, now, signal: req.signal }));
+  return runAndPersist(req.cwd, req.dbPath, runId, req.operationId, (conn) => runOperation(registry, conn, { operationId: req.operationId, runId, now, signal: req.signal, cas: req.cas }));
 }
 
 export interface RunQueryRequest {
@@ -209,6 +213,8 @@ export interface RunQueryRequest {
   network?: { fetch: FetchLike };
   /** Cooperative cancellation, forwarded to each resolver (e.g. http.get's fetch). */
   signal?: AbortSignal;
+  /** CAS mode (host opt-in): a content-addressed byte store for cross-db byte reuse. */
+  cas?: CasStore;
 }
 
 /**
@@ -226,5 +232,5 @@ export async function runBioQueryFromManifest(req: RunQueryRequest): Promise<Run
   const resources = req.resources ?? (manifest.provides?.resources ?? []).map((r) => r.id);
   const now = req.now ?? systemClock();
   const runId = req.runId ?? `query-${Date.now()}`;
-  return runAndPersist(req.cwd, req.dbPath, runId, "ad-hoc.query", (conn) => runQuery(registry, conn, { sql: req.sql, resources, runId, now, signal: req.signal }));
+  return runAndPersist(req.cwd, req.dbPath, runId, "ad-hoc.query", (conn) => runQuery(registry, conn, { sql: req.sql, resources, runId, now, signal: req.signal, cas: req.cas }));
 }

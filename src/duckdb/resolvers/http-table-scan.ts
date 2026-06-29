@@ -45,45 +45,71 @@ export function httpTableResolver(fetchImpl: FetchLike): BioResolverImpl {
     // writes via params.method.
     const method = p.method === undefined ? "GET" : p.method;
     if (method !== "GET") throw new Error("http.get supports GET only");
+    // Capture the now-narrowed string values: TS drops property narrowing inside the closures below.
+    const url: string = p.url;
+    const table: string = p.table;
 
     // Memoize only when there are NO custom request headers — Accept/auth/etc. (Vary) could otherwise make a
-    // 304 replay the wrong representation. Conditional request: with a stored ETag for THIS table+url (the memo
-    // is keyed on table name, so a different url must not reuse a stale validator), send If-None-Match so the
-    // server can answer 304 Not Modified — a cache hit with no body.
+    // 304 replay the wrong representation. Two layers of conditional-request reuse, both gated on `memoable`:
+    //   per-db memo  → replays a materialized TABLE within THIS db (no re-materialize).
+    //   CAS remote   → a cross-db url→{etag,address} index; lets a DIFFERENT db 304 and materialize from the
+    //                  already-stored CAS bytes WITHOUT re-downloading. The per-db memo wins when both apply.
     const memoable = Object.keys(headers).length === 0;
-    const memo = memoable ? await memoGet(ctx.conn, p.table) : undefined;
-    const sameUrl = memo?.receipt.sourceSnapshots[0]?.source === p.url;
-    const conditional = memo && sameUrl ? { ...headers, "If-None-Match": memo.freshness } : headers;
-    const res = await fetchImpl(p.url, { method: "GET", headers: conditional, signal: ctx.signal });
-    if (memo && sameUrl && res.status === 304) return memo.receipt; // unchanged: replay the cached receipt, skip body + materialize
-    if (!res.ok) throw new Error(`http resolver: GET ${p.url} returned status ${res.status}`); // fail closed, no retry/fallback
-    const body = await res.text();
-    const digest = createHash("sha256").update(body).digest("hex");
-
-    // Materialize through a resolver-owned temp file (the native reader parses it); clean up always. This is a
-    // resolver DDL (CREATE), not operation SQL, so it never flows through the read-only guard.
-    const dir = await fs.mkdtemp(join(tmpdir(), "pi-bio-http-"));
-    const file = join(dir, format === "csv" ? "body.csv" : "body.json");
-    await fs.writeFile(file, body, "utf8");
-    try {
-      await ctx.conn.run(`CREATE OR REPLACE TABLE ${p.table} AS SELECT * FROM ${reader}(?)`, [file]);
-    } finally {
-      await fs.rm(dir, { recursive: true, force: true });
-    }
+    const cas = ctx.cas;
+    const memo = memoable ? await memoGet(ctx.conn, table) : undefined;
+    const sameUrl = memo?.receipt.sourceSnapshots[0]?.source === url;
+    const casRemote = !memo && memoable && cas ? await cas.getRemote(url) : undefined;
+    const validator = memo && sameUrl ? memo.freshness : casRemote?.etag;
+    const conditional = validator !== undefined ? { ...headers, "If-None-Match": validator } : headers;
+    const res = await fetchImpl(url, { method: "GET", headers: conditional, signal: ctx.signal });
 
     const now = ctx.now ?? systemClock();
-    const output: ResolverOutput = {
+    const materializeFrom = (file: string) => ctx.conn.run(`CREATE OR REPLACE TABLE ${table} AS SELECT * FROM ${reader}(?)`, [file]);
+    const outputFor = (digest: string): ResolverOutput => ({
       // the handle identifies what downstream SQL uses — the materialized table; the URL is provenance, below
-      result: { schema: "pi-bio.resource_handle.v1", mode: "reference", name: p.table, pointer: { uri: `table:${p.table}`, format: "table" }, address: { algorithm: "sha256", digest } },
-      sourceSnapshots: [{ source: p.url, retrievedAt: now, version: `sha256:${digest}` }],
-      provenance: [{ source: p.url, retrievedAt: now, digest: `sha256:${digest}`, notes: ["http.get"] }],
-    };
+      result: { schema: "pi-bio.resource_handle.v1", mode: "reference", name: table, pointer: { uri: `table:${table}`, format: "table" }, address: { algorithm: "sha256", digest } },
+      sourceSnapshots: [{ source: url, retrievedAt: now, version: `sha256:${digest}` }],
+      provenance: [{ source: url, retrievedAt: now, digest: `sha256:${digest}`, notes: cas ? ["http.get", "cas"] : ["http.get"] }],
+    });
+
+    if (res.status === 304) {
+      if (memo && sameUrl) return memo.receipt; // per-db: replay cached receipt, skip body + materialize
+      if (casRemote && cas) {
+        // cross-db: the unchanged bytes are already in CAS (a prior fetch put them) — materialize from them, no download
+        await materializeFrom(cas.pathFor(casRemote.address));
+        const output = outputFor(casRemote.address.digest);
+        if (memoable) await memoStore(ctx.conn, table, casRemote.etag, output); // seed THIS db's memo
+        return output;
+      }
+      throw new Error(`http resolver: GET ${url} returned 304 but no cached bytes were available to replay`);
+    }
+    if (!res.ok) throw new Error(`http resolver: GET ${url} returned status ${res.status}`); // fail closed, no retry/fallback
+
+    const body = await res.text();
+    const digest = createHash("sha256").update(body).digest("hex");
+    const etag = res.headers?.get("etag") ?? undefined;
+
+    // CAS mode: snapshot the bytes into the store and scan FROM the CAS path (byte-perfect provenance + cross-db
+    // reuse). Fast mode: scan from a throwaway temp file. Either way this is resolver DDL (CREATE), not operation
+    // SQL, so it never flows through the read-only guard.
+    if (cas) {
+      const address = { algorithm: "sha256" as const, digest };
+      await cas.put(address, body);
+      await materializeFrom(cas.pathFor(address));
+      if (memoable && etag !== undefined) await cas.putRemote(url, etag, address); // seed the cross-db index
+    } else {
+      const dir = await fs.mkdtemp(join(tmpdir(), "pi-bio-http-"));
+      const file = join(dir, format === "csv" ? "body.csv" : "body.json");
+      await fs.writeFile(file, body, "utf8");
+      try { await materializeFrom(file); } finally { await fs.rm(dir, { recursive: true, force: true }); }
+    }
+
+    const output = outputFor(digest);
     // Store the ETag if the server gave one; if a fresh 200 has NO validator, CLEAR any prior memo so a stale
     // validator can never be replayed on a later 304.
     if (memoable) {
-      const etag = res.headers?.get("etag") ?? undefined;
-      if (etag !== undefined) await memoStore(ctx.conn, p.table, etag, output);
-      else await memoClear(ctx.conn, p.table);
+      if (etag !== undefined) await memoStore(ctx.conn, table, etag, output);
+      else await memoClear(ctx.conn, table);
     }
     return output;
   };
