@@ -302,17 +302,24 @@ body — overfitting: a real skill doesn't bake the query data into the manifest
   why OPTIONS/HEAD aren't in the body->table resolver: they're DISCOVERY, a separate concern from data-fetch.
   Build: `openApiToResources(spec)` -> http resource templates (url/method/body-schema/format); the agent picks
   an operation and fills its params.
-- **PARAMETERIZED RESOURCES (the query data comes from upstream/agent, not the manifest).** Today resource
-  params are STATIC manifest data; there is no way to template a resource's request from another table's
-  contents or agent input. The honest "discover variants then annotate" flow needs: stage-1 reads a VCF
-  (`duckhts.read_bcf`) -> a table of ids; stage-2's VEP request `body` is TEMPLATED from that table (`{ids: SELECT
-  id FROM variants}`). That is a real feature — a resource whose request is a function of upstream data — and it
-  is what turns the hardcoded-rsID toy into a composed skill. Until then, examples that bake query data into the
-  manifest must SAY so (variant-annotation's README now does).
+- **PARAMETERIZED RESOURCES — done the SQL way, not a DSL.** The query data comes from the agent / upstream, not
+  the manifest, and it is all SQL (no bespoke templating; the `fillTemplate`/`$sql` DSL was reverted):
+  - **agent params = DuckDB SESSION VARIABLES.** `bindings` -> `SET VARIABLE name = ?` on the conn before
+    resolution; a resource's `url` (when not a literal) is a SQL EXPRESSION evaluated against the conn:
+    `'https://…/search?q=' || getvariable('query') || '&ontology=' || coalesce(getvariable('ontology'),'mondo')`.
+    DuckDB composes it; a non-http result fails closed. (ols4-grounding now works exactly this way.)
+  - **upstream data = SQL subqueries.** "Discover then annotate": stage-1 reads a VCF (`duckhts.read_bcf`) -> a
+    `variants` table; stage-2's request composes from it in SQL — a url with a subquery, or a body built with
+    `json_group_array((SELECT id FROM variants))`. The request is a function of upstream data, in SQL.
+  - **GAP:** SQL URL composition needs a `url_encode` for values with spaces/specials. `ducknng_ncurl` provides
+    it (and makes the fetch itself SQL); else register a small UDF. Today's examples use already-safe terms.
+- **BATCH HTTP = a chunked, rate-limited PIPELINE, not one request.** VEP caps the batch (~200-1000 ids) and
+  rate-limits (~15 req/s, `429`+`Retry-After`, hourly quota). Annotating a real VCF: chunk the variant list (SQL)
+  into batches <= the limit, run them through `runPipeline` (the push/pull pool) with `withRetry` (429/backoff),
+  `UNION` the results. The pieces exist; wiring a "batched http resource" over them is the remaining build.
 
-Together: OpenAPI gives the resource SHAPE + param schema (derived); parameterization lets the agent/upstream
-fill the params. Then the flow is real: discover the API (OpenAPI) -> read variants (VCF) -> annotate them (VEP
-with agent/upstream-provided ids), with nothing query-specific hardcoded.
+Together: OpenAPI gives the resource SHAPE (derived); SQL (SET VARIABLE + subqueries) fills the params; a chunked
+rate-limited pipeline handles scale. Nothing query-specific is hardcoded, and it is all SQL + the pipeline pieces.
 
 ## Machine studying — Fugu pieces 2 & 3 over the study-notes system
 
