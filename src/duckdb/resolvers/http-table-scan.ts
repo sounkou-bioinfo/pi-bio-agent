@@ -16,7 +16,7 @@ import { memoClear, memoGet, memoStore } from "../resolution-memo.js";
 // the exact bytes fetched, so the run records precisely what came back.
 
 export type FetchResponse = { ok: boolean; status: number; text(): Promise<string>; headers?: { get(name: string): string | null } };
-export type FetchLike = (url: string, init?: { method?: string; headers?: Record<string, string> }) => Promise<FetchResponse>;
+export type FetchLike = (url: string, init?: { method?: string; headers?: Record<string, string>; signal?: AbortSignal }) => Promise<FetchResponse>;
 
 // A remote resource is a time-varying thunk; its memo is HTTP cache validation, not a precomputed token. We
 // store the response's ETag and replay the cached receipt on a `304 Not Modified` to a conditional
@@ -54,7 +54,7 @@ export function httpTableResolver(fetchImpl: FetchLike): BioResolverImpl {
     const memo = memoable ? await memoGet(ctx.conn, p.table) : undefined;
     const sameUrl = memo?.receipt.sourceSnapshots[0]?.source === p.url;
     const conditional = memo && sameUrl ? { ...headers, "If-None-Match": memo.freshness } : headers;
-    const res = await fetchImpl(p.url, { method: "GET", headers: conditional });
+    const res = await fetchImpl(p.url, { method: "GET", headers: conditional, signal: ctx.signal });
     if (memo && sameUrl && res.status === 304) return memo.receipt; // unchanged: replay the cached receipt, skip body + materialize
     if (!res.ok) throw new Error(`http resolver: GET ${p.url} returned status ${res.status}`); // fail closed, no retry/fallback
     const body = await res.text();

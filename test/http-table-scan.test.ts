@@ -62,6 +62,18 @@ describe("http.get: one generic HTTP resolver (injected fetch, no ambient networ
     assert.equal(second.sourceSnapshots[0]!.retrievedAt, "T1", "a 304 must replay the cached resolution");
   });
 
+  test("forwards the cancellation signal to the injected fetch (cooperative abort)", async () => {
+    const conn = await memoryConn();
+    const ac = new AbortController();
+    ac.abort();
+    // the resolver must hand ctx.signal to the fetch so an aborted tool call tears the request down
+    const seesSignal: FetchLike = async (_url, init) => {
+      if (init?.signal?.aborted) throw new Error("aborted by signal");
+      return { ok: true, status: 200, text: async () => "[]" };
+    };
+    await assert.rejects(() => httpTableResolver(seesSignal)(resource({ url: "https://x/y", table: "t" }), { conn, now: "t", signal: ac.signal }), /aborted by signal/);
+  });
+
   test("never reaches the network on its own — fetch is injected; a throwing fetch surfaces, nothing ambient", async () => {
     const conn = await memoryConn();
     const exploding: FetchLike = async () => { throw new Error("network call attempted"); };

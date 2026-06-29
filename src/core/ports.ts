@@ -50,6 +50,10 @@ export interface ResolutionContext {
   conn: SqlConn;
   /** Injectable clock for deterministic receipts/tests. */
   now?: string;
+  /** Cooperative cancellation. A networked resolver (http.get) passes it to the injected fetch so an aborted
+   *  tool call / a runaway request is torn down instead of running to completion. A resolver that can't honor
+   *  it ignores it — cancellation is best-effort, not a correctness guarantee. */
+  signal?: AbortSignal;
 }
 
 /**

@@ -81,8 +81,8 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
       operationId: Type.String({ description: "Operation id declared in the manifest." }),
       runId: Type.Optional(Type.String({ description: "Stable run id; generated when omitted." })),
     }),
-    async execute(_id, params: { dbPath: string; manifestPath: string; operationId: string; runId?: string }, _signal, _onUpdate, ctx) {
-      return text(await runBioOperationFromManifest({ cwd: ctx.cwd, ...params, network }));
+    async execute(_id, params: { dbPath: string; manifestPath: string; operationId: string; runId?: string }, signal, _onUpdate, ctx) {
+      return text(await runBioOperationFromManifest({ cwd: ctx.cwd, ...params, network, signal }));
     },
   });
 
@@ -97,8 +97,8 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
       resources: Type.Optional(Type.Array(Type.String(), { description: "Which declared resource ids to resolve first. Defaults to ALL declared; pass the subset your SQL uses to avoid resolving unrelated resources (e.g. a remote one you don't need)." })),
       runId: Type.Optional(Type.String({ description: "Stable run id; generated when omitted." })),
     }),
-    async execute(_id, params: { dbPath: string; manifestPath: string; sql: string; resources?: string[]; runId?: string }, _signal, _onUpdate, ctx) {
-      return text(await runBioQueryFromManifest({ cwd: ctx.cwd, ...params, network }));
+    async execute(_id, params: { dbPath: string; manifestPath: string; sql: string; resources?: string[]; runId?: string }, signal, _onUpdate, ctx) {
+      return text(await runBioQueryFromManifest({ cwd: ctx.cwd, ...params, network, signal }));
     },
   });
 

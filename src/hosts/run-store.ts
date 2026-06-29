@@ -120,6 +120,8 @@ export interface RunOperationRequest {
   /** Network opt-in: pass a fetch to enable the http.get resolver. Absent = http.get stays unbound and any
    *  networked resource fails closed. The host (not core) owns this policy; nothing is read from ambient state. */
   network?: { fetch: FetchLike };
+  /** Cooperative cancellation, forwarded to each resolver (e.g. http.get's fetch). */
+  signal?: AbortSignal;
 }
 
 export type RunOperationResponse =
@@ -190,7 +192,7 @@ export async function runBioOperationFromManifest(req: RunOperationRequest): Pro
   if (op.transport !== "duckdb.sql" || !op.sql) throw new Error(`operation '${req.operationId}' is not a duckdb.sql operation`);
   const now = req.now ?? systemClock();
   const runId = req.runId ?? `${req.operationId.replace(/[^a-zA-Z0-9._-]/g, "_")}-${Date.now()}`;
-  return runAndPersist(req.cwd, req.dbPath, runId, req.operationId, (conn) => runOperation(registry, conn, { operationId: req.operationId, runId, now }));
+  return runAndPersist(req.cwd, req.dbPath, runId, req.operationId, (conn) => runOperation(registry, conn, { operationId: req.operationId, runId, now, signal: req.signal }));
 }
 
 export interface RunQueryRequest {
@@ -205,6 +207,8 @@ export interface RunQueryRequest {
   runId?: string;
   now?: string;
   network?: { fetch: FetchLike };
+  /** Cooperative cancellation, forwarded to each resolver (e.g. http.get's fetch). */
+  signal?: AbortSignal;
 }
 
 /**
@@ -222,5 +226,5 @@ export async function runBioQueryFromManifest(req: RunQueryRequest): Promise<Run
   const resources = req.resources ?? (manifest.provides?.resources ?? []).map((r) => r.id);
   const now = req.now ?? systemClock();
   const runId = req.runId ?? `query-${Date.now()}`;
-  return runAndPersist(req.cwd, req.dbPath, runId, "ad-hoc.query", (conn) => runQuery(registry, conn, { sql: req.sql, resources, runId, now }));
+  return runAndPersist(req.cwd, req.dbPath, runId, "ad-hoc.query", (conn) => runQuery(registry, conn, { sql: req.sql, resources, runId, now, signal: req.signal }));
 }
