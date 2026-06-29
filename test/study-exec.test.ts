@@ -68,6 +68,28 @@ describe("study scaffold executor: orchestration over workers", () => {
     assert.match(result.notes.find((n) => n.slug === "aggregator")!.body, /\[leaf-a,leaf-b\]/);
   });
 
+  test("runs a SURVEY/DEBATE topology: N respondents answer the same subtask independently, one aggregator synthesizes", async () => {
+    // Fugu's best-of-N: respondents are isolated from EACH OTHER (parallel independent attempts); only the
+    // aggregator surveys them all. This is the nng surveyor/respondent pattern over the access-list DAG.
+    const respondents = ["resp-1", "resp-2", "resp-3"];
+    const scaffold = {
+      schema: "pi-bio.study_scaffold.v1" as const, corpusId: "c", objective: "best-of-N debate",
+      steps: [
+        ...respondents.map((id) => ({ id, subtask: "answer Q independently", produces: "worked_example" as const, accessList: {} })),
+        { id: "aggregator", subtask: "synthesize all answers", produces: "index" as const, accessList: { notes: respondents } },
+      ],
+    };
+    const seen: Record<string, string[]> = {};
+    const worker: StudyWorker = async ({ step, notes }) => { seen[step.id] = notes.map((n) => n.slug); return { body: `${step.id} saw [${notes.map((n) => n.slug).join(",")}]`, hook: "h" }; };
+    const result = await runStudyScaffold(scaffold, worker, { now: "T1" });
+
+    // every respondent is isolated from the others (independent attempts)
+    for (const id of respondents) assert.deepEqual(seen[id], [], `${id} must attempt independently`);
+    // the aggregator surveys ALL respondents (fan-in of N)
+    assert.deepEqual(seen["aggregator"], respondents);
+    assert.equal(result.order[result.order.length - 1], "aggregator");
+  });
+
   test("fails closed on an invalid scaffold (does not execute any worker)", async () => {
     let called = false;
     const worker: StudyWorker = async () => { called = true; return { body: "x", hook: "y" }; };
