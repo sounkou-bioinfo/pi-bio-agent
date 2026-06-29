@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
-import type { BioResolverImpl } from "../../core/ports.js";
+import { readFileSync, statSync } from "node:fs";
+import type { BioResolverImpl, ResolverOutput } from "../../core/ports.js";
+import { memoLookup, memoStore } from "../resolution-memo.js";
 
 // Generic DuckDB-native file resolver. A *variant record* (or any record) is an abstraction over a table
 // shape — the source FORMAT is a swappable provider. VCF/BCF is one provider (duckhts.read_bcf); CSV, TSV,
@@ -39,6 +40,23 @@ export const duckdbFileScanResolver: BioResolverImpl = async (resource, ctx) => 
   const fn = readerFor(path, reader);
   const now = ctx.now ?? new Date().toISOString();
 
+  // Memoization: a cheap freshness token (mtime+size) for a LOCAL file lets a re-resolve over a persistent db
+  // skip the re-read + re-load when the file is unchanged. Remote/unstatable paths get no token -> never memo
+  // (always re-resolve) — the safe default. Keyed on content freshness, so it never serves stale data.
+  let freshness: string | undefined;
+  if (!path.includes("://")) {
+    try {
+      const s = statSync(path);
+      freshness = `${s.mtimeMs}:${s.size}`;
+    } catch {
+      /* unstatable -> no memo */
+    }
+  }
+  if (freshness !== undefined) {
+    const hit = await memoLookup(ctx.conn, table, freshness);
+    if (hit) return hit; // file unchanged + table present: replay the receipt, skip read + DuckDB load
+  }
+
   let inputDigest: string | undefined;
   try {
     inputDigest = `sha256:${createHash("sha256").update(readFileSync(path)).digest("hex")}`;
@@ -49,7 +67,7 @@ export const duckdbFileScanResolver: BioResolverImpl = async (resource, ctx) => 
   await ctx.conn.run(`CREATE OR REPLACE TABLE ${table} AS SELECT * FROM ${fn}(?)`, [path]);
 
   const sourceUri = path.includes("://") ? path : `file:${path}`; // a remote input is its own URI, not file:
-  return {
+  const output: ResolverOutput = {
     result: { schema: "pi-bio.resource_handle.v1", mode: "reference", name: table, pointer: { uri: `table:${table}`, format: "table" } },
     sourceSnapshots: [
       { source: sourceUri, version: inputDigest, retrievedAt: now },
@@ -57,4 +75,6 @@ export const duckdbFileScanResolver: BioResolverImpl = async (resource, ctx) => 
     ],
     provenance: [{ source: "duckdb.file_scan", retrievedAt: now }],
   };
+  if (freshness !== undefined) await memoStore(ctx.conn, table, freshness, output);
+  return output;
 };
