@@ -55,3 +55,10 @@ export async function memoStore(conn: SqlConn, tableName: string, freshness: str
   await conn.run(`DELETE FROM ${MEMO_TABLE} WHERE table_name = ?`, [tableName]);
   await conn.run(`INSERT INTO ${MEMO_TABLE} (table_name, freshness, receipt) VALUES (?, ?, ?)`, [tableName, freshness, JSON.stringify(output)]);
 }
+
+/** Drop any memo entry for a table — used after a fresh materialization that yielded NO validator, so a stale
+ *  validator can never be replayed on a later conditional request. */
+export async function memoClear(conn: SqlConn, tableName: string): Promise<void> {
+  await ensureMemo(conn);
+  await conn.run(`DELETE FROM ${MEMO_TABLE} WHERE table_name = ?`, [tableName]);
+}

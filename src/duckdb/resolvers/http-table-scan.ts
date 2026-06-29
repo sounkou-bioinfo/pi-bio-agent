@@ -3,7 +3,7 @@ import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { BioResolverImpl, ResolverOutput } from "../../core/ports.js";
-import { memoGet, memoStore } from "../resolution-memo.js";
+import { memoClear, memoGet, memoStore } from "../resolution-memo.js";
 
 // ONE generic HTTP resolver — not a per-API client. It GETs a declared URL and materializes the response into
 // a DuckDB table via a native reader (json/csv), so any HTTP/JSON source (OLS4 search, OpenTargets, gnomAD,
@@ -18,10 +18,10 @@ export type FetchResponse = { ok: boolean; status: number; text(): Promise<strin
 export type FetchLike = (url: string, init?: { method?: string; headers?: Record<string, string> }) => Promise<FetchResponse>;
 
 // A remote resource is a time-varying thunk; its memo is HTTP cache validation, not a precomputed token. We
-// store the response's ETag (or Last-Modified) and replay the cached receipt on a `304 Not Modified` to a
-// conditional `If-None-Match` — no body re-download, no re-materialize. The consumer is ClawBio-shaped: a skill
-// that grounds/looks up the same remote endpoint (OLS4, OpenTargets, gnomAD) repeatedly.
-const validatorOf = (res: FetchResponse): string | undefined => res.headers?.get("etag") ?? res.headers?.get("last-modified") ?? undefined;
+// store the response's ETag and replay the cached receipt on a `304 Not Modified` to a conditional
+// `If-None-Match` — no body re-download, no re-materialize. The consumer is ClawBio-shaped: a skill that
+// grounds/looks up the same remote endpoint (OLS4, OpenTargets, gnomAD) repeatedly. Correctness: ETag only
+// (Last-Modified would need If-Modified-Since), and only when there are no custom request headers (Vary).
 
 const READERS: Record<string, string> = { json: "read_json_auto", ndjson: "read_json_auto", csv: "read_csv_auto" };
 
@@ -44,11 +44,12 @@ export function httpTableResolver(fetchImpl: FetchLike): BioResolverImpl {
     const method = p.method === undefined ? "GET" : p.method;
     if (method !== "GET") throw new Error("http.get supports GET only");
 
-    // Conditional request: if we have a stored validator (ETag/Last-Modified) for this table, the table is
-    // still present, AND the cached receipt is for THIS url (the memo is keyed on table name, so a different
-    // url to the same table must not reuse a stale validator), send If-None-Match so the server can answer
-    // 304 Not Modified — a cache hit with no body.
-    const memo = await memoGet(ctx.conn, p.table);
+    // Memoize only when there are NO custom request headers — Accept/auth/etc. (Vary) could otherwise make a
+    // 304 replay the wrong representation. Conditional request: with a stored ETag for THIS table+url (the memo
+    // is keyed on table name, so a different url must not reuse a stale validator), send If-None-Match so the
+    // server can answer 304 Not Modified — a cache hit with no body.
+    const memoable = Object.keys(headers).length === 0;
+    const memo = memoable ? await memoGet(ctx.conn, p.table) : undefined;
     const sameUrl = memo?.receipt.sourceSnapshots[0]?.source === p.url;
     const conditional = memo && sameUrl ? { ...headers, "If-None-Match": memo.freshness } : headers;
     const res = await fetchImpl(p.url, { method: "GET", headers: conditional });
@@ -75,10 +76,13 @@ export function httpTableResolver(fetchImpl: FetchLike): BioResolverImpl {
       sourceSnapshots: [{ source: p.url, retrievedAt: now, version: `sha256:${digest}` }],
       provenance: [{ source: p.url, retrievedAt: now, digest: `sha256:${digest}`, notes: ["http.get"] }],
     };
-    // Memoize only when the server gave a validator (ETag/Last-Modified) — without one a future conditional
-    // request can't 304, so there is nothing to cache against.
-    const validator = validatorOf(res);
-    if (validator !== undefined) await memoStore(ctx.conn, p.table, validator, output);
+    // Store the ETag if the server gave one; if a fresh 200 has NO validator, CLEAR any prior memo so a stale
+    // validator can never be replayed on a later 304.
+    if (memoable) {
+      const etag = res.headers?.get("etag") ?? undefined;
+      if (etag !== undefined) await memoStore(ctx.conn, p.table, etag, output);
+      else await memoClear(ctx.conn, p.table);
+    }
     return output;
   };
 }
