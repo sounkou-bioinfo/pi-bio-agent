@@ -243,6 +243,20 @@ sign-off (host policy). The collapse is ARCHITECTURAL (no new substrate class), 
 http-resolver generalization (POST/body, host-injected auth, pagination-follow, poll) that does not exist yet —
 that is pal's one accurate point. See "HTTP resolver generalization" below.
 
+Narrowed further (pal #10c, honest): "no new SUBSTRATE class for many request/response APIs" is the defensible
+claim; **production SEMANTICS are NOT free** and are real engineering, not architecture:
+- stateful-async needs DURABLE job ids + resume-after-crash + idempotency keys + cancellation + TTL/cleanup +
+  PARTIAL receipts (today a resolver that submits a remote job and crashes before returning loses the job id —
+  `src/core/operations.ts` only records a receipt after `resolveResource` returns).
+- auth is more than a header: OAuth refresh needs a host-owned TOKEN LIFECYCLE + retry-on-401 (today `headers`
+  come from manifest params, not a host `authHeaders` capability).
+- rate limits: `429`/`Retry-After`/quota budgets/host throttling — unaddressed.
+- streaming/binary/SSE/websockets: today `FetchResponse` is `text()`-only, JSON/CSV/NDJSON — full-body only.
+- real remote WRITES/transactions: the operation surface is read-only by design; POST with `mutates:false` does
+  not cover two-phase workflows, retries, idempotency, transaction receipts.
+So: the bet is "the substrate absorbs the request/response API SHAPE as data"; the durable effect/auth/rate-
+limit/streaming/write machinery is genuine work the process runtime + host capabilities must provide.
+
 ### HTTP resolver generalization (the real build the collapse needs)
 `http.get` is today GET-only, JSON/CSV/NDJSON, single-shot. To make the classes above manifest-expressible:
 - `method` + `body` params (POST/PUT; GraphQL = POST + JSON query body). Keep read-only INTENT explicit (a

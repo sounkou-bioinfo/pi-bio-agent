@@ -3,7 +3,7 @@
   "id": "long-context-aggregate",
   "version": "0.1.0",
   "title": "Long-context aggregate (RLM, as SQL)",
-  "description": "Closes over RLM (Recursive Language Models, arXiv 2512.24601): instead of stuffing thousands of rows into the prompt and recursively sub-querying an LM, the rows live as a DuckDB TABLE and the agent answers the distributional query with one GROUP BY. This is RLM's OOLONG task ('among instances for these user IDs, how many are label X') expressed as deterministic SQL — the agent never sees the whole context (no context rot) and the count is exact (where RLM recurses and miscounts at long context). The manifest declares only the resource; the agent writes the SQL.",
+  "description": "Closes over the DETERMINISTIC HALF of RLM (Recursive Language Models, arXiv 2512.24601): once rows are labeled, the distributional query ('among instances for these user IDs, how many are label X') is one GROUP BY — the rows live as a DuckDB table, the agent never sees the whole context (no context rot), and the count is exact where RLM recurses and miscounts at long context. HONEST CAVEAT: the `label` is pre-given in the CSV here; the genuinely hard part RLM recurses on is INFERRING each label from free text — the semantic judgment boundary, shown as a map step in test/map-reduce-labeling.test.ts (worker labels partitions -> host single-writer merge -> aggregate). This manifest shows only the deterministic aggregate.",
   "domains": ["long-context"],
   "provides": {
     "resolvers": [

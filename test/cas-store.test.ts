@@ -32,9 +32,18 @@ describe("CAS-of-bytes: a content-addressed byte store", () => {
     const addr = addressOf(bytes);
     await cas.put(addr, bytes);
     const firstMtime = (await fs.stat(cas.pathFor(addr))).mtimeMs;
-    await cas.put(addr, "DIFFERENT bytes (ignored — the address pins the content)");
+    await cas.put(addr, bytes); // re-putting the SAME (matching) bytes is a no-op (present entry left untouched)
     assert.equal(await fs.readFile(cas.pathFor(addr), "utf8"), bytes, "a present entry is immutable");
     assert.equal((await fs.stat(cas.pathFor(addr))).mtimeMs, firstMtime, "no rewrite on re-put");
+  });
+
+  test("put REFUSES content that does not hash to its address (provenance integrity)", async () => {
+    const root = await fs.mkdtemp(join(tmpdir(), "pi-bio-cas-"));
+    const cas = fsCasStore(root);
+    const addr = addressOf("the real bytes");
+    // a digest that does not match the bytes must be rejected — CAS can't be allowed to store a lie
+    await assert.rejects(() => cas.put(addr, "DIFFERENT bytes than the address claims"), /mismatched content/);
+    assert.equal(await cas.has(addr), false, "nothing was stored");
   });
 
   test("distinct content lands in distinct entries (dedup is by hash)", async () => {

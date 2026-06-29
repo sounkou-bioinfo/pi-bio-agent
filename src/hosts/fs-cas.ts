@@ -16,6 +16,12 @@ export function fsCasStore(root: string): CasStore {
       try { await fs.access(pathFor(a)); return true; } catch { return false; }
     },
     async put(a, bytes) {
+      // CAS must never store content that does not match its address, or a receipt's digest would lie. Verify
+      // the bytes actually hash to the claimed address before writing (content-addressing is the whole point).
+      if (a.algorithm === "sha256") {
+        const actual = createHash("sha256").update(bytes).digest("hex");
+        if (actual !== a.digest) throw new Error(`CAS put: bytes hash to ${actual} but address claims ${a.digest} — refusing to store mismatched content`);
+      }
       const dest = pathFor(a);
       try { await fs.access(dest); return; } catch { /* not present — write it */ }
       await fs.mkdir(join(root, a.algorithm), { recursive: true });
