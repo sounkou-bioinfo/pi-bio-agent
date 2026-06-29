@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { BioArtifact } from "./types.js";
 import { appendRunEvent, newRunRecord, type BioRunRecord, type BioRunSpec } from "./run-spec.js";
 import { validateReadOnlySelect } from "./sql-guard.js";
+import { materializeScaleMembers } from "./scales.js";
 import type { BioRegistry, ResolutionReceipt, SourceSnapshot } from "./manifest.js";
 import type { SqlConn } from "./ports.js";
 
@@ -82,6 +83,9 @@ export async function runOperation(
     for (const rid of resources) {
       receipts.push(await registry.resolveResource(rid, { conn, now }));
     }
+    // Ordinal scales as data: project every ordered TermSet into `scale_members` so operation SQL can JOIN
+    // and threshold/ORDER BY on rank. Derived from declared manifest data (no external source, no receipt).
+    await materializeScaleMembers(registry, conn);
 
     // No column pre-declaration: the SQL the agent wrote references its columns, and DuckDB's binder is the
     // arbiter — a missing column fails closed here with a clear binder error. Schema discovery (describeTable)

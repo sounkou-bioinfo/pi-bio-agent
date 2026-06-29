@@ -12,6 +12,7 @@ export * from "./storage.js";
 export * from "./manifest.js";
 export * from "./operations.js";
 export * from "./schema-discovery.js";
+export * from "./scales.js";
 export * from "./judgment.js";
 export * from "./context.js";
 export * from "./study.js";

@@ -16,10 +16,17 @@ export type { BioResolverSpec, SourceSnapshot, VirtualResourceSpec } from "./res
 export interface TermRef {
   id: string;
   label?: string;
+  /** Position on an ordered scale (lowest = smallest). Required for every member of an `ordered` TermSet;
+   *  ignored otherwise. The scale is DATA — ordering lives here, not in TypeScript. */
+  rank?: number;
 }
 export interface TermSet {
   id: string;
   title: string;
+  /** When true this is an ORDINAL SCALE: every member carries a unique integer `rank`, and the substrate
+   *  materializes the set into the `scale_members` table so operation SQL can ORDER BY / threshold on rank.
+   *  Membership grounding (decideGrounding) is unchanged; ordering is just the rank column. */
+  ordered?: boolean;
   members: TermRef[];
 }
 
@@ -156,13 +163,22 @@ export function validateDomainPackManifest(manifest: DomainPackManifest): string
   }
   for (const ts of termSets) {
     if (!ts.title?.trim()) errors.push(`termSet '${ts.id}' requires a title`);
-    rejectUnknownKeys(ts, ["id", "title", "members"], `termSet '${ts.id}'`, errors);
+    rejectUnknownKeys(ts, ["id", "title", "ordered", "members"], `termSet '${ts.id}'`, errors);
     const seenMembers = new Set<string>();
     for (const m of ts.members ?? []) {
       if (typeof m.id !== "string" || !m.id.trim()) errors.push(`termSet '${ts.id}' has a member with an empty id`);
       else if (seenMembers.has(m.id)) errors.push(`termSet '${ts.id}' has a duplicate member id '${m.id}'`);
       else seenMembers.add(m.id);
-      rejectUnknownKeys(m, ["id", "label"], `termSet '${ts.id}' member`, errors);
+      rejectUnknownKeys(m, ["id", "label", "rank"], `termSet '${ts.id}' member`, errors);
+    }
+    // An ordinal scale must carry a real total order: every member has a unique integer rank.
+    if (ts.ordered) {
+      const seenRanks = new Set<number>();
+      for (const m of ts.members ?? []) {
+        if (typeof m.rank !== "number" || !Number.isInteger(m.rank)) errors.push(`ordered termSet '${ts.id}' member '${m.id}' requires an integer rank`);
+        else if (seenRanks.has(m.rank)) errors.push(`ordered termSet '${ts.id}' has a duplicate rank ${m.rank}`);
+        else seenRanks.add(m.rank);
+      }
     }
   }
   const resourceIds = new Set(resources.map((r) => r.id));

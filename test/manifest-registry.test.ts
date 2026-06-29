@@ -88,6 +88,13 @@ describe("validateDomainPackManifest: fail closed", () => {
     assert.deepEqual(validateDomainPackManifest(ts([{ id: "A:1" }, { id: "A:2" }])), []);
   });
 
+  test("ordered termSets require a unique integer rank per member (ordinal scale = data)", () => {
+    const scale = (members: Array<{ id: string; label?: string; rank?: number }>) => baseManifest({ termSets: [{ id: "sev", title: "Severity", ordered: true, members }] });
+    assert.ok(validateDomainPackManifest(scale([{ id: "low" }, { id: "high" }])).some((e) => /requires an integer rank/.test(e)));
+    assert.ok(validateDomainPackManifest(scale([{ id: "low", rank: 0 }, { id: "high", rank: 0 }])).some((e) => /duplicate rank 0/.test(e)));
+    assert.deepEqual(validateDomainPackManifest(scale([{ id: "low", rank: 0 }, { id: "high", rank: 1 }])), []);
+  });
+
   test("rejects an invalid operation spec (delegates to validateBioOperationSpec)", () => {
     const m = baseManifest({ operations: [{
       schema: "pi-bio.operation_spec.v1", id: "op.y", version: "0.1.0", title: "Y", description: "y", domains: ["genomics"],
