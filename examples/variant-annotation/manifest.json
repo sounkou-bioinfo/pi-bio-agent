@@ -2,15 +2,24 @@
   "schema": "pi-bio.domain_pack_manifest.v1",
   "id": "variant-annotation",
   "version": "0.1.0",
-  "title": "Variant annotation (Ensembl VEP REST)",
-  "description": "Same SHAPE as ClawBio's 'Variant Annotation' skill (Annotate VCF variants with Ensembl VEP REST, ClinVar significance, gnomAD frequencies — https://github.com/ClawBio/ClawBio), as DATA — not a faithful reproduction (it annotates one variant by id, not a whole VCF; a VCF is the same skill scaled). It declares an Ensembl VEP REST endpoint as an http.get resource; VEP's nested transcript_consequences carry impact and colocated_variants carry gnomAD allele frequency + ClinVar clin_sig, so the agent unnests the envelope in SQL and answers 'rare, high-impact, pathogenic'. There is NO VEP/ClinVar/gnomAD-specific TypeScript — the URL and response shape live in the manifest, the same generic http.get resolver serves any JSON/CSV endpoint, and the resolver memoizes by ETag so re-annotating the same variants does not re-download. Network is the host's opt-in by composition: this manifest fails closed until a host injects a fetch (load the explicit index-networked.ts entrypoint).",
+  "title": "Variant annotation (Ensembl VEP REST, batch)",
+  "description": "Same SHAPE as ClawBio's 'Variant Annotation' skill (Annotate VCF variants with Ensembl VEP REST, ClinVar significance, gnomAD frequencies — https://github.com/ClawBio/ClawBio), as DATA. It annotates a BATCH of variants via VEP's real multi-variant endpoint (POST /vep/human/id with an `ids` body) — the same call shape a whole VCF uses (chunk the VCF into id/region batches). VEP's nested transcript_consequences carry impact and colocated_variants carry gnomAD allele frequency + ClinVar clin_sig, so the agent unnests the envelope in SQL and filters 'rare, high-impact, pathogenic' across the batch. There is NO VEP/ClinVar/gnomAD-specific TypeScript — the URL, method, body, and response shape live in the manifest; the same generic http.get resolver serves any JSON/CSV endpoint (GET or read-only POST query). Network is the host's opt-in by composition: this manifest fails closed until a host injects a fetch (load the explicit index-networked.ts entrypoint).",
   "domains": ["genomics"],
   "provides": {
     "resolvers": [
-      { "id": "http.get", "version": "0.1.0", "title": "HTTP GET", "description": "GET a declared URL and materialize the JSON/CSV response into a table.", "output": { "mode": "table" } }
+      { "id": "http.get", "version": "0.1.0", "title": "HTTP fetch", "description": "GET a URL, or POST a read-only query body, and materialize the JSON/CSV response into a table.", "output": { "mode": "table" } }
     ],
     "resources": [
-      { "id": "vep_annotations", "title": "VEP annotations", "kind": "virtual", "resolver": "http.get", "params": { "url": "https://rest.ensembl.org/vep/human/id/rs699?content-type=application/json", "table": "vep_annotations", "format": "json" } }
+      {
+        "id": "vep_annotations", "title": "VEP annotations (batch)", "kind": "virtual", "resolver": "http.get",
+        "params": {
+          "url": "https://rest.ensembl.org/vep/human/id",
+          "table": "vep_annotations", "format": "json",
+          "method": "POST",
+          "headers": { "Content-Type": "application/json", "Accept": "application/json" },
+          "body": { "ids": ["rs699", "rs1042522", "rs28897696", "rs80357906", "rs121913343"] }
+        }
+      }
     ]
   }
 }

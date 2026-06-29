@@ -21,9 +21,13 @@ const MANIFEST = resolve(process.cwd(), "examples", "variant-annotation", "manif
 // returns. gnomAD AF + ClinVar clin_sig live under colocated_variants; gene/impact under transcript_consequences.
 // (Simplified: real VEP nests gnomAD AF under colocated_variants[].frequencies.<allele>; flattened to one
 // `gnomad_af` here so the example stays about the unnest+filter pattern, not VEP frequency-map wrangling.)
-const vepMock = (etag: string): FetchLike => async (_url, init) => {
-  const h = { get: (n: string) => (n.toLowerCase() === "etag" ? etag : null) };
-  if (init?.headers?.["If-None-Match"] === etag) return { ok: false, status: 304, text: async () => "", headers: h };
+// the batch VEP response — honest now: the manifest POSTs many ids, so returning many annotations matches what
+// the real /vep/human/id batch endpoint returns. The mock REQUIRES a POST with an `ids` body (proves the batch
+// path is exercised, not a single-variant GET faked into many).
+let lastRequest: { method?: string; body?: string } = {};
+const vepMock = (): FetchLike => async (_url, init) => {
+  lastRequest = { method: init?.method, body: init?.body };
+  if (init?.method !== "POST" || !init.body || !JSON.parse(init.body).ids) throw new Error("VEP batch expects a POST with an { ids } body");
   const body = [
     { input: "rs699", most_severe_consequence: "missense_variant", transcript_consequences: [{ gene_symbol: "AGT", impact: "MODERATE", consequence_terms: ["missense_variant"] }], colocated_variants: [{ id: "rs699", clin_sig: ["benign"], gnomad_af: 0.42 }] },
     { input: "var2", most_severe_consequence: "stop_gained", transcript_consequences: [{ gene_symbol: "BRCA1", impact: "HIGH", consequence_terms: ["stop_gained"] }], colocated_variants: [{ id: "var2", clin_sig: ["pathogenic"], gnomad_af: 0.0001 }] },
@@ -31,7 +35,7 @@ const vepMock = (etag: string): FetchLike => async (_url, init) => {
     { input: "var4", most_severe_consequence: "missense_variant", transcript_consequences: [{ gene_symbol: "TP53", impact: "MODERATE", consequence_terms: ["missense_variant"] }], colocated_variants: [{ id: "var4", clin_sig: ["pathogenic"], gnomad_af: 0.2 }] },
     { input: "var5", most_severe_consequence: "missense_variant", transcript_consequences: [{ gene_symbol: "PALB2", impact: "MODERATE", consequence_terms: ["missense_variant"] }], colocated_variants: [{ id: "var5", clin_sig: ["pathogenic"], gnomad_af: 0.001 }] },
   ];
-  return { ok: true, status: 200, text: async () => JSON.stringify(body), headers: h };
+  return { ok: true, status: 200, text: async () => JSON.stringify(body) }; // POST: no ETag memo, no headers needed
 };
 
 // The agent's SQL: unnest VEP's nested arrays, then filter rare (gnomAD) + high-impact (VEP impact) + pathogenic
@@ -52,14 +56,17 @@ const FILTER_SQL = [
 ].join("\n");
 
 describe("example: a ClawBio Variant Annotation-shaped skill is a manifest, not code", () => {
-  test("resolves the VEP http.get resource, unnests the nested envelope, filters rare+high-impact+pathogenic", async () => {
+  test("POSTs a BATCH of variant ids, unnests the nested envelope, filters rare+high-impact+pathogenic across the batch", async () => {
     const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-vep-"));
-    const dbPath = join(cwd, "v.duckdb"); // persistent so the ETag memo survives across the two runs
-    const first = await runBioQueryFromManifest({ cwd, dbPath, manifestPath: MANIFEST, sql: FILTER_SQL, network: { fetch: vepMock("vep-v1") }, runId: "v1", now: "T1" });
+    const out = await runBioQueryFromManifest({ cwd, dbPath: ":memory:", manifestPath: MANIFEST, sql: FILTER_SQL, network: { fetch: vepMock() }, runId: "v1", now: "T1" });
 
-    assert.equal(first.ok, true);
-    if (!first.ok) return;
-    const result = JSON.parse(await fs.readFile(join(first.runDir, "result.json"), "utf8")) as { rows: Array<{ input: string; gene_symbol: string; most_severe_consequence: string }> };
+    assert.equal(out.ok, true);
+    if (!out.ok) return;
+    // the manifest genuinely POSTs a BATCH (proving it annotates many, not one variant faked into many)
+    assert.equal(lastRequest.method, "POST");
+    assert.deepEqual(JSON.parse(lastRequest.body!).ids.length, 5);
+
+    const result = JSON.parse(await fs.readFile(join(out.runDir, "result.json"), "utf8")) as { rows: Array<{ input: string; gene_symbol: string; most_severe_consequence: string }> };
     // BRCA1 stop_gained + CFTR frameshift pass all three. Exclusions prove each predicate is load-bearing:
     //   AGT  -> benign (clin_sig) AND common; TP53 -> common (gnomad_af 0.2); PALB2 -> rare+pathogenic but
     //   MODERATE impact, excluded ONLY by the high-impact predicate.
@@ -67,14 +74,6 @@ describe("example: a ClawBio Variant Annotation-shaped skill is a manifest, not 
       { input: "var2", gene_symbol: "BRCA1", most_severe_consequence: "stop_gained" },
       { input: "var3", gene_symbol: "CFTR", most_severe_consequence: "frameshift_variant" },
     ]);
-
-    // re-annotating the same variants replays the ETag memo (304) — no re-download, same answer
-    const second = await runBioQueryFromManifest({ cwd, dbPath, manifestPath: MANIFEST, sql: FILTER_SQL, network: { fetch: vepMock("vep-v1") }, runId: "v2", now: "T2" });
-    assert.equal(second.ok, true);
-    if (!second.ok) return;
-    const receipts = JSON.parse(await fs.readFile(join(second.runDir, "receipts.json"), "utf8")) as Array<{ sourceSnapshots?: Array<{ retrievedAt?: string }> }>;
-    const vepReceipt = receipts.find((r) => r.sourceSnapshots?.[0]?.retrievedAt);
-    assert.equal(vepReceipt?.sourceSnapshots?.[0]?.retrievedAt, "T1", "the 304 replays the cached resolution from run 1");
   });
 
   test("fails closed with NO network bound — the VEP manifest cannot resolve without the host's opt-in", async () => {

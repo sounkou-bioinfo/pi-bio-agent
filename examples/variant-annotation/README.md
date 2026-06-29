@@ -2,10 +2,17 @@
 
 > **Honest tag:** this is the **same shape** as a real, named ClawBio skill —
 > [*Variant Annotation*](https://github.com/ClawBio/ClawBio): "Annotate VCF variants with Ensembl VEP REST,
-> ClinVar significance, gnomAD frequencies." It is *not* a faithful reproduction: it annotates **one variant by
-> id**, not a whole VCF (a VCF is the same skill scaled — one resource per variant, or VEP's region endpoint).
-> This is the ClawBio half of the API bet; the [`ols4-grounding`](../ols4-grounding/) example reproduces
+> ClinVar significance, gnomAD frequencies." It annotates a **batch** of variants via VEP's real multi-variant
+> endpoint (`POST /vep/human/id` with an `ids` body) — the same call a whole VCF uses (chunk the VCF into id/
+> region batches). This is the ClawBio half of the API bet; [`ols4-grounding`](../ols4-grounding/) reproduces
 > *metacurator*'s `disambiguate`, not ClawBio.
+>
+> **Honest remaining limitation:** the manifest hard-codes 5 example rsIDs in the request `body`. That is *demo
+> data, not how a real skill works* — the variant ids should come from an UPSTREAM resource (a VCF read with
+> `duckhts.read_bcf`) or the agent's input, not be baked into the manifest. Parameterizing a resource's request
+> by another table's contents is a real substrate gap (resource params are static manifest data today). So this
+> example honestly demonstrates the *batch unnest-and-filter SQL* over a VEP-shaped payload; it does **not** yet
+> show "discover the variants, then annotate them" as one composed flow.
 
 A skill that annotates a variant against [Ensembl VEP REST](https://rest.ensembl.org/) and filters for rare,
 high-impact, pathogenic results is, in this substrate, **a manifest plus one SQL query** — not a bespoke client.

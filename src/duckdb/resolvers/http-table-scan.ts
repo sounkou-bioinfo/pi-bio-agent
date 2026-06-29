@@ -16,7 +16,7 @@ import { memoClear, memoGet, memoStore } from "../resolution-memo.js";
 // the exact bytes fetched, so the run records precisely what came back.
 
 export type FetchResponse = { ok: boolean; status: number; text(): Promise<string>; headers?: { get(name: string): string | null } };
-export type FetchLike = (url: string, init?: { method?: string; headers?: Record<string, string>; signal?: AbortSignal }) => Promise<FetchResponse>;
+export type FetchLike = (url: string, init?: { method?: string; headers?: Record<string, string>; body?: string; signal?: AbortSignal }) => Promise<FetchResponse>;
 
 // A remote resource is a time-varying thunk; its memo is HTTP cache validation, not a precomputed token. We
 // store the response's ETag and replay the cached receipt on a `304 Not Modified` to a conditional
@@ -30,7 +30,7 @@ const READERS: Record<string, string> = { json: "read_json_auto", ndjson: "read_
 /** Build the HTTP table resolver bound to a host-supplied fetch. Tests pass a mock; production passes fetch. */
 export function httpTableResolver(fetchImpl: FetchLike): BioResolverImpl {
   return async (resource, ctx) => {
-    const p = resource.params as { url?: unknown; table?: unknown; format?: unknown; method?: unknown; headers?: unknown };
+    const p = resource.params as { url?: unknown; table?: unknown; format?: unknown; method?: unknown; headers?: unknown; body?: unknown };
     if (typeof p.url !== "string" || !/^https?:\/\//i.test(p.url)) {
       throw new Error("http resolver requires params.url to be an http(s) URL (explicit remote; no local/file fetch)");
     }
@@ -41,10 +41,11 @@ export function httpTableResolver(fetchImpl: FetchLike): BioResolverImpl {
     const reader = READERS[format];
     if (!reader) throw new Error(`http resolver: unknown format '${format}' (expected json, ndjson, or csv)`);
     const headers = (p.headers && typeof p.headers === "object" ? p.headers : {}) as Record<string, string>;
-    // http.get is read-only by name and policy: GET only, so the effect surface can't silently widen to
-    // writes via params.method.
-    const method = p.method === undefined ? "GET" : p.method;
-    if (method !== "GET") throw new Error("http.get supports GET only");
+    // Read-only by policy: GET, or POST as a QUERY (a request body that READS — VEP batch annotation, GraphQL).
+    // PUT/DELETE/PATCH (mutations) are refused, so the effect surface can't silently widen to writes.
+    const method = p.method === undefined ? "GET" : String(p.method).toUpperCase();
+    if (method !== "GET" && method !== "POST") throw new Error("http.get supports GET or read-only POST (a query body); PUT/DELETE/PATCH are refused");
+    const requestBody = method === "POST" && p.body !== undefined ? (typeof p.body === "string" ? p.body : JSON.stringify(p.body)) : undefined;
     // Capture the now-narrowed string values: TS drops property narrowing inside the closures below.
     const url: string = p.url;
     const table: string = p.table;
@@ -54,14 +55,14 @@ export function httpTableResolver(fetchImpl: FetchLike): BioResolverImpl {
     //   per-db memo  → replays a materialized TABLE within THIS db (no re-materialize).
     //   CAS remote   → a cross-db url→{etag,address} index; lets a DIFFERENT db 304 and materialize from the
     //                  already-stored CAS bytes WITHOUT re-downloading. The per-db memo wins when both apply.
-    const memoable = Object.keys(headers).length === 0;
+    const memoable = method === "GET" && Object.keys(headers).length === 0; // POST is body-dependent: skip the ETag/304 memo
     const cas = ctx.cas;
     const memo = memoable ? await memoGet(ctx.conn, table) : undefined;
     const sameUrl = memo?.receipt.sourceSnapshots[0]?.source === url;
     const casRemote = !memo && memoable && cas ? await cas.getRemote(url) : undefined;
     const validator = memo && sameUrl ? memo.freshness : casRemote?.etag;
     const conditional = validator !== undefined ? { ...headers, "If-None-Match": validator } : headers;
-    const res = await fetchImpl(url, { method: "GET", headers: conditional, signal: ctx.signal });
+    const res = await fetchImpl(url, { method, headers: conditional, body: requestBody, signal: ctx.signal });
 
     const now = ctx.now ?? systemClock();
     const materializeFrom = (file: string) => ctx.conn.run(`CREATE OR REPLACE TABLE ${table} AS SELECT * FROM ${reader}(?)`, [file]);
