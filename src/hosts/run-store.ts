@@ -3,7 +3,7 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { createBioRegistry, type DomainPackManifest, type ResolutionReceipt } from "../core/manifest.js";
 import type { BioResolverImpl } from "../core/ports.js";
-import { runOperation, type OperationResult } from "../core/operations.js";
+import { OperationRunError, runOperation, type OperationResult } from "../core/operations.js";
 import type { BioRunRecord } from "../core/run-spec.js";
 import { duckdbNodeConn } from "../duckdb/node-api.js";
 import { duckdbFileScanResolver } from "../duckdb/resolvers/duckdb-file-scan.js";
@@ -51,22 +51,37 @@ export interface PersistedRun {
   files: { run: string; result: string; receipts: string };
 }
 
+async function writeRunFile(dir: string, name: string, data: unknown): Promise<string> {
+  const path = join(dir, name);
+  await fs.writeFile(path, `${JSON.stringify(data, null, 2)}\n`, "utf8");
+  return path;
+}
+
 /** Host-level persistence: write run/result/receipts under .pi/bio-agent/runs/<runId>/. result.json IS the
  *  report — whatever the operation's SQL returned. */
 export async function persistRun(cwd: string, runId: string, payload: RunPayload): Promise<PersistedRun> {
   const dir = join(runsRoot(cwd), runId);
   await fs.mkdir(dir, { recursive: true });
-  const write = async (name: string, data: unknown): Promise<string> => {
-    const path = join(dir, name);
-    await fs.writeFile(path, `${JSON.stringify(data, null, 2)}\n`, "utf8");
-    return path;
-  };
   return {
     dir,
     files: {
-      run: await write("run.json", payload.run),
-      result: await write("result.json", payload.result),
-      receipts: await write("receipts.json", payload.receipts),
+      run: await writeRunFile(dir, "run.json", payload.run),
+      result: await writeRunFile(dir, "result.json", payload.result),
+      receipts: await writeRunFile(dir, "receipts.json", payload.receipts),
+    },
+  };
+}
+
+/** Persist a FAILED run: run.json (status "failed", carrying the error) + receipts.json for whatever resolved
+ *  before the failure. No result.json — there is no answer. A failed run is still an auditable receipt. */
+export async function persistFailedRun(cwd: string, runId: string, payload: { run: BioRunRecord; receipts: ResolutionReceipt[] }): Promise<{ dir: string; files: { run: string; receipts: string } }> {
+  const dir = join(runsRoot(cwd), runId);
+  await fs.mkdir(dir, { recursive: true });
+  return {
+    dir,
+    files: {
+      run: await writeRunFile(dir, "run.json", payload.run),
+      receipts: await writeRunFile(dir, "receipts.json", payload.receipts),
     },
   };
 }
@@ -80,15 +95,9 @@ export interface RunOperationRequest {
   now?: string;
 }
 
-export interface RunOperationResponse {
-  ok: true;
-  runId: string;
-  operationId: string;
-  status: BioRunRecord["status"];
-  rowCount: number;
-  artifacts: PersistedRun["files"];
-  runDir: string;
-}
+export type RunOperationResponse =
+  | { ok: true; runId: string; operationId: string; status: BioRunRecord["status"]; rowCount: number; artifacts: PersistedRun["files"]; runDir: string }
+  | { ok: false; runId: string; operationId: string; status: BioRunRecord["status"]; error: string; runDir: string };
 
 function resolveInCwd(cwd: string, p: string): string {
   return p === ":memory:" || isAbsolute(p) ? p : resolve(cwd, p);
@@ -124,16 +133,17 @@ export async function runBioOperationFromManifest(req: RunOperationRequest): Pro
   const instance = await DuckDBInstance.create(resolveInCwd(req.cwd, req.dbPath));
   const conn = duckdbNodeConn(await instance.connect());
 
-  const { run, result, receipts } = await runOperation(registry, conn, { operationId: req.operationId, runId, now });
-  const persisted = await persistRun(req.cwd, runId, { run, result, receipts });
-
-  return {
-    ok: true,
-    runId,
-    operationId: req.operationId,
-    status: run.status,
-    rowCount: result.rows.length,
-    artifacts: persisted.files,
-    runDir: persisted.dir,
-  };
+  try {
+    const { run, result, receipts } = await runOperation(registry, conn, { operationId: req.operationId, runId, now });
+    const persisted = await persistRun(req.cwd, runId, { run, result, receipts });
+    return { ok: true, runId, operationId: req.operationId, status: run.status, rowCount: result.rows.length, artifacts: persisted.files, runDir: persisted.dir };
+  } catch (error) {
+    // A run that started and failed at runtime persists a failed-run receipt and returns ok:false — the
+    // failure is auditable, not lost. Pre-flight/config errors (which never became a run) still throw.
+    if (error instanceof OperationRunError) {
+      const persisted = await persistFailedRun(req.cwd, runId, { run: error.run, receipts: error.receipts });
+      return { ok: false, runId, operationId: req.operationId, status: error.run.status, error: error.message, runDir: persisted.dir };
+    }
+    throw error;
+  }
 }

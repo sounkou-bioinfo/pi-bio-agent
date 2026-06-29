@@ -20,6 +20,20 @@ export interface OperationResult {
   rows: Array<Record<string, unknown>>;
 }
 
+/**
+ * A run that STARTED and then failed at runtime — resolution or the SQL itself (e.g. the binder rejecting a
+ * missing column). It carries the failed run record (status "failed") and whatever receipts resolved before
+ * the failure, so a host can persist a failed-run receipt instead of losing the failure. Pre-flight/config
+ * errors (no sql, resources don't cover requirements) are thrown plainly and are NOT this — the request
+ * never became a run. Defends the "reproducible run receipt" gate: a failed run is still auditable.
+ */
+export class OperationRunError extends Error {
+  constructor(message: string, readonly run: BioRunRecord, readonly receipts: ResolutionReceipt[]) {
+    super(message);
+    this.name = "OperationRunError";
+  }
+}
+
 
 /**
  * Generic operation runner: resolve the named required resources (materializing their tables/views), run
@@ -47,41 +61,59 @@ export async function runOperation(
     if (uncovered.length) throw new Error(`operation '${operationId}': provided resources do not cover required resource(s): ${uncovered.join(", ")}`);
   }
 
-  const receipts: ResolutionReceipt[] = [];
+  // Pre-flight: the request must be RUNNABLE before it becomes a run — every required resource is registered
+  // and its resolver has a bound impl. These are config errors (a host lacking the resolver can't run this),
+  // thrown plainly; they are NOT failed runs. Runtime failures (a resolver that errors, or the SQL) happen
+  // below, after the run has started, and ARE recorded as a failed run.
   for (const rid of resources) {
-    if (!registry.getResource(rid)) throw new Error(`operation '${operationId}' requires unregistered resource '${rid}'`);
-    receipts.push(await registry.resolveResource(rid, { conn, now }));
+    const resource = registry.getResource(rid);
+    if (!resource) throw new Error(`operation '${operationId}' requires unregistered resource '${rid}'`);
+    if (!registry.hasResolverImpl(resource.resolver)) throw new Error(`resolver '${resource.resolver}' is declared but no implementation is bound`);
   }
 
-  // No column pre-declaration: the SQL the agent wrote references its columns, and DuckDB's binder is the
-  // arbiter — a missing column fails closed here with a clear binder error. Schema discovery (describeTable)
-  // is a primitive the agent CALLS to decide what SQL to write, not a contract the runner enforces.
-  const rows = await conn.all<Record<string, unknown>>(op.sql.sqlTemplate, params);
-  const sourceSnapshots = receipts.flatMap((r) => r.sourceSnapshots);
-  const result: OperationResult = { schema: "pi-bio.operation_result.v1", operationId, runId, sourceSnapshots, rows };
-
-  // The result IS the report: whatever the operation's SQL returns (classified rows, or a GROUP BY count).
-  // No TS reducer, no report-kind taxonomy — counts/aggregation are the operation's SQL when it wants them.
-  // Reproducibility pin: the run record carries the exact operation version + a digest of the SQL that
-  // produced this result, so a receipt identifies precisely what ran (defends "provenance correct").
-  const sqlDigest = `sha256:${createHash("sha256").update(op.sql.sqlTemplate).digest("hex")}`;
-  const artifact: BioArtifact = {
-    kind: "artifact",
-    role: "output",
-    // The host persists the result as result.json; the run record must point at the file that exists on
-    // disk, not a per-operation name. Keep this in lockstep with persistRun()'s result.json.
-    path: `runs/${runId}/result.json`,
-    format: "json",
-    provenance: [
-      { source: op.id, version: op.version, digest: sqlDigest, notes: ["operation"] },
-      ...receipts.map((r) => ({ source: `${r.resolverId}@${r.resolverVersion}`, retrievedAt: r.resolvedAt, notes: ["resolver receipt"] })),
-    ],
-  };
+  // From here a run EXISTS: any runtime failure (resolution or the SQL) is recorded on it as a "failed" event
+  // and surfaced as an OperationRunError so the host can persist a failed-run receipt rather than lose it.
   const runSpec: BioRunSpec = { schema: "pi-bio.run_spec.v1", id: runId, title: op.title, description: op.description, tool: { name: op.id, version: op.version }, mode: "inline", inputs: [] };
   let run = newRunRecord(runSpec, now);
   run = appendRunEvent(run, { type: "started", at: now });
-  run = appendRunEvent(run, { type: "artifact", at: now, artifacts: [artifact] });
-  run = appendRunEvent(run, { type: "completed", at: now, data: { rowCount: rows.length } });
 
-  return { result, run, receipts };
+  const receipts: ResolutionReceipt[] = [];
+  try {
+    for (const rid of resources) {
+      receipts.push(await registry.resolveResource(rid, { conn, now }));
+    }
+
+    // No column pre-declaration: the SQL the agent wrote references its columns, and DuckDB's binder is the
+    // arbiter — a missing column fails closed here with a clear binder error. Schema discovery (describeTable)
+    // is a primitive the agent CALLS to decide what SQL to write, not a contract the runner enforces.
+    const rows = await conn.all<Record<string, unknown>>(op.sql.sqlTemplate, params);
+    const sourceSnapshots = receipts.flatMap((r) => r.sourceSnapshots);
+    const result: OperationResult = { schema: "pi-bio.operation_result.v1", operationId, runId, sourceSnapshots, rows };
+
+    // The result IS the report: whatever the operation's SQL returns (classified rows, or a GROUP BY count).
+    // No TS reducer, no report-kind taxonomy — counts/aggregation are the operation's SQL when it wants them.
+    // Reproducibility pin: the run record carries the exact operation version + a digest of the SQL that
+    // produced this result, so a receipt identifies precisely what ran (defends "provenance correct").
+    const sqlDigest = `sha256:${createHash("sha256").update(op.sql.sqlTemplate).digest("hex")}`;
+    const artifact: BioArtifact = {
+      kind: "artifact",
+      role: "output",
+      // The host persists the result as result.json; the run record must point at the file that exists on
+      // disk, not a per-operation name. Keep this in lockstep with persistRun()'s result.json.
+      path: `runs/${runId}/result.json`,
+      format: "json",
+      provenance: [
+        { source: op.id, version: op.version, digest: sqlDigest, notes: ["operation"] },
+        ...receipts.map((r) => ({ source: `${r.resolverId}@${r.resolverVersion}`, retrievedAt: r.resolvedAt, notes: ["resolver receipt"] })),
+      ],
+    };
+    run = appendRunEvent(run, { type: "artifact", at: now, artifacts: [artifact] });
+    run = appendRunEvent(run, { type: "completed", at: now, data: { rowCount: rows.length } });
+    return { result, run, receipts };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    run = appendRunEvent(run, { type: "failed", at: now, message });
+    run = { ...run, error: message };
+    throw new OperationRunError(message, run, receipts);
+  }
 }

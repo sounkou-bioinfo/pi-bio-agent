@@ -66,6 +66,9 @@ export interface BioRegistry {
   bindResolverImpl(resolverId: string, impl: BioResolverImpl, opts?: { replace?: boolean }): void;
   getResource(id: string): VirtualResourceSpec | undefined;
   getResolverSpec(id: string): BioResolverSpec | undefined;
+  /** Whether a resolver id has an executable impl bound — a pre-flight runnability check, distinct from
+   *  whether its spec is declared. A host that lacks the impl can't run the operation (config error). */
+  hasResolverImpl(resolverId: string): boolean;
   getTermSet(id: string): TermSet | undefined;
   getOperation(id: string): BioOperationSpec | undefined;
   /** Resource-centered resolution. The registry stamps receipt metadata; impls only return resolved data. */
@@ -215,6 +218,7 @@ export function createBioRegistry(): BioRegistry {
     },
     getResource: (id) => resources.get(id),
     getResolverSpec: (id) => resolverSpecs.get(id),
+    hasResolverImpl: (id) => resolverImpls.has(id),
     getTermSet: (id) => termSets.get(id),
     getOperation: (id) => operations.get(id),
     async resolveResource(resourceId, ctx) {

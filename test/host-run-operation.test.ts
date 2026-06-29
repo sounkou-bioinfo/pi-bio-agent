@@ -94,6 +94,41 @@ describe("host: bio_run_operation end-to-end", () => {
     assert.deepEqual(onDisk, ["receipts.json", "result.json", "run.json"]);
   });
 
+  test("a run that fails at runtime persists a failed-run receipt and returns ok:false", async () => {
+    // SQL that resolves its resource but references a missing column — the run STARTS, then the binder fails.
+    const badManifest: DomainPackManifest = {
+      ...manifest,
+      provides: {
+        ...manifest.provides,
+        operations: [{
+          schema: "pi-bio.operation_spec.v1", id: "bad.op", version: "0.1.0",
+          title: "Bad op", description: "References a column that does not exist.",
+          domains: ["genomics"], transport: "duckdb.sql", inputSchema: { type: "object" },
+          sql: { sqlTemplate: "SELECT no_such_column FROM annotated_variants", readOnly: true, requiredResources: ["annotated_variants"] },
+        }],
+      },
+    };
+    const cwd = await tmpProject(badManifest);
+    const res = await runBioOperationFromManifest({ cwd, dbPath: ":memory:", manifestPath: "manifest.json", operationId: "bad.op", runId: "fail-1", now: "2026-06-28T00:00:00Z" });
+    assert.equal(res.ok, false);
+    assert.equal(res.status, "failed");
+    if (res.ok) throw new Error("unreachable"); // narrow the union for the failure-only fields
+    assert.match(res.error, /no_such_column/i);
+
+    const dir = join(runsRoot(cwd), "fail-1");
+    assert.equal(res.runDir, dir);
+    // run.json + receipts.json persisted; NO result.json — there is no answer, but the failure is auditable
+    assert.deepEqual((await fs.readdir(dir)).sort(), ["receipts.json", "run.json"]);
+    const run_ = JSON.parse(await fs.readFile(join(dir, "run.json"), "utf8"));
+    assert.equal(run_.status, "failed");
+    assert.match(run_.error, /no_such_column/i);
+    assert.ok(run_.events.some((e: { type: string }) => e.type === "failed"));
+    // the resource that DID resolve before the failure still carries a receipt
+    const receipts = JSON.parse(await fs.readFile(join(dir, "receipts.json"), "utf8"));
+    assert.equal(receipts.length, 1);
+    assert.equal(receipts[0].resourceId, "annotated_variants");
+  });
+
   test("fails closed on an invalid manifest", async () => {
     const cwd = await tmpProject({ ...manifest, schema: "nope" as never });
     await assert.rejects(() => run(cwd), /invalid manifest/);
