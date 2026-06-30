@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { StringDecoder } from "node:string_decoder";
 import type { ProcessRunner, ProcessRunResult, ProcessRunSpec } from "../core/ports.js";
 
 // The host adapter for the ProcessRunner port — spawn an out-of-process child via node:child_process, capture
@@ -20,11 +21,21 @@ export function nodeProcessRunner(): ProcessRunner {
           env: spec.env ? { ...process.env, ...spec.env } : process.env,
           stdio: ["ignore", "pipe", "pipe"], // no stdin; the data contract is the Arrow files, not the pipe
         });
+        // Capture stdout/stderr capped at OUTPUT_CAP, decoded multibyte-safe (a UTF-8 char can straddle two
+        // chunks; the stderr tail surfaces in error messages, so a naive per-chunk toString() would mojibake it).
         let stdout = "";
         let stderr = "";
         let timedOut = false;
-        child.stdout.on("data", (d: Buffer) => { if (stdout.length < OUTPUT_CAP) stdout += d.toString(); });
-        child.stderr.on("data", (d: Buffer) => { if (stderr.length < OUTPUT_CAP) stderr += d.toString(); });
+        const sink = (get: () => string, set: (s: string) => void) => {
+          const decoder = new StringDecoder("utf8");
+          return (d: Buffer): void => {
+            const cur = get();
+            if (cur.length >= OUTPUT_CAP) return; // already at the cap; drop further output
+            set((cur + decoder.write(d)).slice(0, OUTPUT_CAP)); // hard-cap even a single oversized chunk
+          };
+        };
+        child.stdout.on("data", sink(() => stdout, (s) => { stdout = s; }));
+        child.stderr.on("data", sink(() => stderr, (s) => { stderr = s; }));
 
         const timer = spec.timeoutMs ? setTimeout(() => { timedOut = true; child.kill("SIGKILL"); }, spec.timeoutMs) : undefined;
         const onAbort = (): void => { child.kill("SIGKILL"); };
@@ -32,7 +43,7 @@ export function nodeProcessRunner(): ProcessRunner {
         const cleanup = (): void => { if (timer) clearTimeout(timer); spec.signal?.removeEventListener("abort", onAbort); };
 
         child.on("error", (err) => { cleanup(); reject(err); }); // exec failure (e.g. ENOENT: no such executable)
-        child.on("close", (code) => { cleanup(); resolve({ exitCode: code, stdout, stderr, timedOut }); });
+        child.on("close", (code, signal) => { cleanup(); resolve({ exitCode: code, signal, stdout, stderr, timedOut }); });
       });
     },
   };

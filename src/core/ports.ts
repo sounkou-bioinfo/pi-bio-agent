@@ -101,6 +101,9 @@ export interface ProcessRunSpec {
 export interface ProcessRunResult {
   /** The child's exit code, or null if it was killed by a signal/timeout. */
   exitCode: number | null;
+  /** The signal that killed the child (e.g. "SIGKILL"), or null on a normal exit. Lets a caller distinguish an
+   *  OOM/abort kill from a clean non-zero exit instead of reporting an opaque "exited null". */
+  signal: NodeJS.Signals | null;
   stdout: string;
   stderr: string;
   timedOut: boolean;
