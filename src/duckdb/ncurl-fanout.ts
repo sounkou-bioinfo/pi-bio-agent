@@ -1,9 +1,11 @@
 import type { SqlConn } from "../core/ports.js";
 
-// Chunked HTTP fanout over ducknng's ASYNC client — the one piece of the SQL-native HTTP story that is
-// legitimately host code, not SQL. The IO TABLE functions (ducknng_ncurl / _ncurl_table) reject correlated
-// column args ("only literals") AND a recursive CTE over them is constant-folded to a single call, so a
-// per-chunk, retried fanout cannot live in one SELECT. The SCALAR launcher `ducknng_ncurl_aio(url, …)` DOES
+// Chunked HTTP fanout over ducknng's ASYNC client — host code for the MANY-endpoints / chunk case. The dynamic-
+// schema `ducknng_ncurl_table` can't be lateral-correlated per chunk, so a per-chunk fanout needs the scalar aio
+// loop below. (The SINGLE-endpoint retry is now a different story: on the OWNED ducknng build `ducknng_ncurl` is
+// VOLATILE and a recursive CTE re-fires per iteration — see ncurl-retry.ts; on the default community build it
+// still constant-folds, so even single-endpoint retry falls back to a host loop there.) The SCALAR launcher
+// `ducknng_ncurl_aio(url, …)` DOES
 // take a per-row column body, so one statement launches one real request per batch; the DRAIN
 // (`ducknng_ncurl_aio_collect`, an any-ready collector — NOT a wait-for-all barrier) and the status-driven
 // RE-LAUNCH (retry) are the loop. Errors are values here: `aio_collect` returns (ok, status, …) rows, so a
