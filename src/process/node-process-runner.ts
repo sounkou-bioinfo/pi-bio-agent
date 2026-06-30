@@ -8,7 +8,10 @@ import type { ProcessRunner, ProcessRunResult, ProcessRunSpec } from "../core/po
 // array — never a shell string — so there is no shell to inject into. This is the seam the host injects to GRANT
 // the agent out-of-process compute; without it bound, a process.compute resource fails closed.
 
-const OUTPUT_CAP = 1_000_000; // cap captured stdout/stderr so a chatty/runaway child can't blow up memory
+// Cap RETAINED stdout/stderr so a chatty/runaway child can't blow up memory. Peak transient is bounded too:
+// the kept string is hard-sliced to OUTPUT_CAP and a stream `data` chunk is <= the stream highWaterMark (~64KB),
+// so the worst-case live allocation is OUTPUT_CAP + one chunk — intentionally not micro-optimized further.
+const OUTPUT_CAP = 1_000_000;
 
 export function nodeProcessRunner(): ProcessRunner {
   return {

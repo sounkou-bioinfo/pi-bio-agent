@@ -16,6 +16,9 @@ const BATCH = 200; // VEP /region POST cap
 const VEP = "https://rest.ensembl.org/vep/human/region";
 const HEADERS = '[{"name":"Content-Type","value":"application/json"},{"name":"Accept","value":"application/json"}]';
 
+// NB: allow_unsigned_extensions is NOT required for the community duckhts/ducknng/nanoarrow used here — they are
+// SIGNED and load without it. It is set defensively only in case a LOCAL dev build of an extension is unsigned;
+// in a clean deployment you can drop it. duckdbConfig stays the right home for real settings (cache_httpfs, S3).
 const conn = duckdbNodeConn(await (await DuckDBInstance.create(":memory:", { allow_unsigned_extensions: "true" })).connect());
 const J = (x) => JSON.stringify(x, (_k, v) => (typeof v === "bigint" ? Number(v) : v), 2);
 
