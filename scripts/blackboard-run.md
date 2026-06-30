@@ -42,6 +42,6 @@ memory), which is exactly the Fugu "workflow-as-data + shared memory" shape on a
 deterministic mechanics also back the chain/survey dogfoods — same executor, different scaffold.
 
 > Shared-**write** variant: this demo's board is in-process (`memoryBlackboard`). The same `Blackboard` interface
-> backs a SQL board (`src/hosts/sql-blackboard.ts`, publish = `INSERT`, await = poll `SELECT`), which over a
-> `quack` shared-mutable db (see `quack-shared-db.md`) makes the board itself a cross-process shared write — the
+> backs a SQL board (`src/hosts/sql-blackboard.ts`, publish = `INSERT`, await = poll `SELECT`), which over
+> **ducknng RPC** (see `blackboard-shared.md`) makes the board itself a cross-process shared write — the
 > decentralized topology and shared writes composed.

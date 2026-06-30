@@ -394,6 +394,23 @@ body — overfitting: a real skill doesn't bake the query data into the manifest
   retry a DATA branch; the re-executing loop is launch-all + status-driven re-launch/drain (scalar aio), NOT a
   recursive CTE over the throwing/constant-folded table functions. This is the SQL-native shape of the
   "rate-limits = exponential backoff" production-semantics resolution.
+- **UPDATE (2026-06-30) — the constant-fold is a ducknng BUG we OWN AND FIXED (backport pending).** Root cause:
+  `ducknng_ncurl(...)` did HTTP I/O inside a table-function BIND path, so DuckDB treated the constant-argument
+  table function as reusable inside the recursive CTE — the retry CTE iterated but the request fired ONCE
+  (reused). FIX (in the ducknng branch we maintain): raw `ducknng_ncurl(...)` now executes through a **VOLATILE
+  scalar** internally (`ducknng__ncurl_row(...)`); the public `ducknng_ncurl(...)` stays a table macro over it. So
+  a recursive-CTE retry now **re-fires the HTTP call per iteration** (verified upstream: `503, 503, 200`; body
+  call counts `1, 2, 3`; still error-as-value, no throw). **KEY RULE for that pattern:** make the call **depend on
+  the recursive row** (put `attempt` in the URL/body), e.g. `url || '?attempt=' || (a.attempt+1)`, else DuckDB may
+  still make one extra **speculative** call after the stop condition. CAVEATS, both load-bearing: (1) this is the
+  SCALAR/row `ducknng_ncurl` path — the dynamic-schema `ducknng_ncurl_table(...)` infers columns from response
+  Content-Type at bind, so it stays unsuitable for lateral per-row retry/chunk fanout (don't "just mark it
+  volatile"); (2) the fix is **NOT in our installed community build** (`8dbf073` still exposes `ducknng_ncurl` as
+  a `table` function, no `ducknng__ncurl_row`) — so `src/duckdb/ncurl-fanout.ts` is still required TODAY. Once we
+  backport the volatile-scalar fix across the DuckDB versions we ship, a single-endpoint multi-round retry
+  collapses to **one recursive-CTE SELECT** (attempt-in-row); `ncurl-fanout.ts` then remains only for the
+  table-function CHUNK fanout (many endpoints) and for unpatched builds. This is the first concrete payoff of
+  **owning the ducknng stack** (we dropped quack and fix/backport ducknng ourselves).
 
 Together: OpenAPI gives the resource SHAPE (derived); SQL (SET VARIABLE + subqueries) fills the params; a chunked
 rate-limited pipeline handles scale. Nothing query-specific is hardcoded, and it is all SQL + the pipeline pieces.

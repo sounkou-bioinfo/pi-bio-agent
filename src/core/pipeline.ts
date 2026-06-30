@@ -2,7 +2,7 @@
 // (load-balanced fan-out); each processes a task and emits a result. Completion order is non-deterministic but
 // the result set is complete and index-aligned to the input. For our RLM labeling map-reduce, the partitions
 // are tasks and the labeler agents are the pool — no central bottleneck, work is balanced by who pulls next.
-// In a real deployment the queue is a quack table / ducknng pull socket and the workers are separate processes.
+// In a real deployment the queue is a ducknng pull socket / shared table and the workers are separate processes.
 
 /** Run `tasks` through a pool of at most `concurrency` workers pulling from a shared cursor. Results are returned
  *  in INPUT order regardless of completion order. */

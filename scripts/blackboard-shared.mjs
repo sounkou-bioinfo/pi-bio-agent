@@ -1,46 +1,42 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { DuckDBInstance } from "@duckdb/node-api";
-import { duckdbNodeConn } from "../dist/duckdb/node-api.js";
-import { sqlBlackboard } from "../dist/hosts/sql-blackboard.js";
 
-// DOGFOOD: topology x shared-WRITES — the decentralized BLACKBOARD (pub/sub) running ACROSS PROCESSES over a
-// quack shared-mutable DuckDB. quack-shared-db.mjs proved separate processes can write one shared db; blackboard-
-// run.mjs proved the pub/sub topology in-process; this composes them: each agent is a SEPARATE OS process that
-// coordinates ONLY through the shared blackboard table on a quack server (publish = INSERT, await = poll SELECT),
-// with NO coordinator and without any client opening the db file. The same sqlBlackboard the unit test uses,
-// now genuinely cross-process. (sqlBlackboard.publish is check-then-plain-INSERT precisely so it works over
-// quack, which rejects ON CONFLICT / INSERT...SELECT.)
+// DOGFOOD: topology x shared-writes — the decentralized BLACKBOARD (pub/sub) running ACROSS PROCESSES over
+// ducknng RPC (we own this stack; quack is dropped). Each agent is a SEPARATE OS process that coordinates ONLY
+// through a shared blackboard table on a ducknng server: publish = ducknng_run_rpc(INSERT), await = poll
+// ducknng_query_rpc(SELECT) until the row appears. No coordinator, no client opens the db file, exec opt-in.
+// (Append-only publish — first-writer-wins — is all a blackboard needs; for mutate-in-place see
+// ducknng-rpc-mutate.md.) Closes the topology matrix: chain / survey / pub-sub / push-pull / shared-write.
 //
 // Run:  npm run build && node scripts/blackboard-shared.mjs
 
 const SELF = fileURLToPath(import.meta.url);
-const ADDR = "quack:localhost:9878", TOKEN = "bb-token-123", FILE = "/tmp/quack-blackboard.duckdb";
-const TABLE = "remote._pi_bio_blackboard";
-const note = (slug, body) => ({ schema: "pi-bio.study_note.v1", slug, id: slug, kind: "memory_note", title: slug, hook: slug, body, tags: [], sources: [], createdAt: "T", updatedAt: "T" });
+const URL = "tcp://127.0.0.1:9880";
+const note = (slug, deps) => JSON.stringify({ schema: "pi-bio.study_note.v1", slug, body: `${slug}(${deps.join("+") || "root"})` });
 
 async function serve() {
-  const inst = await DuckDBInstance.create(FILE);
+  const inst = await DuckDBInstance.create(":memory:");
   const c = await inst.connect();
-  await c.run("LOAD quack");
-  await c.run("CREATE OR REPLACE TABLE _pi_bio_blackboard (slug TEXT PRIMARY KEY, note TEXT)"); // pre-create: clients' IF NOT EXISTS is a no-op
-  await c.run(`CALL quack_serve('${ADDR}', token = '${TOKEN}')`);
-  console.log(`  [server pid ${process.pid}] quack_serve up; owns the shared blackboard table`);
+  await c.run("LOAD ducknng");
+  await c.run("CREATE TABLE board (slug TEXT PRIMARY KEY, note TEXT)");
+  await c.run(`SELECT ducknng_start_server('bb', '${URL}', 4, 134217728, 300000, 0::UBIGINT)`);
+  await c.run("SELECT ducknng_register_exec_method(false)"); // exec opt-in (publish); reads need no extra method
+  console.log(`  [server pid ${process.pid}] ducknng server owns the shared blackboard table`);
   await new Promise((r) => setTimeout(r, 7000));
-  const rows = (await c.runAndReadAll("SELECT slug FROM _pi_bio_blackboard ORDER BY rowid")).getRows();
+  const rows = (await c.runAndReadAll("SELECT slug FROM board ORDER BY rowid")).getRows();
   console.log(`  [server] FINAL board (rows written by SEPARATE client processes): ${rows.map((r) => r[0]).join(", ")}`);
   c.closeSync(); inst.closeSync();
 }
 
 async function client(slug, deps) {
-  const inst = await DuckDBInstance.create(":memory:"); // owns NO file — talks to the quack server
+  const inst = await DuckDBInstance.create(":memory:"); // owns NO shared state — only talks RPC
   const c = await inst.connect();
-  await c.run("LOAD quack");
-  await c.run(`CREATE SECRET (TYPE quack, TOKEN '${TOKEN}')`);
-  await c.run(`ATTACH '${ADDR}' AS remote`);
-  const bb = await sqlBlackboard(duckdbNodeConn(c), { table: TABLE, pollMs: 40, timeoutMs: 9000 });
-  for (const d of deps) await bb.awaitNote(d); // BLOCK on each upstream note appearing on the shared board
-  await bb.publish(slug, note(slug, `${slug}(${deps.join("+") || "root"})`));
+  await c.run("LOAD ducknng");
+  const present = async (s) => (await c.runAndReadAll(`SELECT * FROM ducknng_query_rpc('${URL}', ?, 0::UBIGINT)`, [`SELECT 1 AS x FROM board WHERE slug='${s}'`])).getRows().length > 0;
+  for (const d of deps) { while (!(await present(d))) await new Promise((r) => setTimeout(r, 40)); } // await = poll the shared board
+  const sql = `INSERT INTO board VALUES ('${slug}', '${note(slug, deps).replace(/'/g, "''")}')`;
+  await c.runAndReadAll(`SELECT * FROM ducknng_run_rpc('${URL}', ?, 0::UBIGINT)`, [sql]); // publish = INSERT
   console.log(`  [agent ${slug} pid ${process.pid}] published${deps.length ? ` after [${deps.join(", ")}]` : " (root)"}`);
   c.closeSync(); inst.closeSync();
 }
@@ -54,22 +50,20 @@ function spawnChild(args) {
 }
 
 async function orchestrate() {
-  console.log("=== SHARED-WRITE BLACKBOARD: a decentralized pub/sub DAG across SEPARATE processes via quack ===\n");
+  console.log("=== SHARED-WRITE BLACKBOARD over ducknng RPC: a decentralized pub/sub DAG across SEPARATE processes ===\n");
   const server = spawnChild(["serve"]);
-  await new Promise((r) => setTimeout(r, 1300)); // let the server bind
-  // a diamond DAG, each step a SEPARATE process launched at once; they self-sequence via the shared board
-  await Promise.all([
+  await new Promise((r) => setTimeout(r, 1300)); // let the server bind + register exec
+  await Promise.all([ // a diamond DAG, each step a SEPARATE process launched at once; they self-sequence via the board
     spawnChild(["client", "extract", ""]),
     spawnChild(["client", "annotate", "extract"]),
     spawnChild(["client", "qc", "extract"]),
     spawnChild(["client", "classify", "annotate,qc"]),
   ]);
   await server;
-  console.log("\nWhat it proves: four DISTINCT OS processes (distinct pids) coordinated a diamond DAG through ONE");
-  console.log("shared mutable table on a quack server — no coordinator, no shared file handle. 'extract' published");
-  console.log("first (the other three blocked on it via poll-SELECT), 'classify' last (it blocked on annotate+qc).");
-  console.log("The pub/sub order emerged from the shared WRITES — topology x shared-writes, the last cell of the");
-  console.log("matrix (chain / survey / pub-sub / push-pull / shared-write).");
+  console.log("\nWhat it proves: four DISTINCT OS processes coordinated a diamond DAG through ONE shared table on a");
+  console.log("ducknng server — no coordinator, no shared file handle. 'extract' published first (the others polled");
+  console.log("for it via query_rpc), 'classify' last (it blocked on annotate+qc). The pub/sub order emerged from");
+  console.log("the shared writes — topology x shared-writes, on a stack we own (ducknng RPC, quack dropped).");
 }
 
 const [mode, slug, depsCsv] = process.argv.slice(2);

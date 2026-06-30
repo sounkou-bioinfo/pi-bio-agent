@@ -48,14 +48,16 @@ generalization and the agent topologies converge in one extension.
 
 ## 4. The process boundary — sharing state across agent processes
 DuckDB's file lock is **process-exclusive-writer** (verified). So state-sharing across agent processes is either
-immutable (CAS) or via a single owner (quack). See the boundary analysis in [`docs/refinments.md`](../docs/refinments.md).
+immutable (CAS) or via a single owner (a **ducknng** server — we own this stack; quack was dropped). See the
+boundary analysis in [`docs/refinments.md`](../docs/refinments.md).
 
 | Example | Proof |
 |---|---|
 | `test/http-cas-reuse.test.ts` | **CAS** — a second db with an empty memo 304s from the shared content store and materializes with **no re-download** (immutable cross-db reuse) |
-| `test/run-store-init-sql.test.ts` | the host **connection-init hook** (`duckdbInitSql`) — where an agent runs `LOAD quack; ATTACH 'quack:host'` |
-| **live:** [`scripts/quack-shared-db.mjs`](../scripts/quack-shared-db.md) | **quack** — three processes; two client agents (own `:memory:` dbs) both **write** one shared mutable db via a single server, no lock; the second observes the first's write. `node scripts/quack-shared-db.mjs serve` + `... client A`. quack = live shared **mutable** db; CAS = immutable cross-host. |
+| `test/run-store-init-sql.test.ts` | the host **connection-init hook** (`duckdbInitSql`) — where an agent runs `INSTALL/LOAD` extensions before resolution |
+| **live:** [`scripts/ducknng-rpc-mutate.mjs`](../scripts/ducknng-rpc-mutate.md) | **ducknng RPC** — separate processes **mutate** one shared table in place (`UPDATE`/`DELETE`/upsert) via `ducknng_run_rpc` against a server running native DuckDB, exec opt-in. The mutate-in-place quack can't do; a fact-superseding KG needs it. |
+| **live:** [`scripts/blackboard-shared.mjs`](../scripts/blackboard-shared.md) | **ducknng RPC blackboard** — a decentralized pub/sub diamond DAG across separate processes (publish = `run_rpc` INSERT, await = poll `query_rpc`); order emerges from shared writes, no coordinator. |
 
 ---
-Run all deterministic examples: `npm test`. The two **live** dogfoods need the `pi` CLI (multi-agent) / a free
-local port (quack) and are run by hand; their recorded outputs are in the linked `.md` files.
+Run all deterministic examples: `npm test`. The **live** dogfoods need the `pi` CLI (multi-agent) / a free
+local port (ducknng) and are run by hand; their recorded outputs are in the linked `.md` files.

@@ -6,15 +6,16 @@ import { sqlBlackboard } from "../src/hosts/sql-blackboard.js";
 import type { SqlConn } from "../src/core/ports.js";
 import type { StudyNote } from "../src/core/study.js";
 
-// A real transport for the decentralized blackboard: a SQL table. Single-process here; a quack-attached conn
-// makes the same code cross-process. Proves publish/await over the table, both orders, idempotency, and timeout.
+// A real transport for the decentralized blackboard: a SQL table over an injected SqlConn (single-DB here). The
+// cross-process variant runs over ducknng RPC (scripts/blackboard-shared.mjs). Proves publish/await over the
+// table, both orders, idempotency, and timeout.
 
 async function memoryConn(): Promise<SqlConn> {
   return duckdbNodeConn(await (await DuckDBInstance.create(":memory:")).connect());
 }
 const note = (slug: string): StudyNote => ({ schema: "pi-bio.study_note.v1", slug, id: slug, kind: "memory_note", title: slug, hook: "h", body: `body-${slug}`, tags: [], sources: [], createdAt: "T", updatedAt: "T" });
 
-describe("sql blackboard: a real (quack-attachable) transport for decentralized coordination", () => {
+describe("sql blackboard: a real single-DB transport for decentralized coordination (cross-process via ducknng RPC)", () => {
   test("publish then await returns the note; idempotent re-publish keeps the first", async () => {
     const bb = await sqlBlackboard(await memoryConn(), { pollMs: 5 });
     await bb.publish("a", note("a"));

@@ -7,9 +7,9 @@ import type { StudyWorker } from "./study-exec.js";
 // note back. Topological order EMERGES from the data dependencies — there is NO coordinator. That is stigmergy:
 // agents coordinate only through traces left in a shared environment ([[networked-agents-stigmergic-cas]]).
 //
-// The Blackboard is an injected port: in-memory (tests / single process), a quack shared table
-// (publish = INSERT, await = poll SELECT), CAS (publish = put at the slug's address, await = poll has), or a
-// ducknng pub/sub socket (publish = pub send, await = sub recv by prefix).
+// The Blackboard is an injected port: in-memory (tests / single process), a ducknng-served shared table
+// (publish = ducknng_run_rpc INSERT, await = poll ducknng_query_rpc SELECT), CAS (publish = put at the slug's
+// address, await = poll has), or a ducknng pub/sub socket (publish = pub send, await = sub recv by prefix).
 
 export interface Blackboard {
   publish(slug: string, note: StudyNote): Promise<void>;
@@ -42,7 +42,7 @@ export async function runScaffoldOnBlackboard(scaffold: StudyScaffold, worker: S
   return Promise.all(scaffold.steps.map((s) => bb.awaitNote(s.id)));
 }
 
-/** In-memory blackboard for tests / single-process runs. Cross-process: a quack table, CAS, or ducknng pub/sub. */
+/** In-memory blackboard for tests / single-process runs. Cross-process: a ducknng-served table, CAS, or ducknng pub/sub. */
 export function memoryBlackboard(): Blackboard {
   const notes = new Map<string, StudyNote>();
   const waiters = new Map<string, Array<(n: StudyNote) => void>>();

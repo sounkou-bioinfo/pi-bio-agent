@@ -81,12 +81,12 @@ export const bioDuckDbExtensions: DuckDbExtensionDescriptor[] = [
     loadSql: "LOAD cache_httpfs;",
   },
   {
-    name: "quack",
-    source: "core",
-    purpose: "Client/server protocol for DuckDB: one instance runs quack_serve() and OWNS the database file (and its process-exclusive RW lock); other instances ATTACH 'quack:host' over the network and read AND write remote tables without opening the file themselves — so NO per-client lock conflict. This is how MULTIPLE AGENT PROCESSES share one LIVE mutable database (e.g. a common knowledge graph): a single quack server owns it, agents attach as clients via the connection-init hook (CREATE SECRET (TYPE quack ...); ATTACH ...). Complements CAS-of-bytes (immutable content-addressed artifacts, cross-host, lock-free): quack = a live shared mutable db; CAS = durable immutable sharing. Native cross-process DuckDB without quack is reads-only (concurrent READ_ONLY openers; any RW holder blocks all).",
-    domains: ["remote-io", "client-server", "concurrency", "multi-agent"],
-    installSql: "INSTALL quack;",
-    loadSql: "LOAD quack;",
+    name: "ducknng",
+    source: "community",
+    purpose: "Our owned cross-process/cross-machine transport (we maintain a fork and backport it across the DuckDB versions we need). Binds the NNG scalability protocols (pub/sub, push/pull, survey, bus, pair) + a framed Arrow-IPC RPC: ducknng_run_rpc(url, sql, tls) executes a SQL STRING on a server running NATIVE DuckDB (so the FULL write surface works — UPDATE/DELETE/ON CONFLICT, unlike quack's local-catalog shim which is append-only), and ducknng_query_rpc(url, sql, tls) reads rows back. Exec is OPT-IN — the server must ducknng_register_exec_method(...) (the host security boundary: + per-method auth, peer/IP allowlists, mTLS), vs quack's open-by-ATTACH. This is how MULTIPLE AGENT PROCESSES share one LIVE mutable db (a common KG): the server owns it, agents talk RPC (no client opens the file). Also ships ducknng_ncurl / ducknng_ncurl_table (the SQL-native HTTP path) over the same extension. Complements CAS-of-bytes (immutable content-addressed, cross-host): ducknng RPC = a live shared MUTABLE db; CAS = durable immutable sharing. (quack was dropped: its remote writes are append-only and it tracks unstable DuckDB storage APIs; we own ducknng instead.)",
+    domains: ["remote-io", "client-server", "concurrency", "multi-agent", "http"],
+    installSql: "INSTALL ducknng FROM community;",
+    loadSql: "LOAD ducknng;",
   },
   {
     name: "fts",

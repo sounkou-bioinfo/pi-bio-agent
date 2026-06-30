@@ -8,10 +8,10 @@ import { runsRoot } from "./run-store.js";
 //
 // *** DISTRIBUTED-RUN SAFETY (load-bearing) ***
 // Mark-and-sweep is correct ONLY when the root set is COMPLETE. Two hazards once runs are distributed over a
-// SHARED CAS (object store / quack):
+// SHARED CAS (object store / a ducknng-served shared db):
 //   1. INCOMPLETE ROOTS: a GC on one node sees only ITS local runs. Sweeping from local roots alone would
 //      delete bytes that ANOTHER node's runs still reference. => the caller MUST pass the union of ALL nodes'
-//      roots (`extraRoots`, e.g. scanned from a quack-shared run/receipt index) before sweeping a shared CAS.
+//      roots (`extraRoots`, e.g. scanned from a ducknng-served run/receipt index) before sweeping a shared CAS.
 //      Without that, restrict GC to a NODE-LOCAL CAS (the default, single-node case, which IS safe).
 //   2. WRITE RACE: a concurrent/remote run can write CAS bytes that are not yet in any committed receipt. The
 //      `minAgeMs` grace retains entries younger than the longest possible in-flight run, so they are never
@@ -102,7 +102,7 @@ export async function pruneRuns(runsDir: string, opts: PruneOpts = {}): Promise<
 
 /** End-to-end GC for a project: prune runs first, then mark-and-sweep the CAS rooted at the SURVIVING runs'
  *  receipts. SINGLE-NODE-SAFE by default. For DISTRIBUTED runs over a SHARED CAS, pass `extraRoots` — the union
- *  of every OTHER node's live digests (e.g. scanned from a quack-shared receipt index) — and `minAgeMs` (a grace
+ *  of every OTHER node's live digests (e.g. scanned from a ducknng-served receipt index) — and `minAgeMs` (a grace
  *  >= the longest possible in-flight run) so a local sweep cannot delete another node's or an in-flight run's
  *  bytes. Without extraRoots, only run this against a node-LOCAL CAS. */
 export async function collectGarbage(cwd: string, opts: { runs?: PruneOpts; casRoot?: string; extraRoots?: Iterable<string>; minAgeMs?: number } = {}): Promise<{ runsPruned: string[]; casSwept: string[]; remoteDropped: number }> {
