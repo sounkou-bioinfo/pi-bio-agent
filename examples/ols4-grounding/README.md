@@ -19,9 +19,10 @@ The host provisions ducknng once via `duckdbInitSql` (`INSTALL ducknng FROM comm
 HTTPS, a TLS config (`SET VARIABLE tls = ducknng_tls_config_from_files(NULL, '/etc/ssl/certs/ca-certificates.crt',
 '', 1)`); the agent supplies `{query}` as a binding. The test is **deterministic** — a *local ducknng server*
 (`ducknng_start_server` + `ducknng_register_http_route` + `ducknng_http_json`) is the fixture, so it needs no
-external network. (ducknng's community build is unsigned, so the host opens the db with
-`duckdbConfig: { allow_unsigned_extensions: "true" }`.) `http.get` (TS resolver + injected fetch) remains the
-fallback when a DuckDB version has no ducknng build.
+external network. The host opens the db with `duckdbConfig` — good practice regardless, since that's where S3
+secrets, `cache_httpfs` settings, and `allow_unsigned_extensions` live (the *community* ducknng is signed; we
+pass `allow_unsigned_extensions` defensively because a cached or local *dev* build may not be). `http.get` (TS
+resolver + injected fetch) remains the fallback when a DuckDB version has no ducknng build.
 
 > **Honest tag:** this is a **metacurator** concrete, *not* a ClawBio skill. ClawBio has no standalone OLS /
 > ontology-grounding skill — its API skills are things like *Variant Annotation* (Ensembl VEP REST / ClinVar /

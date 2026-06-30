@@ -131,7 +131,9 @@ export interface RunOperationRequest {
   duckdbInitSql?: string[];
   /** Agent params as DuckDB session variables: each becomes `SET VARIABLE name = value`, so a resource url/body composes them with plain SQL (getvariable(name)) and upstream data with subqueries — no bespoke template DSL. */
   bindings?: Record<string, unknown>;
-  /** Host DuckDB instance config set at open, e.g. { allow_unsigned_extensions: "true" } to LOAD ducknng / local extension builds. */
+  /** Host DuckDB instance config set at db open (host-owned, never an agent param) — the home for credentials +
+   *  startup settings: S3/object-store secrets, cache_httpfs cache dir, extension_directory, and
+   *  allow_unsigned_extensions (for a cached/local dev extension build; community builds are signed). */
   duckdbConfig?: Record<string, string>;
 }
 
@@ -242,7 +244,9 @@ export interface RunQueryRequest {
   duckdbInitSql?: string[];
   /** Agent params as DuckDB session variables: each becomes `SET VARIABLE name = value`, so a resource url/body composes them with plain SQL (getvariable(name)) and upstream data with subqueries — no bespoke template DSL. */
   bindings?: Record<string, unknown>;
-  /** Host DuckDB instance config set at open, e.g. { allow_unsigned_extensions: "true" } to LOAD ducknng / local extension builds. */
+  /** Host DuckDB instance config set at db open (host-owned, never an agent param) — the home for credentials +
+   *  startup settings: S3/object-store secrets, cache_httpfs cache dir, extension_directory, and
+   *  allow_unsigned_extensions (for a cached/local dev extension build; community builds are signed). */
   duckdbConfig?: Record<string, string>;
 }
 
