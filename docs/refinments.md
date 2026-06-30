@@ -336,7 +336,23 @@ body — overfitting: a real skill doesn't bake the query data into the manifest
 - **BATCH HTTP = a chunked, rate-limited PIPELINE, not one request.** VEP caps the batch (~200-1000 ids) and
   rate-limits (~15 req/s, `429`+`Retry-After`, hourly quota). Annotating a real VCF: chunk the variant list (SQL)
   into batches <= the limit, run them through `runPipeline` (the push/pull pool) with `withRetry` (429/backoff),
-  `UNION` the results. The pieces exist; wiring a "batched http resource" over them is the remaining build.
+  `UNION` the results.
+- **SQL-native HTTP — what migrated and what HIT WALLS (probed on ducknng 1.5.2).** `ols4-grounding` migrated
+  cleanly to `duckdb.sql_materialize` over `ducknng_ncurl_table` (a simple GET, the URL composed from a SCALAR
+  `getvariable` + `url_encode`). The POST-batch / upstream-driven `variant-annotation` did NOT — three real
+  DuckDB+ducknng limitations block the pure-SQL chunked pipeline:
+  1. `ducknng_ncurl_table` does NOT support LATERAL-correlated column params -> `bodies, ncurl_table(... body
+     ...)` per-chunk UNION is rejected ("does not support lateral join column parameters").
+  2. `ducknng_ncurl_table` args cannot contain SUBQUERIES -> the POST body can't be `(SELECT json_object('ids',
+     json_group_array(id)) FROM variants)` directly ("Table function cannot contain subqueries").
+  3. There is no BETWEEN-RESOURCE hook to `SET VARIABLE body = (subquery over variants)` after `variants`
+     materializes but before the VEP resource resolves; and `ducknng_ncurl_aio` + `_aio_collect` (the scalar
+     async path that COULD fan out per batch) returned a single row, not one per batch, in a one-SELECT CTE.
+  So: for a SINGLE GET/POST with SCALAR params (`getvariable`), ducknng_ncurl is the SQL-native path. For
+  BATCHED, upstream-driven, chunked, rate-limited annotation, the TS `http.get` resolver + `runPipeline` +
+  `withRetry` is genuinely the right tool TODAY (it composes the body in JS and loops over chunks). `variant-
+  annotation` therefore STAYS on `http.get`. Lifting this needs ducknng to allow lateral/subquery table-function
+  args (or a stable aio fan-out), then the chunked pipeline becomes one SQL query.
 
 Together: OpenAPI gives the resource SHAPE (derived); SQL (SET VARIABLE + subqueries) fills the params; a chunked
 rate-limited pipeline handles scale. Nothing query-specific is hardcoded, and it is all SQL + the pipeline pieces.
