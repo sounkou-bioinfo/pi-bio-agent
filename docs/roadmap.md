@@ -165,7 +165,10 @@ Phase 4 (ACTIVE — the main lane) Safe harness-adaptation surface: extension/sp
                  implementing declare -> validate -> test -> record -> activate -> rollback. CONSUMES
                  Phase 1's leftover: `record` = judgments as KG facts; `activate`/`rollback` = as-of
                  temporality. DONE: 4.0a (bio_observations temporal store + as-of), 4.1 (coloc records
-                 judgments), 4.2 (activate/rollback). NEXT: 4.3 (declare->validate->test->record->activate).
+                 judgments), 4.2 (activate/rollback), 4.3 (declare->validate->test->record->activate, GENERIC).
+                 The substrate is the loop; examples (coloc, …) are interchangeable DATA — never a shape it bends
+                 toward (the bet). Remaining: 4.4 (the real approval workflow — the host's), a 2nd producer when
+                 a real one exists. NEXT: tighten the approval/rollback ergonomics + a candidate-spec fixture.
 ```
 
 The expertise-per-budget measurement (§2) runs continuously now that the Phase 0 skeleton exists.
@@ -201,16 +204,20 @@ Each slice is end-to-end and deterministic-tested; build the foundation only as 
 - **4.1 — Record a real judgment. BUILT.** `coloc` is the producer: every per-tissue posterior is a scalar
   observation (`coloc:posterior:PP.Hk`) and the high-PP.H4 tissue becomes the edge `tissue
   ←shares_causal_variant_with← gwas_locus` (projecting into `bio_edges_as_of`). `test/coloc-record.test.ts` —
-  4.1a deterministic (no R, non-skipped) + 4.1b the real `examples/coloc` run. (rare-high-impact's categorical
-  classification + abstention is the next producer pattern.)
+  4.1a deterministic (no R, non-skipped) + 4.1b the real `examples/coloc` run. **The recorder is GENERIC**
+  (`recordObservation`); coloc is *one* producer (a manifest), not a shape the substrate is built toward — any
+  other producer (a categorical classifier, an abstaining call, …) is just more data through the same primitive.
 - **4.2 — The activate/rollback state machine. BUILT.** `src/duckdb/activation.ts` (`recordActivation` /
   `activeOperationAsOf` / `rollbackOperation`) — a thin wrapper over `recordObservation`: `statement_key =
   activation:operation:<id>`, the current active version is latest-as-of, `rollback` **appends** the prior
   version (never mutates), `trust.provenanceClass = "attested"`. `test/activation-as-of.test.ts` (5 cases).
-- **4.3 — The declare → validate → test → record → activate happy path (thin).** The agent declares a CANDIDATE
-  operation; the harness `validate`s it (built: `validateDomainPackManifest`/`validateReadOnlySelect`), `test`s
-  it against its declared fixtures, `record`s pass/fail + the spec digest as facts, and `activate`s it **iff the
-  test passes**. Skeleton example: a good candidate activates; a buggy one is recorded-failed and NOT activated.
+- **4.3 — The declare → validate → test → record → activate happy path. BUILT.** `src/hosts/harness-adaptation.ts`
+  `runCandidateActivation(conn, candidate, deps)`: validate (`validateReadOnlySelect`) → run the candidate over its
+  fixture in a SANDBOX → record validation + test status as observations → activate **iff both pass AND an injected
+  approval policy approves** (the human/policy boundary — "tests pass" is NOT "production activation"). The
+  candidate is **GENERIC DATA** (an operation spec + fixture + expected), deliberately *not* a bio example — the
+  substrate is the loop, the examples are interchangeable. `test/harness-adaptation.test.ts`: good→activates,
+  wrong-expected→recorded-failed-no-activation, non-read-only→validation-fails, **approval-rejects→not activated**.
 - **4.4 — Rollback + the approval gate.** Revert to a prior active version (as-of). The `activate` decision is
   the host/human **policy gate** (the boundary) — wire it as a host opt-in now, leave the real approval workflow
   to the host.
