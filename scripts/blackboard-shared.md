@@ -38,3 +38,21 @@ also rejects `INSERT … SELECT … WHERE NOT EXISTS` (`multiple streaming scans
 it. Fix: `publish` is now a **check-then-plain-INSERT** (first-writer-wins, idempotent re-publish) that works over
 both quack and plain DuckDB; the `PRIMARY KEY` stays as the backstop. Verified by `test/sql-blackboard.test.ts`
 (in-process) and this dogfood (cross-process).
+
+## quack's write surface is APPEND-ONLY (verified against HEAD), and ducknng RPC is the mutate-in-place answer
+
+This is **not** a 1.5.2 wart — it is architectural. quack makes the remote table a LOCAL CATALOG ENTRY, so
+DuckDB's planner calls `GetStorageInfo` / `PlanUpdate` / `PlanDelete` on quack's storage shim, and at quack HEAD
+(commit `29fc039`, 2026-06-30, DuckDB 1.5.4) those still `throw NotImplementedException`. So over quack:
+`INSERT … VALUES` and `CREATE TABLE AS` work, but `INSERT … ON CONFLICT`, `UPDATE`, `DELETE`, and `CREATE INDEX`
+do **not** — remote writes are effectively append-only. The blackboard's monotonic first-writer-wins publish is
+therefore the *right fit*, not a workaround.
+
+When you genuinely need mutate-in-place across processes (revise/expire/upsert a shared row — e.g. superseding a
+fact as a judgment changes, the Phase-4 `activate`/`rollback` shape), use **ducknng RPC** instead of quack ATTACH.
+`ducknng_run_rpc(url, sql, tls)` sends a SQL string to a server running NATIVE DuckDB (no catalog shim), so
+`UPDATE`/`DELETE`/`ON CONFLICT` all work — verified live (a client mutated a server table to `[[1,99],[3,5]]`
+via remote `UPDATE`/`DELETE`/upsert). Exec is OPT-IN — the server must `ducknng_register_exec_method(false|true)`
+(the host security boundary; supports auth + peer/IP allowlists), unlike quack's open-by-ATTACH. The trade is the
+ATTACH ergonomics: explicit RPC SQL strings, and no single-query local⨝remote join (fetch via `query_rpc`, then
+join locally). So: **quack ATTACH = ergonomic shared APPEND; ducknng RPC = full shared mutate, opt-in & explicit.**
