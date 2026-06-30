@@ -478,6 +478,35 @@ files in place, monkey-patching tools, silent behavior changes, hidden env/proce
 [`roadmap.md`](./roadmap.md#6-harness-adaptation-doctrine-mods-vs-hooks) for the full doctrine and the
 graph model of harness state.
 
+### Where the human stays in the loop (the judgment/approval boundary)
+
+The substrate covers the **executable middle** (data → SQL → process). The roadmap's still-deferred work
+([`roadmap.md`](./roadmap.md), groups "A. no consumer yet" and "B. Phase-4-consumed") is not a random backlog —
+it is exactly where the **irreducibly human** parts cluster, and that is by design, not a gap. Locate them
+precisely so they are never quietly automated away:
+
+- **Judgment** (B: *recording results/judgments as KG facts*). A pathogenicity call, a grounding decision, an
+  "this evidence supports X" is a human-or-model *judgment*. The substrate's job is to **record** it as a
+  provenance-bearing fact (who/what decided, when, on what evidence, at what confidence) — never to **compute**
+  it. SQL can deterministically run the *rule* once a human has fixed it (the rare-high-impact abstention is a
+  pinned, tested operation), but the choice of rule and the calls SQL can't decide remain judgments.
+- **Approval / policy** (Phase 4: `activate` / `rollback`). `validate`/`test`/`record` are mechanical; what is
+  not is **promoting** a new skill/spec into active use, or **reverting** one — a policy/approval gate a human
+  (or a human-set policy) owns. `rollback` is also *why* temporal anchoring (B) exists: you can only revert to a
+  prior state if facts are time-versioned (as-of).
+- **Curation** (A: *ontology-ingest*, and *pipeline/tool/version selection* for the `process` artifact
+  transport). Which ontology, which release, which tool at which version, how to reconcile conflicting sources —
+  authored into a manifest by a human, not derivable. The projection (statements → `bio_edges`) and the run
+  (argv → artifacts) are mechanical; the *trust decision* is curatorial.
+
+**The link between A and B is a governance loop.** A's deferred executors **produce** (run a pipeline, ingest an
+ontology); B **records** the human/model *judgment about A's output* as a provenance-bearing, as-of-versioned
+fact; Phase 4 `activate`/`rollback` is the **policy gate** that promotes or reverts on those judgments. So the
+human is threaded through as *judgment → approval*, and the substrate's contribution is to make that loop
+**explicit, accountable, time-versioned, and reversible** — rails for the human decision, not a replacement for
+it. This is the sharp form of the honest boundary (the executable middle is ours; semantic judgment and
+human/policy workflows are deliberately *hosted*, not *computed*).
+
 ## Progressive disclosure
 
 Context should carry compact indexes, not every body/schema/result:

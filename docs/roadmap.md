@@ -121,7 +121,9 @@ resolver/registry all have **real producers**. Since built out: the SQL-native N
 `http.get` as the fallback), the COMPUTE pillar (`process.compute` over Arrow IPC), region-scoped
 `duckhts.read_bcf`, a `duckdbInitSql` connection-init hook, and CAS-of-bytes (`src/core/cas.ts`, proven by
 `http.get` byte-reuse across DBs). The items below are **not partial/owed work** and sandboxing/effect-limits are
-the **host's** job, never ours. They split by whether the consumer is named yet:
+the **host's** job, never ours. They are also where the irreducibly **human** parts cluster (judgment, approval,
+curation) — see [design.md "Where the human stays in the loop"](./design.md#where-the-human-stays-in-the-loop-the-judgmentapproval-boundary).
+They split by whether the consumer is named yet:
 - **Named consumer = Phase 4** (so built WITH it, not speculative): **temporal anchoring** and **recording
   results/judgments as KG facts** are exactly what Phase 4's `record → activate → rollback` consumes (record =
   judgments as KG facts; activate/rollback = as-of temporality). Phase 1 and Phase 4 are linked — this leftover
