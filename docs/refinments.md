@@ -363,6 +363,26 @@ body — overfitting: a real skill doesn't bake the query data into the manifest
   So: single GET/POST with scalar params (incl. an upstream-aggregated body) is the SQL-native path TODAY (both
   examples). The TS `http.get` resolver + `runPipeline` is the right tool only for the multi-REQUEST chunked-VCF
   fanout, or as the fallback when a DuckDB version has no ducknng build.
+- **RETRY is ERROR-AS-VALUE, and the loop is the AIO DRAIN (not a recursive CTE) — all verified on 1.5.2.** Two
+  building blocks are real: (a) `ducknng_ncurl(...)` and `ducknng_ncurl_aio_collect(...)` return `(ok, status,
+  error, …)` ROWS — a non-2xx / `429` / `503` / connection failure is a VALUE you branch on, not a thrown
+  exception (contrast `ducknng_ncurl_table`, which THROWS on non-2xx — proved: same transient failure returns a
+  `status=503` row from `ncurl` but a Binder Error from `ncurl_table`). So a retry decision is `WHERE status IN
+  (429,503,…)`, not try/catch. (b) iteration IS simulable in SQL — `WITH RECURSIVE` loops, counts attempts, and
+  terminates on a data condition. BUT the naive composition — a single recursive CTE that re-fires a table
+  function (`ncurl`/`ncurl_table`) per iteration — does NOT re-hit the network: DuckDB evaluates the literal-arg
+  IO table function ONCE per statement and reuses the result across all iterations (proved three ways: a scalar
+  subquery → one real call reused 4×; the table function in `FROM` → call#s `1,2,2,2`), and you can't perturb the
+  args per iteration to defeat the folding because the table functions reject column/correlated args ("only
+  literals"). The primitive that DOES re-execute per row is the SCALAR launcher `ducknng_ncurl_aio(url, …)` —
+  scalar, so it accepts a per-row column arg: `SELECT ducknng_ncurl_aio(url, …) AS h FROM chunks` launches one
+  REAL request per chunk (proved: 3 chunks → 3 distinct server-side call#s), then `ducknng_ncurl_aio_collect(
+  list(h), wait_ms)` drains them (one error-as-value row per newly-terminal handle). RETRY = re-launch the subset
+  whose drained `status` says to (another per-row scalar `aio` over the not-yet-2xx chunks), looped at the
+  statement-driver level (agent re-issues a drain round) with backoff between rounds. Net: error-as-value makes
+  retry a DATA branch; the re-executing loop is launch-all + status-driven re-launch/drain (scalar aio), NOT a
+  recursive CTE over the throwing/constant-folded table functions. This is the SQL-native shape of the
+  "rate-limits = exponential backoff" production-semantics resolution.
 
 Together: OpenAPI gives the resource SHAPE (derived); SQL (SET VARIABLE + subqueries) fills the params; a chunked
 rate-limited pipeline handles scale. Nothing query-specific is hardcoded, and it is all SQL + the pipeline pieces.
