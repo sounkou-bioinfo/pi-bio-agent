@@ -411,6 +411,20 @@ body — overfitting: a real skill doesn't bake the query data into the manifest
   collapses to **one recursive-CTE SELECT** (attempt-in-row); `ncurl-fanout.ts` then remains only for the
   table-function CHUNK fanout (many endpoints) and for unpatched builds. This is the first concrete payoff of
   **owning the ducknng stack** (we dropped quack and fix/backport ducknng ourselves).
+- **FOLLOW-UP — backport tracking + the SIGNING flip (`allow_unsigned_extensions`).** The branch/backport work is
+  tracked upstream: [`sounkou-bioinfo/ducknng#1`](https://github.com/sounkou-bioinfo/ducknng/issues/1)
+  (per-DuckDB-version release branches) and [`#2`](https://github.com/sounkou-bioinfo/ducknng/issues/2) (backport
+  the volatile-scalar `ncurl` fix to the DuckDB 1.5.2 branch). **Trigger to flip the substrate over:** when our
+  loaded ducknng exposes `ducknng__ncurl_row` (probe `duckdb_functions()`), enable the recursive-CTE retry path
+  and narrow `ncurl-fanout.ts` to the chunk-fanout case; until then, no change.
+  - **Signing reverses once we ship our OWN build.** The *community* `ducknng`/`nanoarrow` are **signed** — they
+    `INSTALL/LOAD FROM community` with NO `allow_unsigned_extensions` (we dropped that flag from the signed-path
+    examples/tests). But an extension we **build from source** (the backport branches, a local dev build) is
+    **UNSIGNED**, so loading it REQUIRES `allow_unsigned_extensions = true`. That is **host-owned `duckdbConfig`**
+    set at DB open (`DuckDBInstance.create(path, { allow_unsigned_extensions: "true" })` — the same home as
+    cache_httpfs / S3 secrets), **never an agent param**, and it stays scoped to the dev/owned-build deployment.
+    So the rule is: *signed community build → no flag; our from-source backport build → host sets the flag.* Both
+    are the host's choice by composition, consistent with the powerful-by-default, host-controlled-effects stance.
 
 Together: OpenAPI gives the resource SHAPE (derived); SQL (SET VARIABLE + subqueries) fills the params; a chunked
 rate-limited pipeline handles scale. Nothing query-specific is hardcoded, and it is all SQL + the pipeline pieces.

@@ -9,7 +9,7 @@ import { DuckDBInstance } from "@duckdb/node-api";
 // the test backing scripts/ducknng-rpc-mutate.mjs.
 const ducknngAvailable = await (async () => {
   try {
-    const c = await (await DuckDBInstance.create(":memory:")).connect();
+    const c = await (await DuckDBInstance.create(":memory:", { allow_unsigned_extensions: "true" })).connect();
     await c.run("INSTALL ducknng FROM community");
     await c.run("LOAD ducknng");
     return true;
@@ -17,7 +17,7 @@ const ducknngAvailable = await (async () => {
 })();
 
 async function startServer(name: string, seedSql: string[]): Promise<{ conn: Awaited<ReturnType<DuckDBInstance["connect"]>>; url: string; close: () => void }> {
-  const inst = await DuckDBInstance.create(":memory:");
+  const inst = await DuckDBInstance.create(":memory:", { allow_unsigned_extensions: "true" });
   const conn = await inst.connect();
   await conn.run("LOAD ducknng");
   for (const s of seedSql) await conn.run(s);
@@ -27,7 +27,7 @@ async function startServer(name: string, seedSql: string[]): Promise<{ conn: Awa
 }
 
 async function client(): Promise<Awaited<ReturnType<DuckDBInstance["connect"]>>> {
-  const inst = await DuckDBInstance.create(":memory:"); // own catalog — talks only RPC, never opens the server's db
+  const inst = await DuckDBInstance.create(":memory:", { allow_unsigned_extensions: "true" }); // own catalog — talks only RPC, never opens the server's db
   const c = await inst.connect();
   await c.run("LOAD ducknng");
   return c;
