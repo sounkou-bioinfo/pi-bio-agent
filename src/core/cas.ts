@@ -23,6 +23,14 @@ export interface CasStore {
   // a URL and, on 304, materialize from the CAS bytes WITHOUT re-downloading — even where the table never
   // persisted. CAS stays storage/dedup, not freshness: the server's 304 (against this ETag) is what proves the
   // bytes are still current.
+  //
+  // BEST-EFFORT, not durable: this index is a CACHE, and its bytes are kept alive by the SAME GC roots as
+  // everything else — a retained run receipt referencing the digest (see gc.ts). GC sweeps the bytes and then
+  // drops the now-dangling index entry, so a cross-db hit is only available while SOME retained run still roots
+  // those bytes. Pruning every run that referenced a URL reclaims its cached bytes; the next fetch just
+  // re-downloads (a cache miss, never a dangling read). Making the index self-rooting would pin its bytes
+  // forever (an unbounded cache) — deliberately not done; durable cross-host reuse belongs to the ducknng-fs /
+  // shared-CAS lane with real refs/leases (docs/refinments.md), not to this best-effort filesystem index.
   /** The validator (ETag) + content address last stored for a URL, if any. */
   getRemote(url: string): Promise<{ etag: string; address: ContentAddress } | undefined>;
   /** Record the validator + content address for a URL after a real fetch. */

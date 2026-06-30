@@ -46,6 +46,15 @@ describe("CAS-of-bytes: a content-addressed byte store", () => {
     assert.equal(await cas.has(addr), false, "nothing was stored");
   });
 
+  test("put FAILS CLOSED on a non-sha256 address (CAS is sha256-only; an unverifiable blob the GC can't root is refused)", async () => {
+    const root = await fs.mkdtemp(join(tmpdir(), "pi-bio-cas-"));
+    const cas = fsCasStore(root);
+    // a sha512-shaped address: the type union names it, but no producer exists and put() can't verify it — refuse
+    const addr: ContentAddress = { algorithm: "sha512", digest: "0".repeat(128) };
+    await assert.rejects(() => cas.put(addr, "some bytes"), /only sha256 is supported/);
+    assert.equal(await cas.has(addr), false, "nothing was stored");
+  });
+
   test("distinct content lands in distinct entries (dedup is by hash)", async () => {
     const root = await fs.mkdtemp(join(tmpdir(), "pi-bio-cas-"));
     const cas = fsCasStore(root);

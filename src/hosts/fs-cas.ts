@@ -4,10 +4,21 @@ import { join } from "node:path";
 import type { CasStore } from "../core/cas.js";
 import type { ContentAddress } from "../core/resources.js";
 
-// Filesystem CAS rooted at a host-chosen directory (e.g. .pi/bio-agent/cas, or a shared cross-project cache, or
-// an object-store mount). Layout: <root>/<algorithm>/<digest>. The host owns WHERE the store lives — the library
-// only addresses by hash, so swapping a project-local store for a shared one is a host composition choice, not a
-// code change. This is the host's fs adapter boundary (direct fs is allowed here, like run-store).
+// Filesystem CAS rooted at a host-chosen POSIX-like directory (e.g. .pi/bio-agent/cas, or a shared cross-project
+// filesystem mount). Layout: <root>/<algorithm>/<digest>. The host owns WHERE the store lives — the library only
+// addresses by hash, so swapping a project-local store for a shared one is a host composition choice, not a code
+// change. This is the host's fs adapter boundary (direct fs is allowed here, like run-store).
+//
+// This implementation assumes POSIX-ish filesystem semantics: directory listing, atomic intra-directory rename,
+// file mtime, and unlink (the GC in gc.ts relies on the same). An object store (S3/GCS) has none of those as
+// stated (no atomic rename, different listing/mtime semantics) and needs a DIFFERENT CasStore implementation —
+// do NOT point this one at an object-store mount.
+//
+// CAS is sha256-only today: every resolver stamps a sha256 address, gc.ts's liveDigests roots by 64-hex digest,
+// and put() (below) only verifies sha256. ContentAddressAlgorithm still NAMES sha512/blake3 as a future option,
+// but nothing produces them — so put() FAILS CLOSED on a non-sha256 address rather than store it unverified
+// (storing an unverified blob the GC then can't root is the real footgun). Widen when a second algorithm has a
+// real producer + GC support, not before.
 export function fsCasStore(root: string): CasStore {
   const pathFor = (a: ContentAddress): string => join(root, a.algorithm, a.digest);
   return {
@@ -16,12 +27,12 @@ export function fsCasStore(root: string): CasStore {
       try { await fs.access(pathFor(a)); return true; } catch { return false; }
     },
     async put(a, bytes) {
-      // CAS must never store content that does not match its address, or a receipt's digest would lie. Verify
-      // the bytes actually hash to the claimed address before writing (content-addressing is the whole point).
-      if (a.algorithm === "sha256") {
-        const actual = createHash("sha256").update(bytes).digest("hex");
-        if (actual !== a.digest) throw new Error(`CAS put: bytes hash to ${actual} but address claims ${a.digest} — refusing to store mismatched content`);
-      }
+      // CAS must never store content that does not match its address, or a receipt's digest would lie. This store
+      // verifies sha256 only; a non-sha256 address can't be verified here, so refuse it (fail closed) rather than
+      // store an unverifiable blob that the sha256-shaped GC could neither root nor trust.
+      if (a.algorithm !== "sha256") throw new Error(`CAS put: only sha256 is supported today (got '${a.algorithm}') — refusing to store an unverified address`);
+      const actual = createHash("sha256").update(bytes).digest("hex");
+      if (actual !== a.digest) throw new Error(`CAS put: bytes hash to ${actual} but address claims ${a.digest} — refusing to store mismatched content`);
       const dest = pathFor(a);
       try { await fs.access(dest); return; } catch { /* not present — write it */ }
       await fs.mkdir(join(root, a.algorithm), { recursive: true });

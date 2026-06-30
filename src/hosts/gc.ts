@@ -8,7 +8,7 @@ import { runsRoot } from "./run-store.js";
 //
 // *** DISTRIBUTED-RUN SAFETY (load-bearing) ***
 // Mark-and-sweep is correct ONLY when the root set is COMPLETE. Two hazards once runs are distributed over a
-// SHARED CAS (object store / a ducknng-served shared db):
+// SHARED CAS (a shared filesystem mount / a ducknng-served shared db):
 //   1. INCOMPLETE ROOTS: a GC on one node sees only ITS local runs. Sweeping from local roots alone would
 //      delete bytes that ANOTHER node's runs still reference. => the caller MUST pass the union of ALL nodes'
 //      roots (`extraRoots`, e.g. scanned from a ducknng-served run/receipt index) before sweeping a shared CAS.
@@ -19,7 +19,10 @@ import { runsRoot } from "./run-store.js";
 // collectGarbage is single-node-safe by default; pass extraRoots + minAgeMs for the distributed case.
 
 /** Every 64-hex content digest mentioned anywhere in these receipt JSON blobs — sourceSnapshot versions,
- *  provenance digests, result-handle addresses. These name the CAS files retained runs still reference. */
+ *  provenance digests, result-handle addresses. These name the CAS files retained runs still reference.
+ *  sha256-SHAPED by design (64 hex): the CAS is sha256-only today (fsCasStore.put refuses other algorithms), so
+ *  a 64-hex scan IS the complete root set. If a second algorithm ever gets a producer, this must parse the
+ *  structured address fields (algorithm+digest) instead — a bare-hex scan can't root a 128-hex sha512 digest. */
 export function liveDigests(receiptJsons: string[]): Set<string> {
   const set = new Set<string>();
   for (const j of receiptJsons) for (const m of j.matchAll(/[0-9a-f]{64}/g)) set.add(m[0]);
@@ -56,7 +59,13 @@ export async function gcCas(casRoot: string, live: Set<string>, opts: { minAgeMs
 }
 
 /** Drop CAS remote-index entries (`remote/<hash>.json`) whose stored address is no longer in the live set — a
- *  url->bytes pointer to swept content would 304-replay a gone artifact. Also returns their addresses as roots. */
+ *  url->bytes pointer to swept content would 304-replay a gone artifact. Run AFTER gcCas: the cross-db cache is
+ *  best-effort and SUBORDINATE to run-receipt roots (it does NOT contribute its own roots — self-rooting would
+ *  pin its bytes forever, an unbounded cache; see cas.ts). So gcCas sweeps bytes by receipt roots, then this
+ *  prunes the index entries whose bytes that sweep removed, leaving the index coherent (no dangling pointers).
+ *  NOTE: coherent only for a NODE-LOCAL, non-concurrent GC. A GC that interleaves with a live 304-reuse on a
+ *  SHARED CAS can still race (read the index, sweep the bytes, then materialize a gone path) — that race, like
+ *  the rest of distributed-CAS GC, is the ducknng-fs/shared-CAS lane's job (refs/leases), not this sweeper's. */
 export async function gcRemoteIndex(casRoot: string, live: Set<string>): Promise<{ dropped: number }> {
   const dir = join(casRoot, "remote");
   let files: string[];

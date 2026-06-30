@@ -708,6 +708,37 @@ Tiers 0–2 live IN the DuckDB substrate (SQL/FTS/VSS), consistent with graph-as
   - skill boundary rules
 - Treat `validateReadOnlySelect()` as a preflight helper only. The eventual execution adapter must also use a genuinely read-only/scoped DuckDB connection or equivalent sandbox.
 
+## Distributed CAS garbage collection (DEFERRED — ducknng-fs / shared-CAS lane)
+
+Today's GC (`src/hosts/gc.ts`) is mark-and-sweep: CAS = heap, retained run receipts = roots, unreachable bytes
+swept. For the **node-local, non-concurrent** reality we are actually in, this is *coherent and correct* — a GC
+pass leaves no dangling pointers, and the cross-db remote index is best-effort and subordinate to receipt roots
+(`src/core/cas.ts`). It is **not** a distributed protocol, and the existing `extraRoots` + `minAgeMs` knobs are a
+documented escape hatch, not one. Do **not** extend the receipt-regex sweeper to cover distribution. When a real
+shared CAS arrives (ducknng-fs / NNG workers reusing+deleting shared artifacts), the hazards return and the model
+must change — but only THEN, consumer-forced.
+
+The correct shape is **metadata-driven GC**, and it is our own substrate shape ([[semantic-sql-graph-substrate]]):
+roots become rows, not regex scrapes, owned by the metadata authority (DuckDB over ducknng RPC), and GC becomes a
+SQL anti-join, not a filesystem scan:
+
+- `cas_object(algorithm, digest, size, state{staging|committed|tombstoned|deleted}, committed_at, storage_uri)`
+- `cas_ref(ref_type{run|artifact|fs_version|remote_index|manual_pin}, algorithm, digest, expires_at)` — durable refs
+- `cas_lease(holder, algorithm, digest, expires_at)` — in-flight reads/writes (the old-object **reuse race** fix:
+  a resolver acquires a lease before materializing from `cas.pathFor(...)`, GC retains leased objects; `minAgeMs`
+  becomes a fallback margin, not the correctness mechanism)
+- GC = `cas_object` committed-before-cutoff `LEFT JOIN` (`cas_ref` ∪ `cas_lease`) `WHERE ref IS NULL` → tombstone
+  in metadata → publish event → delete bytes after a grace → mark deleted (explicit state transitions, not
+  "hope local views are complete").
+
+This subsumes the three hazards a shared sweeper hits — incomplete roots (→ `cas_ref` is the global root set),
+the write/reuse race (→ `cas_lease`), and the remote-index race (→ index entries are `cas_ref` rows with leases
+while a 304-reuse is in flight). It is the **ducknng-fs / shared-CAS lane**, NOT a core GC patch. Until that lane
+has a real consumer, leave `collectGarbage` node-local-safe and keep `cas_ref`/`cas_lease`/epochs as this spec.
+
+The cheap, non-protocol mitigations (also deferred until a consumer): a `utimes` LRU-touch on CAS hit / 304 reuse
+(resets `minAgeMs` grace for reused-but-old bytes) — useful, but still cache semantics, not a correctness lease.
+
 ## Documentation cleanup
 
 - Keep `docs/design.md` as the positive architecture note.
