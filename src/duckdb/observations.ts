@@ -103,6 +103,16 @@ export async function observationsAsOf(conn: SqlConn, t: string): Promise<Observ
   return conn.all<ObservationRow>(asOfSql(TABLE), [t, t, t]);
 }
 
+/** The single latest statement for ONE slot as of t — keyed, no full-table scan (what a state machine wants). */
+export async function observationAsOfKey(conn: SqlConn, statementKey: string, t: string): Promise<ObservationRow | null> {
+  const rows = await conn.all<ObservationRow>(
+    `SELECT * FROM ${TABLE} WHERE statement_key = ? AND recorded_at <= ? AND (valid_from IS NULL OR valid_from <= ?) AND (valid_to IS NULL OR valid_to > ?)
+     ORDER BY recorded_at DESC, observation_id DESC LIMIT 1`,
+    [statementKey, t, t, t],
+  );
+  return rows[0] ?? null;
+}
+
 /** Project the EDGE-LIKE latest-as-of statements (`object_id` set) into a `bio_edges`-shaped table, so the SAME
  *  SemanticSQL closure (`materializeEntailedEdges` with a source table) walks the graph as it stood at time t.
  *  Returns the projected edge count. */
