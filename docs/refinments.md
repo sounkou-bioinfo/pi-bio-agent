@@ -155,10 +155,12 @@ CAS-of-whole-bytes is right for a REST/JSON API body or a moderate dump fetched 
 WRONG granularity for two cases, which are separate tiers chosen by which resolver the manifest declares:
 
 - **Small-region joins over a huge indexed remote VCF (gnomAD):** use HTTP RANGE + tabix via htslib, not whole-
-  object CAS. Spec — region-scoped `duckhts.read_bcf` (an intentional extension; today it only takes
-  `{path,table}` and reads the whole file, `src/duckdb/resolvers/duckhts-read-bcf.ts`):
-  - params `{ path, index?, table, regions: [{chrom,start,end}] }`; resolver canonicalizes to htslib region
-    strings and reads only those blocks (`read_bcf(?, region := ?)`).
+  object CAS. **BUILT** — region-scoped `duckhts.read_bcf` (`src/duckdb/resolvers/duckhts-read-bcf.ts`) takes a
+  `region` (an htslib `chrom:start-end` string OR `{chrom,start,end}`) and emits `read_bcf(?, region := ?,
+  tidy_format := true)`, reading only that region's blocks; the live WGS chr22 flagship uses it
+  (`examples/wgs-chr22-annotation`, `test/duckhts-region.test.ts`). Remaining (spec):
+  - a MULTI-region `regions: [{chrom,start,end}]` array and an explicit `index?` param (today: single `region`,
+    index discovered by convention); resolver canonicalizes to htslib region strings and reads only those blocks.
   - Provenance: record the VCF URI + the INDEX (.tbi/.csi) URI + index/file ETag + the canonical region list;
     do NOT record a whole-file sha256 that was never downloaded. CAS may cache the small INDEX bytes (reused,
     tiny) and/or the derived region table — never the whole VCF.
@@ -177,11 +179,10 @@ WRONG granularity for two cases, which are separate tiers chosen by which resolv
   ```
   Then `read_parquet('https://…')` etc. used by `duckdb.file_scan`/`duckdb.sql_materialize` benefit
   transparently. `cache_httpfs` is now in the extension catalog (`src/duckdb/extensions.ts`).
-  - GAP (pal #8): the host runner (`src/hosts/run-store.ts`) has no connection-INIT hook. `sql_materialize` can
-    `LOAD` declared `params.extensions` but cannot `INSTALL` or `SET`. A real host needs a small
-    connection-bootstrap layer — a `duckdbInitSql` / `beforeRun(conn)` option on the run request that runs
-    INSTALL/LOAD/SET once per connection. Spec'd; build when a remote-parquet example drives it (do NOT
-    half-build — it touches the run-store acquire path).
+  - **BUILT (was pal #8):** the host runner (`src/hosts/run-store.ts`) has a `duckdbInitSql?: string[]` option on
+    both request types, run statement-by-statement once per connection BEFORE resolution (`test/run-store-init-sql.test.ts`) —
+    so a host can `INSTALL`/`LOAD`/`SET` (httpfs + cache_httpfs, ducknng, secrets) without `sql_materialize`
+    needing to. (The non-transactional caveat below still applies: keep DDL/DML out of init.)
   - Provenance note: for DuckDB-internal remote reads the receipt records the URI + SQL/params + resolver +
     time, but NO byte digest (we never saw the bytes). That is correct for fast/lazy/range mode. Byte-perfect
     replay would require snapshot mode (download whole object into CAS first), which forfeits lazy/range reads —

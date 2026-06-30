@@ -82,10 +82,14 @@ What the library *does* enforce is **accountability, not access**: every answer-
 that ran (a digest of the SQL **and** its bound params), the resources/sources it declared, the resolver
 receipts, and the artifacts it produced.
 `validateReadOnlySelect` is therefore **statement-class only** (one read-only `SELECT`/`WITH`, no writes/DDL —
-because that is what an "operation" *is*), not an egress firewall. Network is a **host-injected capability**
-(`http.get` needs a host-supplied `fetch`; `file_scan`/`read_bcf` may read remote URIs if the environment
-allows) — the host decides whether egress is possible, the library records that it happened. A strict
-"no external I/O / CAS-snapshot-first" profile is an **optional host policy**, not the default stance.
+because that is what an "operation" *is*), not an egress firewall. The **primary** network path is SQL-native:
+`ducknng_ncurl_table` (a DuckDB table function) inside `duckdb.sql_materialize`, with the URL/headers/body
+composed in SQL and the JSON parsed into a table — no TS resolver (the `ols4-grounding` GET and
+`variant-annotation` POST examples). `http.get` (a TS resolver needing a host-supplied `fetch`) is the
+**fallback** for a DuckDB build with no ducknng, plus the host-driven multi-request retry/fanout seam. Either
+way network is a **host-injected capability** (`file_scan`/`read_bcf`/`sql_materialize` may read remote URIs if
+the environment allows) — the host decides whether egress is possible, the library records that it happened. A
+strict "no external I/O / CAS-snapshot-first" profile is an **optional host policy**, not the default stance.
 
 **The host-control surface is the injected ports — not a separate hook framework.** Pi-agent-core makes
 lifecycle hooks (before/after, context transforms) central, and that pattern is real — but in *our* shape it is
@@ -228,8 +232,16 @@ Three things keep this consistent with the rest of the substrate:
   impose the limits. Same posture as the network: accountability, not access control.
 - **Long-running is already modeled.** `BioRunSpec.mode` is `inline | background | subagent | service | batch`
   and `BioRunRecord` streams `started → progress → checkpoint → completed/failed`. A six-hour job is a
-  `background`/`batch` run whose record accrues progress + checkpoints and ends in output artifacts. The run
-  substrate was built for this; only the executor is missing.
+  `background`/`batch` run whose record accrues progress + checkpoints and ends in output artifacts.
+- **Out-of-process compute is BUILT (table-producing case).** The `process.compute` resolver
+  (`src/duckdb/resolvers/process-compute.ts`) + the injected `ProcessRunner` port
+  (`src/process/node-process-runner.ts`) already run an out-of-process child (R/Python/Go/shell) over Arrow IPC
+  and materialize a TABLE — DuckDB → Arrow → child → Arrow → table — with a script-bytes provenance digest,
+  detached process-group kill on timeout/abort, and fail-closed-without-runner (example
+  `examples/process-compute`, tests `process-compute-example`/`process-compute-guards`). What is still missing is
+  the *operation-level* artifact executor — the `process` **BioOperationTransport** that runs an argv command in
+  a run dir, captures stdout/stderr/exit, and registers declared FILE outputs as CAS artifacts (the six-hour
+  batch / Nextflow-Snakemake case). The compute pillar's table path exists; its long-running artifact path does not.
 
 **One general backend, not a backend zoo.** When the first executor is built, it is `process` (run an argv
 command in a run dir, capture stdout/stderr/exit, register declared outputs as artifacts). `Rscript`,
@@ -243,12 +255,14 @@ semantics `process` cannot express — polling/resume/cancel of a remote job —
 instances, not imagined.
 
 **Discipline — do not build the transport ahead idealistically.** Speculative non-SQL transports were already
-deleted once (http/graphql/mcp/local with no runner). `BioOperationTransport` stays `duckdb.sql` until a real
-pipeline forces the first `process` executor (e.g. run a VCF through VEP / an `Rscript` DESeq2 / a Snakemake
-step). A full `BioExecutionSpec` (a backend enum, `container`/`env`/`resources`/`effects`/`capture` fields) is
-the *sketch of the destination*, not core surface — add fields when an executor consumes them. That first
-executor is also what finally forces **CAS materialization** (today spec-only): a code op's outputs are exactly
-the bytes CAS exists to address.
+deleted once (http/graphql/mcp/local with no runner). The table-producing out-of-process case is now served by
+the `process.compute` RESOLVER (above); the OPERATION-level `BioOperationTransport` stays `duckdb.sql` until a
+real pipeline forces a `process` **transport** that captures FILE artifacts (e.g. a Snakemake/Nextflow step or a
+DESeq2 run whose outputs are files, not a single table). A full `BioExecutionSpec` (a backend enum,
+`container`/`env`/`resources`/`effects`/`capture` fields) is the *sketch of the destination*, not core surface —
+add fields when an executor consumes them. CAS-of-bytes itself is **built** (`src/core/cas.ts` + `src/hosts/fs-cas.ts`,
+proven by `http.get` byte-reuse across DBs in `test/http-cas-reuse.test.ts`); what that artifact transport still
+needs is the wiring of a code op's FILE outputs INTO CAS — those bytes are exactly what CAS exists to address.
 
 ## Storage story
 
