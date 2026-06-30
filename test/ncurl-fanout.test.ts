@@ -57,8 +57,8 @@ describe("ncurl fanout: chunked launch -> loop-drain -> status-driven retry", { 
         drainWaitMs: 500, backoffMs: 10, maxRounds: 5,
       });
       assert.equal(res.succeeded, 3); // all three eventually 2xx
-      assert.equal(res.failed, 0);
-      assert.ok(res.rounds >= 2, `expected a retry round (got ${res.rounds})`); // the first 2 calls 503'd -> retry
+      assert.equal(res.failures.length, 0);
+      assert.ok(res.waves >= 2, `expected a retry wave (got ${res.waves})`); // 503 is transient -> retried
       const rows = await conn.all<{ n: bigint }>("SELECT count(*) n FROM results WHERE status = 200");
       assert.equal(Number(rows[0].n), 3);
       const body = await conn.all<{ body_text: string }>("SELECT DISTINCT body_text FROM results");
@@ -66,7 +66,26 @@ describe("ncurl fanout: chunked launch -> loop-drain -> status-driven retry", { 
     } finally { conn.run("DROP TABLE IF EXISTS batches"); fixture.close(); }
   });
 
-  test("a batch whose body lacks `variants` 400s and stays failed; valid batches still succeed", async () => {
+  test("more batches than maxInFlight -> multiple waves, every batch processed (not just the first wave)", async () => {
+    const fixture = await startFixture(47862, false); // always-200 for valid bodies
+    const conn = duckdbNodeConn(await (await DuckDBInstance.create(":memory:", { allow_unsigned_extensions: "true" })).connect());
+    await conn.run("LOAD ducknng");
+    try {
+      // 5 batches, maxInFlight 2 -> at least 3 waves; ALL must succeed (guards the dropped-un-launched-batch bug)
+      await conn.run(`CREATE TABLE batches AS SELECT batch_id, '{"variants":["22 ' || batch_id || ' . A G"]}' AS body FROM range(5) t(batch_id)`);
+      const res = await ncurlFanout(conn, {
+        batchesTable: "batches", resultsTable: "results",
+        url: "http://127.0.0.1:47862/vep",
+        headersJson: '[{"name":"Content-Type","value":"application/json"}]',
+        drainWaitMs: 400, maxInFlight: 2,
+      });
+      assert.equal(res.succeeded, 5); // every batch annotated, across waves
+      assert.equal(res.failures.length, 0);
+      assert.ok(res.waves >= 3, `5 batches @ maxInFlight 2 should take >=3 waves (got ${res.waves})`);
+    } finally { conn.run("DROP TABLE IF EXISTS batches"); fixture.close(); }
+  });
+
+  test("a batch whose body lacks `variants` 400s -> PERMANENT terminal failure (not retried); valid batch succeeds", async () => {
     const fixture = await startFixture(47861, false);
     const conn = duckdbNodeConn(await (await DuckDBInstance.create(":memory:", { allow_unsigned_extensions: "true" })).connect());
     await conn.run("LOAD ducknng");
@@ -78,9 +97,11 @@ describe("ncurl fanout: chunked launch -> loop-drain -> status-driven retry", { 
         batchesTable: "batches", resultsTable: "results",
         url: "http://127.0.0.1:47861/vep",
         headersJson: '[{"name":"Content-Type","value":"application/json"}]',
-        drainWaitMs: 300, backoffMs: 5, maxRounds: 2, // small: don't spin on the permanent failure
+        drainWaitMs: 300, backoffMs: 5, maxRounds: 4,
       });
-      assert.equal(res.failed, 1); // the malformed batch never reaches 2xx
+      assert.equal(res.succeeded, 1);
+      assert.equal(res.waves, 1); // 400 is permanent -> terminated on the FIRST wave, no wasted retries
+      assert.deepEqual(res.failures, [{ batchId: 1, status: 400, transient: false }]);
       const ok = await conn.all<{ batch_id: bigint }>("SELECT batch_id FROM results ORDER BY batch_id");
       assert.deepEqual(ok.map((r) => Number(r.batch_id)), [0]); // only the well-formed batch is in results
     } finally { conn.run("DROP TABLE IF EXISTS batches"); fixture.close(); }

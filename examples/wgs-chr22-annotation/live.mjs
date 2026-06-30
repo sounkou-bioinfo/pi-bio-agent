@@ -11,6 +11,7 @@ const VCF = process.env.WGS_VCF ?? "/root/WG010.vcf.gz";
 const CLINVAR = process.env.CLINVAR_VCF ?? "/root/duckhts/clinvar.vcf.gz";
 const REGION = process.env.WGS_REGION ?? "chr22:23000000-24000000"; // gene-rich ~1Mb
 const CV_REGION = REGION.replace("chr", ""); // ClinVar contigs are '22', not 'chr22'
+const CONTIG = CV_REGION.split(":")[0]; // the normalized contig (e.g. '22'), derived — NOT hard-coded
 const BATCH = 200; // VEP /region POST cap
 const VEP = "https://rest.ensembl.org/vep/human/region";
 const HEADERS = '[{"name":"Content-Type","value":"application/json"},{"name":"Accept","value":"application/json"}]';
@@ -41,10 +42,12 @@ await conn.run(`CREATE TABLE batches AS
 const [{ nb }] = await conn.all("SELECT count(*) nb FROM batches");
 console.log(`VEP batches (<=${BATCH} each): ${Number(nb)}`);
 
-// 3. CHUNKED FANOUT: scalar ncurl_aio launch per batch + loop-drain + status-driven retry (the host-side loop)
+// 3. CHUNKED FANOUT: scalar ncurl_aio launch per batch + loop-drain + status-driven retry (the host-side loop).
+// Resolve the TLS config id to a bound number (the driver binds it, never interpolates SQL); cap concurrency.
+const [{ tls }] = await conn.all("SELECT getvariable('tls')::BIGINT AS tls");
 const fan = await ncurlFanout(conn, {
   batchesTable: "batches", resultsTable: "results",
-  url: VEP, headersJson: HEADERS, tlsExpr: "getvariable('tls')", timeoutMs: 60000,
+  url: VEP, headersJson: HEADERS, tlsConfigId: Number(tls), timeoutMs: 60000, maxInFlight: 6,
 });
 console.log(`fanout: ${J(fan)}`);
 
@@ -62,7 +65,7 @@ await conn.run(`CREATE TABLE joined AS
   FROM (SELECT pos, ref, alt, csq, tc.gene_symbol AS gene, tc.impact AS impact,
                TRY_CAST(json_extract_string(to_json(cvs), '$[0].frequencies.' || alt || '.gnomadg') AS DOUBLE) AS gnomadg
         FROM ex) a
-  LEFT JOIN clinvar cv ON cv.chrom = '22' AND cv.POS = a.pos AND cv.REF = a.ref AND list_contains(cv.ALT, a.alt)`);
+  LEFT JOIN clinvar cv ON cv.chrom = '${CONTIG}' AND cv.POS = a.pos AND cv.REF = a.ref AND list_contains(cv.ALT, a.alt)`);
 
 console.log("funnel:", J(await conn.all(`SELECT
   count(*) annotated_gene_variants,

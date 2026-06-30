@@ -7,13 +7,13 @@ import type { SqlConn } from "../core/ports.js";
 // take a per-row column body, so one statement launches one real request per batch; the DRAIN
 // (`ducknng_ncurl_aio_collect`, an any-ready collector — NOT a wait-for-all barrier) and the status-driven
 // RE-LAUNCH (retry) are the loop. Errors are values here: `aio_collect` returns (ok, status, …) rows, so a
-// retry is `WHERE status NOT BETWEEN 200 AND 299`, never an exception. That loop is what this function is.
+// retry decision is a `WHERE` over `status`, never an exception. That loop is what this function is.
 //
 // Contract:
 //   in   `batchesTable`  : (batch_id BIGINT, body VARCHAR) — one HTTP request per row, body is the request body
-//   out  `resultsTable`  : (batch_id BIGINT, ok BOOLEAN, status INTEGER, body_text VARCHAR) — one row per
-//                          batch that ultimately SUCCEEDED (2xx). Batches still failing after maxRounds are
-//                          left absent (the caller sees `failed > 0` and which batch_ids are missing).
+//   out  `resultsTable`  : (batch_id BIGINT, status INTEGER, body_text VARCHAR) — one row per batch that
+//                          succeeded (2xx). Terminal failures (permanent status, or transient exhausted after
+//                          maxRounds) are NOT here; they are returned in `failures` with their last status.
 // The host owns url/method/headers/tls (composed in, never agent params); the data args are parameter-bound.
 
 const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -22,32 +22,42 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 export interface NcurlFanoutOptions {
   /** input table (batch_id, body) — one request per row */
   batchesTable: string;
-  /** output table to create (batch_id, ok, status, body_text) — one row per ultimately-successful batch */
+  /** output table to create (batch_id, status, body_text) — one row per ultimately-successful (2xx) batch */
   resultsTable: string;
   url: string;
   /** ducknng canonical header array, e.g. '[{"name":"Content-Type","value":"application/json"}]' */
   headersJson: string;
   method?: string; // default POST
-  /** SQL expression yielding the tls_config_id (host-controlled, NOT an agent param). Default '0::UBIGINT'. */
-  tlsExpr?: string;
+  /** tls_config_id (bound, not interpolated). Host-owned. Default 0 (no TLS / plain http). */
+  tlsConfigId?: number;
   timeoutMs?: number; // per request; default 60000
-  maxRounds?: number; // retry rounds; default 6
+  /** max in-flight requests per wave — caps concurrency so a whole-chromosome fanout doesn't flood the API.
+   *  Default 8. Set higher only against an endpoint you know tolerates it. */
+  maxInFlight?: number;
+  maxRounds?: number; // max attempts per batch (transient retries); default 6
   drainWaitMs?: number; // per aio_collect wait; default 3000
-  drainSpins?: number; // safety cap on drain iterations per round; default 200
-  backoffMs?: number; // initial inter-round backoff; default 500
+  drainSpins?: number; // safety cap on drain iterations per wave; default 200
+  backoffMs?: number; // initial inter-wave backoff when transient retries remain; default 500
   maxBackoffMs?: number; // default 8000
+  /** Which outcomes are TRANSIENT (worth retrying). Default: transport failure (ok=false) or 429 or any 5xx.
+   *  A permanent status (e.g. 400/404) is NOT retried — it terminates immediately. */
+  isTransient?: (status: number | null, ok: boolean) => boolean;
 }
 
 export interface NcurlFanoutResult {
-  rounds: number;
+  waves: number;
   succeeded: number;
-  failed: number; // batches with no 2xx after maxRounds
+  failures: Array<{ batchId: number; status: number | null; transient: boolean }>;
 }
 
+const defaultTransient = (status: number | null, ok: boolean): boolean => !ok || status === 429 || (status !== null && status >= 500);
+
 /**
- * Launch one ducknng async HTTP request per row of `batchesTable`, drain to completion (looping the
- * any-ready collector — never relying on a single collect), and re-launch the non-2xx subset with exponential
- * backoff up to `maxRounds`. Leaves the successes in `resultsTable`. ducknng must already be LOADed on `conn`.
+ * Launch one ducknng async HTTP request per row of `batchesTable`, in concurrency-capped WAVES; drain each wave
+ * to completion (looping the any-ready collector — never a single collect); record 2xx in `resultsTable`; retry
+ * only TRANSIENT failures with exponential backoff up to `maxRounds` attempts; terminate PERMANENT failures
+ * immediately. Every launched handle is dropped (collected) or cancelled+dropped (drain-cap) — no leak, and an
+ * abandoned in-flight handle is never left racing a relaunch. ducknng must already be LOADed on `conn`.
  */
 export async function ncurlFanout(conn: SqlConn, opts: NcurlFanoutOptions): Promise<NcurlFanoutResult> {
   const { batchesTable, resultsTable, url, headersJson } = opts;
@@ -55,38 +65,43 @@ export async function ncurlFanout(conn: SqlConn, opts: NcurlFanoutOptions): Prom
     if (!IDENT.test(id)) throw new Error(`ncurlFanout: ${label} '${id}' must be a SQL identifier`);
   }
   const method = opts.method ?? "POST";
-  const tlsExpr = opts.tlsExpr ?? "0::UBIGINT";
+  const tlsConfigId = opts.tlsConfigId ?? 0;
+  if (!Number.isInteger(tlsConfigId) || tlsConfigId < 0) throw new Error("ncurlFanout: tlsConfigId must be a non-negative integer");
   const timeoutMs = opts.timeoutMs ?? 60000;
+  const maxInFlight = opts.maxInFlight ?? 8;
   const maxRounds = opts.maxRounds ?? 6;
   const drainWaitMs = opts.drainWaitMs ?? 3000;
   const drainSpins = opts.drainSpins ?? 200;
   const maxBackoffMs = opts.maxBackoffMs ?? 8000;
+  const isTransient = opts.isTransient ?? defaultTransient;
 
-  // internal temp tables, namespaced under the result table so concurrent fanouts don't collide
+  // queue carries each batch's remaining attempts; wave/launched/collected are per-wave scratch
+  const queue = `${resultsTable}__queue`;
+  const wave = `${resultsTable}__wave`;
   const launched = `${resultsTable}__launched`;
   const collected = `${resultsTable}__collected`;
-  const pending = `${resultsTable}__pending`;
+  await conn.run(`CREATE OR REPLACE TABLE ${resultsTable} (batch_id BIGINT, status INTEGER, body_text VARCHAR)`);
+  await conn.run(`CREATE OR REPLACE TABLE ${queue} AS SELECT batch_id, body, ${maxRounds}::INTEGER AS attempts_left FROM ${batchesTable}`);
 
-  await conn.run(`CREATE OR REPLACE TABLE ${resultsTable} (batch_id BIGINT, ok BOOLEAN, status INTEGER, body_text VARCHAR)`);
-  await conn.run(`CREATE OR REPLACE TABLE ${pending} AS SELECT batch_id, body FROM ${batchesTable}`);
-
-  let round = 0;
+  const failures: NcurlFanoutResult["failures"] = [];
+  let waves = 0;
   let backoff = opts.backoffMs ?? 500;
   for (;;) {
-    const [{ np }] = await conn.all<{ np: bigint }>(`SELECT count(*) np FROM ${pending}`);
-    if (Number(np) === 0) break;
-    if (round >= maxRounds) break;
-    round += 1;
+    const [{ q }] = await conn.all<{ q: bigint }>(`SELECT count(*) q FROM ${queue}`);
+    if (Number(q) === 0) break;
+    waves += 1;
 
-    // launch this round's pending batches; the per-row `body` is a column arg the scalar launcher accepts
+    // take a concurrency-capped wave and launch one async request per row (scalar launcher, per-row column body)
+    await conn.run(`CREATE OR REPLACE TABLE ${wave} AS SELECT batch_id, body, attempts_left FROM ${queue} ORDER BY batch_id LIMIT ${maxInFlight}`);
     await conn.run(
       `CREATE OR REPLACE TABLE ${launched} AS
-       SELECT batch_id, ducknng_ncurl_aio(?, ?, ?, body::BLOB, ?, ${tlsExpr}) AS h FROM ${pending}`,
-      [url, method, headersJson, timeoutMs],
+       SELECT batch_id, ducknng_ncurl_aio(?, ?, ?, body::BLOB, ?, ?::UBIGINT) AS h FROM ${wave}`,
+      [url, method, headersJson, timeoutMs, tlsConfigId],
     );
     await conn.run(`CREATE OR REPLACE TABLE ${collected} (aio_id UBIGINT, ok BOOLEAN, status INTEGER, body_text VARCHAR)`);
     const [{ need }] = await conn.all<{ need: bigint }>(`SELECT count(*) need FROM ${launched}`);
-    // drain until every launched handle is terminal — do NOT assume one collect returns all of them
+
+    // drain until every launched handle of THIS wave is terminal (loop the any-ready collector)
     let got = 0;
     for (let spin = 0; got < Number(need) && spin < drainSpins; spin += 1) {
       await conn.run(
@@ -98,31 +113,51 @@ export async function ncurlFanout(conn: SqlConn, opts: NcurlFanoutOptions): Prom
       const [{ n }] = await conn.all<{ n: bigint }>(`SELECT count(*) n FROM ${collected}`);
       got = Number(n);
     }
-    // record 2xx successes; whatever batch is still not in results is retried next round
+
+    // 2xx successes -> results
     await conn.run(
       `INSERT INTO ${resultsTable}
-       SELECT l.batch_id, c.ok, c.status, c.body_text
+       SELECT l.batch_id, c.status, c.body_text
        FROM ${launched} l JOIN ${collected} c ON c.aio_id = l.h
        WHERE c.ok AND c.status BETWEEN 200 AND 299`,
     );
-    // release every terminal handle from the ducknng runtime registry — a retried fanout over a whole VCF is
-    // thousands of handles; without this they leak. (Any handle never collected within drainSpins is abandoned
-    // here; its batch simply re-launches a fresh handle next round.)
-    await conn.run(`SELECT ducknng_aio_drop(aio_id) FROM ${collected}`);
-    await conn.run(
-      `CREATE OR REPLACE TABLE ${pending} AS
-       SELECT b.batch_id, b.body FROM ${batchesTable} b
-       WHERE b.batch_id NOT IN (SELECT batch_id FROM ${resultsTable})`,
+    // outcomes per batch for this wave: collected non-2xx (with ok/status) + any UNcollected (drain-cap) = transport-fail
+    const outcomes = await conn.all<{ batch_id: bigint; ok: boolean | null; status: number | null; attempts_left: number }>(
+      `SELECT w.batch_id, c.ok, c.status, w.attempts_left
+       FROM ${wave} w
+       LEFT JOIN ${launched} l ON l.batch_id = w.batch_id
+       LEFT JOIN ${collected} c ON c.aio_id = l.h
+       WHERE NOT (c.ok AND c.status BETWEEN 200 AND 299) OR c.aio_id IS NULL`,
     );
-    const [{ remaining }] = await conn.all<{ remaining: bigint }>(`SELECT count(*) remaining FROM ${pending}`);
-    if (Number(remaining) > 0 && round < maxRounds) {
-      await sleep(backoff);
-      backoff = Math.min(backoff * 2, maxBackoffMs);
+    // release EVERY launched handle: collected ones drop cleanly; uncollected (still in-flight at the cap) are
+    // cancelled then dropped so they never leak NOR race the relaunch.
+    await conn.run(`SELECT ducknng_aio_drop(aio_id) FROM ${collected}`);
+    await conn.run(`SELECT ducknng_aio_cancel(h) FROM ${launched} WHERE h NOT IN (SELECT aio_id FROM ${collected})`);
+    await conn.run(`SELECT ducknng_aio_drop(h) FROM ${launched} WHERE h NOT IN (SELECT aio_id FROM ${collected})`);
+
+    // classify: permanent -> terminal failure; transient with attempts left -> requeue (attempts-1); exhausted -> failure
+    const requeue: number[] = [];
+    for (const o of outcomes) {
+      const id = Number(o.batch_id);
+      const ok = o.ok === true; // uncollected -> null -> treated as transport failure (transient)
+      const transient = isTransient(o.status, ok);
+      if (!transient) { failures.push({ batchId: id, status: o.status, transient: false }); continue; }
+      if (o.attempts_left - 1 <= 0) { failures.push({ batchId: id, status: o.status, transient: true }); continue; }
+      requeue.push(id);
     }
+    // queue update: THIS WAVE's terminal batches (succeeded / permanent-failed / transient-exhausted) leave the
+    // queue; transient-retriable ones stay with one fewer attempt. Batches BEYOND maxInFlight were never in this
+    // wave and are left untouched, so a later wave picks them up. (Bug guard: do NOT rebuild the queue from the
+    // wave alone — that would drop every not-yet-launched batch.)
+    const waveIds = (await conn.all<{ batch_id: bigint }>(`SELECT batch_id FROM ${wave}`)).map((r) => Number(r.batch_id));
+    const requeueSet = new Set(requeue);
+    const terminal = waveIds.filter((id) => !requeueSet.has(id));
+    if (terminal.length) await conn.run(`DELETE FROM ${queue} WHERE batch_id IN (${terminal.join(",")})`);
+    if (requeue.length) await conn.run(`UPDATE ${queue} SET attempts_left = attempts_left - 1 WHERE batch_id IN (${requeue.join(",")})`);
+    if (requeue.length > 0) { await sleep(backoff); backoff = Math.min(backoff * 2, maxBackoffMs); }
   }
 
   const [{ succeeded }] = await conn.all<{ succeeded: bigint }>(`SELECT count(*) succeeded FROM ${resultsTable}`);
-  const [{ failed }] = await conn.all<{ failed: bigint }>(`SELECT count(*) failed FROM ${pending}`);
-  for (const t of [launched, collected, pending]) await conn.run(`DROP TABLE IF EXISTS ${t}`);
-  return { rounds: round, succeeded: Number(succeeded), failed: Number(failed) };
+  for (const t of [queue, wave, launched, collected]) await conn.run(`DROP TABLE IF EXISTS ${t}`);
+  return { waves, succeeded: Number(succeeded), failures };
 }

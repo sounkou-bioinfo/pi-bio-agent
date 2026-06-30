@@ -24,9 +24,12 @@ the filter. **One** piece is host code — the chunked fanout loop in
   literals"), and a recursive CTE over them is constant-folded to a single call — so a per-chunk, retried loop
   **cannot** live in one `SELECT` (all verified).
 - The **scalar** launcher `ducknng_ncurl_aio(url, …)` *does* take a per-row column body, so one statement
-  launches one real request per batch. The **drain** (`ducknng_ncurl_aio_collect`, an any-ready collector — not a
-  wait-for-all barrier) and the **status-driven retry** (`WHERE status NOT BETWEEN 200 AND 299` — errors are
-  *values*, not exceptions) are the loop. That loop is `ncurlFanout`.
+  launches one real request per batch (in concurrency-capped waves). The **drain**
+  (`ducknng_ncurl_aio_collect`, an any-ready collector — not a wait-for-all barrier) and the **status-driven
+  retry** are the loop: errors are *values*, not exceptions, so `ncurlFanout` retries only **transient** outcomes
+  (transport failure / `429` / `5xx`) with backoff and **terminates permanent** ones (`4xx`) immediately,
+  returning each terminal failure's status. Every launched handle is dropped (or cancelled+dropped on a drain
+  cap) — no handle leak. That loop is `ncurlFanout`.
 
 `test/ncurl-fanout.test.ts` proves the loop **deterministically** — a local ducknng server whose POST route
 validates the `{variants}` body and 503s the first two calls (server-side sequence) before 200, so the retry
@@ -70,7 +73,13 @@ column, often absent for novel WGS calls.
   hundreds of batches and would flood Ensembl REST. For a full chromosome, cap region size (or add a
   concurrency wave to `ncurlFanout`) and respect the ~15 req/s + hourly quota — the retry honors transient 503s
   but is not a substitute for rate limiting.
-- **gnomAD AF** is read from VEP's allele-keyed `colocated_variants[].frequencies.<ALT>.gnomadg`; a variant
-  absent from gnomAD is treated as rare (AF 0). This is the genome (`gnomadg`) frequency, not a population
-  subset.
+- **gnomAD AF** is read from VEP's allele-keyed `colocated_variants[0].frequencies.<ALT>.gnomadg`. Two honest
+  limits (per review): it reads only the *first* colocated variant, and it keys by the *raw VCF ALT* — for
+  indels/minimised/multiallelic alleles VEP's frequency key may differ (deletions keyed as `-`), so the lookup
+  silently misses and `coalesce(…,0)` then treats it as rare. For a real screen, unnest all colocated
+  variants/frequency maps, normalise alleles, and treat a *missing* AF as **unknown**, not zero (the abstention
+  the `rare-high-impact` flagship is built around).
+- **ClinVar join is exact `POS/REF/ALT`** (after `chr`-strip + a derived contig). Representation differences
+  between the two VCFs (left-alignment, trimming) can miss equivalent records → a false `(not in ClinVar)`.
+  Normalise/split both to a shared variant key before joining for a real pipeline.
 - **First ALT only.** Multiallelic sites use `ALT[1]`; normalize/split upstream for full multiallelic handling.

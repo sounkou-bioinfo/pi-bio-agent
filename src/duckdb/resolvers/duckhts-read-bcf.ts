@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { systemClock } from "../../core/clock.js";
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import type { BioResolverImpl } from "../../core/ports.js";
 
 // Generic DuckHTS reader: materialize an HTS file (VCF/BCF) into a RAW table via read_bcf(tidy_format) and
@@ -53,9 +53,18 @@ export const duckhtsReadBcfResolver: BioResolverImpl = async (resource, ctx) => 
   // companion INDEX (.tbi/.csi) by digest + record the region; for a whole-file read, digest the file itself.
   let inputDigest: string | undefined;
   if (region) {
+    // Pin the small companion INDEX by content digest AND a cheap identity for the DATA file the slice was cut
+    // from (size+mtime) — the slice depends on the data bytes too, but a full hash would defeat the point of a
+    // region read (and is impossible for a huge remote VCF never downloaded). The region itself is in
+    // provenance.notes; duckhts version is recorded above. (A caller needing byte-exact reproduction of a
+    // remote slice should pin the source's ETag/digest at the host.)
+    let indexDigest: string | undefined;
     for (const ext of [".tbi", ".csi"]) {
-      try { inputDigest = `index-sha256:${createHash("sha256").update(readFileSync(path + ext)).digest("hex")}`; break; } catch { /* try next / best effort */ }
+      try { indexDigest = `index-sha256:${createHash("sha256").update(readFileSync(path + ext)).digest("hex")}`; break; } catch { /* try next / best effort */ }
     }
+    let dataIdentity: string | undefined;
+    try { const st = statSync(path); dataIdentity = `data-size:${st.size};data-mtime:${Math.round(st.mtimeMs)}`; } catch { /* remote/unreadable: best effort */ }
+    inputDigest = [indexDigest, dataIdentity].filter(Boolean).join(";") || undefined;
   } else {
     try { inputDigest = `sha256:${createHash("sha256").update(readFileSync(path)).digest("hex")}`; } catch { /* non-local/unreadable: read_bcf fails closed below */ }
   }
