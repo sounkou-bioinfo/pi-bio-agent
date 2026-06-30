@@ -120,17 +120,22 @@ resolver/registry all have **real producers**. Since built out: the SQL-native N
 (`ducknng_ncurl_table` in `sql_materialize`; the `ols4-grounding` + `variant-annotation` examples ship, with
 `http.get` as the fallback), the COMPUTE pillar (`process.compute` over Arrow IPC), region-scoped
 `duckhts.read_bcf`, a `duckdbInitSql` connection-init hook, and CAS-of-bytes (`src/core/cas.ts`, proven by
-`http.get` byte-reuse across DBs). The items below are **not partial/owed work** — they are **deferred by the
-anti-idealist discipline** (build only when a real consumer forces them), and sandboxing/effect-limits are the
-**host's** job, never ours: wiring process-op FILE artifacts into CAS (waits on the `process` artifact transport,
-which waits on a real pipeline consumer); temporality; recording results/judgments as KG facts.
+`http.get` byte-reuse across DBs). The items below are **not partial/owed work** and sandboxing/effect-limits are
+the **host's** job, never ours. They split by whether the consumer is named yet:
+- **Named consumer = Phase 4** (so built WITH it, not speculative): **temporal anchoring** and **recording
+  results/judgments as KG facts** are exactly what Phase 4's `record → activate → rollback` consumes (record =
+  judgments as KG facts; activate/rollback = as-of temporality). Phase 1 and Phase 4 are linked — this leftover
+  has a concrete consumer, it is just correctly sequenced behind it.
+- **Consumer not yet real** (deferred by discipline): wiring process-op FILE artifacts into CAS waits on the
+  `process` artifact transport (Phase 3's remainder), which waits on a real pipeline.
 
 ```text
 Phase 0 (done)   Flagship walking skeleton: manifest #1, runOperation -> run/result/receipts, host
                  persistence. Three contracts became real producers.
 Phase 1 (DONE)   Run/provenance substrate: run+receipt persistence DONE; CAS-of-bytes DONE
-                 (src/core/cas.ts + fs-cas.ts, http.get byte-reuse across DBs). Consumer-gated (deferred
-                 by discipline, NOT owed): process-op FILE artifacts -> CAS, temporal anchoring.
+                 (src/core/cas.ts + fs-cas.ts, http.get byte-reuse across DBs). Leftover: temporal
+                 anchoring + KG-fact recording are CONSUMED BY PHASE 4 (built with it, not speculative);
+                 process-op FILE artifacts -> CAS waits on the Phase 3 artifact transport.
 Phase 2 (DONE)   Network is SQL-native: ducknng_ncurl_table inside duckdb.sql_materialize composes the
                  URL/headers/body in SQL and parses JSON -> table with NO TS resolver (ols4-grounding GET +
                  variant-annotation POST both ship). http.get (src/duckdb/resolvers/http-table-scan.ts) is
@@ -141,7 +146,8 @@ Phase 3 (DONE: table compute) Out-of-process COMPUTE: process.compute resolver (
                  fail-closed-without-runner. Consumer-gated (deferred, NOT owed): the operation-level
                  `process` transport that captures FILE artifacts (waits on a real pipeline consumer).
 Phase 4          Safe harness-adaptation surface: extension/spec/skill scaffold implementing
-                 declare -> validate -> test -> record -> activate -> rollback.
+                 declare -> validate -> test -> record -> activate -> rollback. CONSUMES Phase 1's
+                 leftover: `record` = judgments as KG facts; `activate`/`rollback` = as-of temporality.
 ```
 
 The expertise-per-budget measurement (§2) runs continuously now that the Phase 0 skeleton exists.
