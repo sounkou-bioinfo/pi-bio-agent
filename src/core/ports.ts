@@ -78,3 +78,34 @@ export interface ResolverOutput {
  * at runtime via the registry; never present in a manifest or a snapshot (those carry only the BioResolverSpec).
  */
 export type BioResolverImpl = (resource: VirtualResourceSpec, ctx: ResolutionContext) => Promise<ResolverOutput>;
+
+/**
+ * The PROCESS-RUNTIME port — the COMPUTE pillar's seam. A host-injected capability to run an OUT-OF-PROCESS
+ * computation (R / Python / Go / shell), exactly like `fetch` is injected for the network: the agent's manifest
+ * declares a `process.compute` resource, and without a ProcessRunner bound it FAILS CLOSED (the agent can never
+ * spawn a process on its own). The runner only spawns and reports — it does NOT touch DuckDB. The resolver owns
+ * the Arrow-IPC marshalling (DuckDB `COPY (sql) TO arrow_in (FORMAT arrow)`, the process computes, DuckDB
+ * `read_arrow(arrow_out)`), so the DATA contract stays in SQL/Arrow and the runner stays a thin, auditable exec
+ * boundary. Out-of-process, not FFI: a crash/OOM/timeout in the computation is contained in the child.
+ */
+export interface ProcessRunSpec {
+  /** [executable, ...args] — an argv array, NEVER a shell string (so there is no shell to inject into). */
+  command: readonly string[];
+  cwd?: string;
+  /** Extra environment for the child (merged over the host's). The resolver passes the Arrow in/out paths here. */
+  env?: Record<string, string>;
+  timeoutMs?: number;
+  signal?: AbortSignal;
+}
+
+export interface ProcessRunResult {
+  /** The child's exit code, or null if it was killed by a signal/timeout. */
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  timedOut: boolean;
+}
+
+export interface ProcessRunner {
+  run(spec: ProcessRunSpec): Promise<ProcessRunResult>;
+}

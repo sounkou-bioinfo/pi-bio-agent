@@ -18,6 +18,14 @@ import type { SqlConn } from "../core/ports.js";
 
 const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+// batch_id comes back from DuckDB as BIGINT; coercing to a JS number is only safe below 2^53. Guard it so a
+// huge id can never silently target the wrong row in a DELETE/UPDATE IN-list. (batch_id is a chunk index, so
+// this never fires in practice — but it must not be a silent footgun.)
+const safeId = (v: bigint): number => {
+  const n = Number(v);
+  if (!Number.isSafeInteger(n)) throw new Error(`ncurlFanout: batch_id ${v} exceeds JS safe-integer range`);
+  return n;
+};
 
 export interface NcurlFanoutOptions {
   /** input table (batch_id, body) — one request per row */
@@ -69,6 +77,7 @@ export async function ncurlFanout(conn: SqlConn, opts: NcurlFanoutOptions): Prom
   if (!Number.isInteger(tlsConfigId) || tlsConfigId < 0) throw new Error("ncurlFanout: tlsConfigId must be a non-negative integer");
   const timeoutMs = opts.timeoutMs ?? 60000;
   const maxInFlight = opts.maxInFlight ?? 8;
+  if (!Number.isInteger(maxInFlight) || maxInFlight < 1) throw new Error("ncurlFanout: maxInFlight must be a positive integer"); // LIMIT 0 would launch nothing and spin forever
   const maxRounds = opts.maxRounds ?? 6;
   const drainWaitMs = opts.drainWaitMs ?? 3000;
   const drainSpins = opts.drainSpins ?? 200;
@@ -138,7 +147,7 @@ export async function ncurlFanout(conn: SqlConn, opts: NcurlFanoutOptions): Prom
     // classify: permanent -> terminal failure; transient with attempts left -> requeue (attempts-1); exhausted -> failure
     const requeue: number[] = [];
     for (const o of outcomes) {
-      const id = Number(o.batch_id);
+      const id = safeId(o.batch_id);
       const ok = o.ok === true; // uncollected -> null -> treated as transport failure (transient)
       const transient = isTransient(o.status, ok);
       if (!transient) { failures.push({ batchId: id, status: o.status, transient: false }); continue; }
@@ -149,7 +158,7 @@ export async function ncurlFanout(conn: SqlConn, opts: NcurlFanoutOptions): Prom
     // queue; transient-retriable ones stay with one fewer attempt. Batches BEYOND maxInFlight were never in this
     // wave and are left untouched, so a later wave picks them up. (Bug guard: do NOT rebuild the queue from the
     // wave alone — that would drop every not-yet-launched batch.)
-    const waveIds = (await conn.all<{ batch_id: bigint }>(`SELECT batch_id FROM ${wave}`)).map((r) => Number(r.batch_id));
+    const waveIds = (await conn.all<{ batch_id: bigint }>(`SELECT batch_id FROM ${wave}`)).map((r) => safeId(r.batch_id));
     const requeueSet = new Set(requeue);
     const terminal = waveIds.filter((id) => !requeueSet.has(id));
     if (terminal.length) await conn.run(`DELETE FROM ${queue} WHERE batch_id IN (${terminal.join(",")})`);
