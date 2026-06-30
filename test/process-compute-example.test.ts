@@ -27,7 +27,7 @@ describe("example: out-of-process compute (R lm over Arrow IPC) is a manifest â€
       cwd, dbPath: ":memory:", manifestPath: MANIFEST,
       sql: "SELECT n, slope, intercept, r_squared FROM lm_fit",
       process: { runner: nodeProcessRunner() }, // host GRANTS out-of-process compute by composition
-      duckdbInitSql: PROVISION, duckdbConfig: { allow_unsigned_extensions: "true" },
+      duckdbInitSql: PROVISION,
       runId: "c1", now: "T1",
     });
     assert.equal(out.ok, true);
@@ -46,7 +46,7 @@ describe("example: out-of-process compute (R lm over Arrow IPC) is a manifest â€
     await assert.rejects(
       () => runBioQueryFromManifest({
         cwd, dbPath: ":memory:", manifestPath: MANIFEST, sql: "SELECT * FROM lm_fit",
-        duckdbInitSql: PROVISION, duckdbConfig: { allow_unsigned_extensions: "true" },
+        duckdbInitSql: PROVISION,
         runId: "c2", now: "T1", // no `process` -> process.compute stays unbound
       }),
       /process\.compute' is declared but no implementation is bound/,

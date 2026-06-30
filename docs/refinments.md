@@ -352,9 +352,19 @@ body — overfitting: a real skill doesn't bake the query data into the manifest
     point conflated a substrate convenience with a ducknng limit). On the pinned 1.5.2 build a subquery placed
     *directly inside* the table-function args is still rejected ("Table function cannot contain subqueries"), so
     the aggregate goes through a variable first; a later build may let the scalar subquery sit inline.
-  - **The one real constraint is multi-*request* fanout**, not row count. `ducknng_ncurl_table` is a bind-time
-    dynamic-schema table function, so it can't be **lateral-correlated** for one-call-per-chunk inside a single
-    `SELECT`. For chunk fanout (a whole VCF > VEP's ~200–1000-id/request cap, ~15 req/s + `429`/`Retry-After`):
+  - **NB — the table-function limits below are DuckDB-CORE, not ducknng's.** "Table function cannot contain
+    subqueries" and "does not support lateral join column parameters" are how *every* DuckDB table function
+    behaves (`read_csv`, `read_parquet`, … all reject subquery args and correlated lateral column inputs);
+    `ducknng_ncurl_table` only **inherits** them. The single genuinely *ducknng-flavored* wrinkle is that its
+    schema is **dynamic** (columns derived from the JSON response at bind time), which makes a per-row/lateral
+    call even less expressible than for a fixed-schema reader. So this is a DuckDB constraint we route around, not
+    a ducknng defect.
+  - **The one real constraint is multi-*request* fanout**, not row count. Because of the DuckDB-core limits above,
+    `ducknng_ncurl_table` can't be **lateral-correlated** for one-call-per-chunk inside a single `SELECT` — but
+    that does NOT mean per-chunk HTTP leaves SQL: the SCALAR `ducknng_ncurl_aio(...)` *does* fire one real request
+    per row with **error-as-value** `(ok, status, body_text)`, so the per-chunk fanout is SQL-native; only the
+    multi-ROUND retry orchestration is host code (`src/duckdb/ncurl-fanout.ts`), and only because a recursive CTE
+    constant-folds the IO (see the RETRY note below). For chunk fanout (a whole VCF > VEP's ~200–1000-id/request cap, ~15 req/s + `429`/`Retry-After`):
     launch per-row `ducknng_ncurl_aio(...)` handles (scalar — it *can* fire per chunk), materialize the aio ids,
     and **drain repeatedly** — `ducknng_ncurl_aio_collect(...)` is an *any-ready collector, not a wait-for-all
     barrier*, so getting 1 of 3 launched handles back is legal until you drain the rest (the earlier "returned
