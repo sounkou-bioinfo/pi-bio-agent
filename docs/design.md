@@ -333,9 +333,15 @@ distinguished only by scope:
   predicate, object=to_id`). Labels, synonyms, definitions, and relations are all just rows; the predicate is
   an open CURIE vocabulary (`rdfs:subClassOf`, `BFO:0000050` part_of, our own `references`/`measures`/…).
 - **`entailed_edge(from_id, predicate, to_id)`** — the *precomputed transitive closure* over the transitive
-  predicates (`materializeEntailedEdges(conn, transitivePredicates)`, a recursive CTE). With it,
-  descendants / ancestors / subsumption / graph-walk are **one indexed JOIN**, no bespoke walker:
+  predicates (`materializeEntailedEdges(conn, transitivePredicates[, {sourceTable, targetTable}])`, a recursive
+  CTE). With it, descendants / ancestors / subsumption / graph-walk are **one indexed JOIN**, no bespoke walker:
   `SELECT from_id FROM entailed_edge WHERE to_id = ? AND predicate = 'rdfs:subClassOf'`.
+- **`bio_observations(observation_id, statement_key, subject_id, predicate, object_id, value_json, recorded_at,
+  valid_from, valid_to, source, digest, attrs, trust)`** — the **append-only temporal** statement log (Phase 4),
+  kept *separate* from the atemporal `bio_edges` (whose `UNIQUE(from_id,to_id,predicate)` is the compiled-graph
+  contract). A row is edge-like (`object_id`) or scalar (`value`); `statement_key` is the *state slot* a later
+  row supersedes; `observationsAsOf(t)` is latest-per-`statement_key`; edge-like rows project into
+  `bio_edges_as_of(t)` over which the *same* closure runs. record = append, current = as-of, rollback = append.
 
 This makes **order the unifying idea, expressed as data and queried by SQL**, at three layers:
 
@@ -401,8 +407,11 @@ memo key is **content freshness, not the request** — params/URL is the *call*,
 pieces land when a concrete re-run forces them: content-addressed byte storage (CAS) for cross-db reuse; remote
 freshness via HTTP cache validation (ETag / Last-Modified, `If-None-Match` → `304`) once the `FetchLike` port
 exposes headers; `sql_materialize` freshness over its `declaredSources`' mtimes. Derived tables (`scale_members`,
-`entailed_edge`) are pure and trivially safe (recompute). Also pending: "as_of" as a graph parameter, and lazy
-resolution forcing only the resources a query names.
+`entailed_edge`) are pure and trivially safe (recompute). **`as_of` is now built** (Phase 4.0a): the temporal
+facts live in the append-only `bio_observations` (`src/duckdb/observations.ts`), `observationsAsOf(t)` is
+latest-per-`statement_key`, and edge-like rows project into `bio_edges_as_of(t)` over which the *same*
+`entailed_edge` closure runs (`entailedEdgesAsOf`). Still pending: lazy resolution forcing only the resources a
+query names.
 
 ### 5. Provenance graph: every claim has a source path
 

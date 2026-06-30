@@ -75,10 +75,17 @@ The KG is a typed graph over facts, artifacts, concepts, and evidence. A simple 
 
 ```sql
 bio_nodes(node_id, family, type, label, description, attrs JSON, trust JSON)
-bio_edges(from_id, to_id, predicate, attrs JSON, trust JSON)
-bio_observations(node_id, subject_id, observed_at, code_system, code_id, name, value, unit, attrs JSON, trust JSON)
+bio_edges(from_id, to_id, predicate, attrs JSON, trust JSON)   -- atemporal, UNIQUE(from_id,to_id,predicate): the compiled graph
+-- bio_observations is the APPEND-ONLY TEMPORAL statement log (Phase 4, BUILT — src/duckdb/observations.ts).
+-- statement_key = the state SLOT a later row supersedes; a row is edge-like (object_id) or scalar (value_json):
+bio_observations(observation_id, statement_key, subject_id, predicate, object_id, value_json, recorded_at, valid_from, valid_to, source, digest, attrs JSON, trust JSON)
 bio_artifacts(node_id, path, format, role, digest, attrs JSON)
 ```
+
+`observationsAsOf(t)` returns the latest row per `statement_key` (recorded_at ≤ t, valid interval contains t);
+edge-like observations project into `bio_edges_as_of(t)` over which the same `entailed_edge` closure runs. A
+measured scalar (a clinical value with `code_system`/`unit`) is just an observation whose `value_json` carries
+`{ code_system, code_id, name, value, unit }` — the general form subsumes the earlier measurement-specific shape.
 
 ### Node families
 

@@ -164,7 +164,8 @@ Phase 3 (DONE: table + file artifacts) Out-of-process COMPUTE: process.compute r
 Phase 4 (ACTIVE — the main lane) Safe harness-adaptation surface: extension/spec/skill scaffold
                  implementing declare -> validate -> test -> record -> activate -> rollback. CONSUMES
                  Phase 1's leftover: `record` = judgments as KG facts; `activate`/`rollback` = as-of
-                 temporality. Walking-skeleton plan below.
+                 temporality. DONE: 4.0a (bio_observations temporal store + as-of), 4.1 (coloc records
+                 judgments), 4.2 (activate/rollback). NEXT: 4.3 (declare->validate->test->record->activate).
 ```
 
 The expertise-per-budget measurement (§2) runs continuously now that the Phase 0 skeleton exists.
@@ -197,12 +198,15 @@ Each slice is end-to-end and deterministic-tested; build the foundation only as 
   (`createBioObservationSchema`/`recordObservation`/`observationsAsOf`/`materializeBioEdgesAsOf`/`entailedEdgesAsOf`)
   + `test/observations-as-of.test.ts` (supersession across a changing object/value, duplicate-triple-allowed,
   idempotency, the as-of edge closure); `materializeEntailedEdges` generalized to take a source/target table.
-- **4.1 — Record a real judgment.** An existing operation records its RESULT as a fact: e.g. `coloc` writes
-  `(gwas_locus) ←colocalizes-with[PP.H4]← (tissue) @t #digest`, or `rare-high-impact` writes its per-variant
-  classification. Proves "results/judgments as KG facts" with a real producer (not a synthetic one).
-- **4.2 — The activate/rollback state machine.** A spec's lifecycle as activation *events* over versions; the
-  "current active version" is the latest activation **as-of now**; `rollback` appends a reactivation of a prior
-  version. As-of makes rollback a *query*, not a redeploy.
+- **4.1 — Record a real judgment. BUILT.** `coloc` is the producer: every per-tissue posterior is a scalar
+  observation (`coloc:posterior:PP.Hk`) and the high-PP.H4 tissue becomes the edge `tissue
+  ←shares_causal_variant_with← gwas_locus` (projecting into `bio_edges_as_of`). `test/coloc-record.test.ts` —
+  4.1a deterministic (no R, non-skipped) + 4.1b the real `examples/coloc` run. (rare-high-impact's categorical
+  classification + abstention is the next producer pattern.)
+- **4.2 — The activate/rollback state machine. BUILT.** `src/duckdb/activation.ts` (`recordActivation` /
+  `activeOperationAsOf` / `rollbackOperation`) — a thin wrapper over `recordObservation`: `statement_key =
+  activation:operation:<id>`, the current active version is latest-as-of, `rollback` **appends** the prior
+  version (never mutates), `trust.provenanceClass = "attested"`. `test/activation-as-of.test.ts` (5 cases).
 - **4.3 — The declare → validate → test → record → activate happy path (thin).** The agent declares a CANDIDATE
   operation; the harness `validate`s it (built: `validateDomainPackManifest`/`validateReadOnlySelect`), `test`s
   it against its declared fixtures, `record`s pass/fail + the spec digest as facts, and `activate`s it **iff the
