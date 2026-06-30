@@ -10,17 +10,24 @@ import type { BioResolverImpl, ProcessRunner } from "../../core/ports.js";
 // shell) over a DuckDB input, exchanging Arrow IPC. The DATA contract stays in SQL/Arrow — this resolver does
 // the marshalling, the injected ProcessRunner only spawns:
 //   1. `COPY (inputSql) TO <in.arrow> (FORMAT arrow)`  — the input table handed to the process, as Arrow IPC
-//   2. run `command` with PI_ARROW_IN / PI_ARROW_OUT in the env (the process reads in, writes out)
+//   2. run `command` with the in/out Arrow paths APPENDED AS THE LAST TWO ARGV entries (… <in.arrow> <out.arrow>)
+//      — NOT env vars: argv is explicit and does not leak down a process tree (a discipline that matters once
+//      children spawn their own children). The process reads the input path, writes the output path.
 //   3. `CREATE OR REPLACE TABLE <table> AS SELECT * FROM read_arrow(<out.arrow>)`  — the result back as a table
-// Fails closed: no ProcessRunner bound -> the resource cannot resolve (the agent can't spawn on its own); a
-// non-zero exit, a timeout, or a missing output file THROWS (the run records the failure, never a silent empty
-// table). Out-of-process, not FFI: a crash/OOM in the computation is contained in the child.
+// ERROR MODEL (two layers, both defined — not happy-path):
+//   * CATASTROPHIC (the run crashed): no ProcessRunner bound, a non-zero exit, a timeout, or a missing output
+//     file all THROW here -> the run is recorded as FAILED with a receipt, never a silent empty table. Out-of-
+//     process, not FFI: a crash/OOM in the computation is contained in the child.
+//   * PER-UNIT (the computation ran but a sub-result failed): that is ERRORS-AS-VALUES and lives in the OUTPUT
+//     TABLE, by convention a `status` column ("ok" / "error: <msg>") the agent branches on in SQL — the COMPUTE
+//     script's job, not the resolver's. So a partial failure (one tissue, one batch) is data, not a crash.
 //
 // params: { table, inputSql, command, env?, timeoutMs?, extensions? }
 //   table       output table (its identity); a valid SQL identifier
 //   inputSql    a single read-only SELECT/WITH producing the input handed to the process (validated)
 //   command     argv array [exe, ...args] (NOT a shell string) — e.g. ["Rscript", "/abs/coloc.R"]
-//   env         extra environment for the child (merged over the host's; the Arrow paths are added by us)
+//   env         extra environment for the child (merged over the host's) — tool knobs only; NOT the Arrow paths
+//               (those are appended as argv)
 //   timeoutMs   kill the child after this long (default 120000)
 //   extensions  DuckDB extensions to LOAD first; nanoarrow is always loaded (it provides the Arrow-IPC codec)
 
@@ -66,10 +73,12 @@ export function processComputeResolver(runner: ProcessRunner): BioResolverImpl {
       // 1. input table -> Arrow IPC file (the process's stdin-equivalent, but a typed columnar contract)
       await ctx.conn.run(`COPY (${inner}) TO '${inFile.replace(/'/g, "''")}' (FORMAT arrow)`);
 
-      // 2. run the out-of-process computation; it reads PI_ARROW_IN, writes PI_ARROW_OUT
+      // 2. run the out-of-process computation. The Arrow in/out paths are APPENDED AS THE LAST TWO ARGV entries
+      //    (not env vars) — explicit, and never inherited down a process tree. `env` carries only the manifest's
+      //    own child env (tool knobs), never the IO paths.
       const result = await runner.run({
-        command,
-        env: { ...env, PI_ARROW_IN: inFile, PI_ARROW_OUT: outFile },
+        command: [...command, inFile, outFile],
+        env,
         timeoutMs,
         signal: ctx.signal,
       });
@@ -81,7 +90,7 @@ export function processComputeResolver(runner: ProcessRunner): BioResolverImpl {
         throw new Error(`process.compute: '${command[0]}' ${how}${tail ? `\n${tail}` : ""}`);
       }
       // the process MUST produce the output file; a clean exit with no output is still a failure (fail closed)
-      try { await fs.access(outFile); } catch { throw new Error(`process.compute: '${command[0]}' exited 0 but wrote no Arrow output to PI_ARROW_OUT`); }
+      try { await fs.access(outFile); } catch { throw new Error(`process.compute: '${command[0]}' exited 0 but wrote no Arrow output to its output path (argv)`); }
 
       // 3. Arrow IPC result -> a DuckDB table
       await ctx.conn.run(`CREATE OR REPLACE TABLE ${p.table} AS SELECT * FROM read_arrow('${outFile.replace(/'/g, "''")}')`);
@@ -90,7 +99,7 @@ export function processComputeResolver(runner: ProcessRunner): BioResolverImpl {
       // that resolves to a readable file (the script), hash its BYTES so editing the script changes the digest —
       // contributed as basename + content-hash, NOT the machine-specific absolute path, so the same run on another
       // host digests identically. Entries are NUL-delimited (["a b","c"] != ["a","b c"]) and the env (sorted, the
-      // real compute knob) is folded in. PI_ARROW_IN/OUT are deliberately absent (machine-specific temp paths
+      // real compute knob) is folded in. The in/out Arrow paths (argv) are deliberately absent (machine-specific temp paths
       // added only at spawn) — excluding them keeps the digest portable.
       const parts: string[] = [];
       for (const c of command) {

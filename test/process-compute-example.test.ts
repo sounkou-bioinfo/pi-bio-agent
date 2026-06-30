@@ -15,12 +15,12 @@ const PROVISION = ["INSTALL nanoarrow FROM community", "LOAD nanoarrow"]; // nan
 
 const rArrowAvailable = (() => {
   try {
-    execFileSync("Rscript", ["-e", 'if(!requireNamespace("arrow",quietly=TRUE)) quit(status=1)'], { stdio: "ignore" });
+    execFileSync("Rscript", ["-e", 'if(!requireNamespace("nanoarrow",quietly=TRUE)) quit(status=1)'], { stdio: "ignore" });
     return true;
   } catch { return false; }
 })();
 
-describe("example: out-of-process compute (R lm over Arrow IPC) is a manifest — the COMPUTE pillar", { skip: rArrowAvailable ? false : "Rscript + R 'arrow' package not available" }, () => {
+describe("example: out-of-process compute (R lm over Arrow IPC) is a manifest — the COMPUTE pillar", { skip: rArrowAvailable ? false : "Rscript + R 'nanoarrow' package not available" }, () => {
   test("DuckDB table -> Arrow IPC -> R lm() -> Arrow IPC -> table; the agent reads the fitted coefficients", async () => {
     const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-compute-"));
     const out = await runBioQueryFromManifest({

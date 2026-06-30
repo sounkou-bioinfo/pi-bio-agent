@@ -18,14 +18,14 @@
         "id": "harmonized", "title": "Harmonized coloc input bundle (DATA pillar)", "kind": "virtual", "resolver": "duckdb.sql_materialize",
         "params": {
           "table": "harmonized",
-          "sql": "SELECT g.snp, g.beta AS beta_gwas, g.se * g.se AS varbeta_gwas, CASE WHEN g.ea = e.ea AND g.oa = e.oa THEN e.beta WHEN g.ea = e.oa AND g.oa = e.ea THEN -e.beta END AS beta_eqtl, e.se * e.se AS varbeta_eqtl FROM gwas_locus g JOIN eqtl_locus e ON g.snp = e.snp WHERE (g.ea = e.ea AND g.oa = e.oa) OR (g.ea = e.oa AND g.oa = e.ea) ORDER BY g.pos"
+          "sql": "SELECT e.tissue, g.snp, g.beta AS beta_gwas, g.se * g.se AS varbeta_gwas, CASE WHEN g.ea = e.ea AND g.oa = e.oa THEN e.beta WHEN g.ea = e.oa AND g.oa = e.ea THEN -e.beta END AS beta_eqtl, e.se * e.se AS varbeta_eqtl FROM gwas_locus g JOIN eqtl_locus e ON g.snp = e.snp WHERE (g.ea = e.ea AND g.oa = e.oa) OR (g.ea = e.oa AND g.oa = e.ea) ORDER BY e.tissue, g.pos"
         }
       },
       {
         "id": "coloc_result", "title": "Colocalization posteriors (COMPUTE pillar)", "kind": "virtual", "resolver": "process.compute",
         "params": {
           "table": "coloc_result",
-          "inputSql": "SELECT snp, beta_gwas, varbeta_gwas, beta_eqtl, varbeta_eqtl FROM harmonized",
+          "inputSql": "SELECT tissue, snp, beta_gwas, varbeta_gwas, beta_eqtl, varbeta_eqtl FROM harmonized",
           "command": ["Rscript", "./coloc.R"],
           "timeoutMs": 120000
         }

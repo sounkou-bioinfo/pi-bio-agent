@@ -92,7 +92,8 @@ export interface ProcessRunSpec {
   /** [executable, ...args] — an argv array, NEVER a shell string (so there is no shell to inject into). */
   command: readonly string[];
   cwd?: string;
-  /** Extra environment for the child (merged over the host's). The resolver passes the Arrow in/out paths here. */
+  /** Extra environment for the child (merged over the host's) — tool knobs only; the Arrow in/out paths are passed
+   *  as the last two ARGV entries (see process.compute), never via env. */
   env?: Record<string, string>;
   timeoutMs?: number;
   signal?: AbortSignal;

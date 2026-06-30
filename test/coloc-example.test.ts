@@ -7,15 +7,17 @@ import { join, resolve } from "node:path";
 import { runBioQueryFromManifest } from "../src/hosts/run-store.js";
 import { nodeProcessRunner } from "../src/process/node-process-runner.js";
 
-// The two-pillar flagship end to end: GWAS + eQTL loci -> SQL allele HARMONIZATION (DATA pillar) -> out-of-process
-// R coloc.abf over Arrow IPC (COMPUTE pillar) -> colocalization posteriors. Real DAG, synthetic locus with a
-// shared causal at rs6 (=> high PP.H4), one flipped-allele SNP (rs9) and one allele-mismatch SNP (rs12, dropped).
+// The two-pillar flagship end to end, MULTI-TISSUE: GWAS + per-tissue eQTL loci -> SQL allele HARMONIZATION
+// (DATA pillar) -> out-of-process R coloc.abf PER TISSUE over Arrow IPC (COMPUTE pillar; per-tissue = the
+// partition+map) -> colocalization posteriors per tissue. The synthetic locus discriminates three outcomes:
+// Whole_Blood SHARES the causal (rs6) with the GWAS (high PP.H4); Liver has a DIFFERENT causal (rs3) -> PP.H3;
+// Brain has no eQTL signal -> PP.H1. Whole_Blood also exercises harmonization (rs9 allele-swap flip, rs12 drop).
 const MANIFEST = resolve(process.cwd(), "examples", "coloc", "manifest.json");
 const PROVISION = ["INSTALL nanoarrow FROM community", "LOAD nanoarrow"];
 
 const rArrowAvailable = (() => {
   try {
-    execFileSync("Rscript", ["-e", 'if(!requireNamespace("arrow",quietly=TRUE)) quit(status=1)'], { stdio: "ignore" });
+    execFileSync("Rscript", ["-e", 'if(!requireNamespace("nanoarrow",quietly=TRUE)) quit(status=1)'], { stdio: "ignore" });
     return true;
   } catch { return false; }
 })();
@@ -32,24 +34,38 @@ async function rows(sql: string): Promise<Array<Record<string, unknown>>> {
   return (JSON.parse(await fs.readFile(join(out.runDir, "result.json"), "utf8")) as { rows: Array<Record<string, unknown>> }).rows;
 }
 
-describe("example: post-GWAS colocalization is a manifest — the two-pillar flagship (walking skeleton)", { skip: rArrowAvailable ? false : "Rscript + R 'arrow' not available" }, () => {
-  test("DATA pillar: SQL harmonization aligns alleles, flips the swapped SNP, drops the mismatch", async () => {
-    const h = await rows("SELECT snp, round(beta_eqtl, 3) AS beta_eqtl FROM harmonized ORDER BY snp");
-    const snps = h.map((r) => r.snp);
-    assert.equal(h.length, 11, "rs12 (allele mismatch) is dropped; 11 of 12 SNPs harmonize");
-    assert.ok(!snps.includes("rs12"), "rs12 dropped");
-    const rs9 = h.find((r) => r.snp === "rs9");
-    assert.equal(Number(rs9!.beta_eqtl), 0.07, "rs9 alleles were swapped -> eqtl beta flipped -0.07 -> +0.07");
+describe("example: post-GWAS colocalization is a manifest — the two-pillar flagship (multi-tissue)", { skip: rArrowAvailable ? false : "Rscript + R 'nanoarrow' not available" }, () => {
+  test("DATA pillar: SQL harmonization aligns/flips/drops per tissue", async () => {
+    const h = await rows("SELECT tissue, count(*) AS n FROM harmonized GROUP BY tissue ORDER BY tissue");
+    const byTissue = Object.fromEntries(h.map((r) => [r.tissue, Number(r.n)]));
+    assert.equal(byTissue["Whole_Blood"], 11, "Whole_Blood drops the rs12 allele mismatch (11 of 12)");
+    assert.equal(byTissue["Liver"], 12, "Liver alleles all align (12)");
+    assert.equal(byTissue["Brain"], 12, "Brain alleles all align (12)");
+    const rs9 = await rows("SELECT round(beta_eqtl,3) AS b FROM harmonized WHERE tissue='Whole_Blood' AND snp='rs9'");
+    assert.equal(Number(rs9[0]!.b), 0.07, "Whole_Blood rs9 alleles were swapped -> eqtl beta flipped -0.07 -> +0.07");
   });
 
-  test("COMPUTE pillar: R coloc.abf over Arrow IPC concludes the GWAS and eQTL COLOCALIZE (high PP.H4)", async () => {
-    const pp = await rows("SELECT hypothesis, round(posterior, 4) AS posterior, nsnps, engine FROM coloc_result ORDER BY hypothesis");
-    assert.equal(pp.length, 5, "PP.H0..PP.H4");
-    const byHyp = Object.fromEntries(pp.map((r) => [r.hypothesis, Number(r.posterior)]));
-    const total = pp.reduce((a, r) => a + Number(r.posterior), 0);
-    assert.ok(Math.abs(total - 1) < 0.01, `posteriors sum to ~1 (got ${total})`);
-    assert.equal(Number(pp[0]!.nsnps), 11, "ran over the 11 harmonized SNPs");
-    assert.ok(byHyp["PP.H4"] > 0.8, `PP.H4 (shared causal variant) is high — colocalized (got ${byHyp["PP.H4"]})`);
-    assert.ok(byHyp["PP.H4"] > byHyp["PP.H3"], "PP.H4 (shared) dominates PP.H3 (distinct causals)");
+  test("COMPUTE pillar: per-tissue coloc.abf discriminates colocalization vs different-causal vs no-eQTL", async () => {
+    const r = await rows(`SELECT tissue,
+        round(max(CASE WHEN hypothesis='PP.H1' THEN posterior END),3) AS H1,
+        round(max(CASE WHEN hypothesis='PP.H3' THEN posterior END),3) AS H3,
+        round(max(CASE WHEN hypothesis='PP.H4' THEN posterior END),3) AS H4
+      FROM coloc_result GROUP BY tissue`);
+    const t = Object.fromEntries(r.map((x) => [x.tissue, x]));
+    // Whole_Blood: SHARED causal -> high PP.H4
+    assert.ok(Number(t["Whole_Blood"]!.H4) > 0.8, `Whole_Blood colocalizes (PP.H4=${t["Whole_Blood"]!.H4})`);
+    // Liver: different causal -> PP.H3 dominates
+    assert.ok(Number(t["Liver"]!.H3) > 0.8 && Number(t["Liver"]!.H3) > Number(t["Liver"]!.H4), `Liver shares the locus but a different causal (PP.H3=${t["Liver"]!.H3})`);
+    // Brain: no eQTL signal -> PP.H1 (GWAS only) dominates
+    assert.ok(Number(t["Brain"]!.H1) > 0.8 && Number(t["Brain"]!.H1) > Number(t["Brain"]!.H4), `Brain has GWAS signal only (PP.H1=${t["Brain"]!.H1})`);
+
+    // the agent's actual question: which tissue colocalizes? -> the top PP.H4
+    const top = await rows("SELECT tissue FROM coloc_result WHERE hypothesis='PP.H4' ORDER BY posterior DESC LIMIT 1");
+    assert.equal(top[0]!.tissue, "Whole_Blood", "the colocalizing tissue is Whole_Blood");
+
+    // errors-as-values: every row carries a status; the happy path is all "ok" (a failed tissue would be a row
+    // with status="error: …", not a crashed job)
+    const st = await rows("SELECT DISTINCT status FROM coloc_result");
+    assert.deepEqual(st.map((r) => r.status), ["ok"], "all tissues computed (status=ok), errors would be in-band");
   });
 });

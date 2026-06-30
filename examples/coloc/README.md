@@ -24,26 +24,29 @@ eqtl_locus ┘        (DATA pillar)   (COMPUTE pillar)
    H0–H4 posterior combination, a thing SQL is poor at) and reads the posteriors back as a table. Uses the real
    `coloc` package when present, else a faithful inline implementation of the same algorithm.
 
-## Recorded run (2026-06-30)
+It runs **per tissue** (the partition+map fan-out): three eQTL tissues, one bundle, `coloc.abf` per tissue group.
+
+## Recorded run (2026-06-30, real `coloc::coloc.abf`)
 
 ```
-  PP.H0        0   (nsnps=11, engine=coloc::coloc.abf)
-  PP.H1        0
-  PP.H2        0
-  PP.H3        0
-  PP.H4        1   (shared causal variant — COLOCALIZED)
+  tissue        PP.H1   PP.H3   PP.H4
+  Whole_Blood   0.000   0.000   1.000   ← COLOCALIZED (shared causal rs6)
+  Liver         0.055   0.941   0.003   ← same locus, DIFFERENT causal (eQTL peak rs3)
+  Brain         0.945   0.000   0.054   ← GWAS signal only (no eQTL)
 ```
 
-The synthetic locus has a shared causal at `rs6` (strong signal in *both* traits), so the real `coloc::coloc.abf`
-concludes `PP.H4 ≈ 1.0`: the GWAS and eQTL share a causal variant. The DATA pillar (SQL allele harmonization) and
-the COMPUTE pillar (out-of-process R coloc over Arrow IPC) **composed end to end**, with a receipt at every step
-(file digests, the harmonization SQL digest, the `coloc.R` command digest).
+The agent's question — *which tissue's eQTL colocalizes with the GWAS?* — is one `ORDER BY PP.H4` away:
+**Whole_Blood** (`PP.H4 ≈ 1.0`, shared causal at `rs6`). And the substrate distinguishes the two non-trivial
+nulls: **Liver** shares the locus but a *different* causal variant (`PP.H3 ≈ 0.94`, its eQTL peaks at `rs3`),
+while **Brain** has the GWAS signal but no eQTL (`PP.H1 ≈ 0.95`). The DATA pillar (SQL allele harmonization,
+per tissue) and the COMPUTE pillar (out-of-process R coloc over Arrow IPC, per tissue) **composed end to end**,
+with a receipt at every step (file digests, the harmonization SQL digest, the `coloc.R` command digest).
 
 Run the test: `npm test` (gated on `Rscript` + the R `arrow` package).
 
 ## How it thickens (and why it's the finish line)
 
-This skeleton is `coloc.abf` on **one locus + one tissue** (no LD matrix needed). Thickening it is exactly what
+This skeleton is `coloc.abf` on **one locus across a few tissues** (no LD matrix needed). Thickening it is exactly what
 drives the last deferred substrate pieces — it is **one flagship, not three remaining promises**:
 
 - **per-tissue fan-out** over real GTEx eQTL tissues = the partition+map DAG (`runPipeline`);
