@@ -320,10 +320,15 @@ body — overfitting: a real skill doesn't bake the query data into the manifest
     `SELECT * FROM ducknng_ncurl_table('http://httpbin.org/' || url_encode(getvariable('path')), 'GET', NULL,
     NULL, 12000, 0::UBIGINT)` — fetched + parsed the JSON body into a table, URL composed in pure SQL. So with
     ducknng version-matched, HTTP needs NO `http.get` TS resolver at all: it's `ducknng_ncurl_table` (+ chunking
-    via SQL, retry via SQL/Retry-After). Caveat: HTTPS needs a TLS config (CA bundle / tls_config_id) — plain
-    HTTP worked directly, HTTPS gave "Peer could not be authenticated". The `http.get` TS resolver (global fetch)
-    remains the FALLBACK when the DuckDB version doesn't match a ducknng build. To adopt ducknng project-wide:
-    pin DuckDB to a ducknng-built version, or wait for a v1.5.4 ducknng build.
+    via SQL, retry via SQL/Retry-After). **HTTPS works too** (proven against the REAL OLS4 API): build a TLS
+    config from the system CA bundle as IN-MEMORY PEM and pass its id —
+    `SET VARIABLE tls = ducknng_tls_config_from_pem('', '', getvariable('ca'), '', 1);
+     SELECT * FROM ducknng_ncurl_table('https://www.ebi.ac.uk/ols4/api/search?q=' || url_encode(getvariable('query')),
+       'GET', NULL, NULL, 20000, getvariable('tls')::UBIGINT)` -> parsed the OLS4 response into a table
+    (`response`, `responseHeader`, `facet_counts`). So the WHOLE fetch is SQL: SET VARIABLE params + url_encode
+    composition + a PEM TLS config + ncurl_table parse. The `http.get` TS resolver (global fetch) + the
+    http-policies (withRetry/withAuth) remain the FALLBACK when the DuckDB version doesn't match a ducknng build.
+    To adopt ducknng project-wide: pin DuckDB to a ducknng-built version (1.5.2/1.5.3), or build ducknng for 1.5.4.
 - **BATCH HTTP = a chunked, rate-limited PIPELINE, not one request.** VEP caps the batch (~200-1000 ids) and
   rate-limits (~15 req/s, `429`+`Retry-After`, hourly quota). Annotating a real VCF: chunk the variant list (SQL)
   into batches <= the limit, run them through `runPipeline` (the push/pull pool) with `withRetry` (429/backoff),
