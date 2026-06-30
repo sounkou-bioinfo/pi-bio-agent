@@ -225,6 +225,33 @@ Each slice is end-to-end and deterministic-tested; build the foundation only as 
 Discipline: do NOT build the full state machine (4.2) or the loop (4.3) ahead of 4.0/4.1; each slice earns the
 next. The forbidden/allowed table in §6 is the invariant every slice must already satisfy.
 
+### Later (a separate lane, not core): NNG host capabilities — compute distribution + `ducknng-fs`
+
+A **note, not a build** — deferred until a real cross-machine/worker-pool consumer forces it (the anti-idealist
+rule). Two capabilities that are **unrelated as abstractions** but **merge as a host SERVICE**, never as a
+substrate concept:
+
+- **Storage/namespace** (`ducknng-fs`): `path → metadata → digest/bytes` — a DuckDB `fs_node` metadata graph over
+  ducknng RPC + CAS bytes + a future FUSE host-port (the Latch Data split: metadata DB + object bytes + FUSE; the
+  `scripts/ducknng-fs.mjs` dogfood proves the storage half). A *systems* lane (consistency races, chunked/partial
+  reads, deletion races, reconciliation) — kept later.
+- **Execution/control** (pure NNG process calling): `command + env + inputs → exit/status/logs/outputs`. Slots
+  behind the **existing `ProcessRunner` port** — no new core type.
+
+Build order (each a HOST capability, injected, interpreting existing declarations — like `nodeProcessRunner`):
+1. **`nngProcessRunner`** — implements `ProcessRunner` over NNG (sends `ProcessRunSpec`, returns
+   `ProcessRunResult`). First slice assumes a **shared run dir / CAS**, so `process.compute`'s Arrow-file +
+   argv-paths contract is **UNCHANGED**. The first proof is about the *runner seam* (echo-like worker), not biology.
+2. **`process.nng_compute`** — later, **pure Arrow-over-NNG** (controller sends Arrow IPC bytes + command; worker
+   returns Arrow output bytes + logs/status). Removes the shared-filesystem requirement → true cross-machine.
+   Needs a NEW adapter surface (it owns the Arrow bytes) — do NOT mutate the clean `ProcessRunner`.
+3. **`ducknng-fs` host-port** + optional **`nng-host` daemon** exposing `fs.*` + `proc.*` over one
+   transport/auth/sandbox boundary.
+
+**GUARDRAIL:** process calling must NOT depend on the filesystem *conceptually* (`proc.run` is never a method on
+the fs). The fs is a **staging convenience**; the execution model stays: manifest declares compute → host injects
+runner → runner executes → resolver materializes output → run/receipt/observation records what happened.
+
 ## 6. Harness-adaptation doctrine (mods vs hooks)
 
 Extending the harness is **core to the Pi lineage** — Pi packages, extensions, custom tools, skills,

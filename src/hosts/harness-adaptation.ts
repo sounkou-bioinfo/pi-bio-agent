@@ -33,6 +33,7 @@ export interface CandidateOutcome {
   activated: boolean;
 }
 
+const ID = /^[A-Za-z0-9._-]+$/;
 const specDigestOf = (c: OperationCandidate): string =>
   `sha256:${createHash("sha256").update(JSON.stringify([c.id, c.version, c.fixtureSql, c.sql, c.expected])).digest("hex")}`;
 
@@ -41,6 +42,8 @@ export async function runCandidateActivation(
   candidate: OperationCandidate,
   deps: { sandbox: SqlConn; recordedAt: string; source: string; approve: ApprovalPolicy },
 ): Promise<CandidateOutcome> {
+  if (!ID.test(candidate.id ?? "")) throw new Error("runCandidateActivation: candidate.id must match [A-Za-z0-9._-]+"); // fail-fast (else it'd only fail at activate)
+  if (!ID.test(candidate.version ?? "")) throw new Error("runCandidateActivation: candidate.version must match [A-Za-z0-9._-]+");
   const specDigest = specDigestOf(candidate);
   const candKey = `candidate:${specDigest}`;
   const recStatus = (slot: string, predicate: string, value: string): Promise<string> =>
@@ -51,7 +54,8 @@ export async function runCandidateActivation(
   try { validateReadOnlySelect(candidate.sql); } catch { validation = "failed"; }
   await recStatus("validation", "harness:validation_status", validation);
 
-  // 2. TEST — run the candidate over its fixture in a SANDBOX (separate conn — can't touch the real db), compare
+  // 2. TEST — run the candidate over its fixture in a SANDBOX (separate conn — can't touch the real db), compare.
+  //    The audit trail is COMPLETE: a skipped test (validation failed) is recorded too, not just absent.
   let test: "passed" | "failed" | "skipped" = "skipped";
   if (validation === "passed") {
     test = "failed";
@@ -61,13 +65,15 @@ export async function runCandidateActivation(
       const canon = (rows: unknown): string => JSON.stringify(rows, (_k, v) => (typeof v === "bigint" ? Number(v) : v)); // DuckDB ints can be bigint
       test = canon(actual) === canon(candidate.expected) ? "passed" : "failed";
     } catch { test = "failed"; }
-    await recStatus("fixture-test", "harness:test_status", test);
   }
+  await recStatus("fixture-test", "harness:test_status", test);
 
-  // 3. ACTIVATE — only if BOTH pass AND the approval policy approves (the human/policy boundary, NOT "tests pass")
+  // 3. ACTIVATE — only if BOTH pass AND the approval policy approves (the human/policy boundary, NOT "tests pass").
+  //    The approval DECISION is recorded too, so a rejected-but-tested candidate is auditable.
   let activated = false;
   if (validation === "passed" && test === "passed") {
     const approval = await deps.approve({ id: candidate.id, version: candidate.version, specDigest });
+    await recStatus("approval", "harness:approval_status", approval ? "approved" : "rejected");
     if (approval) {
       await recordActivation(conn, { kind: "operation", id: candidate.id, version: candidate.version, specDigest, recordedAt: deps.recordedAt, source: deps.source, approvedBy: approval.approvedBy, reason: approval.reason });
       activated = true;

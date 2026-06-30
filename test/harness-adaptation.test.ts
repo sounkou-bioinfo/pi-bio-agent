@@ -55,13 +55,20 @@ describe("Phase 4.3: declare -> validate -> test -> record -> activate (generic,
     const writey: OperationCandidate = { ...good, sql: "DELETE FROM nums" };
     const out = await runCandidateActivation(conn, writey, { sandbox: await sandbox(), recordedAt: NOW, source: "ci", approve: approveAlways });
     assert.deepEqual({ v: out.validation, t: out.test, a: out.activated }, { v: "failed", t: "skipped", a: false });
-    assert.equal(await observationAsOfKey(conn, `candidate:${out.specDigest}:fixture-test`, NOW), null, "no test status when validation failed");
+    assert.equal(JSON.parse((await observationAsOfKey(conn, `candidate:${out.specDigest}:fixture-test`, NOW))!.value_json!), "skipped", "the skipped test is recorded too (complete audit trail)");
   });
 
-  test("tests passing is NOT activation — a rejecting approval policy blocks it (the human boundary)", async () => {
+  test("tests passing is NOT activation — a rejecting approval policy blocks it, and the rejection is recorded", async () => {
     const conn = await obsConn();
     const out = await runCandidateActivation(conn, good, { sandbox: await sandbox(), recordedAt: NOW, source: "ci", approve: rejectAlways });
     assert.deepEqual({ v: out.validation, t: out.test, a: out.activated }, { v: "passed", t: "passed", a: false });
+    assert.equal(JSON.parse((await observationAsOfKey(conn, `candidate:${out.specDigest}:approval`, NOW))!.value_json!), "rejected", "the approval rejection is auditable");
     assert.equal(await activeOperationAsOf(conn, "double.report", NOW), null, "validated + tested but NOT approved -> not active");
+  });
+
+  test("fail-fast: a candidate with an ambiguous id is rejected before any recording", async () => {
+    const conn = await obsConn();
+    const sb = await sandbox();
+    await assert.rejects(() => runCandidateActivation(conn, { ...good, id: "bad:id" }, { sandbox: sb, recordedAt: NOW, source: "ci", approve: approveAlways }), /candidate.id must match/);
   });
 });
