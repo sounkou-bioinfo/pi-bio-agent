@@ -9,8 +9,21 @@ small set of generic primitives and the agent writes the SQL.
 ## How it works
 
 A resolver turns a declared resource into a DuckDB table and stamps a receipt (resolver version, params
-digest, source snapshot). Today that means reading a file natively (`duckdb.file_scan` over csv/tsv/parquet/
-json), a VCF/BCF (`duckhts.read_bcf`), or an HTTP/JSON endpoint (`http.get`, whose fetch is host-supplied).
+digest, source snapshot). The built-ins span three concerns:
+
+- **Data** — read a file natively (`duckdb.file_scan` over csv/tsv/parquet/json), a VCF/BCF region
+  (`duckhts.read_bcf`), or any read-only query over what DuckDB can reach including httpfs/s3
+  (`duckdb.sql_materialize`).
+- **Network** — fetch an HTTP/JSON endpoint *as SQL*: DuckDB's `ducknng_ncurl_table` table function, with the
+  URL/headers/body composed in SQL (`getvariable` + `url_encode`) and the JSON parsed straight into a table —
+  no bespoke TypeScript. `http.get` (whose fetch is host-supplied) is the fallback for a DuckDB build with no
+  ducknng, and the multi-request retry/fanout over a rate-limited API lives in one host helper.
+- **Compute** — run an out-of-process computation (R/Python/Go/shell) over Arrow IPC (`process.compute`): a
+  DuckDB table is exported as Arrow, the child computes, the result is read back as a table. The compute is
+  external (a thing SQL is poor at, e.g. an `lm()` fit); only the *data contract* is SQL/Arrow.
+
+The two capability resolvers are host-injected by composition — without a `fetch` bound `http.get` fails closed,
+without a `ProcessRunner` bound `process.compute` fails closed — exactly like every other host-owned effect.
 An operation is then a single read-only `SELECT`/`WITH` over those tables, and whatever it returns is the
 result — there is no separate report layer. A run bundles the result with its run record and the resolver
 receipts (a failed run still leaves an auditable receipt), written under `.pi/bio-agent/runs/<runId>/`.

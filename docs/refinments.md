@@ -330,7 +330,7 @@ body — overfitting: a real skill doesn't bake the query data into the manifest
     http-policies (withRetry/withAuth) remain the FALLBACK when the DuckDB version doesn't match a ducknng build.
     ADOPTED: pinned `@duckdb/node-api` to **1.5.2-r.2** — the prebuilt ducknng (community AND the local build) is
     for v1.5.2, NOT 1.5.3 (the install error confirms it); on 1.5.2, `INSTALL ducknng FROM community` loads (6
-    ncurl fns) AND duckhts still works (184 tests green). When ducknng is released/backported for a newer DuckDB
+    ncurl fns) AND duckhts still works (full suite green). When ducknng is released/backported for a newer DuckDB
     (or built from source — trivial), bump the pin. Next: migrate the `http.get` resource to a
     `duckdb.sql_materialize` over `ducknng_ncurl_table` so the fetch is SQL, with the TS resolver as fallback.
 - **BATCH HTTP = a chunked, rate-limited PIPELINE, not one request.** VEP caps the batch (~200-1000 ids) and

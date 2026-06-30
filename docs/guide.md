@@ -87,15 +87,31 @@ operationId })`. For everything exploratory, prefer `bio_query` — most manifes
 
 ## 3. Resolvers (how data becomes a table)
 
-Declare one of the built-in resolvers on a resource and give it `params`:
+Declare one of the built-in resolvers on a resource and give it `params`. The point of the bet is that most of
+these are **SQL all the way down** — even fetching a remote API is a SQL table function, not a `.ts` file:
 
 - `duckdb.file_scan` — `{ path, table }`; reads csv/tsv/parquet/json natively.
 - `duckdb.sql_materialize` — `{ table, sql, declaredSources?, extensions? }`; the general resolver:
-  `sql` is a read-only query (`SELECT * FROM read_parquet('…')`, `read_bcf('x.bcf', tidy_format := true)`,
-  a computed projection) wrapped into a table. A new source is usually just this, with no new code.
-- `duckhts.read_bcf` — `{ path, table }`; VCF/BCF via the DuckHTS extension (`npm run provision:duckhts` first).
-- `http.get` — `{ url, table, format? }`; fetches a URL into a table. Needs the host to supply `fetch`
-  (`runBioOperationFromManifest({ …, network: { fetch: globalThis.fetch } })`); absent, it fails closed.
+  `sql` is a read-only query wrapped into a table. This is also the **SQL-native network path**: with the
+  `ducknng` extension, `sql` can be `SELECT * FROM ducknng_ncurl_table(<url>, 'GET', …)` where the URL/headers/
+  body compose in SQL (`getvariable('q') || url_encode(…)`) and the JSON parses straight into columns — no
+  TypeScript at all (the `ols4-grounding` and `variant-annotation` examples are exactly this). A new source —
+  local file, `httpfs`/`s3` read, OR an HTTP/JSON API — is usually just this, with no new code.
+- `duckhts.read_bcf` — `{ path, region?, table }`; VCF/BCF (region-sliced) via the DuckHTS extension
+  (`npm run provision:duckhts` first).
+- `process.compute` — `{ table, inputSql, command, env?, timeoutMs? }`; the **compute** escape hatch for what
+  SQL is poor at (an `lm()` fit, fine-mapping, a Python model). It exports `inputSql` as Arrow IPC, runs an
+  out-of-process child (`["Rscript","./fit.R"]`), and reads its Arrow output back as a table — the *data
+  contract* stays SQL/Arrow even though the computation is external. Needs the host to supply a `ProcessRunner`
+  (`runBioQueryFromManifest({ …, process: { runner: nodeProcessRunner() } })`); absent, it fails closed.
+- `http.get` — `{ url, table, format? }`; the **fallback** HTTP fetch (a TS resolver) for a DuckDB build with no
+  `ducknng`, and the seam for the host-driven multi-request retry/fanout over a rate-limited API. Needs the host
+  to supply `fetch` (`{ …, network: { fetch: globalThis.fetch } }`); absent, it fails closed.
+
+So the bet holds end to end: **data** and **network** are SQL (table functions); **compute** is the one place
+code runs out-of-process, and even there the boundary is SQL/Arrow. The two capability resolvers
+(`http.get` ← `fetch`, `process.compute` ← `ProcessRunner`) are host-injected by composition and fail closed
+when unbound.
 
 The library is **not a network/filesystem sandbox** — whether a remote read or `httpfs` is possible is your
 deployment's decision (container, sandbox, the Pi runtime). The substrate records what ran; the host governs
