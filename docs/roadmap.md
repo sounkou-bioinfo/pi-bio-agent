@@ -118,9 +118,13 @@ resolution receipts; the host tool `bio_run_operation` persists `run/result/rece
 `.pi/bio-agent/runs/`. So `BioRunSpec`/`BioRunRecord`, `Provenance`, `BioOperationSpec`, and the
 resolver/registry all have **real producers**. Since built out: the SQL-native NETWORK path
 (`ducknng_ncurl_table` in `sql_materialize`; the `ols4-grounding` + `variant-annotation` examples ship, with
-`http.get` as the fallback), the COMPUTE pillar (`process.compute` over Arrow IPC), region-scoped
-`duckhts.read_bcf`, a `duckdbInitSql` connection-init hook, and CAS-of-bytes (`src/core/cas.ts`, proven by
-`http.get` byte-reuse across DBs). The items below are **not partial/owed work** and sandboxing/effect-limits are
+`http.get` as the fallback) plus the **owned ducknng** stack (we dropped quack; per-DuckDB-version backport
+branches + the volatile-scalar `ncurl` fix → `ncurl-retry`'s SQL-native recursive-CTE retry), the COMPUTE pillar
+(`process.compute` over Arrow IPC, nanoarrow + argv + errors-as-values), region-scoped `duckhts.read_bcf`, a
+`duckdbInitSql` connection-init hook, CAS-of-bytes (`src/core/cas.ts`), and **the two-pillar coloc flagship**
+(`examples/coloc`, multi-tissue post-GWAS colocalization, DATA harmonization + out-of-process R `coloc.abf`).
+Docs are kept honest by **literate generation** (`npm run readme:examples` runs the manifest; `check:examples`
+fails on drift). The items below are **not partial/owed work** and sandboxing/effect-limits are
 the **host's** job, never ours. They are also where the irreducibly **human** parts cluster (judgment, approval,
 curation) — see [design.md "Where the human stays in the loop"](./design.md#where-the-human-stays-in-the-loop-the-judgmentapproval-boundary).
 They split by whether the consumer is named yet:
@@ -132,11 +136,12 @@ They split by whether the consumer is named yet:
   `process` artifact transport (Phase 3's remainder), which waits on a real pipeline.
 
 **These are ONE thing — the coloc flagship unifies them.** The "real pipeline" the artifact transport waits on
-**is** post-GWAS colocalization ([coloc memory](../README.md)): its `ColocEngine`/fine-mapping are the long-
-running file-producing process ops (Phase-3 remainder), and its posteriors/credible sets are the judgments
-Phase 4 records as time-versioned KG facts. So the finish line is not three deferred items — it is **build
-coloc, and it converts the artifact transport (#3) and the judgment-recording (#2) from deferred to
-built-because-driven.** That is the anti-idealist "a real consumer forces it" rule, made literal.
+**is** post-GWAS colocalization ([`examples/coloc/`](../examples/coloc/README.md)). Its WALKING SKELETON is
+**built** (multi-tissue `coloc.abf` over Arrow IPC, DATA harmonization + COMPUTE), so the unification is now
+concrete: **thickening** coloc drives the rest — multi-output / file-producing `ColocEngine` runs force the
+`process` artifact transport (#3, Phase-3 remainder), and recording its per-tissue posteriors as time-versioned
+KG facts is Phase-4's `record` (#2). So the deferred items are not speculative — they are **built as coloc
+thickens**, the anti-idealist "a real consumer forces it" rule made literal (the consumer now exists).
 
 ```text
 Phase 0 (done)   Flagship walking skeleton: manifest #1, runOperation -> run/result/receipts, host
@@ -154,12 +159,46 @@ Phase 3 (DONE: table compute) Out-of-process COMPUTE: process.compute resolver (
                  DONE with timeout/output caps, process-group kill, script-bytes provenance,
                  fail-closed-without-runner. Consumer-gated (deferred, NOT owed): the operation-level
                  `process` transport that captures FILE artifacts (waits on a real pipeline consumer).
-Phase 4          Safe harness-adaptation surface: extension/spec/skill scaffold implementing
-                 declare -> validate -> test -> record -> activate -> rollback. CONSUMES Phase 1's
-                 leftover: `record` = judgments as KG facts; `activate`/`rollback` = as-of temporality.
+Phase 4 (ACTIVE — the main lane) Safe harness-adaptation surface: extension/spec/skill scaffold
+                 implementing declare -> validate -> test -> record -> activate -> rollback. CONSUMES
+                 Phase 1's leftover: `record` = judgments as KG facts; `activate`/`rollback` = as-of
+                 temporality. Walking-skeleton plan below.
 ```
 
 The expertise-per-budget measurement (§2) runs continuously now that the Phase 0 skeleton exists.
+
+### Phase 4 plan (walking skeleton first)
+
+The governance loop `declare → validate → test → record → activate → rollback`, built thinnest-first. The
+foundation is the **temporal provenance statement** — a receipt is *already* a `bio_edges` row with a digest +
+time (`[[semantic-sql-graph-substrate]]`, `[[lazy-evaluation-substrate]]`); Phase 4 promotes results/judgments
+and activation events to first-class, as-of-versioned facts in that same graph. The irreducible **human** stays
+at `activate` (the approval gate) — the substrate provides the rails (record + as-of + the state machine), the
+sign-off is hosted, not computed ([design.md "Where the human stays in the loop"](./design.md#where-the-human-stays-in-the-loop-the-judgmentapproval-boundary)).
+
+Each slice is end-to-end and deterministic-tested; build the foundation only as the next slice consumes it.
+
+- **4.0 — Temporal provenance-statement store (the Phase-1-leftover foundation).** `record(conn, fact)` appends a
+  result/judgment as a time-stamped, content-addressed `bio_edges` row (`subject, predicate, object,
+  recorded_at, digest, source`) — receipts already carry `source`+`digest`+`retrievedAt`, so this promotes them.
+  Plus an `as_of(t)` query (recorded_at ≤ t, latest-not-superseded). Land the **strict-`now`** endpoint here
+  (push the clock to the OS-adapter boundary so as-of is deterministic — the ~46-test ripple). Driven by 4.1.
+- **4.1 — Record a real judgment.** An existing operation records its RESULT as a fact: e.g. `coloc` writes
+  `(gwas_locus) ←colocalizes-with[PP.H4]← (tissue) @t #digest`, or `rare-high-impact` writes its per-variant
+  classification. Proves "results/judgments as KG facts" with a real producer (not a synthetic one).
+- **4.2 — The activate/rollback state machine.** A spec's lifecycle as activation *events* over versions; the
+  "current active version" is the latest activation **as-of now**; `rollback` appends a reactivation of a prior
+  version. As-of makes rollback a *query*, not a redeploy.
+- **4.3 — The declare → validate → test → record → activate happy path (thin).** The agent declares a CANDIDATE
+  operation; the harness `validate`s it (built: `validateDomainPackManifest`/`validateReadOnlySelect`), `test`s
+  it against its declared fixtures, `record`s pass/fail + the spec digest as facts, and `activate`s it **iff the
+  test passes**. Skeleton example: a good candidate activates; a buggy one is recorded-failed and NOT activated.
+- **4.4 — Rollback + the approval gate.** Revert to a prior active version (as-of). The `activate` decision is
+  the host/human **policy gate** (the boundary) — wire it as a host opt-in now, leave the real approval workflow
+  to the host.
+
+Discipline: do NOT build the full state machine (4.2) or the loop (4.3) ahead of 4.0/4.1; each slice earns the
+next. The forbidden/allowed table in §6 is the invariant every slice must already satisfy.
 
 ## 6. Harness-adaptation doctrine (mods vs hooks)
 
