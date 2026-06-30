@@ -424,7 +424,11 @@ body — overfitting: a real skill doesn't bake the query data into the manifest
     must use a **from-source / repo-published-release** build (the point of `#3`): download/build the
     `release/duckdb-1.5.2` `.duckdb_extension` and `LOAD '<path>'`. Because that build is **unsigned**, the host
     sets `allow_unsigned_extensions = true` in `duckdbConfig` (host-owned, never an agent param) — the SIGNING
-    flip we documented, now the real install path.
+    flip we documented, now the real install path. **Provisioning helper:** `npm run provision:ducknng-owned`
+    (`scripts/provision-ducknng-owned.sh`) resolves the target DuckDB version, then downloads the tagged release
+    asset (`v0.1.1+duckdb<ver>`) if published, else builds `release/duckdb-<ver>` from source, places it under
+    `.pi/ducknng/duckdb-<ver>/ducknng.duckdb_extension`, and VERIFIES `ducknng__ncurl_row` is `VOLATILE` before
+    printing the `LOAD` recipe. (Per-DuckDB-version binary publishing is upstream `#3`.)
   - **Trigger to flip the substrate:** probe `duckdb_functions()` for `ducknng__ncurl_row`; when present (i.e. the
     host loaded an owned build), enable the recursive-CTE retry path and narrow `ncurl-fanout.ts` to the
     chunk-fanout case. With the default community build it stays absent, so `ncurl-fanout.ts` remains in use — no
