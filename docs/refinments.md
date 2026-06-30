@@ -328,7 +328,11 @@ body — overfitting: a real skill doesn't bake the query data into the manifest
     (`response`, `responseHeader`, `facet_counts`). So the WHOLE fetch is SQL: SET VARIABLE params + url_encode
     composition + a PEM TLS config + ncurl_table parse. The `http.get` TS resolver (global fetch) + the
     http-policies (withRetry/withAuth) remain the FALLBACK when the DuckDB version doesn't match a ducknng build.
-    To adopt ducknng project-wide: pin DuckDB to a ducknng-built version (1.5.2/1.5.3), or build ducknng for 1.5.4.
+    ADOPTED: pinned `@duckdb/node-api` to **1.5.2-r.2** — the prebuilt ducknng (community AND the local build) is
+    for v1.5.2, NOT 1.5.3 (the install error confirms it); on 1.5.2, `INSTALL ducknng FROM community` loads (6
+    ncurl fns) AND duckhts still works (184 tests green). When ducknng is released/backported for a newer DuckDB
+    (or built from source — trivial), bump the pin. Next: migrate the `http.get` resource to a
+    `duckdb.sql_materialize` over `ducknng_ncurl_table` so the fetch is SQL, with the TS resolver as fallback.
 - **BATCH HTTP = a chunked, rate-limited PIPELINE, not one request.** VEP caps the batch (~200-1000 ids) and
   rate-limits (~15 req/s, `429`+`Retry-After`, hourly quota). Annotating a real VCF: chunk the variant list (SQL)
   into batches <= the limit, run them through `runPipeline` (the push/pull pool) with `withRetry` (429/backoff),
