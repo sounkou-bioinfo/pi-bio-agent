@@ -411,12 +411,24 @@ body — overfitting: a real skill doesn't bake the query data into the manifest
   collapses to **one recursive-CTE SELECT** (attempt-in-row); `ncurl-fanout.ts` then remains only for the
   table-function CHUNK fanout (many endpoints) and for unpatched builds. This is the first concrete payoff of
   **owning the ducknng stack** (we dropped quack and fix/backport ducknng ourselves).
-- **FOLLOW-UP — backport tracking + the SIGNING flip (`allow_unsigned_extensions`).** The branch/backport work is
-  tracked upstream: [`sounkou-bioinfo/ducknng#1`](https://github.com/sounkou-bioinfo/ducknng/issues/1)
-  (per-DuckDB-version release branches) and [`#2`](https://github.com/sounkou-bioinfo/ducknng/issues/2) (backport
-  the volatile-scalar `ncurl` fix to the DuckDB 1.5.2 branch). **Trigger to flip the substrate over:** when our
-  loaded ducknng exposes `ducknng__ncurl_row` (probe `duckdb_functions()`), enable the recursive-CTE retry path
-  and narrow `ncurl-fanout.ts` to the chunk-fanout case; until then, no change.
+- **FOLLOW-UP — backport LANDED (release branch), but community won't ship it; + the SIGNING flip.** Tracking:
+  [`#1`](https://github.com/sounkou-bioinfo/ducknng/issues/1) (per-DuckDB-version branches),
+  [`#2`](https://github.com/sounkou-bioinfo/ducknng/issues/2) (the volatile-scalar `ncurl` fix — **DONE**, landed
+  on `main` and backported to `release/duckdb-1.5.2`, commit `95196e0`), and
+  [`#3`](https://github.com/sounkou-bioinfo/ducknng/issues/3) (publish tagged binary releases per DuckDB version).
+  **Verified in OUR node-api runtime** (loading the `release/duckdb-1.5.2` build with `allow_unsigned`):
+  `ducknng__ncurl_row` is registered `VOLATILE`, and a `WITH RECURSIVE` retry with the call **depending on the
+  recursive row** (`?attempt=N`) RE-FIRES per iteration (distinct calls, not one reused) — the fix works.
+  - **The catch — `community-extensions` does NOT carry backports.** The community build tracks one line, so
+    `INSTALL ducknng FROM community` will never ship the 1.5.2-branch fix (still `8dbf073` here). To consume it we
+    must use a **from-source / repo-published-release** build (the point of `#3`): download/build the
+    `release/duckdb-1.5.2` `.duckdb_extension` and `LOAD '<path>'`. Because that build is **unsigned**, the host
+    sets `allow_unsigned_extensions = true` in `duckdbConfig` (host-owned, never an agent param) — the SIGNING
+    flip we documented, now the real install path.
+  - **Trigger to flip the substrate:** probe `duckdb_functions()` for `ducknng__ncurl_row`; when present (i.e. the
+    host loaded an owned build), enable the recursive-CTE retry path and narrow `ncurl-fanout.ts` to the
+    chunk-fanout case. With the default community build it stays absent, so `ncurl-fanout.ts` remains in use — no
+    change until the host opts into the owned build.
   - **Signing reverses once we ship our OWN build.** The *community* `ducknng`/`nanoarrow` are **signed** — they
     `INSTALL/LOAD FROM community` with NO `allow_unsigned_extensions` (we dropped that flag from the signed-path
     examples/tests). But an extension we **build from source** (the backport branches, a local dev build) is
