@@ -131,6 +131,13 @@ They split by whether the consumer is named yet:
 - **Consumer not yet real** (deferred by discipline): wiring process-op FILE artifacts into CAS waits on the
   `process` artifact transport (Phase 3's remainder), which waits on a real pipeline.
 
+**These are ONE thing — the coloc flagship unifies them.** The "real pipeline" the artifact transport waits on
+**is** post-GWAS colocalization ([coloc memory](../README.md)): its `ColocEngine`/fine-mapping are the long-
+running file-producing process ops (Phase-3 remainder), and its posteriors/credible sets are the judgments
+Phase 4 records as time-versioned KG facts. So the finish line is not three deferred items — it is **build
+coloc, and it converts the artifact transport (#3) and the judgment-recording (#2) from deferred to
+built-because-driven.** That is the anti-idealist "a real consumer forces it" rule, made literal.
+
 ```text
 Phase 0 (done)   Flagship walking skeleton: manifest #1, runOperation -> run/result/receipts, host
                  persistence. Three contracts became real producers.

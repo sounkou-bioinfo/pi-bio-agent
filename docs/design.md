@@ -507,6 +507,16 @@ human is threaded through as *judgment → approval*, and the substrate's contri
 it. This is the sharp form of the honest boundary (the executable middle is ours; semantic judgment and
 human/policy workflows are deliberately *hosted*, not *computed*).
 
+**The boundary is narrower than "services/auth/streaming are out."** Much of what looks non-SQL is already in
+reach by composition: API **credentials/auth** = DuckDB's `CREATE SECRET` secret manager (host-owned, the same
+path as our `cache_httpfs`/S3 config) + ducknng mTLS/peer-allowlists + Pi's auth storage/token-refresh;
+**stateful-async** interactions = ducknng query **sessions** (`open_query`/`fetch`/`close`, result handles,
+incremental chunks); **streaming / SSE / websockets** = ducknng `wss` + Pi-mono patterns; a **GraphQL** endpoint
+is an HTTP POST + JSON that `ncurl_table` hits SQL-native (subscriptions = wss/sessions). So the genuinely
+irreducible residue is just the two non-mechanical acts — the **judgment** (the model/human decision) and the
+**approval** (the policy gate) — which the substrate records and gates, never computes. Everything executable is
+in the middle or borrowable.
+
 ## Progressive disclosure
 
 Context should carry compact indexes, not every body/schema/result:
