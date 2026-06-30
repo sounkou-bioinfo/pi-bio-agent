@@ -22,7 +22,7 @@ import type { BioResolverImpl, ProcessRunner } from "../../core/ports.js";
 //     TABLE, by convention a `status` column ("ok" / "error: <msg>") the agent branches on in SQL — the COMPUTE
 //     script's job, not the resolver's. So a partial failure (one tissue, one batch) is data, not a crash.
 //
-// params: { table, inputSql, command, env?, timeoutMs?, extensions? }
+// params: { table, inputSql, command, env?, timeoutMs?, extensions?, outputs? }
 //   table       output table (its identity); a valid SQL identifier
 //   inputSql    a single read-only SELECT/WITH producing the input handed to the process (validated)
 //   command     argv array [exe, ...args] (NOT a shell string) — e.g. ["Rscript", "/abs/coloc.R"]
@@ -30,12 +30,18 @@ import type { BioResolverImpl, ProcessRunner } from "../../core/ports.js";
 //               (those are appended as argv)
 //   timeoutMs   kill the child after this long (default 120000)
 //   extensions  DuckDB extensions to LOAD first; nanoarrow is always loaded (it provides the Arrow-IPC codec)
+//   outputs     OPTIONAL declared FILE outputs — the #3 artifact transport (file outputs ARE a thing in bioinfo):
+//               [{ name, path, kind?: "file"|"table" }]. The child writes them into its WORK DIR (its cwd); after
+//               a clean exit the resolver captures each into CAS (content-addressed) and records {name, path,
+//               digest, size} in the receipt. Values come back via Arrow (the table); FILES go via CAS and NEVER
+//               through the IPC — the nf-r-ipc/Nextflow split (Nextflow's content-addressed work dir = our CAS).
+//               Requires a host-injected CAS (fails closed without one).
 
 const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 export function processComputeResolver(runner: ProcessRunner): BioResolverImpl {
   return async (resource, ctx) => {
-    const p = resource.params as { table?: unknown; inputSql?: unknown; command?: unknown; env?: unknown; timeoutMs?: unknown; extensions?: unknown };
+    const p = resource.params as { table?: unknown; inputSql?: unknown; command?: unknown; env?: unknown; timeoutMs?: unknown; extensions?: unknown; outputs?: unknown };
     if (typeof p.table !== "string" || !IDENT.test(p.table)) throw new Error("process.compute requires params.table to be a valid SQL identifier");
     if (typeof p.inputSql !== "string" || !p.inputSql.trim()) throw new Error("process.compute requires params.inputSql (a single read-only SELECT/WITH)");
     const inner = validateReadOnlySelect(p.inputSql); // input is a read-only query; the side effect is the child, not SQL
@@ -59,6 +65,21 @@ export function processComputeResolver(runner: ProcessRunner): BioResolverImpl {
       env = p.env as Record<string, string>;
     }
 
+    // Declared FILE outputs (#3 artifact transport). Paths are RELATIVE to the work dir (no '..' / absolute — the
+    // child cannot smuggle a read of an arbitrary host file out through a "declared output").
+    const outputs: Array<{ name: string; path: string; kind: "file" | "table" }> = [];
+    if (p.outputs != null) {
+      if (!Array.isArray(p.outputs)) throw new Error("process.compute: params.outputs must be an array of { name, path, kind? }");
+      for (let i = 0; i < p.outputs.length; i++) {
+        const o = p.outputs[i] as { name?: unknown; path?: unknown; kind?: unknown };
+        if (typeof o.name !== "string" || !o.name) throw new Error(`process.compute: outputs[${i}].name (string) is required`);
+        if (typeof o.path !== "string" || !o.path || o.path.startsWith("/") || o.path.split("/").includes("..")) throw new Error(`process.compute: outputs[${i}].path must be a relative path within the work dir (no '..' / absolute)`);
+        if (o.kind !== undefined && o.kind !== "file" && o.kind !== "table") throw new Error(`process.compute: outputs[${i}].kind must be 'file' or 'table'`);
+        outputs.push({ name: o.name, path: o.path, kind: (o.kind as "file" | "table") ?? "file" });
+      }
+      if (!ctx.cas) throw new Error("process.compute: params.outputs requires a host-injected CAS store (none bound) — fail closed");
+    }
+
     // nanoarrow provides the Arrow-IPC COPY/read_arrow codec; LOAD only (fail closed if the host hasn't INSTALLed it)
     for (const ext of ["nanoarrow", ...extraExt]) {
       if (!IDENT.test(ext)) throw new Error(`process.compute: invalid extension name '${ext}'`);
@@ -79,6 +100,7 @@ export function processComputeResolver(runner: ProcessRunner): BioResolverImpl {
       const result = await runner.run({
         command: [...command, inFile, outFile],
         env,
+        cwd: dir, // the WORK DIR — declared output paths are relative to it (the Nextflow model)
         timeoutMs,
         signal: ctx.signal,
       });
@@ -94,6 +116,19 @@ export function processComputeResolver(runner: ProcessRunner): BioResolverImpl {
 
       // 3. Arrow IPC result -> a DuckDB table
       await ctx.conn.run(`CREATE OR REPLACE TABLE ${p.table} AS SELECT * FROM read_arrow('${outFile.replace(/'/g, "''")}')`);
+
+      // 3b. FILE ARTIFACTS (#3): capture each declared output into CAS, content-addressed. Values came back via
+      //     Arrow (step 3); FILES go via CAS and never through the IPC (the nf-r-ipc/Nextflow split). A missing
+      //     declared output is fail-closed (a clean exit that skipped a promised file is still a failure).
+      const artifacts: Array<{ name: string; path: string; kind: string; digest: string; size: number }> = [];
+      for (const o of outputs) {
+        let bytes: Buffer;
+        try { bytes = await fs.readFile(join(dir, o.path)); }
+        catch { throw new Error(`process.compute: '${command[0]}' exited 0 but did not write declared output '${o.name}' (${o.path})`); }
+        const digest = createHash("sha256").update(bytes).digest("hex");
+        await ctx.cas!.put({ algorithm: "sha256", digest }, bytes); // immutable + idempotent
+        artifacts.push({ name: o.name, path: o.path, kind: o.kind, digest: `sha256:${digest}`, size: bytes.length });
+      }
 
       // Provenance digest that actually PINS THE COMPUTATION (not just the argv string): for each command entry
       // that resolves to a readable file (the script), hash its BYTES so editing the script changes the digest —
@@ -116,7 +151,11 @@ export function processComputeResolver(runner: ProcessRunner): BioResolverImpl {
       return {
         result: { schema: "pi-bio.resource_handle.v1", mode: "reference", name: p.table, pointer: { uri: `table:${p.table}`, format: "table" } },
         sourceSnapshots: [{ source: `process:${command[0]}`, version: cmdDigest, retrievedAt: now }],
-        provenance: [{ source: "process.compute", retrievedAt: now, digest: sqlDigest, notes: ["process.compute", `cmd:${command.join(" ")}`, "arrow-ipc"] }],
+        provenance: [
+          { source: "process.compute", retrievedAt: now, digest: sqlDigest, notes: ["process.compute", `cmd:${command.join(" ")}`, "arrow-ipc"] },
+          // one provenance entry per captured FILE artifact (CAS digest = the receipt's "output digest")
+          ...artifacts.map((a) => ({ source: `artifact:${a.name}`, retrievedAt: now, digest: a.digest, notes: ["process.compute", "artifact", a.kind, `path:${a.path}`, `size:${a.size}`] })),
+        ],
       };
     } finally {
       await fs.rm(dir, { recursive: true, force: true });

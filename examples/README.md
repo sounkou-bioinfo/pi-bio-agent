@@ -65,6 +65,7 @@ with the DATA contract staying SQL/Arrow.
 | Example | Proof |
 |---|---|
 | [`process-compute/`](process-compute/) | the **COMPUTE pillar** itself — a DuckDB table → Arrow IPC → real spawned R `lm()` → Arrow IPC → table; fail-closed without a `ProcessRunner` — `test/process-compute-example.test.ts` |
+| [`process-artifacts/`](process-artifacts/) | **FILE outputs (#3)** — a process op returns a table (Arrow) AND captures declared file outputs into **CAS** (content-addressed, recorded in the receipt); values in the IPC, files beside it (the `nf-r-ipc`/Nextflow split) — `test/process-artifacts-example.test.ts` |
 | [`wgs-chr22-annotation/`](wgs-chr22-annotation/) | **NETWORK + COMPUTE on real WGS data** — `duckhts` region read → chunked VEP fanout (`ncurl-fanout`) → ClinVar → rare/high-impact — `test/ncurl-fanout.test.ts` |
 | [`coloc/`](coloc/) | **the two-pillar flagship** — post-GWAS colocalization (`~/PostGWAS`/`~/coloclize` shape): SQL allele **harmonization** (DATA) → out-of-process R **`coloc.abf`** over Arrow IPC (COMPUTE) → `PP.H4` posteriors. `test/coloc-example.test.ts` (real `coloc::coloc.abf`, `PP.H4 ≈ 1.0` on a shared-causal locus) |
 

@@ -1,0 +1,30 @@
+{
+  "schema": "pi-bio.domain_pack_manifest.v1",
+  "id": "process-artifacts",
+  "version": "0.1.0",
+  "title": "Out-of-process compute with FILE outputs — the #3 artifact transport",
+  "description": "File outputs are unavoidable in bioinformatics (BAM/VCF/plots/reports). process.compute returns the VALUE as an Arrow table AND captures DECLARED FILE outputs into CAS (content-addressed), recording {name, path, digest, size} in the receipt — values in the IPC, files beside it (the nf-r-ipc/Nextflow split; Nextflow's content-addressed work dir = our CAS). The child writes files into its work dir (cwd); the host captures only the declared outputs.",
+  "domains": ["statistics"],
+  "provides": {
+    "resolvers": [
+      { "id": "duckdb.file_scan", "version": "0.1.0", "title": "DuckDB file scan", "description": "Read a delimited file into a table.", "output": { "mode": "table" } },
+      { "id": "process.compute", "version": "0.1.0", "title": "Out-of-process compute", "description": "Run an external process over Arrow IPC; return a table and capture declared file outputs into CAS.", "output": { "mode": "table" } }
+    ],
+    "resources": [
+      { "id": "values", "title": "Input values", "kind": "virtual", "resolver": "duckdb.file_scan", "params": { "path": "data/values.csv", "table": "values" } },
+      {
+        "id": "summary", "title": "Summary table + captured file artifacts", "kind": "virtual", "resolver": "process.compute",
+        "params": {
+          "table": "summary",
+          "inputSql": "SELECT x FROM values",
+          "command": ["Rscript", "./summarize.R"],
+          "outputs": [
+            { "name": "rows_csv", "path": "rows.csv", "kind": "table" },
+            { "name": "report", "path": "report.txt", "kind": "file" }
+          ],
+          "timeoutMs": 120000
+        }
+      }
+    ]
+  }
+}

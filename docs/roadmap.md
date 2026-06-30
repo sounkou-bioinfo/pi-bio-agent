@@ -155,10 +155,12 @@ Phase 2 (DONE)   Network is SQL-native: ducknng_ncurl_table inside duckdb.sql_ma
                  variant-annotation POST both ship). http.get (src/duckdb/resolvers/http-table-scan.ts) is
                  the fallback for a no-ducknng build + the multi-request retry/fanout seam; fetch is
                  INJECTED (fail-closed, host opt-in). Two-tier grounding proven (projection + judgment).
-Phase 3 (DONE: table compute) Out-of-process COMPUTE: process.compute resolver (Arrow IPC, table-producing)
-                 DONE with timeout/output caps, process-group kill, script-bytes provenance,
-                 fail-closed-without-runner. Consumer-gated (deferred, NOT owed): the operation-level
-                 `process` transport that captures FILE artifacts (waits on a real pipeline consumer).
+Phase 3 (DONE: table + file artifacts) Out-of-process COMPUTE: process.compute resolver (Arrow IPC,
+                 table-producing) DONE with timeout/output caps, process-group kill, script-bytes
+                 provenance, fail-closed. FILE OUTPUTS now built too (process-artifacts example): declared
+                 `outputs` captured into CAS, content-addressed, recorded in the receipt — values in the
+                 IPC, files beside it (the nf-r-ipc/Nextflow split). Remaining: a files-ONLY op (optional
+                 table) + the long-running operation-level `process` transport (multi-output batch).
 Phase 4 (ACTIVE — the main lane) Safe harness-adaptation surface: extension/spec/skill scaffold
                  implementing declare -> validate -> test -> record -> activate -> rollback. CONSUMES
                  Phase 1's leftover: `record` = judgments as KG facts; `activate`/`rollback` = as-of
