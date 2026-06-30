@@ -105,6 +105,10 @@ export async function ncurlFanout(conn: SqlConn, opts: NcurlFanoutOptions): Prom
        FROM ${launched} l JOIN ${collected} c ON c.aio_id = l.h
        WHERE c.ok AND c.status BETWEEN 200 AND 299`,
     );
+    // release every terminal handle from the ducknng runtime registry — a retried fanout over a whole VCF is
+    // thousands of handles; without this they leak. (Any handle never collected within drainSpins is abandoned
+    // here; its batch simply re-launches a fresh handle next round.)
+    await conn.run(`SELECT ducknng_aio_drop(aio_id) FROM ${collected}`);
     await conn.run(
       `CREATE OR REPLACE TABLE ${pending} AS
        SELECT b.batch_id, b.body FROM ${batchesTable} b
