@@ -120,23 +120,26 @@ resolver/registry all have **real producers**. Since built out: the SQL-native N
 (`ducknng_ncurl_table` in `sql_materialize`; the `ols4-grounding` + `variant-annotation` examples ship, with
 `http.get` as the fallback), the COMPUTE pillar (`process.compute` over Arrow IPC), region-scoped
 `duckhts.read_bcf`, a `duckdbInitSql` connection-init hook, and CAS-of-bytes (`src/core/cas.ts`, proven by
-`http.get` byte-reuse across DBs). Still spec-only: wiring process-op FILE artifacts into CAS; temporality;
-recording results/judgments as KG facts.
+`http.get` byte-reuse across DBs). The items below are **not partial/owed work** — they are **deferred by the
+anti-idealist discipline** (build only when a real consumer forces them), and sandboxing/effect-limits are the
+**host's** job, never ours: wiring process-op FILE artifacts into CAS (waits on the `process` artifact transport,
+which waits on a real pipeline consumer); temporality; recording results/judgments as KG facts.
 
 ```text
 Phase 0 (done)   Flagship walking skeleton: manifest #1, runOperation -> run/result/receipts, host
                  persistence. Three contracts became real producers.
-Phase 1 (partial) Run/provenance substrate: run+receipt persistence DONE; CAS-of-bytes DONE
-                 (src/core/cas.ts + fs-cas.ts, http.get byte-reuse across DBs). Pending: process-op
-                 FILE artifacts -> CAS, and temporal anchoring, driven by a real consumer.
+Phase 1 (DONE)   Run/provenance substrate: run+receipt persistence DONE; CAS-of-bytes DONE
+                 (src/core/cas.ts + fs-cas.ts, http.get byte-reuse across DBs). Consumer-gated (deferred
+                 by discipline, NOT owed): process-op FILE artifacts -> CAS, temporal anchoring.
 Phase 2 (DONE)   Network is SQL-native: ducknng_ncurl_table inside duckdb.sql_materialize composes the
                  URL/headers/body in SQL and parses JSON -> table with NO TS resolver (ols4-grounding GET +
                  variant-annotation POST both ship). http.get (src/duckdb/resolvers/http-table-scan.ts) is
                  the fallback for a no-ducknng build + the multi-request retry/fanout seam; fetch is
                  INJECTED (fail-closed, host opt-in). Two-tier grounding proven (projection + judgment).
-Phase 3 (partial) Out-of-process COMPUTE: process.compute resolver (Arrow IPC, table-producing) DONE with
-                 timeout/output caps, process-group kill, script-bytes provenance, fail-closed-without-runner.
-                 Remaining: the operation-level `process` transport that captures FILE artifacts.
+Phase 3 (DONE: table compute) Out-of-process COMPUTE: process.compute resolver (Arrow IPC, table-producing)
+                 DONE with timeout/output caps, process-group kill, script-bytes provenance,
+                 fail-closed-without-runner. Consumer-gated (deferred, NOT owed): the operation-level
+                 `process` transport that captures FILE artifacts (waits on a real pipeline consumer).
 Phase 4          Safe harness-adaptation surface: extension/spec/skill scaffold implementing
                  declare -> validate -> test -> record -> activate -> rollback.
 ```
