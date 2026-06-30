@@ -54,9 +54,13 @@ export async function createBioObservationSchema(conn: SqlConn, opts: { ifNotExi
 }
 
 function observationId(o: BioObservationInput): string {
-  // identity = SEMANTIC content + time (re-asserting the same fact at a NEW recorded_at is a new row; an exact-same
-  // call is idempotent). Metadata (source/digest/attrs/trust) is NOT identity.
-  const canonical = JSON.stringify([o.statementKey, o.subjectId, o.predicate, o.objectId ?? null, o.value ?? null, o.recordedAt, o.validFrom ?? null, o.validTo ?? null]);
+  // identity = SEMANTIC content + time + PROVENANCE (source, digest). This is a PROVENANCE-statement store: a
+  // different producing run (source) or a different result digest is a DISTINCT provenance event, even for the
+  // same semantic state at the same time. An exact-same call is still idempotent (same id, ON CONFLICT DO
+  // NOTHING); re-asserting at a new recorded_at, or from a new run, is a new row. statement_key (not the id) is
+  // what controls current/as-of supersession, so this does not affect "latest-per-statement_key". (attrs/trust
+  // stay out of identity — they annotate, not identify.)
+  const canonical = JSON.stringify([o.statementKey, o.subjectId, o.predicate, o.objectId ?? null, o.value ?? null, o.recordedAt, o.validFrom ?? null, o.validTo ?? null, o.source ?? null, o.digest ?? null]);
   return `sha256:${createHash("sha256").update(canonical).digest("hex")}`;
 }
 

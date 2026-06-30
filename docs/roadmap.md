@@ -172,9 +172,10 @@ The expertise-per-budget measurement (§2) runs continuously now that the Phase 
 ### Phase 4 plan (walking skeleton first)
 
 The governance loop `declare → validate → test → record → activate → rollback`, built thinnest-first. The
-foundation is the **temporal provenance statement** — a receipt is *already* a `bio_edges` row with a digest +
-time (`[[semantic-sql-graph-substrate]]`, `[[lazy-evaluation-substrate]]`); Phase 4 promotes results/judgments
-and activation events to first-class, as-of-versioned facts in that same graph. The irreducible **human** stays
+foundation is the **temporal provenance statement** — receipts already carry source + digest + time, and Phase 4
+promotes selected results/judgments and activation events into **`bio_observations`** (append-only, as-of-versioned),
+whose edge-like rows project into graph shape as of time t. `bio_edges` stays the atemporal compiled graph. The
+irreducible **human** stays
 at `activate` (the approval gate) — the substrate provides the rails (record + as-of + the state machine), the
 sign-off is hosted, not computed ([design.md "Where the human stays in the loop"](./design.md#where-the-human-stays-in-the-loop-the-judgmentapproval-boundary)).
 
