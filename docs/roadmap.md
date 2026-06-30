@@ -180,11 +180,22 @@ sign-off is hosted, not computed ([design.md "Where the human stays in the loop"
 
 Each slice is end-to-end and deterministic-tested; build the foundation only as the next slice consumes it.
 
-- **4.0 — Temporal provenance-statement store (the Phase-1-leftover foundation).** `record(conn, fact)` appends a
-  result/judgment as a time-stamped, content-addressed `bio_edges` row (`subject, predicate, object,
-  recorded_at, digest, source`) — receipts already carry `source`+`digest`+`retrievedAt`, so this promotes them.
-  Plus an `as_of(t)` query (recorded_at ≤ t, latest-not-superseded). Land the **strict-`now`** endpoint here
-  (push the clock to the OS-adapter boundary so as-of is deterministic — the ~46-test ripple). Driven by 4.1.
+- **4.0 — Temporal provenance-statement store (the Phase-1-leftover foundation).** Keep `bio_edges` **atemporal
+  + UNIQUE-per-triple** (it's the compiled navigation graph + the closure source); the temporal layer is a NEW
+  append-only **`bio_observations`** table (the docs already name it as the "true-on-date-X, superseded-by-Y"
+  store). `record(conn, obs)` appends a result/judgment as a time-stamped, content-addressed
+  observation/statement row carrying a **`statement_key`** (the state SLOT a later row supersedes — NOT the full
+  triple: activation changes the object `v1→v2`, a coloc `PP.H4` changes the value), plus `subject_id,
+  predicate, object_id?, value?, recorded_at, valid_from?, valid_to?, source, digest, attrs, trust`. `asOf(t)` =
+  **latest row per `statement_key`** where `recorded_at ≤ t` (and valid interval contains t). Edge-like rows
+  (`object_id` set) **project into `bio_edges_as_of(t)`**, and `entailed_edge` materializes over that projection
+  (generalize `materializeEntailedEdges` to take a source/target table). record = append; current = latest as-of;
+  rollback = append a row pointing at an older version — event-sourcing, not mutable state. Defer the strict-`now`
+  refactor (the ~46-test ripple) — tests pass explicit `recordedAt`, the host defaults it via the existing
+  injected `now`. Driven by 4.1. **BUILT (4.0a):** `src/duckdb/observations.ts`
+  (`createBioObservationSchema`/`recordObservation`/`observationsAsOf`/`materializeBioEdgesAsOf`/`entailedEdgesAsOf`)
+  + `test/observations-as-of.test.ts` (supersession across a changing object/value, duplicate-triple-allowed,
+  idempotency, the as-of edge closure); `materializeEntailedEdges` generalized to take a source/target table.
 - **4.1 — Record a real judgment.** An existing operation records its RESULT as a fact: e.g. `coloc` writes
   `(gwas_locus) ←colocalizes-with[PP.H4]← (tissue) @t #digest`, or `rare-high-impact` writes its per-variant
   classification. Proves "results/judgments as KG facts" with a real producer (not a synthetic one).
