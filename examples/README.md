@@ -58,6 +58,16 @@ boundary analysis in [`docs/refinments.md`](../docs/refinments.md).
 | **live:** [`scripts/ducknng-rpc-mutate.mjs`](../scripts/ducknng-rpc-mutate.md) | **ducknng RPC** — separate processes **mutate** one shared table in place (`UPDATE`/`DELETE`/upsert) via `ducknng_run_rpc` against a server running native DuckDB, exec opt-in. The mutate-in-place quack can't do; a fact-superseding KG needs it. |
 | **live:** [`scripts/blackboard-shared.mjs`](../scripts/blackboard-shared.md) | **ducknng RPC blackboard** — a decentralized pub/sub diamond DAG across separate processes (publish = `run_rpc` INSERT, await = poll `query_rpc`); order emerges from shared writes, no coordinator. |
 
+## 5. The COMPUTE pillar & the two-pillar flagship
+SQL is poor at some things (an `lm()` fit, a Bayesian colocalization); those run **out-of-process** over Arrow IPC,
+with the DATA contract staying SQL/Arrow.
+
+| Example | Proof |
+|---|---|
+| [`process-compute/`](process-compute/) | the **COMPUTE pillar** itself — a DuckDB table → Arrow IPC → real spawned R `lm()` → Arrow IPC → table; fail-closed without a `ProcessRunner` — `test/process-compute-example.test.ts` |
+| [`wgs-chr22-annotation/`](wgs-chr22-annotation/) | **NETWORK + COMPUTE on real WGS data** — `duckhts` region read → chunked VEP fanout (`ncurl-fanout`) → ClinVar → rare/high-impact — `test/ncurl-fanout.test.ts` |
+| [`coloc/`](coloc/) | **the two-pillar flagship** — post-GWAS colocalization (`~/PostGWAS`/`~/coloclize` shape): SQL allele **harmonization** (DATA) → out-of-process R **`coloc.abf`** over Arrow IPC (COMPUTE) → `PP.H4` posteriors. `test/coloc-example.test.ts` (real `coloc::coloc.abf`, `PP.H4 ≈ 1.0` on a shared-causal locus) |
+
 ---
 Run all deterministic examples: `npm test`. The **live** dogfoods need the `pi` CLI (multi-agent) / a free
 local port (ducknng) and are run by hand; their recorded outputs are in the linked `.md` files.

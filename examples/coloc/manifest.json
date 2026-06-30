@@ -1,0 +1,35 @@
+{
+  "schema": "pi-bio.domain_pack_manifest.v1",
+  "id": "coloc",
+  "version": "0.1.0",
+  "title": "Post-GWAS colocalization — the two-pillar flagship (walking skeleton)",
+  "description": "The DATA + COMPUTE pillars composed on a real research question (post-GWAS colocalization, the shape of ~/PostGWAS + ~/coloclize), as DATA. The DAG: a GWAS locus and an eQTL-tissue locus are read into tables (file_scan; in production these are tabix region-extracts via duckhts), HARMONIZED in SQL (join on variant, align/flip alleles, drop mismatches, varbeta = se^2 — the DATA pillar), then COLOCALIZED out-of-process in R over Arrow IPC (coloc.abf — the COMPUTE pillar, a thing SQL is poor at) to yield the posteriors PP.H0..PP.H4. PP.H4 = probability the GWAS and eQTL share a causal variant. Every step leaves a receipt (resolver version, params digest, source snapshot / command digest). Walking skeleton: ONE locus + ONE tissue with coloc.abf (no LD needed); thickens to per-tissue fan-out + PLINK2 LD + SuSiE later.",
+  "domains": ["genomics", "statistics"],
+  "provides": {
+    "resolvers": [
+      { "id": "duckdb.file_scan", "version": "0.1.0", "title": "DuckDB file scan", "description": "Read a delimited locus file into a table (stands in for a tabix region-extract).", "output": { "mode": "table" } },
+      { "id": "duckdb.sql_materialize", "version": "0.1.0", "title": "SQL materialize", "description": "Materialize a table from a read-only SELECT (here, the allele harmonization join).", "output": { "mode": "table" } },
+      { "id": "process.compute", "version": "0.1.0", "title": "Out-of-process compute", "description": "Run an external process (R coloc.abf) over an Arrow-IPC input and read its Arrow-IPC output back as a table.", "output": { "mode": "table" } }
+    ],
+    "resources": [
+      { "id": "gwas_locus", "title": "GWAS locus sumstats", "kind": "virtual", "resolver": "duckdb.file_scan", "params": { "path": "data/gwas_locus.csv", "table": "gwas_locus" } },
+      { "id": "eqtl_locus", "title": "eQTL tissue locus sumstats", "kind": "virtual", "resolver": "duckdb.file_scan", "params": { "path": "data/eqtl_locus.csv", "table": "eqtl_locus" } },
+      {
+        "id": "harmonized", "title": "Harmonized coloc input bundle (DATA pillar)", "kind": "virtual", "resolver": "duckdb.sql_materialize",
+        "params": {
+          "table": "harmonized",
+          "sql": "SELECT g.snp, g.beta AS beta_gwas, g.se * g.se AS varbeta_gwas, CASE WHEN g.ea = e.ea AND g.oa = e.oa THEN e.beta WHEN g.ea = e.oa AND g.oa = e.ea THEN -e.beta END AS beta_eqtl, e.se * e.se AS varbeta_eqtl FROM gwas_locus g JOIN eqtl_locus e ON g.snp = e.snp WHERE (g.ea = e.ea AND g.oa = e.oa) OR (g.ea = e.oa AND g.oa = e.ea) ORDER BY g.pos"
+        }
+      },
+      {
+        "id": "coloc_result", "title": "Colocalization posteriors (COMPUTE pillar)", "kind": "virtual", "resolver": "process.compute",
+        "params": {
+          "table": "coloc_result",
+          "inputSql": "SELECT snp, beta_gwas, varbeta_gwas, beta_eqtl, varbeta_eqtl FROM harmonized",
+          "command": ["Rscript", "./coloc.R"],
+          "timeoutMs": 120000
+        }
+      }
+    ]
+  }
+}
