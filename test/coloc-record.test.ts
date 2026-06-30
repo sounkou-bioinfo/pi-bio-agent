@@ -29,7 +29,9 @@ async function recordColocObservations(conn: SqlConn, rows: ColocRow[], o: { loc
       trust: { provenanceClass: "computed", confidence: r.posterior, producer: "coloc.abf" },
     });
   }
-  // the biological CALL — only when PP.H4 crosses the threshold — as an edge-like statement
+  // the biological CALL — only when PP.H4 crosses the threshold — as an edge-like statement. NOTE: the threshold
+  // is part of the call's IDENTITY; observation_id excludes attrs, so if the rule changes independently of the
+  // result, fold the rule into source/digest (here the result digest changes per run, so it's covered).
   const h4 = new Map(rows.filter((r) => r.hypothesis === "PP.H4").map((r) => [r.tissue, r.posterior]));
   for (const [tissue, pp] of h4) {
     if (pp <= threshold) continue;

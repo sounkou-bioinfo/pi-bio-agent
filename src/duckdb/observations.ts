@@ -83,10 +83,14 @@ export async function recordObservation(conn: SqlConn, obs: BioObservationInput)
 export interface ObservationRow {
   observation_id: string; statement_key: string; subject_id: string; predicate: string;
   object_id: string | null; value_json: string | null; recorded_at: string; valid_from: string | null; valid_to: string | null;
-  source: string | null; digest: string | null;
+  source: string | null; digest: string | null; attrs: string | null; trust: string | null;
 }
 
 // latest row PER statement_key, as of time t (recorded_at <= t, valid interval [valid_from, valid_to) contains t).
+// TIE-BREAK: two rows with the SAME statement_key and SAME recorded_at are ordered by observation_id DESC —
+// deterministic but arbitrary. Producers that mutate STATE (e.g. activation) must use a strictly MONOTONIC
+// recordedAt per state change, so "current" is never ambiguous; equal-timestamp rows for one slot should be exact
+// provenance duplicates of the same state, never competing state changes.
 const asOfSql = (table: string): string =>
   `WITH eligible AS (
      SELECT * FROM ${table} WHERE recorded_at <= ? AND (valid_from IS NULL OR valid_from <= ?) AND (valid_to IS NULL OR valid_to > ?)
@@ -105,8 +109,11 @@ export async function observationsAsOf(conn: SqlConn, t: string): Promise<Observ
 export async function materializeBioEdgesAsOf(conn: SqlConn, t: string, target = "bio_edges_as_of"): Promise<number> {
   if (!IDENT.test(target)) throw new Error(`materializeBioEdgesAsOf: target '${target}' must be a SQL identifier`);
   await conn.run(
+    // keep the PROVENANCE columns in the projection so bio_edges_as_of is an auditable graph table, not only a
+    // closure input (materializeEntailedEdges reads just from_id/predicate/to_id, so the extra columns are free).
     `CREATE OR REPLACE TABLE ${target} AS
-     SELECT subject_id AS from_id, object_id AS to_id, predicate, attrs, trust
+     SELECT subject_id AS from_id, object_id AS to_id, predicate, attrs, trust,
+            observation_id, statement_key, recorded_at, source, digest
      FROM (${asOfSql(TABLE)}) WHERE object_id IS NOT NULL`,
     [t, t, t],
   );
