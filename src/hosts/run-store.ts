@@ -4,7 +4,7 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { createBioRegistry, type BioRegistry, type DomainPackManifest, type ResolutionReceipt } from "../core/manifest.js";
 import type { CasStore } from "../core/cas.js";
-import type { BioResolverImpl, SqlConn } from "../core/ports.js";
+import type { BioResolverImpl, ProcessRunner, SqlConn } from "../core/ports.js";
 import { OperationRunError, runOperation, runQuery, type OperationResult } from "../core/operations.js";
 import type { BioRunRecord } from "../core/run-spec.js";
 import { duckdbNodeConn } from "../duckdb/node-api.js";
@@ -12,6 +12,7 @@ import { duckdbFileScanResolver } from "../duckdb/resolvers/duckdb-file-scan.js"
 import { duckdbSqlMaterializeResolver } from "../duckdb/resolvers/duckdb-sql-materialize.js";
 import { duckhtsReadBcfResolver } from "../duckdb/resolvers/duckhts-read-bcf.js";
 import { httpTableResolver, type FetchLike } from "../duckdb/resolvers/http-table-scan.js";
+import { processComputeResolver } from "../duckdb/resolvers/process-compute.js";
 
 // Host-level run runner + store. Core returns { run, result, receipts }; persistence and resolver binding
 // live HERE, not in core. Only built-in resolver impls are bound; a manifest that declares any other
@@ -27,6 +28,9 @@ const BUILTIN_RESOLVERS: Record<string, BioResolverImpl> = {
 // by construction, not a library egress firewall. file_scan / read_bcf may read remote URIs freely; whether
 // egress is possible is the host's sandbox decision (container/seccomp/Pi/OS), not ours.
 const NETWORK_RESOLVER = "http.get";
+// The COMPUTE capability: a manifest's process.compute resource resolves only when the host injects a
+// ProcessRunner (grants out-of-process compute by composition), exactly like http.get needs an injected fetch.
+const PROCESS_RESOLVER = "process.compute";
 
 // Built-in resolvers whose params.path is a file location to resolve relative to the manifest's directory.
 const FILE_PATH_RESOLVERS = new Set(["duckdb.file_scan", "duckhts.read_bcf"]);
@@ -38,6 +42,14 @@ const FILE_PATH_RESOLVERS = new Set(["duckdb.file_scan", "duckhts.read_bcf"]);
  */
 function resolveResourcePaths(manifest: DomainPackManifest, manifestDir: string): DomainPackManifest {
   const resources = (manifest.provides?.resources ?? []).map((res) => {
+    // process.compute: a script SHIPS WITH the manifest, referenced "./compute.R" — resolve such relative
+    // command entries against the manifest dir (absolute paths and bare executable names are left untouched).
+    if (res.resolver === PROCESS_RESOLVER) {
+      const cmd = (res.params as { command?: unknown }).command;
+      if (!Array.isArray(cmd)) return res;
+      const command = cmd.map((c) => (typeof c === "string" && (c.startsWith("./") || c.startsWith("../"))) ? resolve(manifestDir, c) : c);
+      return { ...res, params: { ...res.params, command } };
+    }
     if (!FILE_PATH_RESOLVERS.has(res.resolver)) return res;
     const path = (res.params as { path?: unknown }).path;
     if (typeof path !== "string" || isAbsolute(path) || path.includes("://")) return res;
@@ -121,6 +133,8 @@ export interface RunOperationRequest {
   /** Network opt-in: pass a fetch to enable the http.get resolver. Absent = http.get stays unbound and any
    *  networked resource fails closed. The host (not core) owns this policy; nothing is read from ambient state. */
   network?: { fetch: FetchLike };
+  /** COMPUTE opt-in (host grants out-of-process compute): pass a ProcessRunner to enable the process.compute resolver. Absent => process.compute stays unbound and fails closed. */
+  process?: { runner: ProcessRunner };
   /** Cooperative cancellation, forwarded to each resolver (e.g. http.get's fetch). */
   signal?: AbortSignal;
   /** CAS mode (host opt-in): a content-addressed byte store. Present = resolvers snapshot bytes into it and
@@ -147,15 +161,20 @@ function resolveInCwd(cwd: string, p: string): string {
 
 /** Load + validate + register a manifest and bind the built-in resolver impls it declares. Shared by the
  *  operation and the ad-hoc query entry points. */
-async function prepareRegistry(req: { cwd: string; manifestPath: string; network?: { fetch: FetchLike } }): Promise<{ registry: BioRegistry; manifest: DomainPackManifest }> {
+async function prepareRegistry(req: { cwd: string; manifestPath: string; network?: { fetch: FetchLike }; process?: { runner: ProcessRunner } }): Promise<{ registry: BioRegistry; manifest: DomainPackManifest }> {
   const manifestPath = resolveInCwd(req.cwd, req.manifestPath);
   const raw = JSON.parse(await fs.readFile(manifestPath, "utf8")) as DomainPackManifest;
   const manifest = resolveResourcePaths(raw, dirname(manifestPath)); // relative resource paths -> manifest dir
   const registry = createBioRegistry();
   registry.registerManifest(manifest); // throws on an invalid manifest (fail closed)
-  const httpImpl = req.network ? httpTableResolver(req.network.fetch) : undefined;
+  // Host-injected capability resolvers — present only when the host GRANTS them by composition; absent => the
+  // declaring resource fails closed at resolve time.
+  const injected: Record<string, BioResolverImpl | undefined> = {
+    [NETWORK_RESOLVER]: req.network ? httpTableResolver(req.network.fetch) : undefined,
+    [PROCESS_RESOLVER]: req.process ? processComputeResolver(req.process.runner) : undefined,
+  };
   for (const r of manifest.provides?.resolvers ?? []) {
-    const impl = BUILTIN_RESOLVERS[r.id] ?? (r.id === NETWORK_RESOLVER ? httpImpl : undefined);
+    const impl = BUILTIN_RESOLVERS[r.id] ?? injected[r.id];
     if (impl) registry.bindResolverImpl(r.id, impl);
   }
   return { registry, manifest };
@@ -236,6 +255,8 @@ export interface RunQueryRequest {
   runId?: string;
   now?: string;
   network?: { fetch: FetchLike };
+  /** COMPUTE opt-in (host grants out-of-process compute): pass a ProcessRunner to enable the process.compute resolver. Absent => process.compute stays unbound and fails closed. */
+  process?: { runner: ProcessRunner };
   /** Cooperative cancellation, forwarded to each resolver (e.g. http.get's fetch). */
   signal?: AbortSignal;
   /** CAS mode (host opt-in): a content-addressed byte store for cross-db byte reuse. */
