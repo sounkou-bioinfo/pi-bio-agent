@@ -131,6 +131,8 @@ export interface RunOperationRequest {
   duckdbInitSql?: string[];
   /** Agent params as DuckDB session variables: each becomes `SET VARIABLE name = value`, so a resource url/body composes them with plain SQL (getvariable(name)) and upstream data with subqueries — no bespoke template DSL. */
   bindings?: Record<string, unknown>;
+  /** Host DuckDB instance config set at open, e.g. { allow_unsigned_extensions: "true" } to LOAD ducknng / local extension builds. */
+  duckdbConfig?: Record<string, string>;
 }
 
 export type RunOperationResponse =
@@ -164,8 +166,9 @@ async function runAndPersist(
   body: (conn: SqlConn) => Promise<{ run: BioRunRecord; result: OperationResult; receipts: ResolutionReceipt[] }>,
   initSql?: string[],
   bindings?: Record<string, unknown>,
+  duckdbConfig?: Record<string, string>,
 ): Promise<RunOperationResponse> {
-  const instance = await DuckDBInstance.create(resolveInCwd(cwd, dbPath));
+  const instance = await DuckDBInstance.create(resolveInCwd(cwd, dbPath), duckdbConfig);
   const connection = await instance.connect();
   const conn = duckdbNodeConn(connection);
   try {
@@ -216,7 +219,7 @@ export async function runBioOperationFromManifest(req: RunOperationRequest): Pro
   if (op.transport !== "duckdb.sql" || !op.sql) throw new Error(`operation '${req.operationId}' is not a duckdb.sql operation`);
   const now = req.now ?? systemClock();
   const runId = req.runId ?? `${req.operationId.replace(/[^a-zA-Z0-9._-]/g, "_")}-${Date.now()}`;
-  return runAndPersist(req.cwd, req.dbPath, runId, req.operationId, (conn) => runOperation(registry, conn, { operationId: req.operationId, runId, now, signal: req.signal, cas: req.cas }), req.duckdbInitSql, req.bindings);
+  return runAndPersist(req.cwd, req.dbPath, runId, req.operationId, (conn) => runOperation(registry, conn, { operationId: req.operationId, runId, now, signal: req.signal, cas: req.cas }), req.duckdbInitSql, req.bindings, req.duckdbConfig);
 }
 
 export interface RunQueryRequest {
@@ -239,6 +242,8 @@ export interface RunQueryRequest {
   duckdbInitSql?: string[];
   /** Agent params as DuckDB session variables: each becomes `SET VARIABLE name = value`, so a resource url/body composes them with plain SQL (getvariable(name)) and upstream data with subqueries — no bespoke template DSL. */
   bindings?: Record<string, unknown>;
+  /** Host DuckDB instance config set at open, e.g. { allow_unsigned_extensions: "true" } to LOAD ducknng / local extension builds. */
+  duckdbConfig?: Record<string, string>;
 }
 
 /**
@@ -256,5 +261,5 @@ export async function runBioQueryFromManifest(req: RunQueryRequest): Promise<Run
   const resources = req.resources ?? (manifest.provides?.resources ?? []).map((r) => r.id);
   const now = req.now ?? systemClock();
   const runId = req.runId ?? `query-${Date.now()}`;
-  return runAndPersist(req.cwd, req.dbPath, runId, "ad-hoc.query", (conn) => runQuery(registry, conn, { sql: req.sql, resources, runId, now, signal: req.signal, cas: req.cas }), req.duckdbInitSql, req.bindings);
+  return runAndPersist(req.cwd, req.dbPath, runId, "ad-hoc.query", (conn) => runQuery(registry, conn, { sql: req.sql, resources, runId, now, signal: req.signal, cas: req.cas }), req.duckdbInitSql, req.bindings, req.duckdbConfig);
 }

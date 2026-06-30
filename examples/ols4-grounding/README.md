@@ -1,9 +1,27 @@
 # Example: a grounding skill as a manifest (metacurator `disambiguate`, over OLS4)
 
 This folds in [metacurator](https://github.com/seandavi/metacurator)'s `disambiguate` discipline — ground a text
-term to **one** of the provided grounded CURIEs, or abstain (`None`) — expressed as **a manifest plus one SQL
-query**, not a bespoke client. `manifest.json` declares an [OLS4](https://www.ebi.ac.uk/ols4/) search URL as an
-`http.get` resource; the agent resolves it into a `ols4_candidates` table and grounds with SQL itself.
+term to **one** of the provided grounded CURIEs, or abstain (`None`) — **SQL all the way down**. `manifest.json`
+is a `duckdb.sql_materialize` resource whose SQL fetches [OLS4](https://www.ebi.ac.uk/ols4/) with
+`ducknng_ncurl_table` — a SQL table function — so there is **no TS resolver**: the URL is composed in SQL
+(`getvariable('query')` + `url_encode`), agent params are DuckDB session variables, and the JSON response is
+parsed into `ols4_candidates` by ducknng. The agent grounds with one more SQL line.
+
+```sql
+-- the resource: an HTTP fetch that IS SQL
+SELECT * FROM ducknng_ncurl_table(
+  coalesce(getvariable('ols4_base'), 'https://www.ebi.ac.uk/ols4/api') || '/search?q=' || url_encode(getvariable('query'))
+    || '&ontology=' || url_encode(coalesce(getvariable('ontology'), 'mondo')) || '&fieldList=obo_id,label',
+  'GET', NULL, NULL, 20000, coalesce(getvariable('tls'), 0)::UBIGINT)
+```
+
+The host provisions ducknng once via `duckdbInitSql` (`INSTALL ducknng FROM community; LOAD ducknng`) and, for
+HTTPS, a TLS config (`SET VARIABLE tls = ducknng_tls_config_from_files(NULL, '/etc/ssl/certs/ca-certificates.crt',
+'', 1)`); the agent supplies `{query}` as a binding. The test is **deterministic** — a *local ducknng server*
+(`ducknng_start_server` + `ducknng_register_http_route` + `ducknng_http_json`) is the fixture, so it needs no
+external network. (ducknng's community build is unsigned, so the host opens the db with
+`duckdbConfig: { allow_unsigned_extensions: "true" }`.) `http.get` (TS resolver + injected fetch) remains the
+fallback when a DuckDB version has no ducknng build.
 
 > **Honest tag:** this is a **metacurator** concrete, *not* a ClawBio skill. ClawBio has no standalone OLS /
 > ontology-grounding skill — its API skills are things like *Variant Annotation* (Ensembl VEP REST / ClinVar /

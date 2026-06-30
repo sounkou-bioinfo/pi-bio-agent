@@ -1,16 +1,23 @@
 {
   "schema": "pi-bio.domain_pack_manifest.v1",
   "id": "ols4-grounding",
-  "version": "0.1.0",
-  "title": "OLS4 term grounding",
-  "description": "A metacurator-shaped grounding skill expressed as DATA — this folds in metacurator's `disambiguate` (https://github.com/seandavi/metacurator): ground a text term to ONE of the provided grounded CURIEs, or abstain (None). It declares an OLS4 search endpoint as an http.get resource that returns candidate CURIEs; the agent then grounds deterministically in SQL (exact/synonym match -> one CURIE, else abstain). NOT a ClawBio skill — ClawBio has no standalone OLS/ontology-grounding skill; the named concrete here is metacurator. There is NO OLS4-specific TypeScript — the URL and response shape live in the manifest, the same generic http.get resolver serves any JSON/CSV endpoint, and the resolver memoizes by ETag so repeated grounding does not re-download. Network is the host's opt-in: this manifest fails closed until a host injects a fetch (load the explicit index-networked.ts entrypoint).",
+  "version": "0.2.0",
+  "title": "OLS4 term grounding (SQL-native via ducknng_ncurl)",
+  "description": "A metacurator-shaped grounding skill (disambiguate: a text term -> one CURIE or abstain, https://github.com/seandavi/metacurator), SQL all the way down. The HTTP fetch is ducknng_ncurl_table — a SQL table function — so there is NO TS resolver: the URL is composed in SQL (getvariable + url_encode), agent params are DuckDB session variables, and the JSON response is parsed into a table by ducknng. The host provisions ducknng (duckdbInitSql: INSTALL ducknng FROM community; LOAD ducknng; and a TLS config for HTTPS) and the agent supplies {query}. NOT a ClawBio skill (ClawBio has no OLS skill); the named concrete is metacurator's disambiguate. http.get (TS) is the fallback when a DuckDB version has no ducknng build.",
   "domains": ["ontology"],
   "provides": {
     "resolvers": [
-      { "id": "http.get", "version": "0.1.0", "title": "HTTP GET", "description": "GET a declared URL and materialize the JSON/CSV response into a table.", "output": { "mode": "table" } }
+      { "id": "duckdb.sql_materialize", "version": "0.1.0", "title": "SQL materialize", "description": "Materialize a table from a read-only SELECT (here, a ducknng_ncurl_table HTTP fetch).", "output": { "mode": "table" } }
     ],
     "resources": [
-      { "id": "ols4_candidates", "title": "OLS4 search candidates", "kind": "virtual", "resolver": "http.get", "params": { "url": "'https://www.ebi.ac.uk/ols4/api/search?q=' || url_encode(getvariable('query')) || '&ontology=' || url_encode(coalesce(getvariable('ontology'), 'mondo')) || '&fieldList=obo_id,label'", "table": "ols4_candidates", "format": "json" } }
+      {
+        "id": "ols4_candidates", "title": "OLS4 search candidates", "kind": "virtual", "resolver": "duckdb.sql_materialize",
+        "params": {
+          "table": "ols4_candidates",
+          "extensions": ["ducknng"],
+          "sql": "SELECT * FROM ducknng_ncurl_table(coalesce(getvariable('ols4_base'), 'https://www.ebi.ac.uk/ols4/api') || '/search?q=' || url_encode(getvariable('query')) || '&ontology=' || url_encode(coalesce(getvariable('ontology'), 'mondo')) || '&fieldList=obo_id,label', 'GET', NULL, NULL, 20000, coalesce(getvariable('tls'), 0)::UBIGINT)"
+        }
+      }
     ]
   }
 }

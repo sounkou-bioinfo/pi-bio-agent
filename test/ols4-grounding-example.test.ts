@@ -3,72 +3,63 @@ import { describe, test } from "node:test";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import type { FetchLike } from "../src/duckdb/resolvers/http-table-scan.js";
+import { DuckDBInstance } from "@duckdb/node-api";
+import { duckdbNodeConn } from "../src/duckdb/node-api.js";
 import { runBioQueryFromManifest } from "../src/hosts/run-store.js";
 
-// Honest tag: this folds in metacurator's `disambiguate` (https://github.com/seandavi/metacurator) — ground a
-// text term to ONE provided CURIE or abstain — NOT a ClawBio skill (ClawBio has no standalone OLS skill). The
-// bet made concrete: that grounding skill is just examples/ols4-grounding/manifest.json + one SQL query, no
-// OLS4-specific code. This runs the REAL example manifest end-to-end through the host with an INJECTED mock
-// fetch (no live network): http.get resource -> materialized candidate table -> grounding SQL the agent writes.
-// Network is the host's opt-in by COMPOSITION (here the test injects a fetch; the Pi extension's networked
-// entrypoint does in production).
-
-// repo-root-anchored: npm test compiles to dist-test/ and runs from the repo root, so cwd is the repo root
-// in both the compiled and the tsx runners (import.meta.dirname differs between them).
+// SQL-native OLS4 grounding (metacurator disambiguate), DETERMINISTIC: a local ducknng server serves a canned
+// OLS4-shaped response, and the manifest fetches it with `ducknng_ncurl_table` — the URL composed in SQL
+// (getvariable + url_encode), NO TS resolver, no external network. The agent supplies the query as a binding
+// (-> SET VARIABLE), points `ols4_base` at the local fixture, and grounds with one SQL line. (http.get + a mock
+// fetch is the fallback this stands in for when a DuckDB version has no ducknng build.)
 const MANIFEST = resolve(process.cwd(), "examples", "ols4-grounding", "manifest.json");
+const PROVISION = ["INSTALL ducknng FROM community", "LOAD ducknng"];
 
-// an OLS4-search-shaped response, flattened to the candidate rows the grounding SQL consumes
-let lastUrl = "";
-const ols4Mock = (etag: string): FetchLike => async (url, init) => {
-  lastUrl = url;
-  const h = { get: (n: string) => (n.toLowerCase() === "etag" ? etag : null) };
-  if (init?.headers?.["If-None-Match"] === etag) return { ok: false, status: 304, text: async () => "", headers: h };
-  const body = [
-    { obo_id: "MONDO:0004979", label: "asthma" },
-    { obo_id: "MONDO:0004784", label: "allergic asthma" },
-    { obo_id: "MONDO:0011805", label: "asthma-related traits" },
-  ];
-  return { ok: true, status: 200, text: async () => JSON.stringify(body), headers: h };
-};
+const ducknngAvailable = await (async () => {
+  try {
+    const c = await (await DuckDBInstance.create(":memory:", { allow_unsigned_extensions: "true" })).connect();
+    await c.run("INSTALL ducknng FROM community");
+    await c.run("LOAD ducknng");
+    return true;
+  } catch { return false; }
+})();
 
-describe("example: an OLS4 grounding skill is a manifest, not code", () => {
-  test("resolves the http.get resource and grounds with the agent's SQL — end to end through the host", async () => {
-    const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-ols4-"));
-    const dbPath = join(cwd, "g.duckdb"); // persistent so the ETag memo survives across the two runs
+async function startFixture(port: number): Promise<{ close(): void }> {
+  const inst = await DuckDBInstance.create(":memory:", { allow_unsigned_extensions: "true" });
+  const fix = duckdbNodeConn(await inst.connect());
+  await fix.run("LOAD ducknng");
+  await fix.run(`SELECT ducknng_start_server('ols_fix_${port}', 'http://127.0.0.1:${port}/_ducknng', 1, 134217728, 300000, 0::UBIGINT)`);
+  await fix.run(`SELECT ducknng_register_http_route('ols_fix_${port}', 'GET', '/search', 'SELECT * FROM ducknng_http_json(200, ''[{"obo_id":"MONDO:0004979","label":"asthma"},{"obo_id":"MONDO:0004784","label":"allergic asthma"}]'')')`);
+  return { close: () => inst.closeSync() };
+}
 
-    // exact-match projection tier — the agent's grounding SQL over the resolved candidate table
-    const sql = "SELECT obo_id, label FROM ols4_candidates WHERE lower(label) = 'asthma'";
-    // the AGENT supplies the query as a DuckDB session variable; the manifest's url is a SQL EXPRESSION that
-    // composes it: '…?q=' || getvariable('query'). No bespoke template DSL, no hardcoded term.
-    const first = await runBioQueryFromManifest({ cwd, dbPath, manifestPath: MANIFEST, sql, bindings: { query: "asthma" }, network: { fetch: ols4Mock("ols4-v1") }, runId: "g1", now: "T1" });
-
-    assert.equal(first.ok, true);
-    if (!first.ok) return;
-    assert.match(lastUrl, /[?&]q=asthma&/, "getvariable('query') composed the URL via plain SQL");
-    assert.match(lastUrl, /ontology=mondo/, "an unset param falls back via coalesce(getvariable('ontology'), 'mondo')");
-    const result = JSON.parse(await fs.readFile(join(first.runDir, "result.json"), "utf8")) as { rows: Array<{ obo_id: string; label: string }> };
-    assert.deepEqual(result.rows, [{ obo_id: "MONDO:0004979", label: "asthma" }]);
-
-    // a DIFFERENT query/ontology composes a new URL from the SAME manifest, URL-ENCODED in pure SQL (url_encode)
-    await runBioQueryFromManifest({ cwd, dbPath: ":memory:", manifestPath: MANIFEST, sql, bindings: { query: "lung cancer", ontology: "hp" }, network: { fetch: ols4Mock("ols4-v2") }, runId: "g2", now: "T2" });
-    assert.match(lastUrl, /[?&]q=lung%20cancer&ontology=hp&/, "url_encode(getvariable('query')) encoded the space — all in SQL");
+describe("example: OLS4 grounding is SQL all the way down (ducknng_ncurl)", { skip: ducknngAvailable ? false : "ducknng unavailable (provision: INSTALL ducknng FROM community on a matching DuckDB)" }, () => {
+  test("local ducknng server -> ncurl_table fetch+parse -> SQL grounding, all SQL, no external network", async () => {
+    const fixture = await startFixture(45581);
+    try {
+      const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-ols4-"));
+      const out = await runBioQueryFromManifest({
+        cwd, dbPath: ":memory:", manifestPath: MANIFEST,
+        sql: "SELECT obo_id, label FROM ols4_candidates WHERE lower(label) = getvariable('query')",
+        duckdbInitSql: PROVISION, duckdbConfig: { allow_unsigned_extensions: "true" },
+        bindings: { ols4_base: "http://127.0.0.1:45581", query: "asthma" }, // agent supplies the query; base -> local fixture
+        runId: "g1", now: "T1",
+      });
+      assert.equal(out.ok, true);
+      if (!out.ok) return;
+      const result = JSON.parse(await fs.readFile(join(out.runDir, "result.json"), "utf8")) as { rows: Array<{ obo_id: string; label: string }> };
+      assert.deepEqual(result.rows, [{ obo_id: "MONDO:0004979", label: "asthma" }]); // exact-match grounding over the fetched table
+    } finally { fixture.close(); }
   });
 
-  test("fails closed when {query} has no binding (getvariable is NULL -> the url composes to non-http -> failed run)", async () => {
+  test("fails closed when {query} has no binding (url_encode(NULL) -> NULL url -> auditable failed run)", async () => {
     const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-ols4-"));
-    const out = await runBioQueryFromManifest({ cwd, dbPath: ":memory:", manifestPath: MANIFEST, sql: "SELECT 1", network: { fetch: ols4Mock("x") }, runId: "g3", now: "T1" });
-    assert.equal(out.ok, false); // a runtime resolution failure is an auditable failed run, not a silent empty result
-    if (out.ok) return;
-    assert.match(out.error, /not an http\(s\) URL/);
-  });
-
-  test("fails closed with NO network bound — a networked manifest cannot resolve without the host's opt-in", async () => {
-    const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-ols4-"));
-    // binding supplied; no network -> http.get unbound -> resolution fails closed
-    await assert.rejects(
-      () => runBioQueryFromManifest({ cwd, dbPath: ":memory:", manifestPath: MANIFEST, sql: "SELECT * FROM ols4_candidates", bindings: { query: "asthma" }, runId: "g4", now: "T1" }),
-      /http\.get' is declared but no implementation is bound/,
-    );
+    const out = await runBioQueryFromManifest({
+      cwd, dbPath: ":memory:", manifestPath: MANIFEST, sql: "SELECT 1",
+      duckdbInitSql: PROVISION, duckdbConfig: { allow_unsigned_extensions: "true" },
+      bindings: { ols4_base: "http://127.0.0.1:45581" }, // no query -> the composed URL is NULL; no server needed
+      runId: "g2", now: "T1",
+    });
+    assert.equal(out.ok, false);
   });
 });
