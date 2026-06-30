@@ -312,8 +312,18 @@ body — overfitting: a real skill doesn't bake the query data into the manifest
     `variants` table; stage-2's request composes from it in SQL — a url with a subquery, or a body built with
     `json_group_array((SELECT id FROM variants))`. The request is a function of upstream data, in SQL.
   - **Encoding: solved in pure SQL.** DuckDB has `url_encode` built in, so values compose safely:
-    `'…?q=' || url_encode(getvariable('query'))` turns `lung cancer` into `lung%20cancer`. No UDF, no ducknng
-    needed for encoding (ducknng_ncurl would still make the fetch itself SQL).
+    `'…?q=' || url_encode(getvariable('query'))` turns `lung cancer` into `lung%20cancer`. No UDF needed.
+  - **The fetch ITSELF is SQL via ducknng — PROVEN (corrected).** Earlier I wrongly said "ducknng isn't
+    installable here." It is: built for DuckDB v1.5.2 (community/local build); our node-api ships v1.5.4 — a
+    version LAG, not unavailability (node-api `1.5.2-r.2`/`1.5.3-r.3` exist). In a version-matched scratch env
+    (`@duckdb/node-api@1.5.2-r.2` + `LOAD '~/ducknng/build/release/ducknng.duckdb_extension'`), this ran live:
+    `SELECT * FROM ducknng_ncurl_table('http://httpbin.org/' || url_encode(getvariable('path')), 'GET', NULL,
+    NULL, 12000, 0::UBIGINT)` — fetched + parsed the JSON body into a table, URL composed in pure SQL. So with
+    ducknng version-matched, HTTP needs NO `http.get` TS resolver at all: it's `ducknng_ncurl_table` (+ chunking
+    via SQL, retry via SQL/Retry-After). Caveat: HTTPS needs a TLS config (CA bundle / tls_config_id) — plain
+    HTTP worked directly, HTTPS gave "Peer could not be authenticated". The `http.get` TS resolver (global fetch)
+    remains the FALLBACK when the DuckDB version doesn't match a ducknng build. To adopt ducknng project-wide:
+    pin DuckDB to a ducknng-built version, or wait for a v1.5.4 ducknng build.
 - **BATCH HTTP = a chunked, rate-limited PIPELINE, not one request.** VEP caps the batch (~200-1000 ids) and
   rate-limits (~15 req/s, `429`+`Retry-After`, hourly quota). Annotating a real VCF: chunk the variant list (SQL)
   into batches <= the limit, run them through `runPipeline` (the push/pull pool) with `withRetry` (429/backoff),
