@@ -1,0 +1,19 @@
+{
+  "schema": "pi-bio.domain_pack_manifest.v1",
+  "id": "wgs-chr22-annotation",
+  "version": "0.1.0",
+  "title": "WGS chr22 annotation (real VCF -> duckhts -> chunked VEP /region -> ClinVar -> rare/high-impact)",
+  "description": "The two-pillar flagship on REAL data: a whole-genome VCF chromosome read by duckhts (htslib region read via the .tbi index), annotated against Ensembl VEP's batch /region endpoint in CHUNKS via ducknng's async HTTP client (the host-side launch->drain->retry loop, src/duckdb/ncurl-fanout.ts), joined to a real ClinVar VCF, then filtered rare + high-impact (the rhi flagship) in SQL. The data sources are declared here as duckhts.read_bcf resources; the chunked annotation + filter live in live.mjs (the fanout loop is the one piece that is host code, because the IO table functions can't express a per-chunk retried loop in one SELECT). Point the paths at your own bgzipped+indexed VCF (GRCh38) and a ClinVar VCF.",
+  "domains": ["genomics"],
+  "provides": {
+    "resolvers": [
+      { "id": "duckhts.read_bcf", "version": "0.1.0", "title": "DuckHTS read_bcf", "description": "Read an HTS file (VCF/BCF) region into a tidy table via htslib.", "output": { "mode": "table" } }
+    ],
+    "resources": [
+      { "id": "vcf_raw", "title": "Sample variants (chr22)", "kind": "virtual", "resolver": "duckhts.read_bcf",
+        "params": { "path": "/root/WG010.vcf.gz", "region": "chr22:23000000-24000000", "table": "vcf_raw" } },
+      { "id": "clinvar", "title": "ClinVar (chr22)", "kind": "virtual", "resolver": "duckhts.read_bcf",
+        "params": { "path": "/root/duckhts/clinvar.vcf.gz", "region": "22:23000000-24000000", "table": "clinvar" } }
+    ]
+  }
+}
