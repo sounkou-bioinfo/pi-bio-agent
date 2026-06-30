@@ -21,23 +21,25 @@ describe("SQL-native HTTP grounding via ducknng (a local ducknng server is the d
     const inst = await DuckDBInstance.create(":memory:", { allow_unsigned_extensions: "true" });
     const conn = duckdbNodeConn(await inst.connect());
     await conn.run("LOAD ducknng");
-    const PORT = 45577;
 
-    // FIXTURE: a ducknng HTTP server serving a canned OLS4-shaped search response from a SQL route handler
-    await conn.run(`SELECT ducknng_start_server('ols_fixture', 'http://127.0.0.1:${PORT}/_ducknng', 1, 134217728, 300000, 0::UBIGINT)`);
+    // FIXTURE: a ducknng HTTP server serving a canned OLS4-shaped search response from a SQL route handler.
+    // Bind port 0 (OS-assigned) and DISCOVER the real port via ducknng_list_servers — a fixed port races under
+    // parallel test runs / TIME_WAIT.
+    await conn.run(`SELECT ducknng_start_server('ols_fixture', 'http://127.0.0.1:0/_ducknng', 1, 134217728, 300000, 0::UBIGINT)`);
+    const BASE = (await conn.all<{ listen: string }>("SELECT listen FROM ducknng_list_servers() WHERE name='ols_fixture'"))[0]!.listen.replace(/\/_ducknng.*$/, "");
     await conn.run(`SELECT ducknng_register_http_route('ols_fixture', 'GET', '/search', 'SELECT * FROM ducknng_http_json(200, ''[{"obo_id":"MONDO:0004979","label":"asthma"},{"obo_id":"MONDO:0004784","label":"allergic asthma"}]'')')`);
 
     // the AGENT supplies the query as a session variable; the url composes it in SQL (getvariable + url_encode);
     // ncurl_table fetches the LOCAL server and parses the JSON to a table; the grounding is one SQL line.
     await conn.run("SET VARIABLE query = 'asthma'");
     const rows = await conn.all<{ obo_id: string; label: string }>(
-      `SELECT obo_id, label FROM ducknng_ncurl_table('http://127.0.0.1:${PORT}/search?q=' || url_encode(getvariable('query')), 'GET', NULL, NULL, 5000, 0::UBIGINT) WHERE lower(label) = getvariable('query')`,
+      `SELECT obo_id, label FROM ducknng_ncurl_table('${BASE}/search?q=' || url_encode(getvariable('query')), 'GET', NULL, NULL, 5000, 0::UBIGINT) WHERE lower(label) = getvariable('query')`,
     );
     assert.deepEqual(rows, [{ obo_id: "MONDO:0004979", label: "asthma" }]); // exact-match grounding over the fetched table
 
     // a DIFFERENT query composes a different URL from the SAME route — it's SQL, not a hardcoded term
     await conn.run("SET VARIABLE query = 'allergic asthma'");
-    const url2 = await conn.all<{ u: string }>("SELECT 'http://127.0.0.1:" + PORT + "/search?q=' || url_encode(getvariable('query')) AS u");
+    const url2 = await conn.all<{ u: string }>(`SELECT '${BASE}/search?q=' || url_encode(getvariable('query')) AS u`);
     assert.match(url2[0]!.u, /q=allergic%20asthma$/, "url_encode composed the new query in SQL");
 
     inst.closeSync(); // tears down the server

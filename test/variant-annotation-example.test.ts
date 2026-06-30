@@ -43,21 +43,23 @@ const VEP_BODY = [
 // the local ducknng server fixture. The POST route reads ducknng_http_request_body() and returns the canned
 // envelope ONLY when the body carries an `ids` array (else 400) — so the test proves the manifest genuinely
 // POSTs an { ids: [...] } batch body, server-side, the deterministic equivalent of inspecting init.body.
-async function startFixture(port: number): Promise<{ close(): void }> {
+// Bind port 0 (OS-assigned) and DISCOVER the real base URL — a fixed port races under parallel test runs / TIME_WAIT.
+async function startFixture(): Promise<{ base: string; close(): void }> {
   const inst = await DuckDBInstance.create(":memory:", { allow_unsigned_extensions: "true" });
   const fix = duckdbNodeConn(await inst.connect());
   await fix.run("LOAD ducknng");
-  await fix.run(`SELECT ducknng_start_server('vep_fix_${port}', 'http://127.0.0.1:${port}/_ducknng', 1, 134217728, 300000, 0::UBIGINT)`);
+  await fix.run(`SELECT ducknng_start_server('vep_fix', 'http://127.0.0.1:0/_ducknng', 1, 134217728, 300000, 0::UBIGINT)`);
+  const base = (await fix.all<{ listen: string }>("SELECT listen FROM ducknng_list_servers() WHERE name='vep_fix'"))[0]!.listen.replace(/\/_ducknng.*$/, "");
   const canned = JSON.stringify(VEP_BODY).replaceAll("'", "''");
   await fix.run(
-    `SELECT ducknng_register_http_route('vep_fix_${port}', 'POST', '/vep/human/id', ` +
+    `SELECT ducknng_register_http_route('vep_fix', 'POST', '/vep/human/id', ` +
     `'SELECT * FROM ducknng_http_json(` +
     `  CASE WHEN json_valid((SELECT body_text FROM ducknng_http_request_body())) ` +
     `       AND coalesce(json_array_length((SELECT body_text FROM ducknng_http_request_body()), ''$.ids''), 0) > 0 ` +
     `       THEN 200 ELSE 400 END, ` +  // require a non-empty ids array (real VEP 400s on null/empty ids)
     `  ''${canned}'')')`,
   );
-  return { close: () => inst.closeSync() };
+  return { base, close: () => inst.closeSync() };
 }
 
 // The agent's SQL: unnest VEP's nested arrays, then filter rare (gnomAD) + high-impact (VEP impact) + pathogenic
@@ -79,7 +81,7 @@ const FILTER_SQL = [
 
 describe("example: a ClawBio Variant Annotation-shaped skill is a manifest, SQL all the way down (ducknng_ncurl)", { skip: ducknngAvailable ? false : "ducknng unavailable (provision: INSTALL ducknng FROM community on a matching DuckDB)" }, () => {
   test("POSTs a BATCH of ids via ncurl_table, ducknng parses the nested envelope, SQL unnests + filters rare+high-impact+pathogenic", async () => {
-    const fixture = await startFixture(47781);
+    const fixture = await startFixture();
     try {
       const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-vep-"));
       const out = await runBioQueryFromManifest({
@@ -87,7 +89,7 @@ describe("example: a ClawBio Variant Annotation-shaped skill is a manifest, SQL 
         duckdbInitSql: PROVISION, duckdbConfig: { allow_unsigned_extensions: "true" },
         // the agent supplies the batch as a JSON-array string; base -> local fixture. The manifest does NOT
         // hardcode the ids — they are the agent's discovered batch. The route 400s if the body has no `ids`.
-        bindings: { vep_base: "http://127.0.0.1:47781", vep_ids: JSON.stringify(["rs699", "var2", "var3", "var4", "var5"]) },
+        bindings: { vep_base: fixture.base, vep_ids: JSON.stringify(["rs699", "var2", "var3", "var4", "var5"]) },
         runId: "v1", now: "T1",
       });
       assert.equal(out.ok, true);
@@ -104,13 +106,13 @@ describe("example: a ClawBio Variant Annotation-shaped skill is a manifest, SQL 
   });
 
   test("fails closed when {vep_ids} has no binding (json(NULL) -> the POST body has no ids -> route 400s -> auditable failed run)", async () => {
-    const fixture = await startFixture(47782);
+    const fixture = await startFixture();
     try {
       const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-vep-"));
       const out = await runBioQueryFromManifest({
         cwd, dbPath: ":memory:", manifestPath: MANIFEST, sql: "SELECT * FROM vep_annotations",
         duckdbInitSql: PROVISION, duckdbConfig: { allow_unsigned_extensions: "true" },
-        bindings: { vep_base: "http://127.0.0.1:47782" }, // no vep_ids -> body lacks ids -> 400
+        bindings: { vep_base: fixture.base }, // no vep_ids -> body lacks ids -> 400
         runId: "v2", now: "T1",
       });
       assert.equal(out.ok, false);

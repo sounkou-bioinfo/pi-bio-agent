@@ -23,26 +23,28 @@ const CANNED = '[{"input":"x","most_severe_consequence":"missense_variant"}]';
 
 // flaky=true: 400 on a missing `variants` array, else 503 for the first 2 calls then 200 (exercises retry).
 // flaky=false: 400 on a missing `variants` array, else always 200 (isolates the permanent-400 case).
-async function startFixture(port: number, flaky: boolean): Promise<{ close(): void }> {
+// Bind port 0 (OS-assigned) and DISCOVER the real base URL — a fixed port races under parallel test runs / TIME_WAIT.
+async function startFixture(flaky: boolean): Promise<{ base: string; close(): void }> {
   const inst = await DuckDBInstance.create(":memory:", { allow_unsigned_extensions: "true" });
   const fix = duckdbNodeConn(await inst.connect());
   await fix.run("LOAD ducknng");
   await fix.run("CREATE SEQUENCE calls START 1");
-  await fix.run(`SELECT ducknng_start_server('fan_${port}', 'http://127.0.0.1:${port}/_ducknng', 1, 134217728, 300000, 0::UBIGINT)`);
+  await fix.run(`SELECT ducknng_start_server('fan', 'http://127.0.0.1:0/_ducknng', 1, 134217728, 300000, 0::UBIGINT)`);
+  const base = (await fix.all<{ listen: string }>("SELECT listen FROM ducknng_list_servers() WHERE name='fan'"))[0]!.listen.replace(/\/_ducknng.*$/, "");
   const okBranch = flaky ? "WHEN nextval(''calls'') > 2 THEN 200 ELSE 503" : "ELSE 200";
   await fix.run(
-    `SELECT ducknng_register_http_route('fan_${port}', 'POST', '/vep', ` +
+    `SELECT ducknng_register_http_route('fan', 'POST', '/vep', ` +
     `'SELECT * FROM ducknng_http_json(` +
     `  CASE WHEN coalesce(json_array_length((SELECT body_text FROM ducknng_http_request_body()), ''$.variants''), 0) = 0 THEN 400 ` +
     `       ${okBranch} END, ` +
     `  ''${CANNED}'')')`,
   );
-  return { close: () => inst.closeSync() };
+  return { base, close: () => inst.closeSync() };
 }
 
 describe("ncurl fanout: chunked launch -> loop-drain -> status-driven retry", { skip: ducknngAvailable ? false : "ducknng unavailable (provision: INSTALL ducknng FROM community)" }, () => {
   test("3 batches, server 503s the first 2 calls -> retry round(s) -> all 3 ultimately succeed", async () => {
-    const fixture = await startFixture(47860, true);
+    const fixture = await startFixture(true);
     const conn = duckdbNodeConn(await (await DuckDBInstance.create(":memory:", { allow_unsigned_extensions: "true" })).connect());
     await conn.run("LOAD ducknng");
     try {
@@ -52,7 +54,7 @@ describe("ncurl fanout: chunked launch -> loop-drain -> status-driven retry", { 
         (2, '{"variants":["22 3 . G A"]}')) t(batch_id, body)`);
       const res = await ncurlFanout(conn, {
         batchesTable: "batches", resultsTable: "results",
-        url: "http://127.0.0.1:47860/vep",
+        url: `${fixture.base}/vep`,
         headersJson: '[{"name":"Content-Type","value":"application/json"}]',
         drainWaitMs: 500, backoffMs: 10, maxRounds: 5,
       });
@@ -67,7 +69,7 @@ describe("ncurl fanout: chunked launch -> loop-drain -> status-driven retry", { 
   });
 
   test("more batches than maxInFlight -> multiple waves, every batch processed (not just the first wave)", async () => {
-    const fixture = await startFixture(47862, false); // always-200 for valid bodies
+    const fixture = await startFixture(false); // always-200 for valid bodies
     const conn = duckdbNodeConn(await (await DuckDBInstance.create(":memory:", { allow_unsigned_extensions: "true" })).connect());
     await conn.run("LOAD ducknng");
     try {
@@ -75,7 +77,7 @@ describe("ncurl fanout: chunked launch -> loop-drain -> status-driven retry", { 
       await conn.run(`CREATE TABLE batches AS SELECT batch_id, '{"variants":["22 ' || batch_id || ' . A G"]}' AS body FROM range(5) t(batch_id)`);
       const res = await ncurlFanout(conn, {
         batchesTable: "batches", resultsTable: "results",
-        url: "http://127.0.0.1:47862/vep",
+        url: `${fixture.base}/vep`,
         headersJson: '[{"name":"Content-Type","value":"application/json"}]',
         drainWaitMs: 400, maxInFlight: 2,
       });
@@ -86,7 +88,7 @@ describe("ncurl fanout: chunked launch -> loop-drain -> status-driven retry", { 
   });
 
   test("a batch whose body lacks `variants` 400s -> PERMANENT terminal failure (not retried); valid batch succeeds", async () => {
-    const fixture = await startFixture(47861, false);
+    const fixture = await startFixture(false);
     const conn = duckdbNodeConn(await (await DuckDBInstance.create(":memory:", { allow_unsigned_extensions: "true" })).connect());
     await conn.run("LOAD ducknng");
     try {
@@ -95,7 +97,7 @@ describe("ncurl fanout: chunked launch -> loop-drain -> status-driven retry", { 
         (1, '{"oops":true}')) t(batch_id, body)`); // batch 1 is malformed -> permanent 400
       const res = await ncurlFanout(conn, {
         batchesTable: "batches", resultsTable: "results",
-        url: "http://127.0.0.1:47861/vep",
+        url: `${fixture.base}/vep`,
         headersJson: '[{"name":"Content-Type","value":"application/json"}]',
         drainWaitMs: 300, backoffMs: 5, maxRounds: 4,
       });
