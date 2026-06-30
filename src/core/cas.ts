@@ -17,6 +17,10 @@ export interface CasStore {
   /** Store bytes under their content address. Idempotent + immutable: a present entry is left untouched (the
    *  address IS the content, so re-putting identical bytes is a no-op). */
   put(address: ContentAddress, bytes: Buffer | string): Promise<void>;
+  /** Delete the bytes for an address (idempotent — a missing entry is a no-op). The GC sweep step's hand: a
+   *  content store is immutable but NOT permanent — reclaiming unreferenced bytes is the only mutation allowed,
+   *  and only the GC (which proves the address is unreferenced + unleased) should call it. */
+  remove(address: ContentAddress): Promise<void>;
 
   // Cross-db remote-fetch index. The per-db resolution memo lives in ONE database and replays a materialized
   // table; this index is global to the CAS root, so ANY db can do a conditional GET with the last-seen ETag for

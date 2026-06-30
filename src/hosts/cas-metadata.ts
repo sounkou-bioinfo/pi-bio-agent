@@ -1,0 +1,198 @@
+import { randomUUID } from "node:crypto";
+import type { CasStore } from "../core/cas.js";
+import type { SqlConn } from "../core/ports.js";
+import type { ContentAddress } from "../core/resources.js";
+
+// METADATA-DRIVEN CAS GARBAGE COLLECTION — the distributed-correct GC, as SQL.
+//
+// The node-local sweeper (gc.ts) scrapes digests out of local run receipts and mark-and-sweeps the filesystem.
+// That is correct only when THIS process is the sole writer. The moment a CAS is SHARED — cross-db reuse, an
+// NNG/ducknng-topology worker pool, a shared mount — local receipts are an INCOMPLETE root set and a naive sweep
+// deletes another live writer's bytes. The library advertises that shared/distributed surface, so it must ship
+// the safe GC, not a warning label.
+//
+// The fix is our own substrate shape ([[semantic-sql-graph-substrate]]): roots become ROWS, GC becomes a SQL
+// ANTI-JOIN, owned by a METADATA AUTHORITY. The authority is just a DuckDB holding three tables; whether that
+// DuckDB is a local file or a ducknng-served shared db is a HOST COMPOSITION choice, not a code change — the SAME
+// SQL below runs over either SqlConn, and the ducknng RPC server that already serializes the shared blackboard
+// table serializes these too ([[duckdb-process-boundary-locking]]). Transport is orthogonal; correctness is SQL.
+//
+//   cas_object  the heap: every stored blob + its lifecycle state (committed -> tombstoned -> deleted)
+//   cas_ref     durable references (a run, an artifact, a remote-index entry, a manual pin) — the ROOT SET as rows
+//   cas_lease   in-flight reads/writes — protects bytes a writer is about to REUSE but has not yet rooted
+//
+// GC = mark (tombstone every committed object older than a cutoff with NO live ref AND NO live lease) -> wait a
+// grace -> sweep (delete the bytes of tombstoned objects past the grace, then mark them deleted). State
+// transitions + a serialized authority give correctness; we never "hope a local view is complete."
+//
+// THE REUSE RACE, closed by leases: a writer that wants to reuse an existing blob across the shared store must
+// `withCasObject` — acquire a lease FIRST, then re-check the object is still committed. If the lease lands before
+// the mark transaction commits, mark sees it and retains the object. If mark already tombstoned it, the re-check
+// catches that and (since the bytes are not yet swept, only tombstoned) RESURRECTS it under the held lease. Only
+// a fully `deleted` object is a true miss. `minAgeMs`/grace is then a fallback margin, not the correctness
+// mechanism (the lease is).
+
+const TS = "BIGINT"; // epoch-ms timestamps, passed as params for deterministic tests
+
+/** Create the three CAS-metadata tables if absent. Idempotent. Run once against the authority's SqlConn. */
+export async function initCasMetadata(conn: SqlConn): Promise<void> {
+  await conn.run(`CREATE TABLE IF NOT EXISTS cas_object (
+    algorithm     VARCHAR NOT NULL,
+    digest        VARCHAR NOT NULL,
+    size_bytes    ${TS},
+    state         VARCHAR NOT NULL DEFAULT 'committed',  -- committed | tombstoned | deleted
+    committed_at  ${TS} NOT NULL,
+    tombstoned_at ${TS},
+    PRIMARY KEY (algorithm, digest))`);
+  await conn.run(`CREATE TABLE IF NOT EXISTS cas_ref (
+    ref_id     VARCHAR NOT NULL,   -- the referrer's identity (run id, artifact name, url-hash, pin label)
+    ref_type   VARCHAR NOT NULL,   -- run | artifact | remote_index | fs_version | manual_pin
+    algorithm  VARCHAR NOT NULL,
+    digest     VARCHAR NOT NULL,
+    created_at ${TS} NOT NULL,
+    expires_at ${TS},               -- NULL = durable; else a TTL'd reference
+    PRIMARY KEY (ref_id, ref_type, algorithm, digest))`);
+  await conn.run(`CREATE TABLE IF NOT EXISTS cas_lease (
+    lease_id   VARCHAR NOT NULL PRIMARY KEY,
+    holder     VARCHAR NOT NULL,
+    algorithm  VARCHAR NOT NULL,
+    digest     VARCHAR NOT NULL,
+    created_at ${TS} NOT NULL,
+    expires_at ${TS} NOT NULL)`);
+}
+
+/** Record a stored object as `committed` (idempotent — content-addressed, so a re-record is a no-op). Call right
+ *  after `cas.put`. A previously tombstoned/deleted address that is written again is resurrected to committed. */
+export async function recordCasObject(conn: SqlConn, address: ContentAddress, sizeBytes: number | null, nowMs: number): Promise<void> {
+  await conn.run(
+    `INSERT INTO cas_object (algorithm, digest, size_bytes, state, committed_at, tombstoned_at)
+     VALUES (?, ?, ?, 'committed', ?, NULL)
+     ON CONFLICT (algorithm, digest) DO UPDATE SET state = 'committed', tombstoned_at = NULL`,
+    [address.algorithm, address.digest, sizeBytes, nowMs],
+  );
+}
+
+export interface CasRefSpec { refId: string; refType: string; address: ContentAddress; expiresAt?: number | null; }
+
+/** Add a durable (or TTL'd) reference — a ROOT. Idempotent on (ref_id, ref_type, algorithm, digest); a repeat
+ *  refreshes expires_at. This is how a retained run / captured artifact / remote-index entry roots its bytes. */
+export async function addCasRef(conn: SqlConn, ref: CasRefSpec, nowMs: number): Promise<void> {
+  await conn.run(
+    `INSERT INTO cas_ref (ref_id, ref_type, algorithm, digest, created_at, expires_at)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT (ref_id, ref_type, algorithm, digest) DO UPDATE SET expires_at = excluded.expires_at`,
+    [ref.refId, ref.refType, ref.address.algorithm, ref.address.digest, nowMs, ref.expiresAt ?? null],
+  );
+}
+
+/** Drop every reference held by a referrer (e.g. when a run is pruned, release ITS roots). The bytes then become
+ *  GC-eligible only if no OTHER ref/lease holds them — exactly the shared-safe behaviour. */
+export async function dropCasRefs(conn: SqlConn, refId: string): Promise<{ dropped: number }> {
+  const before = await conn.all<{ n: bigint }>(`SELECT count(*) n FROM cas_ref WHERE ref_id = ?`, [refId]);
+  await conn.run(`DELETE FROM cas_ref WHERE ref_id = ?`, [refId]);
+  return { dropped: Number(before[0]?.n ?? 0) };
+}
+
+/** Acquire a lease over an address for `ttlMs`. Returns the lease id (release/renew with it). A leased object is
+ *  retained by GC regardless of refs — this is the primitive a writer takes BEFORE reusing existing bytes. */
+export async function acquireCasLease(conn: SqlConn, holder: string, address: ContentAddress, ttlMs: number, nowMs: number): Promise<string> {
+  const leaseId = randomUUID();
+  await conn.run(
+    `INSERT INTO cas_lease (lease_id, holder, algorithm, digest, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)`,
+    [leaseId, holder, address.algorithm, address.digest, nowMs, nowMs + ttlMs],
+  );
+  return leaseId;
+}
+
+/** Extend a held lease. */
+export async function renewCasLease(conn: SqlConn, leaseId: string, ttlMs: number, nowMs: number): Promise<void> {
+  await conn.run(`UPDATE cas_lease SET expires_at = ? WHERE lease_id = ?`, [nowMs + ttlMs, leaseId]);
+}
+
+/** Release a held lease (idempotent). */
+export async function releaseCasLease(conn: SqlConn, leaseId: string): Promise<void> {
+  await conn.run(`DELETE FROM cas_lease WHERE lease_id = ?`, [leaseId]);
+}
+
+/** The safe REUSE protocol. Take a lease, then re-check the object's state under it:
+ *   - `committed`  -> live: run `onHit` (e.g. materialize from cas.pathFor) and return { hit: true, result }.
+ *   - `tombstoned` -> a mark already flagged it but the bytes are NOT yet swept (still within grace) and we now
+ *                     hold a lease -> RESURRECT to committed and treat as a hit.
+ *   - `deleted`    -> the bytes are gone -> a true miss; return { hit: false } (caller re-fetches/re-computes).
+ *  The lease is always released. This is what makes reuse-from-a-shared-CAS race-free against a concurrent GC. */
+export async function withCasObject<R>(
+  conn: SqlConn,
+  address: ContentAddress,
+  holder: string,
+  ttlMs: number,
+  onHit: () => Promise<R>,
+  nowMs: number = Date.now(),
+): Promise<{ hit: boolean; result?: R }> {
+  const leaseId = await acquireCasLease(conn, holder, address, ttlMs, nowMs);
+  try {
+    const rows = await conn.all<{ state: string }>(
+      `SELECT state FROM cas_object WHERE algorithm = ? AND digest = ?`,
+      [address.algorithm, address.digest],
+    );
+    const state = rows[0]?.state;
+    if (state === "deleted" || state === undefined) return { hit: false }; // bytes gone (or never recorded) -> miss
+    if (state === "tombstoned") {
+      // bytes still present (not swept yet) and we hold a lease -> revive rather than re-fetch
+      await conn.run(`UPDATE cas_object SET state = 'committed', tombstoned_at = NULL WHERE algorithm = ? AND digest = ?`, [address.algorithm, address.digest]);
+    }
+    return { hit: true, result: await onHit() };
+  } finally {
+    await releaseCasLease(conn, leaseId);
+  }
+}
+
+/** MARK: tombstone every committed object older than `cutoffMs` that has NO live ref and NO live lease. Returns
+ *  the addresses tombstoned. The anti-join IS the GC — completeness comes from the rows, not a filesystem scan. */
+export async function gcMark(conn: SqlConn, opts: { cutoffMs: number; nowMs: number }): Promise<ContentAddress[]> {
+  const marked = await conn.all<{ algorithm: string; digest: string }>(
+    `UPDATE cas_object SET state = 'tombstoned', tombstoned_at = ?
+     WHERE state = 'committed' AND committed_at < ?
+       AND NOT EXISTS (SELECT 1 FROM cas_ref r
+                       WHERE r.algorithm = cas_object.algorithm AND r.digest = cas_object.digest
+                         AND (r.expires_at IS NULL OR r.expires_at > ?))
+       AND NOT EXISTS (SELECT 1 FROM cas_lease l
+                       WHERE l.algorithm = cas_object.algorithm AND l.digest = cas_object.digest
+                         AND l.expires_at > ?)
+     RETURNING algorithm, digest`,
+    [opts.nowMs, opts.cutoffMs, opts.nowMs, opts.nowMs],
+  );
+  return marked.map((m) => ({ algorithm: m.algorithm as ContentAddress["algorithm"], digest: m.digest }));
+}
+
+/** SWEEP: delete the bytes of every object tombstoned longer than `graceMs` ago, then mark it `deleted`. The
+ *  grace is the window in which an in-flight `withCasObject` lease can still resurrect a tombstoned object before
+ *  its bytes vanish. Expired leases are reaped here too (housekeeping). Returns the addresses whose bytes were
+ *  removed. */
+export async function gcSweep(conn: SqlConn, cas: CasStore, opts: { graceMs: number; nowMs: number }): Promise<ContentAddress[]> {
+  await conn.run(`DELETE FROM cas_lease WHERE expires_at <= ?`, [opts.nowMs]); // reap expired leases
+  const due = await conn.all<{ algorithm: string; digest: string }>(
+    `SELECT algorithm, digest FROM cas_object WHERE state = 'tombstoned' AND tombstoned_at <= ?`,
+    [opts.nowMs - opts.graceMs],
+  );
+  const swept: ContentAddress[] = [];
+  for (const { algorithm, digest } of due) {
+    const address: ContentAddress = { algorithm: algorithm as ContentAddress["algorithm"], digest };
+    await cas.remove(address);
+    await conn.run(`UPDATE cas_object SET state = 'deleted' WHERE algorithm = ? AND digest = ?`, [algorithm, digest]);
+    swept.push(address);
+  }
+  return swept;
+}
+
+/** Full mark+sweep over the metadata authority — the distributed-safe collectGarbage. `cutoffMs`/`graceMs`
+ *  default to `nowMs - minAgeMs` and `minAgeMs` respectively (one knob: the longest possible in-flight run). */
+export async function gcMarkSweep(
+  conn: SqlConn,
+  cas: CasStore,
+  opts: { minAgeMs: number; nowMs?: number; cutoffMs?: number; graceMs?: number },
+): Promise<{ marked: ContentAddress[]; swept: ContentAddress[] }> {
+  const nowMs = opts.nowMs ?? Date.now();
+  const marked = await gcMark(conn, { cutoffMs: opts.cutoffMs ?? nowMs - opts.minAgeMs, nowMs });
+  const swept = await gcSweep(conn, cas, { graceMs: opts.graceMs ?? opts.minAgeMs, nowMs });
+  return { marked, swept };
+}

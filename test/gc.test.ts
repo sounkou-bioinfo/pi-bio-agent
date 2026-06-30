@@ -57,6 +57,28 @@ describe("gc: mark-and-sweep over CAS + run retention", () => {
     assert.deepEqual(pruned.sort(), ["run-1", "run-2"].sort());
   });
 
+  test("casMode 'shared' FAILS CLOSED without the complete cross-writer root set (an advertised distributed knob must refuse, not corrupt)", async () => {
+    const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-gc-"));
+    // shared CAS + no extraRoots/rootsProvider -> a local sweep could delete another writer's bytes -> refuse
+    await assert.rejects(() => collectGarbage(cwd, { casMode: "shared", minAgeMs: 60_000 }), /complete cross-writer root set/);
+    // shared CAS + roots but no write-race grace -> still refuse
+    await assert.rejects(() => collectGarbage(cwd, { casMode: "shared", extraRoots: [D(1)] }), /positive minAgeMs/);
+  });
+
+  test("casMode 'shared' (receipt-scan path) runs once given the complete roots + grace; rootsProvider roots protect a remote writer's bytes", async () => {
+    const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-gc-"));
+    const casRoot = join(cwd, ".pi", "bio-agent", "cas", "sha256");
+    await fs.mkdir(casRoot, { recursive: true });
+    // D(7) is referenced only by ANOTHER writer (no local receipt). It must survive when supplied as a cross-writer root.
+    await fs.writeFile(join(casRoot, D(7)), "remote-writers-live-bytes");
+    await fs.writeFile(join(casRoot, D(6)), "truly-unrooted-garbage");
+    await new Promise((r) => setTimeout(r, 25)); // age both entries well past the 1ms write-race grace
+    const out = await collectGarbage(cwd, { casMode: "shared", rootsProvider: async () => [D(7)], minAgeMs: 1 });
+    assert.deepEqual(out.casSwept, [`sha256/${D(6)}`], "the unrooted entry is swept; the remote-rooted one is not");
+    assert.equal(await fs.readFile(join(casRoot, D(7)), "utf8"), "remote-writers-live-bytes", "the remote writer's rooted bytes survive");
+    await assert.rejects(() => fs.access(join(casRoot, D(6))), "garbage gone");
+  });
+
   test("collectGarbage end-to-end: pruned runs' CAS bytes become unreachable and are swept", async () => {
     const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-gc-"));
     const runsDir = join(cwd, ".pi", "bio-agent", "runs");

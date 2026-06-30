@@ -1,5 +1,8 @@
 import { promises as fs } from "node:fs";
 import { join } from "node:path";
+import type { CasStore } from "../core/cas.js";
+import type { SqlConn } from "../core/ports.js";
+import { gcMarkSweep } from "./cas-metadata.js";
 import { runsRoot } from "./run-store.js";
 
 // Garbage collection for the substrate's two unbounded stores: the CAS (content-addressed bytes) and the run
@@ -109,19 +112,78 @@ export async function pruneRuns(runsDir: string, opts: PruneOpts = {}): Promise<
   return { pruned, kept };
 }
 
+export interface CollectGarbageOpts {
+  runs?: PruneOpts;
+  casRoot?: string;
+  /** Which safety regime the CAS is in. `"node-local"` (default): this process is the ONLY writer, so the local
+   *  surviving receipts ARE the complete root set — safe to sweep. `"shared"`: the CAS is reachable by OTHER
+   *  live writers (cross-db reuse, an NNG/ducknng-topology worker pool, a shared mount), so local receipts are
+   *  an INCOMPLETE root set and a naive sweep would delete another writer's live bytes. `"shared"` is therefore
+   *  FAIL-CLOSED: it REFUSES to run unless given the complete cross-writer root set (`extraRoots`/`rootsProvider`)
+   *  AND a write-race grace (`minAgeMs`). This is the library boundary — an advertised distributed knob must be
+   *  safe-or-refuse, not silently corrupting. The complete-roots-as-metadata story (cas_ref/cas_lease served by
+   *  the metadata authority) is the real fix when a shared backend ships; see docs/refinments.md. */
+  casMode?: "node-local" | "shared";
+  /** Cross-writer roots: the union of every OTHER writer's live digests (e.g. scanned from a ducknng-served
+   *  receipt index). Required (with `minAgeMs`) in `"shared"` mode UNLESS a `metadata` authority is supplied. */
+  extraRoots?: Iterable<string>;
+  /** Async source of the cross-writer roots, awaited at sweep time — an alternative to a static `extraRoots`
+   *  (e.g. query the shared metadata authority for all live references). Satisfies `"shared"` mode's requirement. */
+  rootsProvider?: () => Promise<Iterable<string>>;
+  /** Write-race grace: retain CAS entries younger than this (a concurrent/remote writer's bytes not yet in any
+   *  receipt). Required (> 0) in `"shared"` mode; should be >= the longest possible in-flight run. */
+  minAgeMs?: number;
+  /** The CAS METADATA AUTHORITY (cas-metadata.ts). When supplied in `"shared"` mode, GC delegates to the
+   *  metadata-driven mark+sweep (ref/lease anti-join over `conn`, byte deletion via `cas`) — the actually-correct
+   *  distributed GC, where the complete root set is ROWS, not a scraped union. `conn` may be a local DuckDB or a
+   *  ducknng-served shared db; the SQL is the same. This is the supported way to GC a shared CAS safely. */
+  metadata?: { conn: SqlConn; cas: CasStore; cutoffMs?: number; graceMs?: number };
+}
+
 /** End-to-end GC for a project: prune runs first, then mark-and-sweep the CAS rooted at the SURVIVING runs'
- *  receipts. SINGLE-NODE-SAFE by default. For DISTRIBUTED runs over a SHARED CAS, pass `extraRoots` — the union
- *  of every OTHER node's live digests (e.g. scanned from a ducknng-served receipt index) — and `minAgeMs` (a grace
- *  >= the longest possible in-flight run) so a local sweep cannot delete another node's or an in-flight run's
- *  bytes. Without extraRoots, only run this against a node-LOCAL CAS. */
-export async function collectGarbage(cwd: string, opts: { runs?: PruneOpts; casRoot?: string; extraRoots?: Iterable<string>; minAgeMs?: number } = {}): Promise<{ runsPruned: string[]; casSwept: string[]; remoteDropped: number }> {
+ *  receipts. `casMode` defaults to `"node-local"` (this process is the sole writer — the local receipts are the
+ *  complete root set, safe to sweep). `"shared"` FAILS CLOSED: it refuses to sweep unless given the complete
+ *  cross-writer root set (`extraRoots` and/or `rootsProvider`) AND a `minAgeMs` write-race grace, because over a
+ *  shared CAS a sweep from local roots alone would delete another live writer's bytes. The library advertises a
+ *  shared/cross-db CAS and distributed topologies; this guard is what keeps that surface safe-or-refusing rather
+ *  than a silent footgun. (Note: `"node-local"` pointed at a genuinely shared CAS is still a caller error — the
+ *  mode is the caller's assertion about the world — but the unsafe DISTRIBUTED path can no longer be entered by
+ *  accident with incomplete roots.) */
+export async function collectGarbage(cwd: string, opts: CollectGarbageOpts = {}): Promise<{ runsPruned: string[]; casSwept: string[]; remoteDropped: number }> {
+  const mode = opts.casMode ?? "node-local";
   const runsDir = runsRoot(cwd);
+
+  // SHARED CAS + a metadata authority: delegate to the actually-correct distributed GC. The complete root set is
+  // the cas_ref/cas_lease ROWS the authority holds (every writer registers there), so a ref/lease anti-join is
+  // safe where a local-receipt scan is not. Run pruning is still local bookkeeping.
+  if (mode === "shared" && opts.metadata) {
+    if (opts.minAgeMs === undefined || opts.minAgeMs <= 0) {
+      throw new Error("collectGarbage: casMode 'shared' requires a positive minAgeMs (the mark cutoff / sweep grace = the longest possible in-flight run)");
+    }
+    const { pruned } = await pruneRuns(runsDir, opts.runs ?? {});
+    const { conn, cas, cutoffMs, graceMs } = opts.metadata;
+    const { swept } = await gcMarkSweep(conn, cas, { minAgeMs: opts.minAgeMs, cutoffMs, graceMs });
+    return { runsPruned: pruned, casSwept: swept.map((a) => `${a.algorithm}/${a.digest}`), remoteDropped: 0 };
+  }
+
+  if (mode === "shared") {
+    // No metadata authority: the receipt-scan path over a shared CAS is unsafe (local receipts are an INCOMPLETE
+    // root set). FAIL CLOSED unless given the complete cross-writer roots + a write-race grace, rather than
+    // silently deleting another writer's live bytes. (Prefer a `metadata` authority — that is the correct path.)
+    if (opts.extraRoots === undefined && opts.rootsProvider === undefined) {
+      throw new Error("collectGarbage: casMode 'shared' requires either a metadata authority (opts.metadata — the correct path) or the complete cross-writer root set (extraRoots and/or rootsProvider) — a sweep from local roots alone would delete other live writers' bytes");
+    }
+    if (opts.minAgeMs === undefined || opts.minAgeMs <= 0) {
+      throw new Error("collectGarbage: casMode 'shared' requires a positive minAgeMs write-race grace (>= the longest possible in-flight run)");
+    }
+  }
   const { pruned, kept } = await pruneRuns(runsDir, opts.runs ?? {});
   const receiptJsons = await Promise.all(kept.map(async (name) => {
     try { return await fs.readFile(join(runsDir, name, "receipts.json"), "utf8"); } catch { return ""; }
   }));
   const live = liveDigests(receiptJsons);
-  for (const r of opts.extraRoots ?? []) live.add(r); // cross-node roots: the union of all nodes' live digests
+  for (const r of opts.extraRoots ?? []) live.add(r); // cross-writer roots: the union of all writers' live digests
+  if (opts.rootsProvider) for (const r of await opts.rootsProvider()) live.add(r);
   const casRoot = opts.casRoot ?? join(cwd, ".pi", "bio-agent", "cas");
   const { swept } = await gcCas(casRoot, live, { minAgeMs: opts.minAgeMs });
   const { dropped } = await gcRemoteIndex(casRoot, live);

@@ -47,6 +47,12 @@ export function fsCasStore(root: string): CasStore {
         if (!(await this.has(a))) throw err;
       }
     },
+    async remove(a) {
+      // the GC sweep's hand: reclaim the bytes for a proven-unreferenced address. Idempotent (force) — a
+      // racing sweep / already-gone entry is fine. Only the GC, holding proof the address is unrooted+unleased,
+      // should reach here; the store itself does not decide liveness.
+      await fs.rm(pathFor(a), { force: true });
+    },
     // Cross-db remote index: <root>/remote/<sha256(url)>.json. Keyed by URL hash (not the raw URL) so the
     // filename is path-safe regardless of the URL's characters.
     async getRemote(url) {

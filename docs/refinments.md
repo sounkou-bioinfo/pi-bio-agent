@@ -708,36 +708,44 @@ Tiers 0–2 live IN the DuckDB substrate (SQL/FTS/VSS), consistent with graph-as
   - skill boundary rules
 - Treat `validateReadOnlySelect()` as a preflight helper only. The eventual execution adapter must also use a genuinely read-only/scoped DuckDB connection or equivalent sandbox.
 
-## Distributed CAS garbage collection (DEFERRED — ducknng-fs / shared-CAS lane)
+## Distributed CAS garbage collection (BUILT — the metadata-driven GC)
 
-Today's GC (`src/hosts/gc.ts`) is mark-and-sweep: CAS = heap, retained run receipts = roots, unreachable bytes
-swept. For the **node-local, non-concurrent** reality we are actually in, this is *coherent and correct* — a GC
-pass leaves no dangling pointers, and the cross-db remote index is best-effort and subordinate to receipt roots
-(`src/core/cas.ts`). It is **not** a distributed protocol, and the existing `extraRoots` + `minAgeMs` knobs are a
-documented escape hatch, not one. Do **not** extend the receipt-regex sweeper to cover distribution. When a real
-shared CAS arrives (ducknng-fs / NNG workers reusing+deleting shared artifacts), the hazards return and the model
-must change — but only THEN, consumer-forced.
+Two GCs ship, by safety regime:
 
-The correct shape is **metadata-driven GC**, and it is our own substrate shape ([[semantic-sql-graph-substrate]]):
-roots become rows, not regex scrapes, owned by the metadata authority (DuckDB over ducknng RPC), and GC becomes a
-SQL anti-join, not a filesystem scan:
+- **Node-local** (`src/hosts/gc.ts`, `collectGarbage` default `casMode: "node-local"`): mark-and-sweep — CAS =
+  heap, retained run receipts = roots, unreachable bytes swept. Correct when THIS process is the sole writer (a
+  GC pass leaves no dangling pointers; the cross-db remote index is best-effort + subordinate to receipt roots).
+- **Shared / distributed** (`src/hosts/cas-metadata.ts`): the metadata-driven GC. This is a LIBRARY, so the
+  advertised shared/cross-db CAS + the NNG/ducknng topologies must ship a *correct* shared GC, not a warning
+  label — "no in-repo consumer" is the wrong test when downstream users are the consumers. `collectGarbage` with
+  `casMode: "shared"` either delegates to this (when given a `metadata` authority) or FAILS CLOSED (it refuses to
+  sweep a shared CAS from an incomplete local root set).
 
-- `cas_object(algorithm, digest, size, state{staging|committed|tombstoned|deleted}, committed_at, storage_uri)`
-- `cas_ref(ref_type{run|artifact|fs_version|remote_index|manual_pin}, algorithm, digest, expires_at)` — durable refs
-- `cas_lease(holder, algorithm, digest, expires_at)` — in-flight reads/writes (the old-object **reuse race** fix:
-  a resolver acquires a lease before materializing from `cas.pathFor(...)`, GC retains leased objects; `minAgeMs`
-  becomes a fallback margin, not the correctness mechanism)
-- GC = `cas_object` committed-before-cutoff `LEFT JOIN` (`cas_ref` ∪ `cas_lease`) `WHERE ref IS NULL` → tombstone
-  in metadata → publish event → delete bytes after a grace → mark deleted (explicit state transitions, not
-  "hope local views are complete").
+The shared GC is our own substrate shape ([[semantic-sql-graph-substrate]]): roots are ROWS, GC is a SQL
+ANTI-JOIN, owned by a metadata authority that is just a DuckDB — local file OR ducknng-served shared db, the SAME
+SQL runs over either ([[duckdb-process-boundary-locking]]). Transport is orthogonal; correctness is SQL.
 
-This subsumes the three hazards a shared sweeper hits — incomplete roots (→ `cas_ref` is the global root set),
-the write/reuse race (→ `cas_lease`), and the remote-index race (→ index entries are `cas_ref` rows with leases
-while a 304-reuse is in flight). It is the **ducknng-fs / shared-CAS lane**, NOT a core GC patch. Until that lane
-has a real consumer, leave `collectGarbage` node-local-safe and keep `cas_ref`/`cas_lease`/epochs as this spec.
+- `cas_object(algorithm, digest, size_bytes, state{committed|tombstoned|deleted}, committed_at, tombstoned_at)`
+- `cas_ref(ref_id, ref_type{run|artifact|remote_index|fs_version|manual_pin}, algorithm, digest, expires_at)` —
+  durable (or TTL'd) references = the root set as rows. `addCasRef` / `dropCasRefs`.
+- `cas_lease(lease_id, holder, algorithm, digest, expires_at)` — in-flight reads/writes; the **reuse-race** fix.
+  `withCasObject` acquires a lease, re-checks state, RESURRECTS a tombstoned-but-unswept object (revive under the
+  lease) or returns a clean miss on a deleted one. `minAgeMs`/grace is a fallback margin, not the mechanism.
+- `gcMark` = tombstone committed objects past cutoff with NO live ref AND NO live lease (RETURNING the rows);
+  `gcSweep` = after a grace, delete tombstoned bytes (`cas.remove`) + mark deleted; `gcMarkSweep` = both, one
+  `minAgeMs` knob. State transitions, not "hope a local view is complete."
 
-The cheap, non-protocol mitigations (also deferred until a consumer): a `utimes` LRU-touch on CAS hit / 304 reuse
-(resets `minAgeMs` grace for reused-but-old bytes) — useful, but still cache semantics, not a correctness lease.
+This subsumes the three shared-sweeper hazards: incomplete roots (→ `cas_ref` is the global root set), the
+write/reuse race (→ `cas_lease` + `withCasObject`), and the remote-index race (→ the remote index becomes a
+`cas_ref` of `ref_type='remote_index'`, leased while a 304-reuse is in flight). Tested deterministically over a
+single in-memory DuckDB authority (`test/cas-metadata-gc.test.ts`), which exercises the exact SQL a
+ducknng-served authority runs.
+
+STILL OPEN (integration, not core): auto-registering `cas_ref` rows from run receipts + captured artifacts, and
+resolvers taking a `withCasObject` lease around a cross-db `cas.pathFor` reuse (so the shared path is wired
+through the run-store, not just callable); a `gc_epoch` row + a published tombstone/delete EVENT for cross-node
+observers; the ducknng-served-authority dogfood script. A `utimes` LRU-touch on CAS hit is a cheap node-local
+nicety (cache semantics, not a lease) — only if a real workload wants it.
 
 ## Documentation cleanup
 
