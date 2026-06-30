@@ -1,23 +1,21 @@
 {
   "schema": "pi-bio.domain_pack_manifest.v1",
   "id": "variant-annotation",
-  "version": "0.1.0",
-  "title": "Variant annotation (Ensembl VEP REST, batch)",
-  "description": "Same SHAPE as ClawBio's 'Variant Annotation' skill (Annotate VCF variants with Ensembl VEP REST, ClinVar significance, gnomAD frequencies — https://github.com/ClawBio/ClawBio), as DATA. It annotates a BATCH of variants via VEP's real multi-variant endpoint (POST /vep/human/id with an `ids` body) — the same call shape a whole VCF uses (chunk the VCF into id/region batches). VEP's nested transcript_consequences carry impact and colocated_variants carry gnomAD allele frequency + ClinVar clin_sig, so the agent unnests the envelope in SQL and filters 'rare, high-impact, pathogenic' across the batch. There is NO VEP/ClinVar/gnomAD-specific TypeScript — the URL, method, body, and response shape live in the manifest; the same generic http.get resolver serves any JSON/CSV endpoint (GET or read-only POST query). Network is the host's opt-in by composition: this manifest fails closed until a host injects a fetch (load the explicit index-networked.ts entrypoint).",
+  "version": "0.2.0",
+  "title": "Variant annotation (Ensembl VEP REST, batch) — SQL all the way down",
+  "description": "Same SHAPE as ClawBio's 'Variant Annotation' skill (Annotate VCF variants with Ensembl VEP REST, ClinVar significance, gnomAD frequencies — https://github.com/ClawBio/ClawBio), as DATA — now SQL-native. The HTTP call is ducknng_ncurl_table — a SQL table function — so there is NO TS resolver: it POSTs VEP's real multi-variant endpoint (/vep/human/id with an `ids` body) and ducknng parses the NESTED response (transcript_consequences[] + colocated_variants[]) into proper STRUCT(...)[] columns the agent UNNESTs in SQL. The agent supplies the batch as the JSON-array binding {vep_ids} (it discovers/chooses the ids; the manifest does NOT hardcode them), so the POST body composes in SQL (json_object('ids', json(getvariable('vep_ids')))) — a scalar, no subquery. A single batch is one POST; chunking a whole VCF into multiple POSTs is request fanout (see README), not a row-count limit. http.get (TS resolver) is the fallback when a DuckDB version has no ducknng build.",
   "domains": ["genomics"],
   "provides": {
     "resolvers": [
-      { "id": "http.get", "version": "0.1.0", "title": "HTTP fetch", "description": "GET a URL, or POST a read-only query body, and materialize the JSON/CSV response into a table.", "output": { "mode": "table" } }
+      { "id": "duckdb.sql_materialize", "version": "0.1.0", "title": "SQL materialize", "description": "Materialize a table from a read-only SELECT (here, a ducknng_ncurl_table POST to VEP).", "output": { "mode": "table" } }
     ],
     "resources": [
       {
-        "id": "vep_annotations", "title": "VEP annotations (batch)", "kind": "virtual", "resolver": "http.get",
+        "id": "vep_annotations", "title": "VEP annotations (batch)", "kind": "virtual", "resolver": "duckdb.sql_materialize",
         "params": {
-          "url": "https://rest.ensembl.org/vep/human/id",
-          "table": "vep_annotations", "format": "json",
-          "method": "POST",
-          "headers": { "Content-Type": "application/json", "Accept": "application/json" },
-          "body": { "ids": ["rs699", "rs1042522", "rs28897696", "rs80357906", "rs121913343"] }
+          "table": "vep_annotations",
+          "extensions": ["ducknng"],
+          "sql": "SELECT * FROM ducknng_ncurl_table(coalesce(getvariable('vep_base'), 'https://rest.ensembl.org') || '/vep/human/id', 'POST', '[{\"name\":\"Content-Type\",\"value\":\"application/json\"},{\"name\":\"Accept\",\"value\":\"application/json\"}]', json_object('ids', json(getvariable('vep_ids')))::VARCHAR::BLOB, 20000, coalesce(getvariable('tls'), 0)::UBIGINT)"
         }
       }
     ]

@@ -337,22 +337,32 @@ body — overfitting: a real skill doesn't bake the query data into the manifest
   rate-limits (~15 req/s, `429`+`Retry-After`, hourly quota). Annotating a real VCF: chunk the variant list (SQL)
   into batches <= the limit, run them through `runPipeline` (the push/pull pool) with `withRetry` (429/backoff),
   `UNION` the results.
-- **SQL-native HTTP — what migrated and what HIT WALLS (probed on ducknng 1.5.2).** `ols4-grounding` migrated
-  cleanly to `duckdb.sql_materialize` over `ducknng_ncurl_table` (a simple GET, the URL composed from a SCALAR
-  `getvariable` + `url_encode`). The POST-batch / upstream-driven `variant-annotation` did NOT — three real
-  DuckDB+ducknng limitations block the pure-SQL chunked pipeline:
-  1. `ducknng_ncurl_table` does NOT support LATERAL-correlated column params -> `bodies, ncurl_table(... body
-     ...)` per-chunk UNION is rejected ("does not support lateral join column parameters").
-  2. `ducknng_ncurl_table` args cannot contain SUBQUERIES -> the POST body can't be `(SELECT json_object('ids',
-     json_group_array(id)) FROM variants)` directly ("Table function cannot contain subqueries").
-  3. There is no BETWEEN-RESOURCE hook to `SET VARIABLE body = (subquery over variants)` after `variants`
-     materializes but before the VEP resource resolves; and `ducknng_ncurl_aio` + `_aio_collect` (the scalar
-     async path that COULD fan out per batch) returned a single row, not one per batch, in a one-SELECT CTE.
-  So: for a SINGLE GET/POST with SCALAR params (`getvariable`), ducknng_ncurl is the SQL-native path. For
-  BATCHED, upstream-driven, chunked, rate-limited annotation, the TS `http.get` resolver + `runPipeline` +
-  `withRetry` is genuinely the right tool TODAY (it composes the body in JS and loops over chunks). `variant-
-  annotation` therefore STAYS on `http.get`. Lifting this needs ducknng to allow lateral/subquery table-function
-  args (or a stable aio fan-out), then the chunked pipeline becomes one SQL query.
+- **SQL-native HTTP — BOTH examples migrated; the earlier "walls" were mostly wrong (corrected on ducknng
+  1.5.2).** `ols4-grounding` (GET, URL from a scalar `getvariable` + `url_encode`) AND `variant-annotation`
+  (POST batch) are now `duckdb.sql_materialize` over `ducknng_ncurl_table` — NO TS resolver. An earlier note here
+  claimed the batch case "can't be pure SQL"; that was wrong. The corrections, precisely:
+  - `ducknng_ncurl_table` arg order is `(url, method, headers_json[VARCHAR], body[BLOB], timeout_ms, tls)` — for
+    a POST the body is the **4th** arg (a `BLOB`), headers the **3rd** (a JSON array `[{name,value}]`).
+  - **One within-limit batch is one POST, fully SQL.** `ncurl_table` returns a large *response* fine (many
+    rows) — response size was never the constraint. The body composes from a scalar: from a binding
+    (`json_object('ids', json(getvariable('vep_ids')))`, what the example does) or, to build it from upstream
+    rows, a **scalar subquery returning exactly one body value** — `SET VARIABLE vep_body = (SELECT
+    json_object('ids', json_group_array(id)) FROM variants)` then `getvariable('vep_body')::BLOB`. That
+    `SET VARIABLE`-from-subquery is **plain DuckDB, not ducknng-specific** (the old "no between-resource hook"
+    point conflated a substrate convenience with a ducknng limit). On the pinned 1.5.2 build a subquery placed
+    *directly inside* the table-function args is still rejected ("Table function cannot contain subqueries"), so
+    the aggregate goes through a variable first; a later build may let the scalar subquery sit inline.
+  - **The one real constraint is multi-*request* fanout**, not row count. `ducknng_ncurl_table` is a bind-time
+    dynamic-schema table function, so it can't be **lateral-correlated** for one-call-per-chunk inside a single
+    `SELECT`. For chunk fanout (a whole VCF > VEP's ~200–1000-id/request cap, ~15 req/s + `429`/`Retry-After`):
+    launch per-row `ducknng_ncurl_aio(...)` handles (scalar — it *can* fire per chunk), materialize the aio ids,
+    and **drain repeatedly** — `ducknng_ncurl_aio_collect(...)` is an *any-ready collector, not a wait-for-all
+    barrier*, so getting 1 of 3 launched handles back is legal until you drain the rest (the earlier "returned
+    one row, fragile" note misread this). Or drive the separate calls outside one SQL statement with
+    `runPipeline` + `withRetry` (honoring `Retry-After`) and `UNION` the results.
+  So: single GET/POST with scalar params (incl. an upstream-aggregated body) is the SQL-native path TODAY (both
+  examples). The TS `http.get` resolver + `runPipeline` is the right tool only for the multi-REQUEST chunked-VCF
+  fanout, or as the fallback when a DuckDB version has no ducknng build.
 
 Together: OpenAPI gives the resource SHAPE (derived); SQL (SET VARIABLE + subqueries) fills the params; a chunked
 rate-limited pipeline handles scale. Nothing query-specific is hardcoded, and it is all SQL + the pipeline pieces.
