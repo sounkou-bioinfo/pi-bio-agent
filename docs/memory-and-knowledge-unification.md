@@ -11,9 +11,53 @@ Notes on what a coding agent's file-based memory system teaches us, and a propos
 unify `pi-bio-agent`'s currently-separate memory representations under one knowledge-unit
 abstraction.
 
-This is a design proposal, not yet implemented. It is meant to sharpen
+The **core is now IMPLEMENTED** (2026-07-02) — see [Implemented: temporal memory in one
+store](#implemented-2026-07-02-temporal-memory-in-one-store) below. The remaining thread is the agent-tool rewire
+onto it. The rest of this document remains the design rationale it sharpens, alongside
 [`abstraction-derivation.md`](./abstraction-derivation.md) and the storage/skill items in
 [`refinments.md`](./refinments.md).
+
+## Implemented (2026-07-02): temporal memory in one store
+
+Memory is no longer flat, last-write-wins files — it is **the same temporal store as facts**, which fixes the one
+thing that violated the unified-data-model bet.
+
+**Temporal, non-destructive, attributed.** A memory note is observation(s) in `bio_observations` under the
+`agent:memory:<slug>` namespace (`src/hosts/memory-store.ts`):
+- `remember(conn, note, now, author)` appends a content observation (a re-write **supersedes** by
+  subject+predicate; prior revisions are retained). `author` is stamped as `source`, which is **part of
+  observation identity** — so two agents writing one slug are two attributed rows, never a clobber.
+- `recall(conn, slug, asOf?)` reads the content **as of** a time (default now), carrying its `author`.
+- `memoryHistory(conn, slug)` is the change trail — *what changed, when, by whom*.
+- `forget(conn, slug, now, author)` is a **temporal retraction**: a tombstone (null content) so `recall(now)` is
+  null but `recall(earlier)` still sees it. Memory is never destroyed.
+- Each `[[slug]]`/typed link is an **edge-like** observation that `materializeBioEdgesAsOf(t)` projects into
+  `bio_edges_as_of`, so the memory graph is walkable **as of t** through the *same* SemanticSQL closure as facts.
+
+**ONE store, not a `memory.duckdb`.** Facts, jobs, activation, and memory are all rows in the **same
+`bio_observations` table in the same DuckDB** as the graph (`src/hosts/bio-store.ts` `openBioStore`). A separate
+memory database would re-fragment the ledger and break the single `entailed_edge` closure that walks
+**memory → ontology → fact** together. Tested: a memory note and a `gene→disease` fact coexist in one store and
+one graph closure crosses both namespaces.
+
+**Sharing is a host-chosen boundary** (`openBioStore` is the seam — the library records; the host decides where
+the store lives). Because every memory row carries its **author** (`source`) and an **as-of** time, a *shared*
+store stays attributed and consistent:
+
+| Scope | Mechanism | Semantics |
+|---|---|---|
+| Runs of one project | project-local `store.duckdb` (default) | runs open→write→**close** in sequence; memory/facts accumulate. Proven: a later run reads the earlier run's *authored* memory. |
+| Across projects / users | `openBioStore(cwd, { path })` → a shared path | same file, wider audience |
+| Concurrent / cross-host / cross-agent | a **DuckDB server** — ducknng `run_rpc` (exec opt-in) **or a duckdb quack server** | one writer, many concurrent clients — lifts the process-exclusive-writer lock (not serialize-forever) |
+| Immutable snapshots / archival | **CAS** by digest | shareable, content-addressed |
+
+Access stays host-gated (ducknng mTLS / peer-allowlists / exec opt-in). This is **Fugu's inter-workflow shared
+memory** (report §3.2.2) made literal — the same transport story the substrate already had, not a new invention.
+
+**Still open (the wire-up):** the agent tools (`bio_write_study_note`, list/read/walk/delete) still use the
+file-based note store; rewiring them to `remember`/`recall`/`listMemory` over `openBioStore` (with `author` = the
+agent, an `asOf` read path, the `study`→`memory` rename, and a legible-file **materialization** of the ledger) is
+the remaining pass.
 
 ## Where this comes from
 
