@@ -31,11 +31,15 @@ import type { BioResolverImpl, ProcessRunner } from "../../core/ports.js";
 //   resultTable OPTIONAL — "arrow" (default): the table is read from the tool's out.arrow. "artifacts": a
 //               files-only op — no out.arrow; the table IS the captured-outputs listing (name/path/kind/digest/
 //               size). Requires at least one declared output. Lets samtools/bcftools/a plot be a first-class op.
+//               artifacts mode MAY still declare inputSql: then the tool receives in.arrow (a table-fed tool)
+//               but returns only files (e.g. plot a table -> a .svg). inputSql governs the input; resultTable
+//               governs the output — the two are independent.
 //   command     argv array [exe, ...args] (NOT a shell string) — e.g. ["Rscript", "/abs/coloc.R"]
 //   env         extra environment for the child (merged over the host's) — tool knobs only; NOT the Arrow paths
 //               (those are appended as argv)
 //   timeoutMs   kill the child after this long (default 120000)
-//   extensions  DuckDB extensions to LOAD first; nanoarrow is always loaded (it provides the Arrow-IPC codec)
+//   extensions  DuckDB extensions to LOAD first; nanoarrow (the Arrow-IPC codec) is loaded ONLY when Arrow I/O
+//               is actually used (an input table, or an "arrow" result) — a pure files-only op loads no codec
 //   outputs     OPTIONAL declared FILE outputs — the #3 artifact transport (file outputs ARE a thing in bioinfo):
 //               [{ name, path, kind?: "file"|"table" }]. The child writes them into its WORK DIR (its cwd); after
 //               a clean exit the resolver captures each into CAS (content-addressed) and records {name, path,
@@ -63,7 +67,13 @@ export function processComputeResolver(runner: ProcessRunner): BioResolverImpl {
       throw new Error("process.compute: params.timeoutMs must be a positive number of milliseconds");
     }
     const timeoutMs = typeof p.timeoutMs === "number" ? p.timeoutMs : 120000;
-    const extraExt = Array.isArray(p.extensions) && p.extensions.every((x) => typeof x === "string") ? (p.extensions as string[]) : [];
+    // fail closed on a malformed `extensions` (a typo like "extensions":"foo" must NOT be silently dropped —
+    // consistent with env/outputs/timeoutMs/resultTable, which all throw)
+    let extraExt: string[] = [];
+    if (p.extensions !== undefined) {
+      if (!Array.isArray(p.extensions) || !p.extensions.every((x) => typeof x === "string")) throw new Error("process.compute: params.extensions must be an array of strings");
+      extraExt = p.extensions as string[];
+    }
     let env: Record<string, string> = {};
     if (p.env != null) {
       if (typeof p.env !== "object" || Array.isArray(p.env)) throw new Error("process.compute: params.env must be an object of string values");
