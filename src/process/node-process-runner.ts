@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 import type { ProcessRunner, ProcessRunResult, ProcessRunSpec } from "../core/ports.js";
+import { ENV_DESCRIPTOR_SCHEMA, unknownEnvDescriptor, type EnvDescriptor } from "../core/reproducibility.js";
 
 // The host adapter for the ProcessRunner port — spawn an out-of-process child via node:child_process, capture
 // stdout/stderr (capped), honor a timeout and an AbortSignal. It is a THIN exec boundary: it never inspects or
@@ -15,6 +16,18 @@ const OUTPUT_CAP = 1_000_000;
 
 export function nodeProcessRunner(): ProcessRunner {
   return {
+    // A MINIMAL observed environment (C1): the platform + the executable name. Deliberately NO version shell-out
+    // (`Rscript --version`, `pip freeze`): a probe must not spawn, hang, hit network, or mutate — so this is only
+    // what we know without running anything. A richer host provider (micromamba/renv/container) can return more.
+    describeEnvironment(spec: ProcessRunSpec): Promise<EnvDescriptor> {
+      const exe = spec.command[0];
+      if (!exe) return Promise.resolve(unknownEnvDescriptor(["no command to describe"]));
+      return Promise.resolve({
+        schema: ENV_DESCRIPTOR_SCHEMA,
+        kind: "composite",
+        layers: [{ kind: "platform", os: process.platform, arch: process.arch }, { kind: "executable", name: exe }],
+      });
+    },
     run(spec: ProcessRunSpec): Promise<ProcessRunResult> {
       const [exe, ...args] = spec.command;
       if (typeof exe !== "string" || !exe) throw new Error("nodeProcessRunner: command[0] (the executable) is required");

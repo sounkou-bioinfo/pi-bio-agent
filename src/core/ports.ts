@@ -1,6 +1,7 @@
 import type { CasStore } from "./cas.js";
 import type { ResourceHandle, SourceSnapshot, VirtualResourceSpec } from "./resources.js";
 import type { Provenance } from "./types.js";
+import type { EnvDescriptor } from "./reproducibility.js";
 
 // ────────────────────────────────────────────────────────────────────────────────────────────────────────
 // PORTS — the boundary contracts a HOST implements and injects. This file is the dependency-injection spine.
@@ -112,4 +113,9 @@ export interface ProcessRunResult {
 
 export interface ProcessRunner {
   run(spec: ProcessRunSpec): Promise<ProcessRunResult>;
+  /** OPTIONAL reproducibility probe (C1): describe the environment a run WOULD execute in, as an OBSERVED
+   *  EnvDescriptor, for the declared-vs-observed attestation. Absent => process.compute records an explicit
+   *  `unknown` observation, never a fake pin. MUST be cheap and side-effect-free — no spawning a version probe,
+   *  no network, no mutation (a hanging/mutating probe is a host bug). A richer host provider may return more. */
+  describeEnvironment?(spec: ProcessRunSpec): Promise<EnvDescriptor>;
 }

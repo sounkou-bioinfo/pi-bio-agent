@@ -5,6 +5,7 @@ import { basename, join } from "node:path";
 import { systemClock } from "../../core/clock.js";
 import { validateReadOnlySelect } from "../../core/sql-guard.js";
 import type { BioResolverImpl, ProcessRunner } from "../../core/ports.js";
+import { attestEnvironment, validateEnvDescriptor, ENV_ATTESTATION_SCHEMA, type EnvDescriptor } from "../../core/reproducibility.js";
 
 // The COMPUTE-pillar resolver: materialize a table by running an OUT-OF-PROCESS computation (R / Python / Go /
 // shell) over a DuckDB input, exchanging Arrow IPC. The DATA contract stays in SQL/Arrow — this resolver does
@@ -46,12 +47,17 @@ import type { BioResolverImpl, ProcessRunner } from "../../core/ports.js";
 //               digest, size} in the receipt. Values come back via Arrow (the table); FILES go via CAS and NEVER
 //               through the IPC — the nf-r-ipc/Nextflow split (Nextflow's content-addressed work dir = our CAS).
 //               Requires a host-injected CAS (fails closed without one).
+//   environment OPTIONAL declared EnvDescriptor (C1) — the reproduction CONTRACT (a conda/micromamba/renv lock, a
+//               container digest, a duckdb+extensions set — runtime-agnostic layers). Validated fail-closed. The
+//               runner's optional describeEnvironment probe gives the OBSERVED env; the receipt records a declared-
+//               vs-observed attestation (env_status: matched/drift/declared_only/observed_only/unknown). Distinct
+//               from `env` (child environment VARIABLES). Absent declaration + no probe => explicit 'unknown'.
 
 const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 export function processComputeResolver(runner: ProcessRunner): BioResolverImpl {
   return async (resource, ctx) => {
-    const p = resource.params as { table?: unknown; inputSql?: unknown; command?: unknown; env?: unknown; timeoutMs?: unknown; extensions?: unknown; outputs?: unknown; resultTable?: unknown };
+    const p = resource.params as { table?: unknown; inputSql?: unknown; command?: unknown; env?: unknown; timeoutMs?: unknown; extensions?: unknown; outputs?: unknown; resultTable?: unknown; environment?: unknown };
     if (typeof p.table !== "string" || !IDENT.test(p.table)) throw new Error("process.compute requires params.table to be a valid SQL identifier");
     // inputSql is OPTIONAL: absent = a FILES-ONLY op (the tool reads/writes its own files; no Arrow input handed in).
     // Present = the op gets its input table as Arrow IPC (in.arrow, appended to argv).
@@ -105,6 +111,16 @@ export function processComputeResolver(runner: ProcessRunner): BioResolverImpl {
     const resultTable: "arrow" | "artifacts" = p.resultTable === undefined ? "arrow" : p.resultTable as "arrow" | "artifacts";
     if (resultTable !== "arrow" && resultTable !== "artifacts") throw new Error("process.compute: params.resultTable must be 'arrow' or 'artifacts'");
     if (resultTable === "artifacts" && outputs.length === 0) throw new Error("process.compute: resultTable 'artifacts' requires at least one declared output (it IS the table)");
+
+    // DECLARED environment (C1, optional): the reproduction CONTRACT — a runtime-agnostic EnvDescriptor (a conda/
+    // micromamba/renv lock, a container digest, a duckdb+extensions set — all just layers). Validated fail-closed if
+    // present. NB: this is distinct from params.env (the child's environment VARIABLES / tool knobs).
+    let declaredEnv: EnvDescriptor | undefined;
+    if (p.environment !== undefined) {
+      declaredEnv = p.environment as EnvDescriptor;
+      const errs = validateEnvDescriptor(declaredEnv);
+      if (errs.length) throw new Error(`process.compute: params.environment is not a valid EnvDescriptor — ${errs.join("; ")}`);
+    }
 
     // nanoarrow provides the Arrow-IPC COPY/read_arrow codec — LOADed only when Arrow IO is actually used (an input
     // table, or an "arrow" result). A pure files-only op (no input, artifacts result) exchanges no Arrow and needs
@@ -189,11 +205,30 @@ export function processComputeResolver(runner: ProcessRunner): BioResolverImpl {
       const cmdDigest = `sha256:${createHash("sha256").update(parts.join("\0")).digest("hex")}`;
       // input digest pins the SELECT that fed the child; files-only ops have no input, so the mode stands in for it.
       const sqlDigest = `sha256:${createHash("sha256").update(inner ?? `no-input:${resultTable}`).digest("hex")}`;
+
+      // ENVIRONMENT ATTESTATION (C1): declared (the reproduction contract) vs OBSERVED (what actually ran, via the
+      // runner's optional probe). An absent or failed probe => an explicit 'unknown' observation — NEVER a fake pin.
+      // Recorded BESIDE the compute/artifact provenance (it doesn't disturb cmdDigest).
+      let observedEnv: EnvDescriptor | undefined;
+      const envNotes: string[] = [];
+      if (runner.describeEnvironment) {
+        try { observedEnv = await runner.describeEnvironment({ command, env, cwd: dir, timeoutMs, signal: ctx.signal }); }
+        catch (e) { envNotes.push(`env probe failed: ${e instanceof Error ? e.message : String(e)}`); }
+      }
+      const envAttestation = attestEnvironment(
+        declaredEnv ? { descriptor: declaredEnv, source: "manifest" } : undefined,
+        observedEnv ? { descriptor: observedEnv, source: "process_runner" } : undefined,
+        envNotes.length ? envNotes : undefined,
+      );
       return {
         result: { schema: "pi-bio.resource_handle.v1", mode: "reference", name: p.table, pointer: { uri: `table:${p.table}`, format: "table" } },
         sourceSnapshots: [{ source: `process:${command[0]}`, version: cmdDigest, retrievedAt: now }],
         provenance: [
           { source: "process.compute", retrievedAt: now, digest: sqlDigest, notes: ["process.compute", `cmd:${command.join(" ")}`, resultTable === "arrow" ? "arrow-ipc" : "files-only"] },
+          { source: "environment", retrievedAt: now, digest: envAttestation.declared?.digest ?? envAttestation.observed?.digest,
+            notes: ["process.compute", `env_status:${envAttestation.status}`, `env_schema:${ENV_ATTESTATION_SCHEMA}`,
+              ...(envAttestation.declared ? [`env_declared:${envAttestation.declared.digest}`] : []),
+              ...(envAttestation.observed ? [`env_observed:${envAttestation.observed.digest}`] : []), ...envNotes] },
           // one provenance entry per captured FILE artifact (CAS digest = the receipt's "output digest")
           ...artifacts.map((a) => ({ source: `artifact:${a.name}`, retrievedAt: now, digest: a.digest, notes: ["process.compute", "artifact", a.kind, `path:${a.path}`, `size:${a.size}`] })),
         ],
