@@ -112,6 +112,20 @@ export async function observationHistory(conn: SqlConn, statementKey: string): P
   );
 }
 
+/** The live EDGE statements (object_id set, latest-as-of, not tombstoned) OUT of one subject — keyed on the
+ *  `(subject_id, predicate)` index, so it does NOT scan the whole table (what memory-link reconciliation wants). */
+export async function liveOutEdgesAsOf(conn: SqlConn, subjectId: string, t: string): Promise<{ statement_key: string; predicate: string }[]> {
+  return conn.all<{ statement_key: string; predicate: string }>(
+    `SELECT statement_key, predicate FROM (
+       SELECT statement_key, predicate, object_id,
+              row_number() OVER (PARTITION BY statement_key ORDER BY recorded_at DESC, observation_id DESC) AS rn
+       FROM ${TABLE}
+       WHERE subject_id = ? AND recorded_at <= ? AND (valid_from IS NULL OR valid_from <= ?) AND (valid_to IS NULL OR valid_to > ?)
+     ) WHERE rn = 1 AND object_id IS NOT NULL`,
+    [subjectId, t, t, t],
+  );
+}
+
 /** The single latest statement for ONE slot as of t — keyed, no full-table scan (what a state machine wants). */
 export async function observationAsOfKey(conn: SqlConn, statementKey: string, t: string): Promise<ObservationRow | null> {
   const rows = await conn.all<ObservationRow>(

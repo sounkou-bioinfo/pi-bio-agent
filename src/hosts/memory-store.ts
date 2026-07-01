@@ -5,6 +5,7 @@ import {
   observationAsOfKey,
   observationHistory,
   observationsAsOf,
+  liveOutEdgesAsOf,
   recordObservation,
   type ObservationRow,
 } from "../duckdb/observations.js";
@@ -73,11 +74,11 @@ export async function remember(conn: SqlConn, note: MemoryContent, now: string, 
     });
   }
   // RETRACT links that this revision dropped: without a tombstone, a removed [[link]]'s edge observation is never
-  // superseded, so it lingers in bio_edges_as_of forever (a phantom edge). Record a tombstone (no objectId) on the
-  // same statementKey for every currently-live edge from this subject that the new revision no longer declares.
-  for (const row of await observationsAsOf(conn, MEMORY_NOW)) {
-    if (row.subject_id === subject && row.object_id != null && row.statement_key.startsWith(`${subject}|`) && !newKeys.has(row.statement_key)) {
-      await recordObservation(conn, { statementKey: row.statement_key, subjectId: subject, predicate: row.predicate, recordedAt: now, source: author });
+  // superseded, so it lingers in bio_edges_as_of forever (a phantom edge). Tombstone (no objectId) every
+  // currently-live edge OUT of this subject that the new revision no longer declares (indexed, no full-table scan).
+  for (const edge of await liveOutEdgesAsOf(conn, subject, MEMORY_NOW)) {
+    if (!newKeys.has(edge.statement_key)) {
+      await recordObservation(conn, { statementKey: edge.statement_key, subjectId: subject, predicate: edge.predicate, recordedAt: now, source: author });
     }
   }
 }
