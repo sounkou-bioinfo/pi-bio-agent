@@ -8,3 +8,4 @@ export * from "./study-sync.js";
 export * from "./harness-adaptation.js";
 export * from "./job-store.js";
 export * from "./in-memory-job-runner.js";
+export * from "./reproduce.js";

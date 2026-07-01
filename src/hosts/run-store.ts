@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import { createHash } from "node:crypto";
 import { systemClock } from "../core/clock.js";
-import { RUN_REPLAY_SPEC_SCHEMA, canonicalDigest, type RunReplaySpec, type EnvAttestationSummary } from "../core/reproducibility.js";
+import { RUN_REPLAY_SPEC_SCHEMA, receiptContentDigest, type RunReplaySpec, type EnvAttestationSummary } from "../core/reproducibility.js";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { createBioRegistry, type BioRegistry, type BioManifest, type ResolutionReceipt } from "../core/manifest.js";
@@ -213,7 +213,7 @@ function envSummaryFromReceipts(receipts: ResolutionReceipt[]): EnvAttestationSu
  *  reproduce() has stable handles and a status without re-parsing provenance. */
 function enrichReplay(replay: RunReplaySpec, receipts: ResolutionReceipt[]): RunReplaySpec {
   const environment = envSummaryFromReceipts(receipts);
-  return { ...replay, sourceReceiptDigests: receipts.map((r) => canonicalDigest(r)), ...(environment ? { environment } : {}) };
+  return { ...replay, sourceReceiptDigests: receipts.map((r) => receiptContentDigest(r)), ...(environment ? { environment } : {}) };
 }
 
 /** Acquire → use → release: own a DuckDB instance/connection for one run, persist the result (or a failed-run

@@ -159,10 +159,31 @@ export function attestEnvironment(
 // resolved on THIS host (process.compute `./script.R` → an absolute path), keep BOTH the authored manifest snapshot
 // (portable intent) and the resolved execution facts (what actually ran) — see run-store's path resolution.
 
-/** A stable digest over any JSON value (canonical key order). Used for `sourceReceiptDigests` — a fixed handle
- *  over the receipts a run actually produced, so reproduce() can pin them. */
+/** A stable digest over any JSON value (canonical key order). */
 export function canonicalDigest(value: unknown): `sha256:${string}` {
   return `sha256:${createHash("sha256").update(stableStringify(value)).digest("hex")}`;
+}
+
+/** The DETERMINISTIC content of a resolution receipt — WHAT was resolved and from where — excluding wall-clock
+ *  fields (resolvedAt / retrievedAt) and free-text notes that legitimately differ every run. This is the digest
+ *  `sourceReceiptDigests` stores and reproduce() compares: a faithful re-run of the same inputs yields the same
+ *  content digest, so a mismatch is REAL drift (a changed resolver/params/source/result), not a clock difference. */
+export interface ReceiptLike {
+  resourceId: string;
+  resolverId: string;
+  resolverVersion: string;
+  paramsDigest: string;
+  sourceSnapshots: Array<{ source: string; version?: string }>;
+  result: unknown;
+  provenance: Array<{ source: string; digest?: string }>;
+}
+export function receiptContentDigest(r: ReceiptLike): `sha256:${string}` {
+  return canonicalDigest({
+    resourceId: r.resourceId, resolverId: r.resolverId, resolverVersion: r.resolverVersion, paramsDigest: r.paramsDigest,
+    sourceSnapshots: r.sourceSnapshots.map((s) => ({ source: s.source, version: s.version ?? null })),
+    result: r.result,
+    provenance: r.provenance.map((p) => ({ source: p.source, digest: p.digest ?? null })),
+  });
 }
 
 /** The env attestation SUMMARY carried in a replay spec — status + digests only (the full EnvironmentAttestation
