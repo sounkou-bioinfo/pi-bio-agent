@@ -1,0 +1,18 @@
+{
+  "schema": "pi-bio.manifest.v1",
+  "id": "connector-mygene",
+  "version": "0.1.0",
+  "title": "MyGene.info (BioThings) connector (REST) — gene annotation as SQL",
+  "description": "A BioThings/MyGene gene record as DATA: a GET to mygene.info parsed into a table by ducknng_ncurl_table; the id is the binding {gene_id}. The same shape serves any BioThings API (MyVariant, MyChem) — point it at a new URL.",
+  "provides": {
+    "resolvers": [{ "id": "duckdb.sql_materialize", "version": "0.1.0", "title": "SQL materialize", "description": "Materialize a table from a read-only SELECT (a ducknng_ncurl_table GET).", "output": { "mode": "table" } }],
+    "resources": [{
+      "id": "gene_annotation", "title": "Gene annotation", "kind": "virtual", "resolver": "duckdb.sql_materialize",
+      "params": {
+        "table": "gene_annotation",
+        "extensions": ["ducknng"],
+        "sql": "SELECT * FROM ducknng_ncurl_table('https://mygene.info/v3/gene/' || getvariable('gene_id'), 'GET', '[{\"name\":\"Accept\",\"value\":\"application/json\"}]', ''::BLOB, 20000, coalesce(getvariable('tls'), 0)::UBIGINT)"
+      }
+    }]
+  }
+}

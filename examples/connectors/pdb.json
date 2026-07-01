@@ -1,0 +1,18 @@
+{
+  "schema": "pi-bio.manifest.v1",
+  "id": "connector-pdb",
+  "version": "0.1.0",
+  "title": "RCSB PDB connector (REST) — a structure entry as SQL",
+  "description": "A PDB structure entry as DATA: a GET to data.rcsb.org parsed into a table by ducknng_ncurl_table; the id is the binding {pdb_id}. No client code — the connector is the manifest.",
+  "provides": {
+    "resolvers": [{ "id": "duckdb.sql_materialize", "version": "0.1.0", "title": "SQL materialize", "description": "Materialize a table from a read-only SELECT (a ducknng_ncurl_table GET).", "output": { "mode": "table" } }],
+    "resources": [{
+      "id": "pdb_entry", "title": "PDB entry", "kind": "virtual", "resolver": "duckdb.sql_materialize",
+      "params": {
+        "table": "pdb_entry",
+        "extensions": ["ducknng"],
+        "sql": "SELECT * FROM ducknng_ncurl_table('https://data.rcsb.org/rest/v1/core/entry/' || getvariable('pdb_id'), 'GET', '[{\"name\":\"Accept\",\"value\":\"application/json\"}]', ''::BLOB, 20000, coalesce(getvariable('tls'), 0)::UBIGINT)"
+      }
+    }]
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "schema": "pi-bio.manifest.v1",
+  "id": "connector-reactome",
+  "version": "0.1.0",
+  "title": "Reactome connector (ContentService) — a pathway entity as SQL",
+  "description": "A Reactome pathway/entity as DATA: a GET to reactome.org/ContentService parsed into a table by ducknng_ncurl_table; the stable id is the binding {reactome_id}.",
+  "provides": {
+    "resolvers": [{ "id": "duckdb.sql_materialize", "version": "0.1.0", "title": "SQL materialize", "description": "Materialize a table from a read-only SELECT (a ducknng_ncurl_table GET).", "output": { "mode": "table" } }],
+    "resources": [{
+      "id": "reactome_entity", "title": "Reactome entity", "kind": "virtual", "resolver": "duckdb.sql_materialize",
+      "params": {
+        "table": "reactome_entity",
+        "extensions": ["ducknng"],
+        "sql": "SELECT * FROM ducknng_ncurl_table('https://reactome.org/ContentService/data/query/' || getvariable('reactome_id'), 'GET', '[{\"name\":\"Accept\",\"value\":\"application/json\"}]', ''::BLOB, 20000, coalesce(getvariable('tls'), 0)::UBIGINT)"
+      }
+    }]
+  }
+}
