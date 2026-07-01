@@ -10,7 +10,7 @@ import { validateBioManifest, type BioManifest } from "../src/core/manifest.js";
 const DIR = "examples/connectors";
 
 describe("example: scientific-database connectors — each is a valid manifest (zero TS)", () => {
-  test("every connector validates and declares one ncurl_table resource over sql_materialize", async () => {
+  test("every connector validates and declares one HTTP resource (ncurl_table SQL, or agent-drivable http.get)", async () => {
     const files = (await fs.readdir(DIR)).filter((f) => f.endsWith(".json"));
     assert.ok(files.length >= 4, "the starter pack ships >= 4 connectors");
     for (const f of files) {
@@ -18,9 +18,17 @@ describe("example: scientific-database connectors — each is a valid manifest (
       assert.deepEqual(validateBioManifest(m), [], `${f} is a valid manifest`);
       const res = m.provides.resources ?? [];
       assert.equal(res.length, 1, `${f} declares exactly one connector resource`);
-      assert.equal(res[0].resolver, "duckdb.sql_materialize", `${f} resolves via sql_materialize`);
-      assert.match(String(res[0].params.sql), /ducknng_ncurl_table/, `${f} calls the API as SQL (ncurl_table)`);
-      assert.deepEqual(res[0].params.extensions, ["ducknng"], `${f} loads ducknng`);
+      const r = res[0];
+      if (r.resolver === "duckdb.sql_materialize") {
+        // pure-SQL form: host provisions ducknng; the API call is a table function
+        assert.match(String(r.params.sql), /ducknng_ncurl_table/, `${f} calls the API as SQL (ncurl_table)`);
+        assert.deepEqual(r.params.extensions, ["ducknng"], `${f} loads ducknng`);
+      } else if (r.resolver === "http.get") {
+        // agent-drivable form: host-supplied fetch resolves it; the agent composes the SQL over the resulting table
+        assert.match(String(r.params.url), /https?:|getvariable/, `${f} declares an http(s) url (or a SQL expression that composes one)`);
+      } else {
+        assert.fail(`${f} uses an unexpected connector resolver '${r.resolver}'`);
+      }
     }
   });
 });

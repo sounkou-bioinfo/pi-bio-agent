@@ -1,0 +1,17 @@
+{
+  "schema": "pi-bio.manifest.v1",
+  "id": "connector-uniprot-http",
+  "version": "0.1.0",
+  "title": "UniProt connector (http.get) — agent-drivable, the agent composes the SQL",
+  "description": "Same UniProt REST source, but via the http.get resolver (host-supplied fetch) so the AGENT can resolve it with no host ducknng provisioning: it fetches the JSON into a table, then the agent does schema discovery and writes the extraction SQL itself. The manifest declares WHERE the data is; the agent decides WHAT to pull.",
+  "provides": {
+    "resolvers": [{ "id": "http.get", "version": "0.1.0", "title": "HTTP GET -> table", "description": "Fetch an HTTP JSON body into a table (host-supplied fetch).", "output": { "mode": "table" } }],
+    "resources": [{
+      "id": "uniprot_entry", "title": "UniProt entry", "kind": "virtual", "resolver": "http.get",
+      "params": {
+        "table": "uniprot_entry", "format": "json", "method": "GET",
+        "url": "'https://rest.uniprot.org/uniprotkb/' || getvariable('uniprot_acc') || '.json'"
+      }
+    }]
+  }
+}

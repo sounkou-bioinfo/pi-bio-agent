@@ -158,74 +158,104 @@ from drifting (each example records a verified run; `npm run check`
 fails if one goes stale).
 
 **The agent speaks.** Point a live Pi agent at a manifest and ask in
-plain English — it does schema discovery, writes the read-only SQL, runs
-it through the substrate, and answers (this is a real transcript):
+plain English — it does schema discovery, **writes its own read-only
+SQL** (we never hand it the query), runs it through the substrate, and
+answers. This is a real transcript, produced when this README is
+rendered:
 
-``` pi
-pi -e extensions/pi-coding-agent/index.ts -p "Over examples/variant-counts/manifest.json: how many variants of each consequence are there? Give the counts as a short markdown table and one sentence."
+``` sh
+pi -e extensions/pi-coding-agent/index.ts -p \
+  "How many variants of each consequence are in examples/variant-counts/manifest.json? Answer with a short table."
 ```
 
-    There are 2 missense, 2 stop_gained, and 1 synonymous variants, for 5 total.
+> | consequence |   n |
+> |-------------|----:|
+> | missense    |   2 |
+> | stop_gained |   2 |
+> | synonymous  |   1 |
 
 Same run, no agent — the CLI/SDK path, for scripts and CI:
 
 **Ask a question over a manifest — the agent writes the SQL, the
 substrate runs it and receipts it:**
 
-``` biocli
+``` sh
 pi-bio-agent query examples/variant-counts/manifest.json --db :memory: --sql "SELECT consequence, count(*) AS n FROM variants GROUP BY consequence ORDER BY consequence"
 ```
 
+``` json
+{
+  "ok": true,
+  "runId": "query-1782933407596",
+  "status": "succeeded",
+  "rowCount": 3,
+  "artifacts": {
+    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782933407596/run.json",
+    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782933407596/result.json",
+    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782933407596/receipts.json"
+  },
+  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782933407596",
+  "rows": [
     {
-      "ok": true,
-      "runId": "query-1782932584208",
-      "status": "succeeded",
-      "rowCount": 3,
-      "artifacts": {
-        "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782932584208/run.json",
-        "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782932584208/result.json",
-        "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782932584208/receipts.json"
-      },
-      "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782932584208",
-      "rows": [
-        {
-          "consequence": "missense",
-          "n": 2
-        },
-        {
-          "consequence": "stop_gained",
-          "n": 2
-        },
-        {
-          "consequence": "synonymous",
-          "n": 1
-        }
-      ]
+      "consequence": "missense",
+      "n": 2
+    },
+    {
+      "consequence": "stop_gained",
+      "n": 2
+    },
+    {
+      "consequence": "synonymous",
+      "n": 1
     }
+  ]
+}
+```
 
 **A scientific-database connector is a manifest, not a client.** The
 “60+ connected databases” a hosted workbench advertises are, here, one
 file each — [`examples/connectors/`](examples/connectors/) ships
-UniProt, RCSB PDB, MyGene/BioThings, and Reactome, and a new one is a
-new URL:
+UniProt, RCSB PDB, MyGene/BioThings, and Reactome; a new one is a new
+URL. The manifest declares **where** the data is; the agent does schema
+discovery and composes **what** to pull — the query below is *one* the
+agent might write over the resolved `uniprot_entry` table, not a
+hardcoded answer (run live here):
 
 ``` sh
-pi-bio-agent query examples/connectors/uniprot.json --db :memory: \
-  --init-sql "INSTALL ducknng FROM community; LOAD ducknng; SET VARIABLE tls = ducknng_tls_config_from_files(NULL, '/etc/ssl/certs/ca-certificates.crt', '', 1)" \
-  --bindings '{"uniprot_acc":"P04637"}' \
-  --sql "SELECT primaryAccession, uniProtkbId, entryType, annotationScore FROM uniprot_entry"
+pi-bio-agent query examples/connectors/uniprot.json --db :memory: --init-sql "INSTALL ducknng FROM community; LOAD ducknng; SET VARIABLE tls = ducknng_tls_config_from_files(NULL, '/etc/ssl/certs/ca-certificates.crt', '', 1)" --bindings '{"uniprot_acc":"P04637"}' --sql "SELECT primaryAccession, uniProtkbId, sequence.length AS aa FROM uniprot_entry"
 ```
 
 ``` json
-{ "ok": true, "rows": [
-  { "primaryAccession": "P04637", "uniProtkbId": "P53_HUMAN",
-    "entryType": "UniProtKB reviewed (Swiss-Prot)", "annotationScore": 5 } ] }
+{
+  "ok": true,
+  "runId": "query-1782933407689",
+  "status": "succeeded",
+  "rowCount": 1,
+  "artifacts": {
+    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782933407689/run.json",
+    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782933407689/result.json",
+    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782933407689/receipts.json"
+  },
+  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782933407689",
+  "rows": [
+    {
+      "primaryAccession": "P04637",
+      "uniProtkbId": "P53_HUMAN",
+      "aa": 393
+    }
+  ]
+}
 ```
 
-Real — a live GET to UniProt over ducknng (`--init-sql` is host
-provisioning: it INSTALLs/LOADs ducknng and sets a TLS config; network
-is the host’s to grant, so this needs egress and is not part of the
-offline CI gate).
+This connector is pure SQL (`ncurl_table`), so the **host** provisions
+ducknng + TLS (`--init-sql`) and grants egress. For the agent to resolve
+a connector *itself* and compose the SQL with no host provisioning, use
+the `http.get` form
+([`uniprot-http.json`](examples/connectors/uniprot-http.json)) under the
+networked entrypoint — the agent fetches the JSON, discovers the schema,
+and writes the extraction. (`http.get` = the fetch the host binds;
+`ncurl_table` = pure SQL the host provisions — same connector, two
+levers.)
 
 **We port the whole “AI for science” stack as one Pi extension — not a
 hosted product.** The `pi-coding-agent` extension exposes the entire
