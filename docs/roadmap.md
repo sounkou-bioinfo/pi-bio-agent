@@ -252,7 +252,11 @@ running; L1 gives reproduce() a job-shaped target; C2 validates it; L2/L3 make i
   `ProcessRunner.describeEnvironment?` (optional probe; `nodeProcessRunner` returns a minimal observed descriptor,
   no version shell-out); `process.compute` records the attestation in provenance (`env_status:…`). Every run seeds
   **`replay.json`** — the ACTUAL replay inputs (authored manifest snapshot + resolved process facts, sql/params) so
-  C2 can re-execute, not just compare digests. Does NOT execute anything (no micromamba/container run — C2/host).
+  C2 can re-execute, not just compare digests. ENRICHED after receipts with `sourceReceiptDigests` + an env
+  attestation summary (status+digests; full detail in receipts.json, summary keeps replaySpecDigest order-stable).
+  Hardened (extended review): `validateEnvDescriptor(input:unknown)` + sha256 digest-shape checks; cross-platform
+  process output-path isolation (reject drive-absolute/backslash-`..`, plus a resolve-based containment re-check).
+  Does NOT execute anything (no micromamba/container run — C2/host).
 - **L1 — async JobRunner skeleton.** A `JobRunner` port (submit/status/collect/cancel) over the existing
   `BioRunRecord` (queued/running/waiting/succeeded/failed/cancelled) + job-status observations (`job:<runId>:status`
   as an as-of slot — the SAME temporal substrate as Phase 4). In-memory fake first; outputs → CAS. No NNG, no cancel yet.
