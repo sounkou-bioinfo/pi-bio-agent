@@ -30,6 +30,14 @@ describe("C1a EnvDescriptor: canonicalization + digest", () => {
     assert.equal(envDigest(a), envDigest(b));
   });
 
+  test("two DIFFERENT packages that would collide under a delimiter-join still normalize by order (no digest leak)", () => {
+    // {name:"x",version:"a b"} and {name:"x a",version:"b"} join to the same key under a space/NUL delimiter;
+    // sorting by the canonical string keeps them distinct, so reordering them cannot change the digest.
+    const a = env([{ kind: "package_snapshot", manager: "renv", packages: [{ name: "x", version: "a b" }, { name: "x a", version: "b" }] }]);
+    const b = env([{ kind: "package_snapshot", manager: "renv", packages: [{ name: "x a", version: "b" }, { name: "x", version: "a b" }] }]);
+    assert.equal(envDigest(a), envDigest(b));
+  });
+
   test("a package version bump CHANGES the digest (it's real identity)", () => {
     const a = env([{ kind: "package_snapshot", manager: "renv", packages: [{ name: "coloc", version: "5.2.3" }] }]);
     const b = env([{ kind: "package_snapshot", manager: "renv", packages: [{ name: "coloc", version: "5.2.4" }] }]);

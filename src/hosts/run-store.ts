@@ -259,12 +259,13 @@ export async function runBioOperationFromManifest(req: RunOperationRequest): Pro
   const now = req.now ?? systemClock();
   const runId = req.runId ?? `${req.operationId.replace(/[^a-zA-Z0-9._-]/g, "_")}-${Date.now()}`;
   const allResources = (manifest.provides?.resources ?? []).map((r) => r.id);
+  const proc = resolvedProcessFacts(manifest, allResources);
   const replay: RunReplaySpec = {
     schema: RUN_REPLAY_SPEC_SCHEMA, runId, kind: "operation",
     manifest: { digest: manifestDigest, snapshot: raw, path: req.manifestPath },
     operationId: req.operationId, sql: op.sql.sqlTemplate,
     ...(req.bindings ? { bindings: req.bindings } : {}), ...(req.duckdbInitSql ? { duckdbInitSql: req.duckdbInitSql } : {}),
-    ...(resolvedProcessFacts(manifest, allResources) ? { process: resolvedProcessFacts(manifest, allResources) } : {}),
+    ...(proc ? { process: proc } : {}),
   };
   return runAndPersist(req.cwd, req.dbPath, runId, req.operationId, (conn) => runOperation(registry, conn, { operationId: req.operationId, runId, now, signal: req.signal, cas: req.cas }), req.duckdbInitSql, req.bindings, req.duckdbConfig, replay);
 }
@@ -312,12 +313,13 @@ export async function runBioQueryFromManifest(req: RunQueryRequest): Promise<Run
   const resources = req.resources ?? (manifest.provides?.resources ?? []).map((r) => r.id);
   const now = req.now ?? systemClock();
   const runId = req.runId ?? `query-${Date.now()}`;
+  const proc = resolvedProcessFacts(manifest, resources);
   const replay: RunReplaySpec = {
     schema: RUN_REPLAY_SPEC_SCHEMA, runId, kind: "query",
     manifest: { digest: manifestDigest, snapshot: raw, path: req.manifestPath },
     sql: req.sql, resources,
     ...(req.bindings ? { bindings: req.bindings } : {}), ...(req.duckdbInitSql ? { duckdbInitSql: req.duckdbInitSql } : {}),
-    ...(resolvedProcessFacts(manifest, resources) ? { process: resolvedProcessFacts(manifest, resources) } : {}),
+    ...(proc ? { process: proc } : {}),
   };
   return runAndPersist(req.cwd, req.dbPath, runId, "ad-hoc.query", (conn) => runQuery(registry, conn, { sql: req.sql, resources, runId, now, signal: req.signal, cas: req.cas }), req.duckdbInitSql, req.bindings, req.duckdbConfig, replay);
 }
