@@ -17,9 +17,15 @@ A **manifest** declares named *resources*; a **resolver** turns each into a Duck
 those tables — whatever it returns *is* the result; there is no separate report layer. The bet stands on **four
 legs, all SQL over one DuckDB substrate**:
 
-### 1. Data
-Read a file natively (`duckdb.file_scan` over csv/tsv/parquet/json), a VCF/BCF region (`duckhts.read_bcf`), or
-any read-only query over what DuckDB can reach including httpfs/s3 (`duckdb.sql_materialize`).
+### 1. Data — anything DuckDB can read
+`duckdb.sql_materialize` is the one primitive: any read-only query over everything DuckDB reaches — local files
+(csv/tsv/parquet/json), object stores (httpfs/s3), other databases, lakes. `duckdb.file_scan` and
+`duckhts.read_bcf` are just conveniences over it. **The format surface is open**: a new format is a new DuckDB
+*extension*, not new library code — HTS/VCF/BAM ([`duckhts`](https://duckdb.org/community_extensions/extensions/duckhts)),
+single-cell AnnData ([`anndata`](https://duckdb.org/community_extensions/extensions/anndata)),
+Zarr ([`duckdb_zarr`](https://duckdb.org/community_extensions/extensions/duckdb_zarr)),
+PLINK ([`plinking_duck`](https://duckdb.org/community_extensions/extensions/plinking_duck)), and whatever ships
+next. You bring the format; DuckDB's full reach and its community-extension ecosystem *are* the data layer.
 
 ### 2. Network — HTTP *as SQL*, via the owned **ducknng** extension
 - `ducknng_ncurl_table` — an HTTP endpoint *is* a table function: URL/headers/body composed in SQL
