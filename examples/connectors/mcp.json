@@ -1,0 +1,18 @@
+{
+  "schema": "pi-bio.manifest.v1",
+  "id": "connector-mcp",
+  "version": "0.1.0",
+  "title": "MCP server over SQL — a JSON-RPC call is an ncurl POST (proven)",
+  "description": "An MCP (Model Context Protocol) server call as a MANIFEST, zero TypeScript. MCP is JSON-RPC 2.0 over HTTP, so `initialize` / `tools/list` / `tools/call` is a ducknng_ncurl_table POST — verified live against a public MCP server (DeepWiki). The endpoint is the binding {mcp_url}; the host provisions ducknng + TLS. The session id `initialize` returns threads through as a header on the next call; only server-pushed SSE notifications use ducknng wss.",
+  "provides": {
+    "resolvers": [{ "id": "duckdb.sql_materialize", "version": "0.1.0", "title": "SQL materialize", "description": "Materialize a table from a read-only SELECT (an MCP JSON-RPC POST via ducknng_ncurl_table).", "output": { "mode": "table" } }],
+    "resources": [{
+      "id": "mcp_initialize", "title": "MCP initialize", "kind": "virtual", "resolver": "duckdb.sql_materialize",
+      "params": {
+        "table": "mcp_initialize",
+        "extensions": ["ducknng"],
+        "sql": "SELECT * FROM ducknng_ncurl_table(getvariable('mcp_url'), 'POST', '[{\"name\":\"Content-Type\",\"value\":\"application/json\"},{\"name\":\"Accept\",\"value\":\"application/json, text/event-stream\"}]', json_object('jsonrpc','2.0','id',1,'method','initialize','params', json_object('protocolVersion','2025-06-18','capabilities', json_object(), 'clientInfo', json_object('name','pi-bio-agent','version','0.1.0')))::VARCHAR::BLOB, 20000, coalesce(getvariable('tls'), 0)::UBIGINT)"
+      }
+    }]
+  }
+}

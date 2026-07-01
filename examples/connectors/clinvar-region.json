@@ -1,0 +1,14 @@
+{
+  "schema": "pi-bio.manifest.v1",
+  "id": "connector-clinvar-region",
+  "version": "0.1.0",
+  "title": "ClinVar region (duckhts over HTTP) — the agent discovers the schema and composes the summary",
+  "description": "A ClinVar VCF region read DIRECTLY over HTTPS by duckhts (htslib tabix RANGE read — it fetches only the region's blocks, not the whole file), materialized as the `clinvar` table. The manifest declares WHERE the data is (the TP53 locus here); the AGENT does schema discovery (INFO_CLNSIG, INFO_MC, INFO_GENEINFO, ...) and writes the summary SQL itself. duckhts's remote read is htslib, not the injected fetch, so it needs no network resolver — only host egress.",
+  "provides": {
+    "resolvers": [{ "id": "duckhts.read_bcf", "version": "0.1.0", "title": "DuckHTS read_bcf", "description": "Read an HTS file (VCF/BCF) region into a tidy table via htslib.", "output": { "mode": "table" } }],
+    "resources": [{
+      "id": "clinvar", "title": "ClinVar (TP53 region)", "kind": "virtual", "resolver": "duckhts.read_bcf",
+      "params": { "path": "https://ftp.ncbi.nlm.nih.gov/pub/clinvar/vcf_GRCh38/clinvar.vcf.gz", "region": "17:43044295-43125483", "table": "clinvar" }
+    }]
+  }
+}

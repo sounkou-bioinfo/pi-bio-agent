@@ -26,6 +26,9 @@ describe("example: scientific-database connectors — each is a valid manifest (
       } else if (r.resolver === "http.get") {
         // agent-drivable form: host-supplied fetch resolves it; the agent composes the SQL over the resulting table
         assert.match(String(r.params.url), /https?:|getvariable/, `${f} declares an http(s) url (or a SQL expression that composes one)`);
+      } else if (r.resolver === "duckhts.read_bcf") {
+        // htslib form: a remote HTS file (VCF/BCF) read by region over http; the agent summarizes the resulting table
+        assert.match(String(r.params.path), /^https?:|getvariable/, `${f} declares a remote HTS url`);
       } else {
         assert.fail(`${f} uses an unexpected connector resolver '${r.resolver}'`);
       }

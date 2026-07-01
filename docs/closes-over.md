@@ -35,9 +35,12 @@ the [design notes](./design.md) and `scripts/live-multi-agent.ts`, `scripts/pipe
 **host-provided headers**, so the network leg reaches anything HTTP-shaped *as SQL* while auth stays host-owned:
 an authenticated REST/GraphQL API (the host injects the `Authorization` header — never an agent param), an
 [**MCP**](https://modelcontextprotocol.io/) server (JSON-RPC over HTTP + SSE), and **streaming** transports
-(SSE / websockets via ducknng `wss`). So "call an MCP tool," "hit a token-gated database," and "subscribe to a
-stream" reduce to `ncurl`/`wss` calls — the HTTP-shaped parts need no bespoke client (full MCP session / SSE
-semantics may still want a thin host wrapper), and secrets never leave the host boundary.
+(SSE / websockets via ducknng `wss`). **MCP is an `ncurl` call**: an `initialize` handshake to a live MCP server
+(`initialize` / `tools/list` / `tools/call` are JSON-RPC 2.0 over HTTP) is a single `ncurl_table` POST — *verified
+against a public MCP server*, see [`examples/connectors/mcp.json`](../examples/connectors/mcp.json); the session
+id it returns threads through as a header on the next call. And server-*pushed* notifications and live streams
+are **ducknng `wss`** — streaming is ours too, not a gap — with secrets never leaving the host boundary. So "call
+an MCP tool," "hit a token-gated database," and "subscribe to a stream" are all SQL.
 
 ## Fugu — learned orchestration
 
@@ -64,11 +67,20 @@ the **OOLONG** benchmark, which punishes RAG and approximate attention.
 
 `bio_query` / DuckDB **is** that REPL — and a stronger one for the tasks that matter here:
 - data lives **addressably outside the prompt** (a table, a CAS handle), so there is no context to rot;
-- an OOLONG-style *count / order / join* is a `GROUP BY` / `ORDER BY` / `JOIN` — **exact and deterministic** for
-  table-shaped tasks, where an attention-based reader is only approximate: SQL answers, it doesn't ask the model.
+- an OOLONG-style *count / order / join* is a `GROUP BY` / `ORDER BY` / `JOIN` — **exact and deterministic**,
+  where an attention-based reader is only approximate. **Counting beats the model; it doesn't ask it.**
 
 RLM writes Python to navigate text; we write SQL to query data. Same move (a program over external context),
 but ours is a declarative, indexed, provenance-carrying substrate rather than string-slicing.
+
+And it need not be one-shot. Against a `ducknng` server the agent holds a **persistent, cross-process DuckDB REPL
+over RPC**: state built in one call is there in the next. *Verified* — a table `CREATE`d + `INSERT`ed via
+`ducknng_run_rpc`, then read back with `ducknng_query_rpc`, returned `count=3, total=42`; the server-side session
+persisted across calls. For a large result there are proper cursor SESSIONS — `ducknng_open_query` returns a
+`session_id` + `session_token`, then `fetch_query` / `close_query` / `cancel_query` stream batches. Statefulness
+and the full write surface are **exec-gated**: the host opts in with `ducknng_register_exec_method` (per-method
+auth, peer/mTLS allowlists), so the agent gets a real stateful REPL *only* where the host grants it. That is RLM's
+control plane, but durable, shared, and inspectable — not a prompt.
 
 ## Machine studying — memory as data
 
@@ -89,9 +101,9 @@ sentence. We own the substrate those ideas are approximations of.
 The substrate is not a greenfield idea; it is the **factoring** of a working corpus. **ClawBio** — ~80
 per-question bioinformatics skills, each a 12–26 KB bespoke program — is the origin: those skills factor into
 *shared format resolvers + declared SQL operations + term sets + one generic runner*, which is exactly this
-library. Reproducing the ClawBio surface as **manifests + SQL** (zero new TypeScript per question) is the
-north-star "ClawBio for free" factoring the library is built toward; its `rhi_01` case is the flagship's ground
-truth ([`rare-high-impact`](../examples/rare-high-impact/)).
+library. Reproducing the ClawBio surface as **manifests + SQL** — zero new TypeScript per question — is
+**"ClawBio for free"**, and its `rhi_01` case is the flagship's ground truth
+([`rare-high-impact`](../examples/rare-high-impact/)).
 **Machine studying** is the memory half of the same bet — the agent studies a corpus *before* the task and keeps
 what it learns as queryable notes, not prompt context.
 

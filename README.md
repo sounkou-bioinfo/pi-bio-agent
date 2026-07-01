@@ -181,7 +181,7 @@ fails if one goes stale).
 **The agent speaks.** Point a live Pi agent at a manifest and ask in
 plain English — it does schema discovery, **writes its own read-only
 SQL** (we never hand it the query), runs it through the substrate, and
-answers. This is a real transcript, produced when this README is
+answers. This is a real transcript, produced live when this README is
 rendered:
 
 ``` sh
@@ -194,6 +194,30 @@ pi -e extensions/pi-coding-agent/index.ts -p \
 > | missense    |   2 |
 > | stop_gained |   2 |
 > | synonymous  |   1 |
+
+**Going bigger — the agent over live ClinVar.** Point it at
+[`clinvar-region.json`](examples/connectors/clinvar-region.json) and it
+reads a **ClinVar VCF region straight over HTTP with `duckhts`** (an
+htslib tabix range read — only the TP53 locus, not the whole file),
+*discovers the 45-column schema*, finds `INFO_CLNSIG` is an array, and
+writes its **own** `UNNEST` + `GROUP BY`. A real run (captured — this
+one takes ~2–3 min, so it’s not re-run every render):
+
+> ``` sql
+> WITH clnsig AS (SELECT COALESCE(sig,'missing') AS clinical_significance
+>                 FROM clinvar, UNNEST(INFO_CLNSIG) AS u(sig))
+> SELECT clinical_significance, COUNT(*) AS variant_count
+> FROM clnsig GROUP BY 1 ORDER BY variant_count DESC LIMIT 8;
+> ```
+>
+> | clinical_significance                        | variant_count |
+> |----------------------------------------------|--------------:|
+> | Pathogenic                                   |          3593 |
+> | Conflicting_classifications_of_pathogenicity |          2918 |
+> | Likely_benign                                |          2891 |
+> | Uncertain_significance                       |          2445 |
+> | Benign                                       |           704 |
+> | Likely_pathogenic                            |           263 |
 
 Same run, no agent — the CLI/SDK path, for scripts and CI:
 
@@ -209,15 +233,15 @@ pi-bio-agent query examples/variant-counts/manifest.json \
 ``` json
 {
   "ok": true,
-  "runId": "query-1782934160656",
+  "runId": "query-1782935982512",
   "status": "succeeded",
   "rowCount": 3,
   "artifacts": {
-    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782934160656/run.json",
-    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782934160656/result.json",
-    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782934160656/receipts.json"
+    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782935982512/run.json",
+    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782935982512/result.json",
+    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782935982512/receipts.json"
   },
-  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782934160656",
+  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782935982512",
   "rows": [
     {
       "consequence": "missense",
@@ -255,15 +279,15 @@ pi-bio-agent query examples/connectors/uniprot.json \
 ``` json
 {
   "ok": true,
-  "runId": "query-1782934160753",
+  "runId": "query-1782935982603",
   "status": "succeeded",
   "rowCount": 1,
   "artifacts": {
-    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782934160753/run.json",
-    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782934160753/result.json",
-    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782934160753/receipts.json"
+    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782935982603/run.json",
+    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782935982603/result.json",
+    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782935982603/receipts.json"
   },
-  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782934160753",
+  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782935982603",
   "rows": [
     {
       "primaryAccession": "P04637",
@@ -293,6 +317,16 @@ grounded review are a Pi extension **you** run, on **your** infra. Each
 [example](examples/) carries a recorded, verified run; see [what the
 substrate closes over](docs/closes-over.md) for the topology / Fugu /
 RLM argument.
+
+**And the agent doesn’t just *run* these — it *reads and writes* them.**
+The package ships its `examples/`, `docs/`, and every manifest, so a Pi
+coding-agent that installs it has the whole corpus on disk: it reads a
+connector to learn the pattern, then **authors a new one itself** — a
+new database, a new MCP server, a new HTS source is a *file the agent
+writes*, not a feature request. Manifests are data the agent composes,
+validates (`bio_validate_select`, strict-allowlist admission), runs, and
+— when a workflow stabilizes — promotes into a project-local skill.
+Self-extension is the loop: read → compose → validate → run → keep.
 
 ## Install in Pi
 

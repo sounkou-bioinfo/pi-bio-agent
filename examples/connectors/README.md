@@ -33,11 +33,14 @@ binds no egress, so a connector fails closed until the host allows it. The `http
 
 ## Auth, MCP, and streaming (the reach)
 
-These starter manifests hardcode a plain `Accept: application/json` header, but the `headers` argument of
+These REST manifests hardcode a plain `Accept: application/json` header, but the `headers` argument of
 `ducknng_ncurl_table` is a SQL value — so it *can be composed from a host-owned variable*. That opens the same
 pattern to:
 - **token-gated APIs** — the host sets an `Authorization` header from a `duckdbConfig`/bound variable, never an agent param;
-- **MCP servers** — the HTTP-shaped JSON-RPC of an MCP endpoint is an `ncurl` call (full session/SSE semantics may need a host wrapper);
+- **MCP servers** — an MCP `initialize` / `tools/list` / `tools/call` (JSON-RPC 2.0 over HTTP) **is an `ncurl` POST** — see [`mcp.json`](mcp.json), verified live against a public MCP server; the session id `initialize` returns threads through as a header, and only server-*pushed* notifications need `wss`;
 - **streaming** — SSE / websockets via ducknng `wss`.
 
-Secrets stay on the host boundary; the manifest names the shape, the host supplies the auth.
+Two connectors go beyond REST: [`mcp.json`](mcp.json) (MCP over SQL) and
+[`clinvar-region.json`](clinvar-region.json) — a **ClinVar VCF region read live over HTTP by `duckhts`** (an
+htslib tabix range read, not a whole-file download), where the agent discovers the schema and composes the
+summary. Secrets stay on the host boundary; the manifest names the shape, the host supplies the auth.
