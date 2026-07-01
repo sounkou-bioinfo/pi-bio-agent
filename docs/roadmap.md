@@ -238,6 +238,32 @@ Each slice is end-to-end and deterministic-tested; build the foundation only as 
 Discipline: do NOT build the full state machine (4.2) or the loop (4.3) ahead of 4.0/4.1; each slice earns the
 next. The forbidden/allowed table in §6 is the invariant every slice must already satisfy.
 
+### Reproducibility + long-running execution (the C/L lane) — LIBRARY obligations, not example-driven
+
+Reproducibility and long-running tasks are DOMAIN-INHERENT library goals (bioinformatics jobs run for hours; a
+6-hour result that can't say what produced it is a weak receipt) — so by "library facilities must be correct, not
+consumer-gated" they are required, not deferred. Built interleaved: **C1 → L1 → C2 → L2/L3** (C1 makes a job worth
+running; L1 gives reproduce() a job-shaped target; C2 validates it; L2/L3 make it durable + cancellable).
+
+- **C1 — environment identity + replay seed. BUILT.** `src/core/reproducibility.ts`: a RUNTIME-AGNOSTIC
+  `EnvDescriptor` (composite LAYERS — platform/executable/package_lock/package_snapshot/container_image/duckdb/
+  module; containers/conda/micromamba/renv are equal citizens, none privileged), deterministic `envDigest`,
+  explicit `unknown` (never a fake pin), and an `EnvironmentAttestation` (declared-vs-observed + drift status).
+  `ProcessRunner.describeEnvironment?` (optional probe; `nodeProcessRunner` returns a minimal observed descriptor,
+  no version shell-out); `process.compute` records the attestation in provenance (`env_status:…`). Every run seeds
+  **`replay.json`** — the ACTUAL replay inputs (authored manifest snapshot + resolved process facts, sql/params) so
+  C2 can re-execute, not just compare digests. Does NOT execute anything (no micromamba/container run — C2/host).
+- **L1 — async JobRunner skeleton.** A `JobRunner` port (submit/status/collect/cancel) over the existing
+  `BioRunRecord` (queued/running/waiting/succeeded/failed/cancelled) + job-status observations (`job:<runId>:status`
+  as an as-of slot — the SAME temporal substrate as Phase 4). In-memory fake first; outputs → CAS. No NNG, no cancel yet.
+- **C2 — reproduce().** Re-execute `replay.json` + env attestation, diff result/artifact digests →
+  reproduced/diverged/**not_reproducible** (honest: unknown env / missing snapshot / un-snapshotted live source →
+  not_reproducible WITH reasons, never fake confidence).
+- **L2/L3 — durable job store/resume + cancellation** (process-group kill already exists in `node-process-runner`).
+
+What stays the HOST's (NOT built): micromamba/conda/renv/container EXECUTION, a cluster/queue JobRunner adapter
+(SLURM/k8s — a host adapter like `nodeProcessRunner` is the local one), scheduler, semantic env compatibility.
+
 ### Later (a separate lane, not core): NNG host capabilities — compute distribution + `ducknng-fs`
 
 A **note, not a build** — deferred until a real cross-machine/worker-pool consumer forces it (the anti-idealist
