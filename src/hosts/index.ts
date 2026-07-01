@@ -6,3 +6,5 @@ export * from "./sql-blackboard.js";
 export * from "./pi-project.js";
 export * from "./study-sync.js";
 export * from "./harness-adaptation.js";
+export * from "./job-store.js";
+export * from "./in-memory-job-runner.js";
