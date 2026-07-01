@@ -518,16 +518,16 @@ This list is generated from the extension’s `registerTool()` calls
 <!-- BEGIN GENERATED:tools (scripts/generate-readme.mjs — do not edit by hand) -->
 
 - `bio_create_skill` — Create bio skill
-- `bio_delete_study_note` — Delete bio study note
+- `bio_forget` — Delete bio study note
 - `bio_describe_model` — Describe Pi Bio model
 - `bio_list_duckdb_extensions` — List bio DuckDB extensions
-- `bio_list_study_notes` — List bio study notes
+- `bio_list_memory` — List bio study notes
 - `bio_query` — Run an ad-hoc bio query
-- `bio_read_study_note` — Read bio study note
+- `bio_recall` — Read bio study note
 - `bio_run_operation` — Run a bio operation
 - `bio_study_plan` — Plan bio study
 - `bio_validate_select` — Validate bio SQL SELECT
-- `bio_write_study_note` — Write bio study note
+- `bio_remember` — Write bio study note
   <!-- END GENERATED:tools -->
 
 Generated project-local skills and study notes live under

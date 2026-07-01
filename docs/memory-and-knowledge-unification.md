@@ -54,7 +54,7 @@ store stays attributed and consistent:
 Access stays host-gated (ducknng mTLS / peer-allowlists / exec opt-in). This is **Fugu's inter-workflow shared
 memory** (report §3.2.2) made literal — the same transport story the substrate already had, not a new invention.
 
-**Still open (the wire-up):** the agent tools (`bio_write_study_note`, list/read/walk/delete) still use the
+**Still open (the wire-up):** the agent tools (`bio_remember`, list/read/walk/delete) still use the
 file-based note store; rewiring them to `remember`/`recall`/`listMemory` over `openBioStore` (with `author` = the
 agent, an `asOf` read path, the `study`→`memory` rename, and a legible-file **materialization** of the ledger) is
 the remaining pass.
@@ -214,7 +214,7 @@ commit to the full `KnowledgeUnit`:
   caller's input — and the Pi tool reports that persisted note (not the pre-write one).
 - **`INDEX.md` generated cache** via `renderStudyIndex`/`writeStudyIndex`, rewritten on
   every write and delete (`src/hosts/pi-project.ts`).
-- **`deleteStudyNote`** plus a `bio_delete_study_note` Pi tool — hygiene: prefer updating
+- **`deleteStudyNote`** plus a `bio_forget` Pi tool — hygiene: prefer updating
   by slug, delete only rotten units (`extensions/pi-coding-agent/index.ts`).
 - **Links → graph edges (step 3).** An optional `StudyNote.links` field plus `[[slug]]`
   body links, both collected by the pure `parseStudyNoteLinks` (dedup by `(to, predicate)`,
@@ -234,7 +234,7 @@ commit to the full `KnowledgeUnit`:
   KG-ingest adapter (a new opt-in surface, separately reviewed) decides whether to materialize
   stub nodes and write into `bio_nodes`/`bio_edges`.
 
-`studyNoteIndex` now includes `slug`, and `bio_write_study_note` takes an optional `slug`
+`studyNoteIndex` now includes `slug`, and `bio_remember` takes an optional `slug`
 and returns the persisted note plus a `created` flag.
 
 ## KG-ingest adapter (effectful, gated — implemented)

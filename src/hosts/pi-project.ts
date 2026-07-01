@@ -53,7 +53,7 @@ export async function readStudyNotes(cwd: string): Promise<StudyNote[]> {
     try {
       const parsed = JSON.parse(await fs.readFile(join(root, entry), "utf8"));
       // Fail-closed admission gate: only fully valid notes enter the typed system, so downstream
-      // (scoreStudyNote, studyNoteIndex, bio_read_study_note) can dereference fields safely.
+      // (scoreStudyNote, studyNoteIndex, bio_recall) can dereference fields safely.
       // Pre-slug notes are dropped, not migrated — acceptable while .pi/bio-agent is unversioned working memory.
       if (validateStudyNote(parsed).length === 0) notes.push(parsed as StudyNote);
     } catch {

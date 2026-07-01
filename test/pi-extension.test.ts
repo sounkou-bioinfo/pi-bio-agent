@@ -35,17 +35,17 @@ describe("Pi coding-agent extension", () => {
     const names = tools.map((tool) => tool.name).sort();
     assert.deepEqual(names, [
       "bio_create_skill",
-      "bio_delete_study_note",
       "bio_describe_model",
+      "bio_forget",
       "bio_list_duckdb_extensions",
-      "bio_list_study_notes",
+      "bio_list_memory",
       "bio_query",
-      "bio_read_study_note",
+      "bio_recall",
+      "bio_remember",
       "bio_run_operation",
       "bio_study_plan",
       "bio_validate_select",
       "bio_walk_memory",
-      "bio_write_study_note",
     ]);
   });
 
@@ -59,7 +59,7 @@ describe("Pi coding-agent extension", () => {
     await assert.rejects(() => byName.get("bio_validate_select")!.execute("id", { sql: "DROP TABLE bio_nodes" }), /SELECT/);
   });
 
-  test("study-note and skill tools write project-local files", async () => {
+  test("memory and skill tools persist to the store + a legible file view", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "pi-bio-ext-"));
     const { tools } = loadExtension();
     const byName = new Map(tools.map((tool) => [tool.name, tool]));
@@ -72,7 +72,7 @@ describe("Pi coding-agent extension", () => {
     }, undefined, undefined, ctx);
     assert.match(await readFile(skill.details.path, "utf8"), /name: hpo-grounding/);
 
-    const wrote = await byName.get("bio_write_study_note")!.execute("id", {
+    const wrote = await byName.get("bio_remember")!.execute("id", {
       kind: "cheatsheet",
       title: "OpenTargets identifiers",
       hook: "Use before GraphQL evidence queries.",
@@ -83,14 +83,14 @@ describe("Pi coding-agent extension", () => {
     // written to the ONE store (attributed) AND materialized as a legible file view
     assert.equal(wrote.details.stored, "agent:memory:opentargets-identifiers");
     assert.match(await readFile(wrote.details.materialized, "utf8"), /opentargets-identifiers/);
-    const listed = await byName.get("bio_list_study_notes")!.execute("id", { query: "graphql" }, undefined, undefined, ctx);
+    const listed = await byName.get("bio_list_memory")!.execute("id", { query: "graphql" }, undefined, undefined, ctx);
     assert.equal(listed.details.notes[0].slug, wrote.details.note.slug);
-    const read = await byName.get("bio_read_study_note")!.execute("id", { id: "opentargets-identifiers" }, undefined, undefined, ctx);
+    const read = await byName.get("bio_recall")!.execute("id", { id: "opentargets-identifiers" }, undefined, undefined, ctx);
     assert.equal(read.details.title, "OpenTargets identifiers");
 
     // forget = temporal retraction: gone from recall(now), but the store keeps the history
-    const forgotten = await byName.get("bio_delete_study_note")!.execute("id", { slug: "opentargets-identifiers" }, undefined, undefined, ctx);
+    const forgotten = await byName.get("bio_forget")!.execute("id", { slug: "opentargets-identifiers" }, undefined, undefined, ctx);
     assert.equal(forgotten.details.forgotten, true);
-    await assert.rejects(() => byName.get("bio_read_study_note")!.execute("id", { id: "opentargets-identifiers" }, undefined, undefined, ctx), /no memory/);
+    await assert.rejects(() => byName.get("bio_recall")!.execute("id", { id: "opentargets-identifiers" }, undefined, undefined, ctx), /no memory/);
   });
 });

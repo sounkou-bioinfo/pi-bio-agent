@@ -34,7 +34,7 @@ const BIO_ORIENTATION = [
   "workflows). TypeScript is only the interpreter; the agent writes the SQL.",
   "",
   "How to work:",
-  "- DISCOVER cheaply: your MEMORY is the index — check `bio_list_study_notes` / `bio_walk_memory` FIRST. For",
+  "- DISCOVER cheaply: your MEMORY is the index — check `bio_list_memory` / `bio_walk_memory` FIRST. For",
   "  manifests, list `examples/` for names, then call `bio_describe_model` with ONE `manifestPath` (a local path OR",
   "  an http(s) URL) to learn its resources, resolvers, and RUNNABLE operation ids. Never read every example, and",
   "  never parse raw manifest JSON. With no argument `bio_describe_model` describes the global model;",
@@ -47,9 +47,9 @@ const BIO_ORIENTATION = [
   "  binds the built-in resolvers `duckdb.file_scan` and `duckhts.read_bcf`; network (`ncurl_table`) and",
   "  out-of-process `process.compute` are HOST capabilities that fail closed unless the operator granted them.",
   "- REMEMBER (machine studying): memory is an append-only, as-of, ATTRIBUTED store (the same temporal ledger as",
-  "  facts) — `bio_write_study_note` (link with `[[slug]]`; re-writing supersedes, never clobbers) / `bio_list_study_notes`",
-  "  / `bio_walk_memory` (walk the graph) / `bio_read_study_note`. list/read take an `asOf` time (time-travel), and",
-  "  `bio_delete_study_note` is a RETRACTION (recall as-of earlier still sees it) — memory is never erased. Prefer",
+  "  facts) — `bio_remember` (link with `[[slug]]`; re-writing supersedes, never clobbers) / `bio_list_memory`",
+  "  / `bio_walk_memory` (walk the graph) / `bio_recall`. list/read take an `asOf` time (time-travel), and",
+  "  `bio_forget` is a RETRACTION (recall as-of earlier still sees it) — memory is never erased. Prefer",
   "  walking your own memory over re-reading the corpus. Promote a stable workflow to a skill with `bio_create_skill`.",
 ].join("\n");
 
@@ -62,7 +62,7 @@ async function memoryIndexBlock(cwd: string): Promise<string> {
     const mems = await withStore(cwd, (conn) => listMemory(conn, MEMORY_NOW));
     if (mems.length === 0) return "";
     const lines = mems.slice(0, 30).map((m) => `- ${m.slug} — ${m.hook}${m.author ? ` (${m.author})` : ""}`);
-    return `\n\n[memory index] Your current memory (recall with bio_read_study_note / bio_walk_memory before re-deriving):\n${lines.join("\n")}`;
+    return `\n\n[memory index] Your current memory (recall with bio_recall / bio_walk_memory before re-deriving):\n${lines.join("\n")}`;
   } catch {
     return "";
   }
@@ -252,8 +252,8 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
   });
 
   pi.registerTool({
-    name: "bio_write_study_note",
-    label: "Write bio study note",
+    name: "bio_remember",
+    label: "Remember (memory note)",
     description: "Persist an indexed project-local study note under .pi/bio-agent/study-notes. Upserts by slug, so re-writing the same slug updates the note in place. Use for corpus maps, cheatsheets, concept maps, probes, and memories that are too volatile or broad to become skills.",
     parameters: Type.Object({
       kind: Type.String({ description: "corpus_map | cheatsheet | concept_map | question_bank | rubric | worked_example | failure_case | memory_note | skill_draft | index" }),
@@ -280,8 +280,8 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
   });
 
   pi.registerTool({
-    name: "bio_list_study_notes",
-    label: "List bio study notes",
+    name: "bio_list_memory",
+    label: "List memory",
     description: "List or search project-local study notes. This is the cheap memory index to scan before reading full notes or creating new skills.",
     parameters: Type.Object({
       query: Type.Optional(Type.String()),
@@ -322,9 +322,9 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
   });
 
   pi.registerTool({
-    name: "bio_read_study_note",
-    label: "Read bio study note",
-    description: "Read a memory note's full content by slug from the store, optionally AS OF a past time (time-travel). Find slugs with bio_list_study_notes / bio_walk_memory.",
+    name: "bio_recall",
+    label: "Recall memory note",
+    description: "Read a memory note's full content by slug from the store, optionally AS OF a past time (time-travel). Find slugs with bio_list_memory / bio_walk_memory.",
     parameters: Type.Object({
       id: Type.String({ description: "Note slug." }),
       asOf: Type.Optional(Type.String({ description: "ISO time — read the revision that was current AS OF then (default now)." })),
@@ -337,9 +337,9 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
   });
 
   pi.registerTool({
-    name: "bio_delete_study_note",
-    label: "Delete bio study note",
-    description: "Forget a memory note by slug — a TEMPORAL RETRACTION, not destruction: recall(now) becomes null and it drops from the current list, but recall AS OF an earlier time still sees it (memory is never erased). Prefer updating by slug via bio_write_study_note; forget only rotten units.",
+    name: "bio_forget",
+    label: "Forget memory note",
+    description: "Forget a memory note by slug — a TEMPORAL RETRACTION, not destruction: recall(now) becomes null and it drops from the current list, but recall AS OF an earlier time still sees it (memory is never erased). Prefer updating by slug via bio_remember; forget only rotten units.",
     parameters: Type.Object({ slug: Type.String({ description: "Slug of the note to forget." }) }),
     async execute(_id, params: { slug: string }, _signal, _onUpdate, ctx) {
       await withStore(ctx.cwd, (conn) => forget(conn, params.slug, systemClock(), author));
