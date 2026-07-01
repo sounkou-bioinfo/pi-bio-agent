@@ -24,6 +24,14 @@
     "README.md",
     "LICENSE"
   ],
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+    "./core": { "types": "./dist/core/index.d.ts", "import": "./dist/core/index.js" },
+    "./duckdb": { "types": "./dist/duckdb/index.d.ts", "import": "./dist/duckdb/index.js" },
+    "./hosts": { "types": "./dist/hosts/index.d.ts", "import": "./dist/hosts/index.js" }
+  },
   "bin": {
     "pi-bio-agent": "dist/cli/bin.js"
   },
