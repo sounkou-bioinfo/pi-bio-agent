@@ -70,6 +70,24 @@ describe("example: files-only process.compute — the table is the captured-arti
     assert.equal(out.ok, false, "artifacts mode requires at least one declared output -> fail closed");
   });
 
+  test("a declared output path that escapes the work dir fails closed (cross-platform isolation)", async () => {
+    const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-fo-"));
+    const manifest = {
+      schema: "pi-bio.domain_pack_manifest.v1", id: "fo-esc", version: "0.0.0", title: "x", description: "x", domains: ["statistics"],
+      provides: {
+        resolvers: [{ id: "process.compute", version: "0.1.0", title: "x", description: "x", output: { mode: "table" } }],
+        resources: [{ id: "tracks", title: "x", kind: "virtual", resolver: "process.compute", params: {
+          table: "tracks", command: ["sh", "-c", "true"], resultTable: "artifacts", outputs: [{ name: "escape", path: "../escape.txt", kind: "file" }],
+        } }],
+      },
+    };
+    const mpath = join(cwd, "manifest.json");
+    await fs.writeFile(mpath, JSON.stringify(manifest));
+    const casDir = await fs.mkdtemp(join(tmpdir(), "pi-bio-fo-cas-"));
+    const out = await runBioQueryFromManifest({ cwd, dbPath: ":memory:", manifestPath: mpath, sql: "SELECT * FROM tracks", process: { runner: nodeProcessRunner() }, cas: fsCasStore(casDir), runId: "fo-esc", now: "T1" });
+    assert.equal(out.ok, false, "a '..' output path must be rejected");
+  });
+
   test("a malformed params.extensions fails closed (not silently dropped)", async () => {
     const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-fo-"));
     const manifest = {

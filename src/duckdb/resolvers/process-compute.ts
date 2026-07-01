@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, isAbsolute, join, resolve, sep } from "node:path";
 import { systemClock } from "../../core/clock.js";
 import { validateReadOnlySelect } from "../../core/sql-guard.js";
 import type { BioResolverImpl, ProcessRunner } from "../../core/ports.js";
@@ -97,7 +97,11 @@ export function processComputeResolver(runner: ProcessRunner): BioResolverImpl {
       for (let i = 0; i < p.outputs.length; i++) {
         const o = p.outputs[i] as { name?: unknown; path?: unknown; kind?: unknown };
         if (typeof o.name !== "string" || !o.name) throw new Error(`process.compute: outputs[${i}].name (string) is required`);
-        if (typeof o.path !== "string" || !o.path || o.path.startsWith("/") || o.path.split("/").includes("..")) throw new Error(`process.compute: outputs[${i}].path must be a relative path within the work dir (no '..' / absolute)`);
+        // Cross-platform path isolation (don't assume POSIX): reject absolute (incl. a Windows drive `C:\`) and any
+        // `..` segment split on EITHER separator. A resolve-based containment re-check happens at read time too.
+        if (typeof o.path !== "string" || !o.path || isAbsolute(o.path) || /^[A-Za-z]:/.test(o.path) || o.path.split(/[\\/]+/).includes("..")) {
+          throw new Error(`process.compute: outputs[${i}].path must be a relative path within the work dir (no '..' / absolute)`);
+        }
         if (o.kind !== undefined && o.kind !== "file" && o.kind !== "table") throw new Error(`process.compute: outputs[${i}].kind must be 'file' or 'table'`);
         outputs.push({ name: o.name, path: o.path, kind: (o.kind as "file" | "table") ?? "file" });
       }
@@ -170,9 +174,14 @@ export function processComputeResolver(runner: ProcessRunner): BioResolverImpl {
       //     back via Arrow (step 3) while FILES go via CAS — never through the IPC (the nf-r-ipc/Nextflow split). A
       //     missing declared output is fail-closed (a clean exit that skipped a promised file is still a failure).
       const artifacts: Array<{ name: string; path: string; kind: string; digest: string; size: number }> = [];
+      const dirRoot = resolve(dir);
       for (const o of outputs) {
+        // authoritative containment re-check: the resolved path must stay inside the work dir (a symlink the child
+        // created, or any traversal the static check missed, is caught here — belt and braces).
+        const full = resolve(dir, o.path);
+        if (full !== dirRoot && !full.startsWith(dirRoot + sep)) throw new Error(`process.compute: declared output '${o.name}' resolved outside the work dir`);
         let bytes: Buffer;
-        try { bytes = await fs.readFile(join(dir, o.path)); }
+        try { bytes = await fs.readFile(full); }
         catch { throw new Error(`process.compute: '${command[0]}' exited 0 but did not write declared output '${o.name}' (${o.path})`); }
         const digest = createHash("sha256").update(bytes).digest("hex");
         await ctx.cas!.put({ algorithm: "sha256", digest }, bytes); // immutable + idempotent

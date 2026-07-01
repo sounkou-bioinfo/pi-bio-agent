@@ -78,23 +78,40 @@ export function envDigest(env: EnvDescriptor): `sha256:${string}` {
   return `sha256:${createHash("sha256").update(canonicalEnvDescriptor(env)).digest("hex")}`;
 }
 
-/** Structural validation — returns the list of problems (empty = valid). A boundary helper, so it fails loud. */
-export function validateEnvDescriptor(env: EnvDescriptor): string[] {
+const SHA256 = /^sha256:[0-9a-f]{64}$/; // digest-shaped fields are sha256-first (matches the CAS + receipt digests)
+
+/** Structural validation of UNTRUSTED input (a manifest may supply `params.environment`) — returns the list of
+ *  problems (empty = valid). A boundary helper, so it takes `unknown` and fails loud with structured errors rather
+ *  than throwing on a bad shape. Fields named `digest` must be `sha256:<64 hex>` (fail closed, not "banana"). */
+export function validateEnvDescriptor(input: unknown): string[] {
   const errs: string[] = [];
-  if (env?.schema !== ENV_DESCRIPTOR_SCHEMA) errs.push(`env descriptor schema must be '${ENV_DESCRIPTOR_SCHEMA}'`);
-  if (env?.kind !== "unknown" && env?.kind !== "composite") errs.push("env descriptor kind must be 'unknown' or 'composite'");
-  if (!Array.isArray(env?.layers)) { errs.push("env descriptor layers must be an array"); return errs; }
+  if (typeof input !== "object" || input === null || Array.isArray(input)) return ["env descriptor must be an object"];
+  const env = input as { schema?: unknown; kind?: unknown; layers?: unknown };
+  if (env.schema !== ENV_DESCRIPTOR_SCHEMA) errs.push(`env descriptor schema must be '${ENV_DESCRIPTOR_SCHEMA}'`);
+  if (env.kind !== "unknown" && env.kind !== "composite") errs.push("env descriptor kind must be 'unknown' or 'composite'");
+  if (!Array.isArray(env.layers)) { errs.push("env descriptor layers must be an array"); return errs; }
   if (env.kind === "unknown" && env.layers.length > 0) errs.push("an 'unknown' env descriptor must have no layers (use 'composite' when layers are present)");
   if (env.kind === "composite" && env.layers.length === 0) errs.push("a 'composite' env descriptor must have at least one layer (use 'unknown' for no info)");
-  env.layers?.forEach((l, i) => {
-    if (!ENV_LAYER_KINDS.includes(l.kind as (typeof ENV_LAYER_KINDS)[number])) { errs.push(`layers[${i}]: unknown layer kind '${(l as { kind?: string }).kind}'`); return; }
-    if (l.kind === "executable" && !l.name) errs.push(`layers[${i}] (executable): name is required`);
-    if (l.kind === "package_lock" && (!l.manager || !l.digest)) errs.push(`layers[${i}] (package_lock): manager and digest are required`);
+  const digest = (v: unknown, label: string, required: boolean): void => {
+    if (v === undefined || v === null) { if (required) errs.push(`${label} is required`); return; }
+    if (typeof v !== "string" || !SHA256.test(v)) errs.push(`${label} must be 'sha256:<64 hex>'`);
+  };
+  (env.layers as unknown[]).forEach((lu, i) => {
+    if (typeof lu !== "object" || lu === null) { errs.push(`layers[${i}] must be an object`); return; }
+    const l = lu as Record<string, unknown>;
+    if (!ENV_LAYER_KINDS.includes(l.kind as (typeof ENV_LAYER_KINDS)[number])) { errs.push(`layers[${i}]: unknown layer kind '${String(l.kind)}'`); return; }
+    if (l.kind === "executable") { if (!l.name) errs.push(`layers[${i}] (executable): name is required`); digest(l.digest, `layers[${i}] (executable).digest`, false); }
+    if (l.kind === "package_lock") { if (!l.manager) errs.push(`layers[${i}] (package_lock): manager is required`); digest(l.digest, `layers[${i}] (package_lock).digest`, true); }
     if (l.kind === "package_snapshot") {
       if (!l.manager) errs.push(`layers[${i}] (package_snapshot): manager is required`);
       if (!Array.isArray(l.packages)) errs.push(`layers[${i}] (package_snapshot): packages must be an array`);
-      else l.packages.forEach((p, j) => { if (!p.name) errs.push(`layers[${i}].packages[${j}]: name is required`); });
+      else (l.packages as unknown[]).forEach((pu, j) => {
+        const p = (pu ?? {}) as Record<string, unknown>;
+        if (!p.name) errs.push(`layers[${i}].packages[${j}]: name is required`);
+        digest(p.digest, `layers[${i}].packages[${j}].digest`, false);
+      });
     }
+    if (l.kind === "container_image") digest(l.digest, `layers[${i}] (container_image).digest`, false);
     if (l.kind === "module" && !l.name) errs.push(`layers[${i}] (module): name is required`);
   });
   return errs;

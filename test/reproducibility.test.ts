@@ -65,12 +65,25 @@ describe("C1a validateEnvDescriptor", () => {
     assert.deepEqual(validateEnvDescriptor(unknownEnvDescriptor()), []);
   });
   test("catches: bad schema, empty composite, unknown-with-layers, missing required layer fields", () => {
-    assert.ok(validateEnvDescriptor({ schema: "nope" as never, kind: "composite", layers: [platform] }).some((e) => /schema/.test(e)));
+    assert.ok(validateEnvDescriptor({ schema: "nope", kind: "composite", layers: [platform] }).some((e) => /schema/.test(e)));
     assert.ok(validateEnvDescriptor({ schema: ENV_DESCRIPTOR_SCHEMA, kind: "composite", layers: [] }).some((e) => /at least one layer/.test(e)));
     assert.ok(validateEnvDescriptor({ schema: ENV_DESCRIPTOR_SCHEMA, kind: "unknown", layers: [platform] }).some((e) => /no layers/.test(e)));
     assert.ok(validateEnvDescriptor(env([{ kind: "executable", name: "" } as EnvLayer])).some((e) => /executable.*name/.test(e)));
     assert.ok(validateEnvDescriptor(env([{ kind: "package_lock", manager: "conda", digest: "" } as EnvLayer])).some((e) => /package_lock/.test(e)));
     assert.ok(validateEnvDescriptor(env([{ kind: "bogus" } as unknown as EnvLayer])).some((e) => /unknown layer kind/.test(e)));
+  });
+  test("takes UNKNOWN input (untrusted manifest data) without throwing", () => {
+    assert.deepEqual(validateEnvDescriptor(null).length > 0, true);
+    assert.deepEqual(validateEnvDescriptor("not an object").length > 0, true);
+    assert.deepEqual(validateEnvDescriptor([]).length > 0, true);
+    assert.ok(validateEnvDescriptor({ schema: ENV_DESCRIPTOR_SCHEMA, kind: "composite", layers: ["oops"] }).some((e) => /must be an object/.test(e)));
+  });
+  test("digest-shaped fields must be sha256:<64 hex> (fail closed, not 'banana')", () => {
+    const good = "sha256:" + "a".repeat(64);
+    assert.ok(validateEnvDescriptor(env([{ kind: "package_lock", manager: "conda", digest: "banana" } as EnvLayer])).some((e) => /package_lock.*digest.*sha256/.test(e)));
+    assert.deepEqual(validateEnvDescriptor(env([{ kind: "package_lock", manager: "conda", digest: good } as EnvLayer])), []);
+    assert.ok(validateEnvDescriptor(env([{ kind: "container_image", digest: "nope" } as EnvLayer])).some((e) => /container_image.*digest.*sha256/.test(e)));
+    assert.ok(validateEnvDescriptor(env([{ kind: "package_snapshot", manager: "renv", packages: [{ name: "coloc", digest: "xx" }] } as EnvLayer])).some((e) => /packages\[0\].digest.*sha256/.test(e)));
   });
 });
 
