@@ -55,8 +55,7 @@ describe("example: files-only process.compute — the table is the captured-arti
   test("resultTable 'artifacts' with no declared outputs fails closed", async () => {
     const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-fo-"));
     const manifest = {
-      schema: "pi-bio.domain_pack_manifest.v1", id: "fo-bad", version: "0.0.0", title: "x", description: "x", domains: ["statistics"],
-      provides: {
+      schema: "pi-bio.manifest.v1", id: "fo-bad", version: "0.0.0", title: "x", description: "x",       provides: {
         resolvers: [{ id: "process.compute", version: "0.1.0", title: "x", description: "x", output: { mode: "table" } }],
         resources: [{ id: "tracks", title: "x", kind: "virtual", resolver: "process.compute", params: { table: "tracks", command: ["sh", "-c", "true"], resultTable: "artifacts" } }],
       },
@@ -74,8 +73,7 @@ describe("example: files-only process.compute — the table is the captured-arti
   test("a declared output path that escapes the work dir fails closed (cross-platform isolation)", async () => {
     const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-fo-"));
     const manifest = {
-      schema: "pi-bio.domain_pack_manifest.v1", id: "fo-esc", version: "0.0.0", title: "x", description: "x", domains: ["statistics"],
-      provides: {
+      schema: "pi-bio.manifest.v1", id: "fo-esc", version: "0.0.0", title: "x", description: "x",       provides: {
         resolvers: [{ id: "process.compute", version: "0.1.0", title: "x", description: "x", output: { mode: "table" } }],
         resources: [{ id: "tracks", title: "x", kind: "virtual", resolver: "process.compute", params: {
           table: "tracks", command: ["sh", "-c", "true"], resultTable: "artifacts", outputs: [{ name: "escape", path: "../escape.txt", kind: "file" }],
@@ -96,8 +94,7 @@ describe("example: files-only process.compute — the table is the captured-arti
     const secret = join(secretDir, "passwd");
     await fs.writeFile(secret, "root:x:0:0:secret\n");
     const manifest = {
-      schema: "pi-bio.domain_pack_manifest.v1", id: "fo-sym", version: "0.0.0", title: "x", description: "x", domains: ["statistics"],
-      provides: {
+      schema: "pi-bio.manifest.v1", id: "fo-sym", version: "0.0.0", title: "x", description: "x",       provides: {
         resolvers: [{ id: "process.compute", version: "0.1.0", title: "x", description: "x", output: { mode: "table" } }],
         resources: [{ id: "tracks", title: "x", kind: "virtual", resolver: "process.compute", params: {
           table: "tracks", command: ["sh", "-c", `ln -s '${secret}' out.txt`], resultTable: "artifacts",
@@ -119,8 +116,7 @@ describe("example: files-only process.compute — the table is the captured-arti
   test("a malformed params.extensions fails closed (not silently dropped)", async () => {
     const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-fo-"));
     const manifest = {
-      schema: "pi-bio.domain_pack_manifest.v1", id: "fo-ext", version: "0.0.0", title: "x", description: "x", domains: ["statistics"],
-      provides: {
+      schema: "pi-bio.manifest.v1", id: "fo-ext", version: "0.0.0", title: "x", description: "x",       provides: {
         resolvers: [{ id: "process.compute", version: "0.1.0", title: "x", description: "x", output: { mode: "table" } }],
         // extensions should be an array of strings; a bare string is a typo the resolver must reject
         resources: [{ id: "tracks", title: "x", kind: "virtual", resolver: "process.compute", params: { table: "tracks", command: ["sh", "-c", "true"], resultTable: "artifacts", outputs: [{ name: "o", path: "o.txt", kind: "file" }], extensions: "foo" } }],

@@ -14,7 +14,6 @@ const validTool: BioToolSpec = {
   version: "0.1.0",
   title: "Echo",
   description: "Echo a value for tests.",
-  domains: ["testing"],
   determinism: "deterministic",
   inputs: [{ name: "input", kind: "question", required: true }],
   outputs: [{ name: "output", kind: "fact_bundle" }],
@@ -28,7 +27,6 @@ const validOperation: BioOperationSpec = {
   version: "0.1.0",
   title: "Classify variants",
   description: "Classify resolved variants over DuckDB.",
-  domains: ["genomics", "variants"],
   transport: "duckdb.sql",
   inputSchema: { type: "object" },
   outputSchema: { type: "object" },
@@ -81,7 +79,6 @@ describe("BioOperationSpec validation", () => {
       version: validOperation.version,
       title: validOperation.title,
       description: validOperation.description,
-      domains: validOperation.domains,
       transport: validOperation.transport,
     }]);
   });

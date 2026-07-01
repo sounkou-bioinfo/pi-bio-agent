@@ -8,7 +8,7 @@ import type { SqlConn } from "./ports.js";
 // goes through decideGrounding (membership against members[].id); ordering is just the rank column.
 //
 // This is the bet exactly: a scale is data (a ranked TermSet in the manifest); the only TS is generic —
-// validate the order (in validateDomainPackManifest) and project it to a table (here).
+// validate the order (in validateBioManifest) and project it to a table (here).
 
 export const SCALE_MEMBERS_TABLE = "scale_members";
 

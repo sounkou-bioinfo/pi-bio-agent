@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { DuckDBInstance } from "@duckdb/node-api";
-import { createBioRegistry, type DomainPackManifest } from "../src/core/manifest.js";
+import { createBioRegistry, type BioManifest } from "../src/core/manifest.js";
 import type { SqlConn } from "../src/core/ports.js";
 import { runOperation } from "../src/core/operations.js";
 import { defineBioOperationSpec } from "../src/core/operation-spec.js";
@@ -29,13 +29,12 @@ const RARE_HIGH_IMPACT_SQL = [
   "SELECT bucket, CAST(count(*) AS INTEGER) AS n FROM classified GROUP BY bucket ORDER BY bucket",
 ].join("\n");
 
-const manifest: DomainPackManifest = {
-  schema: "pi-bio.domain_pack_manifest.v1",
+const manifest: BioManifest = {
+  schema: "pi-bio.manifest.v1",
   id: "rare-high-impact-variants-csv",
   version: "0.1.0",
   title: "Rare high-impact variants (CSV provider)",
   description: "Rare loss-of-function variants over a CSV variant record, abstaining on unknown frequency.",
-  domains: ["genomics"],
   provides: {
     resolvers: [
       { id: "duckdb.file_scan", version: "0.1.0", title: "DuckDB file scan", description: "Read a DuckDB-native file (csv/tsv/parquet/json) into a table.", output: { mode: "table" } },
@@ -48,7 +47,7 @@ const manifest: DomainPackManifest = {
     operations: [defineBioOperationSpec({
       schema: "pi-bio.operation_spec.v1", id: "rare_high_impact.report", version: "0.1.0",
       title: "Rare high-impact variant classification", description: "Classify variants, abstaining on unknown frequency.",
-      domains: ["genomics"], transport: "duckdb.sql", inputSchema: { type: "object" },
+      transport: "duckdb.sql", inputSchema: { type: "object" },
       sql: { sqlTemplate: RARE_HIGH_IMPACT_SQL, readOnly: true, singleStatement: true, requiredResources: ["annotated_variants", "so_loss_of_function"] },
     })],
   },

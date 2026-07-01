@@ -11,9 +11,8 @@ import { nodeProcessRunner } from "../src/process/node-process-runner.js";
 // pal review: a non-positive timeoutMs must NOT silently disable the timeout, and params.env must be strings.
 
 const BASE = {
-  schema: "pi-bio.domain_pack_manifest.v1", id: "compute-guards", version: "0.1.0",
+  schema: "pi-bio.manifest.v1", id: "compute-guards", version: "0.1.0",
   title: "process.compute param guards", description: "fail-closed param validation for process.compute",
-  domains: ["statistics"],
   provides: {
     resolvers: [{ id: "process.compute", version: "0.1.0", title: "compute", description: "compute", output: { mode: "table" } }],
   },

@@ -58,13 +58,13 @@
       "path": "docs/domain-model.md",
       "type": "Reference",
       "title": "Domain model",
-      "description": "Read before adding any core type or domain pack — kernel slots, resources/CAS/resolvers, temporality, domain packs, and execution backends.",
+      "description": "Read before adding any core type or manifest — kernel slots, resources/CAS/resolvers, temporality, manifests, and execution backends.",
       "tags": [
         "domain-model",
         "resources",
         "resolvers",
         "temporality",
-        "domain-packs",
+        "manifests",
         "execution-backends"
       ]
     },

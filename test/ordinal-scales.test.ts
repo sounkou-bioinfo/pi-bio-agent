@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { DuckDBInstance } from "@duckdb/node-api";
-import { createBioRegistry, type DomainPackManifest } from "../src/core/manifest.js";
+import { createBioRegistry, type BioManifest } from "../src/core/manifest.js";
 import type { SqlConn } from "../src/core/ports.js";
 import { runOperation } from "../src/core/operations.js";
 import { materializeScaleMembers } from "../src/core/scales.js";
@@ -40,10 +40,9 @@ const SQL = [
   "ORDER BY s.rank DESC",
 ].join("\n");
 
-const manifest: DomainPackManifest = {
-  schema: "pi-bio.domain_pack_manifest.v1", id: "ordinal-scale-demo", version: "0.1.0",
+const manifest: BioManifest = {
+  schema: "pi-bio.manifest.v1", id: "ordinal-scale-demo", version: "0.1.0",
   title: "Ordinal scale demo", description: "Threshold variants on the ACMG ordinal scale by rank.",
-  domains: ["genomics"],
   provides: {
     resolvers: [{ id: "inline.table", version: "0.1.0", title: "Inline table", description: "Materialize a declared inline table.", output: { mode: "table" } }],
     resources: [{ id: "variant_calls", title: "Variant calls", kind: "virtual", resolver: "inline.table", params: { table: "variant_calls", columns: [{ name: "variant_key", type: "TEXT" }, { name: "acmg_classification", type: "TEXT" }], rows: VARIANTS } }],
@@ -51,7 +50,7 @@ const manifest: DomainPackManifest = {
     operations: [{
       schema: "pi-bio.operation_spec.v1", id: "acmg.threshold", version: "0.1.0",
       title: "ACMG threshold", description: "Variants at or above likely_pathogenic by ACMG rank.",
-      domains: ["genomics"], transport: "duckdb.sql", inputSchema: { type: "object" },
+      transport: "duckdb.sql", inputSchema: { type: "object" },
       sql: { sqlTemplate: SQL, readOnly: true, requiredResources: ["variant_calls"] },
     }],
   },

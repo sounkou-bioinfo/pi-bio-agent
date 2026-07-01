@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { DomainPackManifest } from "../src/core/manifest.js";
+import type { BioManifest } from "../src/core/manifest.js";
 import { runBioQueryFromManifest } from "../src/hosts/run-store.js";
 
 // The runner connection-init hook (pal #8's gap): a host bootstraps the DuckDB connection ONCE before
@@ -12,13 +12,12 @@ import { runBioQueryFromManifest } from "../src/hosts/run-store.js";
 // agent never supplies it. Offline test: init creates a table the query then reads, proving init ran first.
 
 // a resource-free manifest: the query runs over whatever init set up on the connection
-const manifest: DomainPackManifest = {
-  schema: "pi-bio.domain_pack_manifest.v1",
+const manifest: BioManifest = {
+  schema: "pi-bio.manifest.v1",
   id: "init-sql-host",
   version: "0.1.0",
   title: "Init SQL (host)",
   description: "No resources; the host bootstraps the connection and the query reads what it set up.",
-  domains: ["genomics"],
   provides: {},
 };
 

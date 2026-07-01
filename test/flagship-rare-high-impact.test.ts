@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { DuckDBInstance } from "@duckdb/node-api";
-import { createBioRegistry, type DomainPackManifest } from "../src/core/manifest.js";
+import { createBioRegistry, type BioManifest } from "../src/core/manifest.js";
 import type { SqlConn } from "../src/core/ports.js";
 import { runOperation } from "../src/core/operations.js";
 import { inlineTableResolver } from "./support/inline-table-resolver.js";
@@ -38,13 +38,12 @@ const RARE_HIGH_IMPACT_SQL = [
 ].join("\n");
 
 // The whole "skill" is this manifest — pure data. No code is question-specific.
-const flagshipManifest: DomainPackManifest = {
-  schema: "pi-bio.domain_pack_manifest.v1",
+const flagshipManifest: BioManifest = {
+  schema: "pi-bio.manifest.v1",
   id: "rare-high-impact-variants",
   version: "0.1.0",
   title: "Rare high-impact variants",
   description: "Count frequency-known rare loss-of-function variants, abstaining on unknown frequency.",
-  domains: ["genomics"],
   provides: {
     resources: [
       { id: "annotated_variants", title: "Annotated variants", kind: "virtual", resolver: "inline.table", params: { table: "annotated_variants", columns: [{ name: "variant_key", type: "TEXT" }, { name: "consequence", type: "TEXT" }, { name: "allele_frequency", type: "DOUBLE" }, { name: "clinical_significance", type: "TEXT" }], rows: ANNOTATED_VARIANTS } },
@@ -54,7 +53,7 @@ const flagshipManifest: DomainPackManifest = {
     operations: [defineBioOperationSpec({
       schema: "pi-bio.operation_spec.v1", id: "rare_high_impact.report", version: "0.1.0",
       title: "Rare high-impact variant classification", description: "Classify variants, abstaining on unknown frequency.",
-      domains: ["genomics"], transport: "duckdb.sql", inputSchema: { type: "object" },
+      transport: "duckdb.sql", inputSchema: { type: "object" },
       sql: { sqlTemplate: RARE_HIGH_IMPACT_SQL, readOnly: true, singleStatement: true, requiredResources: ["annotated_variants", "so_loss_of_function"] },
       notes: [
         "Variants with unknown allele frequency are abstained from, not counted as rare.",

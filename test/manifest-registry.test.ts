@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { DuckDBInstance } from "@duckdb/node-api";
-import { createBioRegistry, validateDomainPackManifest, type DomainPackManifest } from "../src/core/manifest.js";
+import { createBioRegistry, validateBioManifest, type BioManifest } from "../src/core/manifest.js";
 import type { SqlConn } from "../src/core/ports.js";
 import { duckdbNodeConn } from "../src/duckdb/node-api.js";
 import { inlineTableResolver } from "./support/inline-table-resolver.js";
@@ -9,14 +9,13 @@ import { inlineTableResolver } from "./support/inline-table-resolver.js";
 const inlineResolver = { id: "inline.table", version: "0.1.0", title: "Inline table", description: "Materialize an inline table.", output: { mode: "table" as const } };
 const tableParams = (table: string) => ({ table, columns: [{ name: "id", type: "TEXT" }], rows: [{ id: "x" }] });
 
-function baseManifest(over: Partial<DomainPackManifest["provides"]> = {}): DomainPackManifest {
+function baseManifest(over: Partial<BioManifest["provides"]> = {}): BioManifest {
   return {
-    schema: "pi-bio.domain_pack_manifest.v1",
+    schema: "pi-bio.manifest.v1",
     id: "pack-a",
     version: "0.1.0",
     title: "Pack A",
     description: "A test pack.",
-    domains: ["genomics"],
     provides: {
       resolvers: [inlineResolver],
       resources: [{ id: "t1", title: "T1", kind: "virtual", resolver: "inline.table", params: tableParams("t1") }],
@@ -28,44 +27,44 @@ async function memoryConn(): Promise<SqlConn> {
   return duckdbNodeConn(await (await DuckDBInstance.create(":memory:")).connect());
 }
 
-describe("validateDomainPackManifest: fail closed", () => {
+describe("validateBioManifest: fail closed", () => {
   test("accepts a well-formed manifest", () => {
-    assert.deepEqual(validateDomainPackManifest(baseManifest()), []);
+    assert.deepEqual(validateBioManifest(baseManifest()), []);
   });
 
   test("strict admission: rejects smuggled sprawl keys at every level (no inert JSON)", () => {
     // a manifest is the program — cut surface (reportKind/requiredColumns/columnRoles/mapper) must not ride
     // along as ignored keys that a future reader might honor; an unknown key fails closed.
     const topLevel = { ...baseManifest(), reportKind: "bucketed" } as never;
-    assert.ok(validateDomainPackManifest(topLevel).some((e) => e.includes("unknown key 'reportKind'")));
+    assert.ok(validateBioManifest(topLevel).some((e) => e.includes("unknown key 'reportKind'")));
 
     const onResource = baseManifest({ resources: [{ id: "t1", title: "T1", kind: "virtual", resolver: "inline.table", params: tableParams("t1"), columnRoles: { af: "x" } } as never] });
-    assert.ok(validateDomainPackManifest(onResource).some((e) => e.includes("unknown key 'columnRoles'")));
+    assert.ok(validateBioManifest(onResource).some((e) => e.includes("unknown key 'columnRoles'")));
 
     const onSql = baseManifest({ operations: [{
-      schema: "pi-bio.operation_spec.v1", id: "op1", version: "0.1.0", title: "Op", description: "d", domains: ["genomics"],
-      transport: "duckdb.sql", inputSchema: { type: "object" },
+      schema: "pi-bio.operation_spec.v1", id: "op1", version: "0.1.0", title: "Op", description: "d",       transport: "duckdb.sql", inputSchema: { type: "object" },
       sql: { sqlTemplate: "SELECT 1 AS x FROM t1", readOnly: true, requiredResources: ["t1"], requiredColumns: ["x"] } as never,
     }] });
-    assert.ok(validateDomainPackManifest(onSql).some((e) => e.includes("unknown key 'requiredColumns'")));
+    assert.ok(validateBioManifest(onSql).some((e) => e.includes("unknown key 'requiredColumns'")));
 
     // opacity is still allowed where core declared it: resource.params and the operation's JSON inputSchema
     const opaqueOk = baseManifest({ resources: [{ id: "t1", title: "T1", kind: "virtual", resolver: "inline.table", params: { ...tableParams("t1"), anything: { nested: true } } }] });
-    assert.deepEqual(validateDomainPackManifest(opaqueOk), []);
+    assert.deepEqual(validateBioManifest(opaqueOk), []);
   });
 
-  test("requires root title/description/domains and reports malformed collections cleanly (no TypeError)", () => {
+  test("requires root title/description and reports malformed collections cleanly (no TypeError)", () => {
     const m = baseManifest();
-    assert.ok(validateDomainPackManifest({ ...m, title: "" }).some((e) => /title is required/.test(e)));
-    assert.ok(validateDomainPackManifest({ ...m, domains: [] }).some((e) => /domains must be a non-empty array/.test(e)));
-    assert.ok(validateDomainPackManifest({ ...m, provides: { resources: "nope" } } as never).some((e) => /resources must be an array/.test(e)));
+    assert.ok(validateBioManifest({ ...m, title: "" }).some((e) => /title is required/.test(e)));
+    // the old `domains` taxonomy is gone: a stray `domains` key is now rejected as unknown, not required
+    assert.ok(validateBioManifest({ ...m, domains: ["x"] } as never).some((e) => /unknown key 'domains'/.test(e)));
+    assert.ok(validateBioManifest({ ...m, provides: { resources: "nope" } } as never).some((e) => /resources must be an array/.test(e)));
     // a malformed JSON shape returns errors rather than throwing while mapping a non-array
-    assert.doesNotThrow(() => validateDomainPackManifest({ schema: "pi-bio.domain_pack_manifest.v1", id: "x", version: "1", title: "t", description: "d", domains: ["genomics"], provides: { operations: 5 } } as never));
+    assert.doesNotThrow(() => validateBioManifest({ schema: "pi-bio.manifest.v1", id: "x", version: "1", title: "t", description: "d", provides: { operations: 5 } } as never));
   });
 
   test("rejects missing/wrong schema", () => {
     const m = baseManifest();
-    assert.ok(validateDomainPackManifest({ ...m, schema: "nope" as never }).some((e) => e.includes("schema must be")));
+    assert.ok(validateBioManifest({ ...m, schema: "nope" as never }).some((e) => e.includes("schema must be")));
   });
 
   test("rejects duplicate ids within a kind", () => {
@@ -73,43 +72,41 @@ describe("validateDomainPackManifest: fail closed", () => {
       { id: "dup", title: "A", kind: "virtual", resolver: "inline.table", params: tableParams("a") },
       { id: "dup", title: "B", kind: "virtual", resolver: "inline.table", params: tableParams("b") },
     ] });
-    assert.ok(validateDomainPackManifest(m).some((e) => e.includes("duplicated within the manifest")));
+    assert.ok(validateBioManifest(m).some((e) => e.includes("duplicated within the manifest")));
   });
 
   test("rejects a resource pointing to an undeclared resolver", () => {
     const m = baseManifest({ resolvers: [], resources: [{ id: "t1", title: "T1", kind: "virtual", resolver: "ghost", params: tableParams("t1") }] });
-    assert.ok(validateDomainPackManifest(m).some((e) => e.includes("undeclared resolver 'ghost'")));
+    assert.ok(validateBioManifest(m).some((e) => e.includes("undeclared resolver 'ghost'")));
   });
 
   test("rejects an operation requiring an undeclared resource", () => {
     const m = baseManifest({ operations: [{
-      schema: "pi-bio.operation_spec.v1", id: "op.x", version: "0.1.0", title: "X", description: "x", domains: ["genomics"],
-      transport: "duckdb.sql", inputSchema: { type: "object" }, sql: { sqlTemplate: "SELECT 1", readOnly: true, requiredResources: ["missing"] },
+      schema: "pi-bio.operation_spec.v1", id: "op.x", version: "0.1.0", title: "X", description: "x",       transport: "duckdb.sql", inputSchema: { type: "object" }, sql: { sqlTemplate: "SELECT 1", readOnly: true, requiredResources: ["missing"] },
     }] });
-    assert.ok(validateDomainPackManifest(m).some((e) => e.includes("undeclared resource 'missing'")));
+    assert.ok(validateBioManifest(m).some((e) => e.includes("undeclared resource 'missing'")));
   });
 
   test("rejects term sets with an untitled set, empty member id, or duplicate member id", () => {
     const ts = (members: Array<{ id: string; label?: string }>, title = "T") => baseManifest({ termSets: [{ id: "ts1", title, members }] });
-    assert.ok(validateDomainPackManifest(ts([{ id: "A:1" }], "")).some((e) => e.includes("requires a title")));
-    assert.ok(validateDomainPackManifest(ts([{ id: "" }])).some((e) => e.includes("empty id")));
-    assert.ok(validateDomainPackManifest(ts([{ id: "A:1" }, { id: "A:1" }])).some((e) => e.includes("duplicate member id 'A:1'")));
-    assert.deepEqual(validateDomainPackManifest(ts([{ id: "A:1" }, { id: "A:2" }])), []);
+    assert.ok(validateBioManifest(ts([{ id: "A:1" }], "")).some((e) => e.includes("requires a title")));
+    assert.ok(validateBioManifest(ts([{ id: "" }])).some((e) => e.includes("empty id")));
+    assert.ok(validateBioManifest(ts([{ id: "A:1" }, { id: "A:1" }])).some((e) => e.includes("duplicate member id 'A:1'")));
+    assert.deepEqual(validateBioManifest(ts([{ id: "A:1" }, { id: "A:2" }])), []);
   });
 
   test("ordered termSets require a unique integer rank per member (ordinal scale = data)", () => {
     const scale = (members: Array<{ id: string; label?: string; rank?: number }>) => baseManifest({ termSets: [{ id: "sev", title: "Severity", ordered: true, members }] });
-    assert.ok(validateDomainPackManifest(scale([{ id: "low" }, { id: "high" }])).some((e) => /requires an integer rank/.test(e)));
-    assert.ok(validateDomainPackManifest(scale([{ id: "low", rank: 0 }, { id: "high", rank: 0 }])).some((e) => /duplicate rank 0/.test(e)));
-    assert.deepEqual(validateDomainPackManifest(scale([{ id: "low", rank: 0 }, { id: "high", rank: 1 }])), []);
+    assert.ok(validateBioManifest(scale([{ id: "low" }, { id: "high" }])).some((e) => /requires an integer rank/.test(e)));
+    assert.ok(validateBioManifest(scale([{ id: "low", rank: 0 }, { id: "high", rank: 0 }])).some((e) => /duplicate rank 0/.test(e)));
+    assert.deepEqual(validateBioManifest(scale([{ id: "low", rank: 0 }, { id: "high", rank: 1 }])), []);
   });
 
   test("rejects an invalid operation spec (delegates to validateBioOperationSpec)", () => {
     const m = baseManifest({ operations: [{
-      schema: "pi-bio.operation_spec.v1", id: "op.y", version: "0.1.0", title: "Y", description: "y", domains: ["genomics"],
-      transport: "duckdb.sql", inputSchema: { type: "object" }, sql: { sqlTemplate: "SELECT 1", readOnly: false as never },
+      schema: "pi-bio.operation_spec.v1", id: "op.y", version: "0.1.0", title: "Y", description: "y",       transport: "duckdb.sql", inputSchema: { type: "object" }, sql: { sqlTemplate: "SELECT 1", readOnly: false as never },
     }] });
-    assert.ok(validateDomainPackManifest(m).some((e) => e.includes("sql.readOnly must be true")));
+    assert.ok(validateBioManifest(m).some((e) => e.includes("sql.readOnly must be true")));
   });
 });
 
@@ -122,7 +119,7 @@ describe("registry: registration is fail-closed, frozen, and id-unique", () => {
   test("rejects the same id registered twice across manifests", () => {
     const r = createBioRegistry();
     r.registerManifest(baseManifest());
-    const clash: DomainPackManifest = { ...baseManifest(), id: "pack-b", provides: { resolvers: [inlineResolver] } };
+    const clash: BioManifest = { ...baseManifest(), id: "pack-b", provides: { resolvers: [inlineResolver] } };
     assert.throws(() => r.registerManifest(clash), /id 'inline.table' is already registered/);
   });
 
@@ -136,9 +133,9 @@ describe("registry: registration is fail-closed, frozen, and id-unique", () => {
     const r = createBioRegistry();
     r.registerManifest(baseManifest());
     // pack-b reuses resolver id inline.table (collision) but also brings a fresh op that must NOT leak in.
-    const partial: DomainPackManifest = { ...baseManifest(), id: "pack-b", provides: {
+    const partial: BioManifest = { ...baseManifest(), id: "pack-b", provides: {
       resolvers: [inlineResolver],
-      operations: [{ schema: "pi-bio.operation_spec.v1", id: "op.leak", version: "0.1.0", title: "L", description: "l", domains: ["genomics"], transport: "duckdb.sql", inputSchema: { type: "object" }, sql: { sqlTemplate: "SELECT 1", readOnly: true } }],
+      operations: [{ schema: "pi-bio.operation_spec.v1", id: "op.leak", version: "0.1.0", title: "L", description: "l", transport: "duckdb.sql", inputSchema: { type: "object" }, sql: { sqlTemplate: "SELECT 1", readOnly: true } }],
     } };
     assert.throws(() => r.registerManifest(partial), /already registered/);
     assert.equal(r.getOperation("op.leak"), undefined); // nothing from the failed manifest committed

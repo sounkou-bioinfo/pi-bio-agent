@@ -1,6 +1,6 @@
 import type { BioRegistry, TermRef, TermSet } from "./manifest.js";
 
-// The typed judgment boundary (a domain-pack PATTERN, not a new registry kind). Derived from metacurator's
+// The typed judgment boundary (a manifest-level PATTERN, not a new registry kind). Derived from metacurator's
 // determinism gradient: a model may *propose*, but the deterministic substrate decides. It validates the
 // proposal against a registered candidate term set, abstains on null/low-confidence, and rejects invented
 // identifiers. The model client is injected per call — the host brings its own model; core never calls one.

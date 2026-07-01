@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { DuckDBInstance } from "@duckdb/node-api";
-import { createBioRegistry, type DomainPackManifest } from "../src/core/manifest.js";
+import { createBioRegistry, type BioManifest } from "../src/core/manifest.js";
 import { duckdbNodeConn } from "../src/duckdb/node-api.js";
 import { duckdbFileScanResolver } from "../src/duckdb/resolvers/duckdb-file-scan.js";
 import { materializeEntailedEdges } from "../src/duckdb/graph-closure.js";
@@ -13,10 +13,9 @@ import { materializeEntailedEdges } from "../src/duckdb/graph-closure.js";
 // closure, and ground + expand — all native, no extension, no new ingest code. (The same holds for OBO Graphs
 // JSON via read_json, or a triple parquet — file_scan reads them all.)
 
-const manifest: DomainPackManifest = {
-  schema: "pi-bio.domain_pack_manifest.v1", id: "ontology-ingest", version: "0.1.0",
+const manifest: BioManifest = {
+  schema: "pi-bio.manifest.v1", id: "ontology-ingest", version: "0.1.0",
   title: "Ontology ingest (SemanticSQL triples via CSV)", description: "Ingest flat ontology triples natively.",
-  domains: ["ontology"],
   provides: {
     resolvers: [{ id: "duckdb.file_scan", version: "0.1.0", title: "DuckDB file scan", description: "Read a DuckDB-native file into a table.", output: { mode: "table" } }],
     resources: [

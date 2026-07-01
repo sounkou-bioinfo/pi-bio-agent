@@ -1,10 +1,9 @@
 {
-  "schema": "pi-bio.domain_pack_manifest.v1",
+  "schema": "pi-bio.manifest.v1",
   "id": "rare-high-impact",
   "version": "0.1.0",
   "title": "Rare high-impact variants",
   "description": "The abstention flagship: count rare loss-of-function variants, abstaining on unknown frequency. A subtle, safety-critical query — so it is PINNED as a declared, tested operation, not left ad hoc.",
-  "domains": ["genomics"],
   "provides": {
     "resolvers": [
       { "id": "duckdb.file_scan", "version": "0.1.0", "title": "DuckDB file scan", "description": "Read a DuckDB-native file into a table.", "output": { "mode": "table" } }
@@ -18,7 +17,7 @@
         "schema": "pi-bio.operation_spec.v1", "id": "rare_high_impact.report", "version": "0.1.0",
         "title": "Rare high-impact variant classification",
         "description": "Classify each variant; the 'included' bucket is the defensible count. Unknown allele frequency is abstained from (NOT counted as rare); benign LoF is excluded.",
-        "domains": ["genomics"], "transport": "duckdb.sql", "inputSchema": { "type": "object" },
+        "transport": "duckdb.sql", "inputSchema": { "type": "object" },
         "notes": [
           "Unknown allele frequency is abstained from, not counted as rare.",
           "Benign-annotated variants are excluded regardless of frequency or consequence."

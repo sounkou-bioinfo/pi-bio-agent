@@ -17,9 +17,9 @@ async function guideBlocks(): Promise<Array<{ lang: string; body: string }>> {
 describe("user guide example runs end to end (anti-rot gate)", () => {
   test("the guide's resource-only manifest + CSV produce the counts it claims (via bio_query)", async () => {
     const blocks = await guideBlocks();
-    const manifestBlock = blocks.find((b) => b.lang === "json" && b.body.includes('"pi-bio.domain_pack_manifest.v1"'));
+    const manifestBlock = blocks.find((b) => b.lang === "json" && b.body.includes('"pi-bio.manifest.v1"'));
     const csvBlock = blocks.find((b) => b.lang === "csv");
-    assert.ok(manifestBlock, "guide must contain a domain-pack manifest JSON block");
+    assert.ok(manifestBlock, "guide must contain a manifest JSON block");
     assert.ok(csvBlock, "guide must contain the example CSV block");
     const manifest = JSON.parse(manifestBlock.body); // must be valid JSON
 

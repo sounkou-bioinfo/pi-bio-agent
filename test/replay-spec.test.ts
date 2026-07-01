@@ -57,8 +57,7 @@ describe("C1b-ii: replay.json seed", () => {
   test("a plain (non-process) query persists replay.json without a process block", async () => {
     const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-replay-"));
     const manifest = {
-      schema: "pi-bio.domain_pack_manifest.v1", id: "vc", version: "0.0.0", title: "x", description: "x", domains: ["statistics"],
-      provides: {
+      schema: "pi-bio.manifest.v1", id: "vc", version: "0.0.0", title: "x", description: "x",       provides: {
         resolvers: [{ id: "duckdb.sql_materialize", version: "0.1.0", title: "x", description: "x", output: { mode: "table" } }],
         resources: [{ id: "nums", title: "x", kind: "virtual", resolver: "duckdb.sql_materialize", params: { table: "nums", sql: "SELECT 1 AS x" } }],
       },

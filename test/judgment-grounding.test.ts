@@ -1,18 +1,17 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { createBioRegistry, type DomainPackManifest } from "../src/core/manifest.js";
+import { createBioRegistry, type BioManifest } from "../src/core/manifest.js";
 import { JudgeContractError, decideGrounding, runGroundingJudgment, type BioJudgeImpl } from "../src/core/judgment.js";
 
 // The typed judgment boundary, derived from metacurator's "disambiguate may return only one of the provided
 // grounded CURIEs or None". Candidates are a registered TermSet (data); the model is injected; core decides.
 
-const candidates: DomainPackManifest = {
-  schema: "pi-bio.domain_pack_manifest.v1",
+const candidates: BioManifest = {
+  schema: "pi-bio.manifest.v1",
   id: "disease-grounding",
   version: "0.1.0",
   title: "Disease grounding candidates",
   description: "MONDO candidates for grounding free-text disease labels.",
-  domains: ["ontology"],
   provides: {
     termSets: [{ id: "mondo.candidates", title: "MONDO candidates", members: [
       { id: "MONDO:0005180", label: "Parkinson disease" },

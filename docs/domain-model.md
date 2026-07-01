@@ -1,8 +1,8 @@
 ---
 type: Reference
 title: Domain model
-description: "Read before adding any core type or domain pack — kernel slots, resources/CAS/resolvers, temporality, domain packs, and execution backends."
-tags: [domain-model, resources, resolvers, temporality, domain-packs, execution-backends]
+description: "Read before adding any core type or manifest — kernel slots, resources/CAS/resolvers, temporality, manifests, and execution backends."
+tags: [domain-model, resources, resolvers, temporality, manifests, execution-backends]
 ---
 
 # Domain model
@@ -25,16 +25,16 @@ Time-aware biomedical resource graph
 ## Three layers
 
 Bioinformatics is too broad for core to encode as `Feature`/`Sample`/`Cohort`/`Matrix` classes, but too
-real to ignore. The resolution is **domain packs over a small kernel, executed by pluggable backends**:
+real to ignore. The resolution is **manifests over a small kernel, executed by pluggable backends**:
 
 ```text
 core kernel        identity · resource handles/CAS/resolvers · facts/relations/time · declarations · runs · memory
-domain packs       genomics · proteomics · transcriptomics/single-cell · metagenomics · data-science · clinical-annotation
+manifests          genomics · proteomics · transcriptomics/single-cell · metagenomics · data-science · clinical-annotation
 execution backends DuckDB SQL · CLI · R · Python · HTTP · wasm/local-service
 ```
 
 - **core owns the grammar** (what *is* a resource, operation, fact, run, term, temporal scope, resolver).
-- **packs own domain vocabulary/views/tools** (how do I get annotated variants? what view exists?).
+- **manifests own domain vocabulary/views/tools** (how do I get annotated variants? what view exists?).
 - **backends own execution** (with policy, provenance, timeouts, CAS receipts, tests).
 - **runs/CAS/provenance/time make outputs reproducible.**
 
@@ -234,14 +234,14 @@ the model can choose or abstain, but it can never mint an id the substrate did n
 
 ## Domain packs & the manifest
 
-A domain/operation pack is the registration boundary for concrete implementations. It declares
-serializable specs; **do not prebuild a giant framework — let the flagship pull each `provides.*` kind
-into existence.**
+A manifest is the registration boundary for concrete implementations. It declares serializable specs;
+**do not prebuild a giant framework — let the flagship pull each `provides.*` kind into existence.**
+(There is no mandatory "domains" taxonomy tag — that was a ClawBio-era vestige the substrate never consumed;
+a manifest is simply THE PROGRAM, a named bag of `provides.*`.)
 
 ```ts
-interface DomainPackManifest {
+interface BioManifest {
   id: string; version: string; title: string; description: string;
-  domains: string[];                                 // ["genomics"], ["proteomics"], ...
   provides: {
     resolvers?: BioResolverSpec[];                    // declarations; impls bound at runtime
     resources?: VirtualResourceSpec[];                // named inputs resolved into tables
@@ -293,9 +293,9 @@ and analysis as manifest SQL, not per-source TypeScript.
 | Identity | `GenomicInterval`, `VariantKey`, `OntologyTermRef`, `ContentAddress`, `PredicateId=string` | id aliases, `TermRef`/`TermSet`/`PredicateDef` registry |
 | Handle | `ResourceHandle`, `VirtualResourceSpec`, `BioResolverSpec`/`Impl`, `ResolutionReceipt`, `resolveResource`, real resolvers (`duckdb.file_scan`, `duckhts.read_bcf`), `ContentAddress`/`casPathForAddress` | gnomAD/http resolvers, CAS materialization |
 | Fact | `BioGraphNode`/`Edge`/`Snapshot`, `TrustBlock`, `Provenance` | `BioFact` + `EvidenceBlock` + `TemporalValidity`; recording judgments/results as edges |
-| Declaration | `BioToolSpec`, `BioOperationSpec`, `DomainPackManifest` registry (validated, frozen) | `PredicateDef` registry |
+| Declaration | `BioToolSpec`, `BioOperationSpec`, `BioManifest` registry (validated, frozen) | `PredicateDef` registry |
 | Run | `BioRunSpec`/`Record`/`Event` + host producer (`bio_run_operation` → run/result/receipts persisted) | richer run lifecycle (resume, budgets) |
 | Memory | `StudyNote`, `studyNoteGraph`, KG sync | — (intentionally time-free) |
 
-Everything in the right column is built **consumer-driven** — when the flagship or a real domain pack
+Everything in the right column is built **consumer-driven** — when the flagship or a real manifest
 needs it — never speculatively.

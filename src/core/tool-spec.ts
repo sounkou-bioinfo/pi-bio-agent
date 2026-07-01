@@ -59,7 +59,6 @@ export interface BioToolSpec {
   version: string;
   title: string;
   description: string;
-  domains: string[];
   determinism: BioToolDeterminism;
   inputs: BioToolIO[];
   outputs: BioToolIO[];
@@ -96,7 +95,6 @@ export function defineBioToolSpec(spec: BioToolSpec): BioToolSpec {
 
 export function validateBioToolSpec(spec: BioToolSpec): string[] {
   const errors: string[] = [];
-  const domains = Array.isArray(spec.domains) ? spec.domains : [];
   const inputs = Array.isArray(spec.inputs) ? spec.inputs : undefined;
   const outputs = Array.isArray(spec.outputs) ? spec.outputs : undefined;
   const surfaces = Array.isArray(spec.surfaces) ? spec.surfaces : [];
@@ -106,7 +104,6 @@ export function validateBioToolSpec(spec: BioToolSpec): string[] {
   if (typeof spec.version !== "string" || !spec.version.trim()) errors.push("version is required");
   if (typeof spec.title !== "string" || !spec.title.trim()) errors.push("title is required");
   if (typeof spec.description !== "string" || !spec.description.trim()) errors.push("description is required");
-  if (!domains.length) errors.push("at least one domain is required");
   if (!inputs) errors.push("inputs array is required");
   if (!outputs) errors.push("outputs array is required");
   if (!surfaces.length) errors.push("at least one execution surface is required");
@@ -115,15 +112,15 @@ export function validateBioToolSpec(spec: BioToolSpec): string[] {
   return errors;
 }
 
-export function toolSpecIndex(registry: BioToolRegistry): Array<Pick<BioToolSpec, "name" | "version" | "title" | "description" | "domains" | "determinism" | "effects">> {
-  return registry.tools.map(({ name, version, title, description, domains, determinism, effects }) => ({ name, version, title, description, domains, determinism, effects }));
+export function toolSpecIndex(registry: BioToolRegistry): Array<Pick<BioToolSpec, "name" | "version" | "title" | "description" | "determinism" | "effects">> {
+  return registry.tools.map(({ name, version, title, description, determinism, effects }) => ({ name, version, title, description, determinism, effects }));
 }
 
 export function findToolSpecs(registry: BioToolRegistry, query: string): BioToolSpec[] {
   const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (!terms.length) return registry.tools;
   return registry.tools.filter((tool) => {
-    const hay = [tool.name, tool.title, tool.description, ...tool.domains, ...(tool.notes ?? [])].join("\n").toLowerCase();
+    const hay = [tool.name, tool.title, tool.description, ...(tool.notes ?? [])].join("\n").toLowerCase();
     return terms.every((term) => hay.includes(term));
   });
 }

@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { DomainPackManifest } from "../src/core/manifest.js";
+import type { BioManifest } from "../src/core/manifest.js";
 import type { FetchLike } from "../src/duckdb/resolvers/http-table-scan.js";
 import { persistRun, runBioOperationFromManifest, runBioQueryFromManifest, runsRoot } from "../src/hosts/run-store.js";
 
@@ -26,13 +26,12 @@ const RARE_HIGH_IMPACT_SQL = [
   "SELECT bucket, CAST(count(*) AS INTEGER) AS n FROM classified GROUP BY bucket ORDER BY bucket",
 ].join("\n");
 
-const manifest: DomainPackManifest = {
-  schema: "pi-bio.domain_pack_manifest.v1",
+const manifest: BioManifest = {
+  schema: "pi-bio.manifest.v1",
   id: "rare-high-impact-host",
   version: "0.1.0",
   title: "Rare high-impact (host)",
   description: "Rare LoF variants over CSV providers, run through the host.",
-  domains: ["genomics"],
   provides: {
     resolvers: [{ id: "duckdb.file_scan", version: "0.1.0", title: "DuckDB file scan", description: "Read a DuckDB-native file into a table.", output: { mode: "table" } }],
     resources: [
@@ -43,13 +42,13 @@ const manifest: DomainPackManifest = {
     operations: [{
       schema: "pi-bio.operation_spec.v1", id: "rare_high_impact.report", version: "0.1.0",
       title: "Rare high-impact variant classification", description: "Classify variants, abstaining on unknown frequency.",
-      domains: ["genomics"], transport: "duckdb.sql", inputSchema: { type: "object" },
+      transport: "duckdb.sql", inputSchema: { type: "object" },
       sql: { sqlTemplate: RARE_HIGH_IMPACT_SQL, readOnly: true, singleStatement: true, requiredResources: ["annotated_variants", "so_loss_of_function"] },
     }],
   },
 };
 
-async function tmpProject(m: DomainPackManifest): Promise<string> {
+async function tmpProject(m: BioManifest): Promise<string> {
   const cwd = await fs.mkdtemp(join(tmpdir(), "biorun-"));
   await fs.mkdir(join(cwd, "data"), { recursive: true });
   await fs.copyFile("test/fixtures/annotated_variants.csv", join(cwd, "data", "annotated_variants.csv"));
@@ -97,14 +96,14 @@ describe("host: bio_run_operation end-to-end", () => {
 
   test("a run that fails at runtime persists a failed-run receipt and returns ok:false", async () => {
     // SQL that resolves its resource but references a missing column — the run STARTS, then the binder fails.
-    const badManifest: DomainPackManifest = {
+    const badManifest: BioManifest = {
       ...manifest,
       provides: {
         ...manifest.provides,
         operations: [{
           schema: "pi-bio.operation_spec.v1", id: "bad.op", version: "0.1.0",
           title: "Bad op", description: "References a column that does not exist.",
-          domains: ["genomics"], transport: "duckdb.sql", inputSchema: { type: "object" },
+          transport: "duckdb.sql", inputSchema: { type: "object" },
           sql: { sqlTemplate: "SELECT no_such_column FROM annotated_variants", readOnly: true, requiredResources: ["annotated_variants"] },
         }],
       },
@@ -132,15 +131,14 @@ describe("host: bio_run_operation end-to-end", () => {
   });
 
   test("network is opt-in: http.get fails closed without a fetch, runs when one is injected", async () => {
-    const netManifest: DomainPackManifest = {
-      schema: "pi-bio.domain_pack_manifest.v1", id: "net-host", version: "0.1.0",
-      title: "Net", description: "An HTTP-sourced operation.", domains: ["genomics"],
-      provides: {
+    const netManifest: BioManifest = {
+      schema: "pi-bio.manifest.v1", id: "net-host", version: "0.1.0",
+      title: "Net", description: "An HTTP-sourced operation.",       provides: {
         resolvers: [{ id: "http.get", version: "0.1.0", title: "HTTP get", description: "Fetch a URL into a table.", output: { mode: "table" } }],
         resources: [{ id: "candidates", title: "Candidates", kind: "virtual", resolver: "http.get", params: { url: "https://example.org/api?q=asthma", table: "candidates", format: "json" } }],
         operations: [{
           schema: "pi-bio.operation_spec.v1", id: "list.candidates", version: "0.1.0", title: "List", description: "List candidates.",
-          domains: ["genomics"], transport: "duckdb.sql", inputSchema: { type: "object" },
+          transport: "duckdb.sql", inputSchema: { type: "object" },
           sql: { sqlTemplate: "SELECT obo_id FROM candidates ORDER BY obo_id", readOnly: true, requiredResources: ["candidates"] },
         }],
       },
@@ -164,10 +162,9 @@ describe("host: bio_run_operation end-to-end", () => {
 
   test("bio_query: resolve declared resources and run the AGENT's SQL — no declared operation needed", async () => {
     // a resource-only manifest: it declares WHERE the data is, not HOW to count it. The agent writes the SQL.
-    const resourceOnly: DomainPackManifest = {
-      schema: "pi-bio.domain_pack_manifest.v1", id: "ad-hoc-pack", version: "0.1.0",
-      title: "Ad-hoc", description: "Resource-only manifest; the agent writes the SQL after schema discovery.", domains: ["genomics"],
-      provides: {
+    const resourceOnly: BioManifest = {
+      schema: "pi-bio.manifest.v1", id: "ad-hoc-pack", version: "0.1.0",
+      title: "Ad-hoc", description: "Resource-only manifest; the agent writes the SQL after schema discovery.",       provides: {
         resolvers: [{ id: "duckdb.file_scan", version: "0.1.0", title: "DuckDB file scan", description: "Read a file.", output: { mode: "table" } }],
         resources: [{ id: "annotated_variants", title: "AV", kind: "virtual", resolver: "duckdb.file_scan", params: { path: "data/annotated_variants.csv", table: "annotated_variants" } }],
       },
@@ -223,15 +220,14 @@ describe("host: bio_run_operation end-to-end", () => {
   });
 
   test("fails closed when a declared resolver is not a host built-in", async () => {
-    const m: DomainPackManifest = {
+    const m: BioManifest = {
       ...manifest,
       provides: {
         ...manifest.provides,
         resolvers: [{ id: "mystery.scan", version: "0.1.0", title: "Mystery", description: "Not a built-in.", output: { mode: "table" } }],
         resources: [{ id: "annotated_variants", title: "AV", kind: "virtual", resolver: "mystery.scan", params: { path: "x" } }],
         operations: [{
-          schema: "pi-bio.operation_spec.v1", id: "rare_high_impact.report", version: "0.1.0", title: "T", description: "t", domains: ["genomics"],
-          transport: "duckdb.sql", inputSchema: { type: "object" },
+          schema: "pi-bio.operation_spec.v1", id: "rare_high_impact.report", version: "0.1.0", title: "T", description: "t",           transport: "duckdb.sql", inputSchema: { type: "object" },
           sql: { sqlTemplate: "SELECT 1 AS variant_key FROM annotated_variants", readOnly: true, requiredResources: ["annotated_variants"] },
         }],
       },

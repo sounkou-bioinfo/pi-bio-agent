@@ -1,10 +1,9 @@
 {
-  "schema": "pi-bio.domain_pack_manifest.v1",
+  "schema": "pi-bio.manifest.v1",
   "id": "process-files-only",
   "version": "0.1.0",
   "title": "Files-only out-of-process compute — a tool that returns NO table, only files",
   "description": "Many bioinformatics tools (samtools index, bcftools, a plot renderer) produce ONLY files — no rectangular return value. process.compute supports this with resultTable=\"artifacts\": no input table, no out.arrow (so no Arrow codec is even loaded), the child just writes its declared FILE outputs into its work dir, and the resolver captures each into CAS (content-addressed). The resource's TABLE is then the artifacts LISTING itself (name, path, kind, digest, size) — so a files-only tool is still a first-class, queryable resource whose outputs are CAS handles the agent reads downstream.",
-  "domains": ["statistics"],
   "provides": {
     "resolvers": [
       { "id": "process.compute", "version": "0.1.0", "title": "Out-of-process compute", "description": "Run an external process; capture its declared FILE outputs into CAS and expose the listing as a table.", "output": { "mode": "table" } }

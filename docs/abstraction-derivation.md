@@ -75,7 +75,7 @@ to justify *patterns*, not to import their nouns.
   judgment boundary**: the LLM may only emit typed objects that deterministic code validates, and
   `disambiguate` may return only one of the provided grounded CURIEs or `None`. That is term-set
   membership + fail-closed + abstention — our resolver discipline with a model behind one impl. The
-  judgment boundary is a *domain-pack pattern*, not a core noun.
+  judgment boundary is a *manifest-level pattern*, not a core noun.
 - **[cu-research-intelligence](https://github.com/seandavi/cu-research-intelligence)** — OpenAlex →
   Parquet → DuckDB with per-partition watermarks and a storage backend that swaps local→R2 with no code
   change. Reinforces **CAS/raw→curated layering**, snapshot temporality, and DuckDB as the query layer.
@@ -98,7 +98,7 @@ The minimum primitives that make many bio workflows simple are:
 4. Knowledge graph tables — nodes, edges, observations, artifacts, trust blocks.
 5. DuckDB substrate — stable SQL views over files, extensions, parquet/lake tables, and catalogs.
 6. Study notes — indexed, mutable expertise memory distinct from skills.
-7. `DomainPackManifest` registry — serializable spec declarations bound to runtime impls; the boundary
+7. `BioManifest` registry — serializable spec declarations bound to runtime impls; the boundary
    where packs register resolvers, resources, views, term sets, and operations.
 8. Skill writer — promote a stabilized workflow into a project-local Pi skill and reload.
 

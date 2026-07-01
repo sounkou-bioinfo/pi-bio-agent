@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { DuckDBInstance } from "@duckdb/node-api";
-import { createBioRegistry, type DomainPackManifest } from "../src/core/manifest.js";
+import { createBioRegistry, type BioManifest } from "../src/core/manifest.js";
 import type { SqlConn } from "../src/core/ports.js";
 import { runOperation } from "../src/core/operations.js";
 import { defineBioOperationSpec } from "../src/core/operation-spec.js";
@@ -49,13 +49,12 @@ const RARE_HIGH_IMPACT_SQL = [
   "SELECT bucket, CAST(count(*) AS INTEGER) AS n FROM classified GROUP BY bucket ORDER BY bucket",
 ].join("\n");
 
-const manifest: DomainPackManifest = {
-  schema: "pi-bio.domain_pack_manifest.v1",
+const manifest: BioManifest = {
+  schema: "pi-bio.manifest.v1",
   id: "rare-high-impact-variants-vcf",
   version: "0.1.0",
   title: "Rare high-impact variants (real VCF)",
   description: "Rare loss-of-function variants over a real VCF: generic read_bcf + mapping in SQL.",
-  domains: ["genomics"],
   provides: {
     resolvers: [
       { id: "duckhts.read_bcf", version: "0.1.0", title: "duckhts read_bcf", description: "Read a VCF/BCF into a raw table via duckhts.", output: { mode: "table" }, temporal: { kind: "snapshot", source: "vcf" } },
@@ -68,7 +67,7 @@ const manifest: DomainPackManifest = {
     operations: [defineBioOperationSpec({
       schema: "pi-bio.operation_spec.v1", id: "rare_high_impact.report", version: "0.1.0",
       title: "Rare high-impact variant classification", description: "Map raw VCF INFO fields, then classify.",
-      domains: ["genomics"], transport: "duckdb.sql", inputSchema: { type: "object" },
+      transport: "duckdb.sql", inputSchema: { type: "object" },
       sql: { sqlTemplate: RARE_HIGH_IMPACT_SQL, readOnly: true, singleStatement: true, requiredResources: ["vcf_raw", "so_loss_of_function"] },
     })],
   },
@@ -79,7 +78,7 @@ async function memoryConn(): Promise<SqlConn> {
 }
 function registry(rawParams?: Record<string, unknown>) {
   const r = createBioRegistry();
-  const m: DomainPackManifest = rawParams
+  const m: BioManifest = rawParams
     ? { ...manifest, provides: { ...manifest.provides, resources: [{ ...manifest.provides.resources![0]!, params: rawParams }, manifest.provides.resources![1]!] } }
     : manifest;
   r.registerManifest(m);

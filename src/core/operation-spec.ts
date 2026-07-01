@@ -29,7 +29,6 @@ export interface BioOperationSpec {
   version: string;
   title: string;
   description: string;
-  domains: string[];
   transport: BioOperationTransport;
   inputSchema: JsonSchema;
   outputSchema?: JsonSchema;
@@ -64,13 +63,11 @@ export function defineBioOperationSpec(spec: BioOperationSpec): BioOperationSpec
 
 export function validateBioOperationSpec(spec: BioOperationSpec): string[] {
   const errors: string[] = [];
-  const domains = Array.isArray(spec.domains) ? spec.domains : [];
   if (spec.schema !== "pi-bio.operation_spec.v1") errors.push("schema must be pi-bio.operation_spec.v1");
   if (typeof spec.id !== "string" || !OPERATION_ID_RE.test(spec.id)) errors.push("id must be lowercase and may use '.', '_' or '-' separators");
   if (typeof spec.version !== "string" || !spec.version.trim()) errors.push("version is required");
   if (typeof spec.title !== "string" || !spec.title.trim()) errors.push("title is required");
   if (typeof spec.description !== "string" || !spec.description.trim()) errors.push("description is required");
-  if (!domains.length) errors.push("at least one domain is required");
   if (!spec.inputSchema || typeof spec.inputSchema !== "object") errors.push("inputSchema is required");
   if (spec.transport !== "duckdb.sql") errors.push("transport must be duckdb.sql");
   if (!spec.sql) errors.push("a duckdb.sql operation requires sql request details");
@@ -83,8 +80,8 @@ export function validateBioOperationSpec(spec: BioOperationSpec): string[] {
   return errors;
 }
 
-export function operationSpecIndex(registry: BioOperationRegistry): Array<Pick<BioOperationSpec, "id" | "version" | "title" | "description" | "domains" | "transport">> {
-  return registry.operations.map(({ id, version, title, description, domains, transport }) => ({ id, version, title, description, domains, transport }));
+export function operationSpecIndex(registry: BioOperationRegistry): Array<Pick<BioOperationSpec, "id" | "version" | "title" | "description" | "transport">> {
+  return registry.operations.map(({ id, version, title, description, transport }) => ({ id, version, title, description, transport }));
 }
 
 export function registryFromOperations(operations: BioOperationSpec[], extras: Omit<BioOperationRegistry, "schema" | "operations"> = {}): BioOperationRegistry {

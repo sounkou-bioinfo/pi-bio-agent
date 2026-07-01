@@ -127,7 +127,7 @@ registry.resolveResource
 registry.snapshot
 registry.listDuckdbExtensions
 spec.validateToolSpec
-spec.validateDomainPackManifest
+spec.validateBioManifest
 sql.validateReadOnlySelect
 study.plan
 study.writeNote

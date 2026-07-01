@@ -43,15 +43,17 @@ export interface ResolutionReceipt {
   provenance: Provenance[];
 }
 
-export const DOMAIN_PACK_MANIFEST_SCHEMA = "pi-bio.domain_pack_manifest.v1" as const;
+// A manifest is simply THE PROGRAM: a named bag of resources/resolvers/operations/termSets the interpreter runs.
+// It is NOT a "domain pack" — the earlier framing (a curated bundle scoped to a bio domain, with a mandatory
+// `domains` taxonomy tag) was a ClawBio-era vestige that nothing in the substrate ever consumed. Dropped.
+export const BIO_MANIFEST_SCHEMA = "pi-bio.manifest.v1" as const;
 
-export interface DomainPackManifest {
-  schema: typeof DOMAIN_PACK_MANIFEST_SCHEMA;
+export interface BioManifest {
+  schema: typeof BIO_MANIFEST_SCHEMA;
   id: string;
   version: string;
   title: string;
   description: string;
-  domains: string[];
   provides: {
     resources?: VirtualResourceSpec[];
     resolvers?: BioResolverSpec[];
@@ -62,7 +64,7 @@ export interface DomainPackManifest {
 
 export interface BioRegistrySnapshot {
   schema: "pi-bio.registry_snapshot.v1";
-  manifests: Array<Pick<DomainPackManifest, "id" | "version" | "title" | "domains">>;
+  manifests: Array<Pick<BioManifest, "id" | "version" | "title">>;
   resources: VirtualResourceSpec[];
   resolvers: BioResolverSpec[];
   termSets: TermSet[];
@@ -70,7 +72,7 @@ export interface BioRegistrySnapshot {
 }
 
 export interface BioRegistry {
-  registerManifest(manifest: DomainPackManifest): void;
+  registerManifest(manifest: BioManifest): void;
   bindResolverImpl(resolverId: string, impl: BioResolverImpl, opts?: { replace?: boolean }): void;
   getResource(id: string): VirtualResourceSpec | undefined;
   getResolverSpec(id: string): BioResolverSpec | undefined;
@@ -120,15 +122,14 @@ function rejectUnknownKeys(obj: unknown, allowed: readonly string[], label: stri
 }
 
 /** Fail-closed structural validation of a manifest. Returns a list of errors ([] = valid). */
-export function validateDomainPackManifest(manifest: DomainPackManifest): string[] {
+export function validateBioManifest(manifest: BioManifest): string[] {
   const errors: string[] = [];
-  if (manifest?.schema !== DOMAIN_PACK_MANIFEST_SCHEMA) errors.push(`schema must be ${DOMAIN_PACK_MANIFEST_SCHEMA}`);
+  if (manifest?.schema !== BIO_MANIFEST_SCHEMA) errors.push(`schema must be ${BIO_MANIFEST_SCHEMA}`);
   if (typeof manifest?.id !== "string" || !manifest.id.trim()) errors.push("manifest id is required");
   if (typeof manifest?.version !== "string" || !manifest.version.trim()) errors.push("manifest version is required");
   if (typeof manifest?.title !== "string" || !manifest.title.trim()) errors.push("manifest title is required");
   if (typeof manifest?.description !== "string" || !manifest.description.trim()) errors.push("manifest description is required");
-  if (!Array.isArray(manifest?.domains) || manifest.domains.length === 0) errors.push("manifest domains must be a non-empty array");
-  rejectUnknownKeys(manifest, ["schema", "id", "version", "title", "description", "domains", "provides"], "manifest", errors);
+  rejectUnknownKeys(manifest, ["schema", "id", "version", "title", "description", "provides"], "manifest", errors);
 
   // Manifests come from JSON files — a malformed shape must produce a clean error, never a TypeError from
   // mapping a non-array. Treat a present-but-wrong-typed collection as an error and fall back to [] for the
@@ -198,7 +199,7 @@ export function validateDomainPackManifest(manifest: DomainPackManifest): string
   for (const op of operations) {
     for (const e of validateBioOperationSpec(op)) errors.push(`operation '${op.id}': ${e}`);
     // inputSchema/outputSchema are JSON Schemas — opaque, not key-checked.
-    rejectUnknownKeys(op, ["schema", "id", "version", "title", "description", "domains", "transport", "inputSchema", "outputSchema", "identifiers", "sql", "cache", "provenance", "notes"], `operation '${op.id}'`, errors);
+    rejectUnknownKeys(op, ["schema", "id", "version", "title", "description", "transport", "inputSchema", "outputSchema", "identifiers", "sql", "cache", "provenance", "notes"], `operation '${op.id}'`, errors);
     if (op.sql) rejectUnknownKeys(op.sql, ["sqlTemplate", "readOnly", "singleStatement", "requiredResources"], `operation '${op.id}'.sql`, errors);
     for (const rid of op.sql?.requiredResources ?? []) {
       if (!resourceIds.has(rid)) errors.push(`operation '${op.id}' requires undeclared resource '${rid}'`);
@@ -209,7 +210,7 @@ export function validateDomainPackManifest(manifest: DomainPackManifest): string
 
 export function createBioRegistry(): BioRegistry {
   const manifestIds = new Set<string>();
-  const manifests: DomainPackManifest[] = [];
+  const manifests: BioManifest[] = [];
   const resources = new Map<string, VirtualResourceSpec>();
   const resolverSpecs = new Map<string, BioResolverSpec>();
   const resolverImpls = new Map<string, BioResolverImpl>();
@@ -218,7 +219,7 @@ export function createBioRegistry(): BioRegistry {
 
   return {
     registerManifest(manifest) {
-      const errors = validateDomainPackManifest(manifest);
+      const errors = validateBioManifest(manifest);
       if (errors.length) throw new Error(`invalid manifest '${manifest?.id ?? "<unknown>"}': ${errors.join("; ")}`);
       // Preflight ALL collisions before mutating any map, so a failed manifest leaves the registry untouched.
       if (manifestIds.has(manifest.id)) throw new Error(`manifest id '${manifest.id}' is already registered`);
@@ -232,7 +233,7 @@ export function createBioRegistry(): BioRegistry {
         if (map.has(id)) throw new Error(`cannot register manifest '${manifest.id}': id '${id}' is already registered`);
       }
       // Clone + freeze so a caller cannot mutate the registry's view of a spec after the fact.
-      const frozen = deepFreeze(JSON.parse(JSON.stringify(manifest)) as DomainPackManifest);
+      const frozen = deepFreeze(JSON.parse(JSON.stringify(manifest)) as BioManifest);
       for (const r of frozen.provides.resolvers ?? []) resolverSpecs.set(r.id, r);
       for (const r of frozen.provides.resources ?? []) resources.set(r.id, r);
       for (const t of frozen.provides.termSets ?? []) termSets.set(t.id, t);
@@ -274,7 +275,7 @@ export function createBioRegistry(): BioRegistry {
     snapshot() {
       return {
         schema: "pi-bio.registry_snapshot.v1",
-        manifests: manifests.map(({ id, version, title, domains }) => ({ id, version, title, domains })),
+        manifests: manifests.map(({ id, version, title }) => ({ id, version, title })),
         resources: [...resources.values()],
         resolvers: [...resolverSpecs.values()],
         termSets: [...termSets.values()],

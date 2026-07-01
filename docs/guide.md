@@ -26,12 +26,11 @@ Then a manifest, `manifest.json`, that declares only **where the data is** — n
 
 ```json
 {
-  "schema": "pi-bio.domain_pack_manifest.v1",
+  "schema": "pi-bio.manifest.v1",
   "id": "variants",
   "version": "0.1.0",
   "title": "Variants",
   "description": "Declares a variants table; the agent writes the SQL.",
-  "domains": ["genomics"],
   "provides": {
     "resolvers": [
       { "id": "duckdb.file_scan", "version": "0.1.0", "title": "DuckDB file scan",

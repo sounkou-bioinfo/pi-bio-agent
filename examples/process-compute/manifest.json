@@ -1,10 +1,9 @@
 {
-  "schema": "pi-bio.domain_pack_manifest.v1",
+  "schema": "pi-bio.manifest.v1",
   "id": "process-compute",
   "version": "0.1.0",
   "title": "Out-of-process compute (R lm over Arrow IPC) — the COMPUTE pillar",
   "description": "The COMPUTE pillar as a manifest: a DuckDB table handed to an OUT-OF-PROCESS R computation over Arrow IPC and the result handed back as a table. `points` is a file_scan resource; `lm_fit` is a process.compute resource whose inputSql (SELECT x, y FROM points) is exported as Arrow IPC to the child, which fits an OLS regression (lm — a thing SQL is poor at) and writes the coefficients back as Arrow IPC. NO compute-specific TypeScript: the command, input query, and Arrow contract live in the manifest; the same generic process.compute resolver runs any R/Python/Go/shell tool. The process capability is the host's opt-in by composition (a ProcessRunner must be injected); this manifest fails closed otherwise.",
-  "domains": ["statistics"],
   "provides": {
     "resolvers": [
       { "id": "duckdb.file_scan", "version": "0.1.0", "title": "DuckDB file scan", "description": "Read a delimited file into a table.", "output": { "mode": "table" } },

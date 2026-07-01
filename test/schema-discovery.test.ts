@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { DuckDBInstance } from "@duckdb/node-api";
-import { assertColumnsPresent, createBioRegistry, describeTable, runOperation, type DomainPackManifest, type SqlConn } from "../src/core/index.js";
+import { assertColumnsPresent, createBioRegistry, describeTable, runOperation, type BioManifest, type SqlConn } from "../src/core/index.js";
 import { defineBioOperationSpec } from "../src/core/operation-spec.js";
 import { duckdbNodeConn } from "../src/duckdb/node-api.js";
 import { inlineTableResolver } from "./support/inline-table-resolver.js";
@@ -33,14 +33,12 @@ describe("schema discovery (no record-type taxonomy)", () => {
   test("SQL is the arbiter: an operation referencing a missing column fails closed at the DuckDB binder", async () => {
     // No requiredColumns pre-declaration — the agent's SQL references allele_frequency, the table doesn't
     // have it, and DuckDB's binder fails closed with a clear error. The substrate adds no ceremony on top.
-    const manifest: DomainPackManifest = {
-      schema: "pi-bio.domain_pack_manifest.v1", id: "needs-af", version: "0.1.0", title: "Needs AF", description: "x", domains: ["genomics"],
-      provides: {
+    const manifest: BioManifest = {
+      schema: "pi-bio.manifest.v1", id: "needs-af", version: "0.1.0", title: "Needs AF", description: "x",       provides: {
         resolvers: [{ id: "inline.table", version: "0.1.0", title: "Inline", description: "Inline.", output: { mode: "table" } }],
         resources: [{ id: "variants", title: "Variants", kind: "virtual", resolver: "inline.table", params: { table: "variants", columns: [{ name: "variant_key", type: "TEXT" }], rows: [{ variant_key: "1:1:A:T" }] } }],
         operations: [defineBioOperationSpec({
-          schema: "pi-bio.operation_spec.v1", id: "needs.af", version: "0.1.0", title: "Needs AF", description: "x", domains: ["genomics"],
-          transport: "duckdb.sql", inputSchema: { type: "object" },
+          schema: "pi-bio.operation_spec.v1", id: "needs.af", version: "0.1.0", title: "Needs AF", description: "x",           transport: "duckdb.sql", inputSchema: { type: "object" },
           sql: { sqlTemplate: "SELECT variant_key, allele_frequency FROM variants", readOnly: true },
         })],
       },

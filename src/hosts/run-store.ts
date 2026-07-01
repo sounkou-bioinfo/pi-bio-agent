@@ -4,7 +4,7 @@ import { systemClock } from "../core/clock.js";
 import { RUN_REPLAY_SPEC_SCHEMA, canonicalDigest, type RunReplaySpec, type EnvAttestationSummary } from "../core/reproducibility.js";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { DuckDBInstance } from "@duckdb/node-api";
-import { createBioRegistry, type BioRegistry, type DomainPackManifest, type ResolutionReceipt } from "../core/manifest.js";
+import { createBioRegistry, type BioRegistry, type BioManifest, type ResolutionReceipt } from "../core/manifest.js";
 import type { CasStore } from "../core/cas.js";
 import type { BioResolverImpl, ProcessRunner, SqlConn } from "../core/ports.js";
 import { OperationRunError, runOperation, runQuery, type OperationResult } from "../core/operations.js";
@@ -42,7 +42,7 @@ const FILE_PATH_RESOLVERS = new Set(["duckdb.file_scan", "duckhts.read_bcf"]);
  * cwd). Absolute paths and remote URIs (http(s)/s3/...) are left untouched. Host-level — core never touches
  * resolver params. Done before registration so the registry (and the receipt's paramsDigest) see the real path.
  */
-function resolveResourcePaths(manifest: DomainPackManifest, manifestDir: string): DomainPackManifest {
+function resolveResourcePaths(manifest: BioManifest, manifestDir: string): BioManifest {
   const resources = (manifest.provides?.resources ?? []).map((res) => {
     // process.compute: a script SHIPS WITH the manifest, referenced "./compute.R" — resolve such relative
     // command entries against the manifest dir (absolute paths and bare executable names are left untouched).
@@ -163,10 +163,10 @@ function resolveInCwd(cwd: string, p: string): string {
 
 /** Load + validate + register a manifest and bind the built-in resolver impls it declares. Shared by the
  *  operation and the ad-hoc query entry points. */
-async function prepareRegistry(req: { cwd: string; manifestPath: string; network?: { fetch: FetchLike }; process?: { runner: ProcessRunner } }): Promise<{ registry: BioRegistry; manifest: DomainPackManifest; raw: DomainPackManifest; manifestDigest: string }> {
+async function prepareRegistry(req: { cwd: string; manifestPath: string; network?: { fetch: FetchLike }; process?: { runner: ProcessRunner } }): Promise<{ registry: BioRegistry; manifest: BioManifest; raw: BioManifest; manifestDigest: string }> {
   const manifestPath = resolveInCwd(req.cwd, req.manifestPath);
   const text = await fs.readFile(manifestPath, "utf8");
-  const raw = JSON.parse(text) as DomainPackManifest; // the AUTHORED manifest — portable replay intent (relative paths intact)
+  const raw = JSON.parse(text) as BioManifest; // the AUTHORED manifest — portable replay intent (relative paths intact)
   const manifestDigest = `sha256:${createHash("sha256").update(text).digest("hex")}`;
   const manifest = resolveResourcePaths(raw, dirname(manifestPath)); // relative resource paths -> manifest dir (resolved execution facts)
   const registry = createBioRegistry();
@@ -187,7 +187,7 @@ async function prepareRegistry(req: { cwd: string; manifestPath: string; network
 /** The RESOLVED process.compute facts for a run's resources (absolute command paths etc. — what actually ran on
  *  this host), captured beside the authored manifest snapshot so replay has BOTH portable intent and local facts.
  *  First process resource among `resources` (the walking-skeleton case; coloc/files-only declare one). */
-function resolvedProcessFacts(manifest: DomainPackManifest, resources: string[]): RunReplaySpec["process"] | undefined {
+function resolvedProcessFacts(manifest: BioManifest, resources: string[]): RunReplaySpec["process"] | undefined {
   const r = (manifest.provides?.resources ?? []).find((x) => x.resolver === PROCESS_RESOLVER && resources.includes(x.id));
   if (!r) return undefined;
   const p = r.params as { table?: string; command?: readonly string[]; inputSql?: string; resultTable?: "arrow" | "artifacts"; outputs?: Array<{ name: string; path: string; kind?: string }> };

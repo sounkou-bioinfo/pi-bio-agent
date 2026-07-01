@@ -16,8 +16,7 @@ type Receipt = { resourceId: string; provenance: ProvEntry[] };
 async function runInline(runner: ProcessRunner, environment?: unknown): Promise<ProvEntry> {
   const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-env-"));
   const manifest = {
-    schema: "pi-bio.domain_pack_manifest.v1", id: "env-test", version: "0.0.0", title: "x", description: "x", domains: ["statistics"],
-    provides: {
+    schema: "pi-bio.manifest.v1", id: "env-test", version: "0.0.0", title: "x", description: "x",     provides: {
       resolvers: [{ id: "process.compute", version: "0.1.0", title: "x", description: "x", output: { mode: "table" } }],
       resources: [{ id: "tracks", title: "x", kind: "virtual", resolver: "process.compute", params: {
         table: "tracks", command: ["sh", "-c", "printf hi > o.txt"], resultTable: "artifacts",
@@ -70,8 +69,7 @@ describe("C1b: process.compute environment attestation in the receipt", () => {
   test("an invalid declared EnvDescriptor fails closed", async () => {
     const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-env-"));
     const manifest = {
-      schema: "pi-bio.domain_pack_manifest.v1", id: "env-bad", version: "0.0.0", title: "x", description: "x", domains: ["statistics"],
-      provides: {
+      schema: "pi-bio.manifest.v1", id: "env-bad", version: "0.0.0", title: "x", description: "x",       provides: {
         resolvers: [{ id: "process.compute", version: "0.1.0", title: "x", description: "x", output: { mode: "table" } }],
         resources: [{ id: "tracks", title: "x", kind: "virtual", resolver: "process.compute", params: {
           table: "tracks", command: ["sh", "-c", "printf hi > o.txt"], resultTable: "artifacts",
