@@ -12,56 +12,53 @@ small set of generic primitives and the agent writes the SQL.
 
 ## How it works
 
-A resolver turns a declared resource into a DuckDB table and stamps a receipt (resolver version, params
-digest, source snapshot). The built-ins span three concerns:
+A **manifest** declares named *resources*; a **resolver** turns each into a DuckDB table and stamps a *receipt*
+(resolver version, params digest, source snapshot). An **operation** is a single read-only `SELECT`/`WITH` over
+those tables — whatever it returns *is* the result; there is no separate report layer. The bet stands on **four
+legs, all SQL over one DuckDB substrate**:
 
-- **Data** — read a file natively (`duckdb.file_scan` over csv/tsv/parquet/json), a VCF/BCF region
-  (`duckhts.read_bcf`), or any read-only query over what DuckDB can reach including httpfs/s3
-  (`duckdb.sql_materialize`).
-- **Network** — fetch an HTTP/JSON endpoint *as SQL* via **ducknng**, the owned Arrow-native extension that is
-  central to the bet: `ducknng_ncurl_table` makes HTTP a table function (URL/headers/body composed in SQL with
-  `getvariable` + `url_encode`, JSON parsed straight into a table — no bespoke TypeScript); `ducknng_run_rpc`
-  makes a live DuckDB a *shared mutable database many agent processes write through*; and its NNG topologies
-  (pub/sub, push/pull, survey, bus, pair) make multi-agent coordination transport-native. So network,
-  cross-process state, and multi-agent are all SQL — not TypeScript machinery. `http.get` (host-supplied fetch)
-  is the fallback for a DuckDB build with no ducknng, and multi-request retry/fanout over a rate-limited API
-  lives in one host helper (the single seam a DuckDB table-function limit forces out of pure SQL).
-- **Compute** — run an out-of-process computation (R/Python/Go/shell) over Arrow IPC (`process.compute`): a
-  DuckDB table is exported as Arrow, the child computes, the result is read back as a table. The compute is
-  external (a thing SQL is poor at, e.g. an `lm()` fit); only the *data contract* is SQL/Arrow.
+### 1. Data
+Read a file natively (`duckdb.file_scan` over csv/tsv/parquet/json), a VCF/BCF region (`duckhts.read_bcf`), or
+any read-only query over what DuckDB can reach including httpfs/s3 (`duckdb.sql_materialize`).
 
-The two capability resolvers are host-injected by composition — without a `fetch` bound `http.get` fails closed,
-without a `ProcessRunner` bound `process.compute` fails closed — exactly like every other host-owned effect.
-An operation is then a single read-only `SELECT`/`WITH` over those tables, and whatever it returns is the
-result — there is no separate report layer. A run bundles the result with its run record and the resolver
-receipts (a failed run still leaves an auditable receipt), written under `.pi/bio-agent/runs/<runId>/`.
+### 2. Network — HTTP *as SQL*, via the owned **ducknng** extension
+- `ducknng_ncurl_table` — an HTTP endpoint *is* a table function: URL/headers/body composed in SQL
+  (`getvariable` + `url_encode`), JSON parsed straight into columns, **no bespoke TypeScript**.
+- `ducknng_run_rpc` — a live DuckDB that many processes write through (shared mutable state).
+- NNG topologies (push/pull, pub/sub, survey, bus, pair) — multi-agent coordination as transport.
+- `http.get` (host-supplied `fetch`) is the fallback where a DuckDB build lacks ducknng; rate-limited
+  multi-request fanout lives in one host helper — the single seam a DuckDB table-function limit forces out of pure SQL.
 
-The substrate is deliberately thin: it enforces statement class (a read-only query with no writes or DDL),
-manifest shape, and receipt integrity, but it is not a network or filesystem sandbox. DuckDB's remote reads,
-replacement scans, and extensions are features; whether egress is possible is the host's decision (container,
-seccomp, the Pi runtime). The library records what ran; the host decides what may run.
+### 3. Compute — out-of-process, over Arrow IPC
+`process.compute` runs an external computation (R/Python/Go/shell): a table is exported as Arrow, the child
+computes what SQL is poor at (an `lm()` fit, a model), and the result reads back as a table. Only the *data
+contract* is SQL/Arrow — the computation is a contained child, not FFI.
 
-Ontologies and the knowledge graph share one shape, borrowed from
-[SemanticSQL](https://github.com/INCATools/semantic-sql): `bio_edges(from_id, predicate,
-to_id)` is the statement/edge base and `entailed_edge` is its transitive closure, so descendants, subsumption,
-and graph-walks are a single indexed join — the same SQL grounds an imported ontology and walks our own graph.
-Grounding a free-text term runs deterministically first (exact and synonym match plus closure, all SQL) and
-falls back to a model only on a miss, where the model may propose a candidate but never invent a CURIE and
-abstains below a confidence threshold. Ordered TermSets become a `scale_members` table so SQL can threshold on
-rank (ACMG, variant impact, clinical stage). Manifests are validated against a strict allowlist, so cut
-surface cannot ride back in as inert keys.
+### 4. Knowledge + memory — one SQL graph
+Ontologies **and** our own KG share one shape ([SemanticSQL](https://github.com/INCATools/semantic-sql)):
+`bio_edges(from_id, predicate, to_id)` + its `entailed_edge` transitive closure, so subsumption, descendants, and
+graph-walks are a single indexed join. Grounding a term runs **deterministically first** (exact/synonym match +
+closure, all SQL) and falls back to a model only on a miss — which may propose a candidate but **never invents a
+CURIE** and abstains below a confidence threshold. Ordered TermSets become a `scale_members` rank table (ACMG,
+variant impact, clinical stage). **Memory is machine studying** ([in this
+sense](https://jacobxli.com/blog/2026/machine-studying/)): the agent retains what it learns as *study notes*
+projected into the same graph — addressable data it queries, distinct from *skills* (activated behavior) and
+*facts* (measured, tool-derived, provenanced). Not prompt-stuffed context that rots.
 
-**Memory is machine studying, and it lives in the same SQL graph.** "Study" here is the [machine
-studying](https://jacobxli.com/blog/2026/machine-studying/) sense — the agent works a corpus *before* a task
-is known and retains what it learns as **study notes** projected into the KG (a cheatsheet, a concept map, a
-failure case), distinct from *skills* (activated behavior) and from *facts* (measured, tool-derived, with
-provenance). Expertise is addressable data the agent queries, not prompt-stuffed context that rots — the same
-`bio_edges`/`entailed_edge` shape the ontologies use.
+### Runs & receipts
+Capability resolvers are **host-injected by composition and fail closed** when unbound: no `fetch` → `http.get`
+is off; no `ProcessRunner` → `process.compute` is off. A run bundles the result with its run record and the
+resolver receipts — *a failed run still leaves an auditable receipt* — under `.pi/bio-agent/runs/<runId>/`.
+Manifests pass a strict allowlist, so cut surface can't ride back in as inert keys.
 
-The bet therefore stands on four legs, all SQL over one DuckDB substrate: **data** (files/formats),
-**network** (ducknng), **compute** (out-of-process code execution over Arrow), and **knowledge + memory**
-(ontology/KG + machine-studying notes). TypeScript is only the interpreter that binds host effects — a new bio
-question is a manifest and some SQL, not a new `.ts` file.
+### Trust boundary
+The substrate is deliberately thin: it enforces statement class (read-only, no DDL), manifest shape, and receipt
+integrity, but it is **not** a network or filesystem sandbox. DuckDB's remote reads, replacement scans, and
+extensions are features; whether egress is possible is the host's call (container, seccomp, the Pi runtime).
+**The library records what ran; the host decides what may run.**
+
+TypeScript is only the interpreter that binds these host effects — a new bio question is a manifest and some SQL,
+not a new `.ts` file.
 
 ## Why a substrate, not a hosted workbench
 
