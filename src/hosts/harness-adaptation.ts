@@ -111,18 +111,19 @@ export async function submitCandidateForApproval(conn: SqlConn, candidate: Opera
   return { specDigest, validation, test, pendingApproval };
 }
 
-/** 4.4 phase 2 — DECIDE a submitted candidate: record approved/rejected and, if approved, ACTIVATE. Fail closed if
- *  the candidate did not pass validation+test (or was never submitted), or if a TERMINAL decision already exists
- *  (no double-approve). `decidedAt` MUST be strictly after the submit's recordedAt (the monotonic-per-slot rule). */
-export async function decideCandidateApproval(conn: SqlConn, d: ApprovalDecision): Promise<{ activated: boolean }> {
+/** INTERNAL — record the approved/rejected decision and (if approved) ACTIVATE. Fail closed if the candidate did
+ *  not pass validation+test (or was never submitted), or if a TERMINAL decision already exists (no double-approve).
+ *  Does NOT require a `pending` marker — the synchronous path (runCandidateActivation) has no time gap and records
+ *  none. The PUBLIC durable decideCandidateApproval adds the `pending` requirement on top of this. */
+async function recordApprovalDecision(conn: SqlConn, d: ApprovalDecision): Promise<{ activated: boolean }> {
   assertIds(d.id, d.version);
-  if (!/^sha256:[0-9a-f]{64}$/.test(d.specDigest ?? "")) throw new Error("decideCandidateApproval: specDigest must be sha256:<64 hex>");
+  if (!/^sha256:[0-9a-f]{64}$/.test(d.specDigest ?? "")) throw new Error("approval decision: specDigest must be sha256:<64 hex>");
   const candKey = `candidate:${d.specDigest}`;
   const validation = parseStatus(await observationAsOfKey(conn, `${candKey}:validation`, d.decidedAt));
   const test = parseStatus(await observationAsOfKey(conn, `${candKey}:fixture-test`, d.decidedAt));
-  if (validation !== "passed" || test !== "passed") throw new Error(`decideCandidateApproval: candidate ${d.specDigest} did not pass validation+test as of ${d.decidedAt} (or was never submitted) — cannot decide`);
+  if (validation !== "passed" || test !== "passed") throw new Error(`approval decision: candidate ${d.specDigest} did not pass validation+test as of ${d.decidedAt} (or was never submitted) — cannot decide`);
   const current = parseStatus(await observationAsOfKey(conn, `${candKey}:approval`, d.decidedAt));
-  if (current === "approved" || current === "rejected") throw new Error(`decideCandidateApproval: candidate ${d.specDigest} already ${current} — a decision is terminal`);
+  if (current === "approved" || current === "rejected") throw new Error(`approval decision: candidate ${d.specDigest} already ${current} — a decision is terminal`);
 
   await recStatus(conn, d.specDigest, d.decidedAt, d.source, "approval", "harness:approval_status", d.approved ? "approved" : "rejected");
   if (d.approved) {
@@ -130,6 +131,23 @@ export async function decideCandidateApproval(conn: SqlConn, d: ApprovalDecision
     return { activated: true };
   }
   return { activated: false };
+}
+
+/** 4.4 phase 2 — DECIDE a SUBMITTED (parked) candidate: record approved/rejected and, if approved, ACTIVATE. This
+ *  is the DURABLE public contract: the candidate MUST currently be `approval="pending"` (submitCandidateForApproval
+ *  parked it), and `decidedAt` MUST be strictly after that pending row (the monotonic-per-slot rule). A candidate
+ *  that was never submitted, already terminal, or not parked fails closed — deciding is only for parked candidates.
+ *  (The synchronous runCandidateActivation does NOT go through here — it has no parked state; it uses the internal
+ *  recordApprovalDecision directly.) */
+export async function decideCandidateApproval(conn: SqlConn, d: ApprovalDecision): Promise<{ activated: boolean }> {
+  assertIds(d.id, d.version);
+  if (!/^sha256:[0-9a-f]{64}$/.test(d.specDigest ?? "")) throw new Error("decideCandidateApproval: specDigest must be sha256:<64 hex>");
+  const pending = await observationAsOfKey(conn, `candidate:${d.specDigest}:approval`, d.decidedAt);
+  const current = parseStatus(pending);
+  if (current === "approved" || current === "rejected") throw new Error(`decideCandidateApproval: candidate ${d.specDigest} already ${current} — a decision is terminal`);
+  if (current !== "pending") throw new Error(`decideCandidateApproval: candidate ${d.specDigest} is not awaiting approval (never submitted / not parked) — call submitCandidateForApproval first`);
+  if (pending && pending.recorded_at >= d.decidedAt) throw new Error(`decideCandidateApproval: decidedAt (${d.decidedAt}) must be strictly after the pending submit (${pending.recorded_at})`);
+  return recordApprovalDecision(conn, d);
 }
 
 /** Synchronous convenience wrapper (4.3): validate → test → (in-process) approve → activate, in one call. No time
@@ -145,7 +163,8 @@ export async function runCandidateActivation(
     // ACTIVATE — only if the approval policy approves (the human/policy boundary, NOT "tests pass"). The decision is
     // recorded even when rejected, so a tested-but-rejected candidate is auditable.
     const approval = await deps.approve({ id: candidate.id, version: candidate.version, specDigest });
-    ({ activated } = await decideCandidateApproval(conn, {
+    // the synchronous path has no parked state — decide directly via the internal helper (public decide requires pending)
+    ({ activated } = await recordApprovalDecision(conn, {
       id: candidate.id, version: candidate.version, specDigest, approved: approval !== null,
       decidedAt: deps.recordedAt, source: deps.source, approvedBy: approval?.approvedBy, reason: approval?.reason,
     }));

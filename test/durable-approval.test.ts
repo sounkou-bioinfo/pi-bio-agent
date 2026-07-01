@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { duckdbNodeConn } from "../src/duckdb/node-api.js";
 import type { SqlConn } from "../src/core/ports.js";
-import { createBioObservationSchema, observationAsOfKey } from "../src/duckdb/observations.js";
+import { createBioObservationSchema, recordObservation, observationAsOfKey } from "../src/duckdb/observations.js";
 import { activeOperationAsOf } from "../src/duckdb/activation.js";
 import { submitCandidateForApproval, decideCandidateApproval, type OperationCandidate } from "../src/hosts/harness-adaptation.js";
 
@@ -67,7 +67,18 @@ describe("Phase 4.4: durable submit -> (park) -> decide approval", () => {
     const sub = await submitCandidateForApproval(conn, writey, { sandbox: await sandbox(), recordedAt: T1, source: "ci" });
     assert.deepEqual({ v: sub.validation, t: sub.test, p: sub.pendingApproval }, { v: "failed", t: "skipped", p: false });
     assert.equal(await status(conn, `candidate:${sub.specDigest}:approval`, T1), null, "not parked");
-    await assert.rejects(() => decideCandidateApproval(conn, { id: writey.id, version: writey.version, specDigest: sub.specDigest, approved: true, decidedAt: T2, source: "x" }), /did not pass validation/);
+    await assert.rejects(() => decideCandidateApproval(conn, { id: writey.id, version: writey.version, specDigest: sub.specDigest, approved: true, decidedAt: T2, source: "x" }), /not awaiting approval|not parked/);
+  });
+
+  test("the DURABLE decide requires a PARKED candidate — validation+test passed but not submitted fails closed", async () => {
+    const conn = await obsConn();
+    // simulate the synchronous path's side effect: validation+test recorded passed, but the candidate was NOT parked
+    // (no `pending`). The public durable decide must refuse it — deciding is only for a submitted/parked candidate.
+    const digest = `sha256:${"a".repeat(64)}`;
+    const candKey = `candidate:${digest}`;
+    await recordObservation(conn, { statementKey: `${candKey}:validation`, subjectId: candKey, predicate: "harness:validation_status", value: "passed", recordedAt: T1, source: "x", digest });
+    await recordObservation(conn, { statementKey: `${candKey}:fixture-test`, subjectId: candKey, predicate: "harness:test_status", value: "passed", recordedAt: T1, source: "x", digest });
+    await assert.rejects(() => decideCandidateApproval(conn, { id: "double.report", version: "1.0.0", specDigest: digest, approved: true, decidedAt: T2, source: "x" }), /not awaiting approval|not parked/);
   });
 
   test("deciding an unknown specDigest fails closed", async () => {
