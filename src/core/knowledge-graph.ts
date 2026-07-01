@@ -1,7 +1,10 @@
 import type { BioArtifact, BioPrimitiveKind, Provenance } from "./types.js";
 import type { OntologyTermRef } from "./types.js";
 
-export type BioNodeFamily = "variant" | "interval" | "ontology_term" | "concept" | "artifact" | "memory";
+// A node's family/type is an OPEN label (variant, interval, gene, protein, drug, disease, pathway, cell_type,
+// concept, artifact, memory, …). A knowledge graph always has more node kinds; the family is stored, never
+// branched on, so it is data — not a closed TS union. Same rule as BioEdgePredicate below.
+export type BioNodeFamily = string;
 
 // CURIE/relation id (e.g. "RO:0002211"). Open vocabulary — well-known predicates come from a registry
 // (RO/BFO/SKOS as data), not a TS union ending in `| string` (which is not a real enum anyway).
@@ -17,7 +20,7 @@ export interface TrustBlock {
 export interface BioGraphNode {
   id: string;
   family: BioNodeFamily;
-  type: BioPrimitiveKind | string;
+  type: BioPrimitiveKind;
   label: string;
   description?: string;
   attrs?: Record<string, unknown>;
