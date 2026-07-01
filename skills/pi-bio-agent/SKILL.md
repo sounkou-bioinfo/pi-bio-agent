@@ -25,12 +25,11 @@ The LLM routes, clarifies, writes SQL/tool calls, explains, and can author new s
 
 ## Preferred workflow
 
-1. Call `bio_describe_model` to inspect the model and SQL contracts.
-2. Call `bio_list_tool_specs` before claiming a domain capability is missing.
-3. Call `bio_list_resource_resolvers` when the task may reduce to content-addressed resources or HTTP request surfaces.
-4. Call `bio_list_duckdb_extensions` to identify useful DuckDB substrates.
-5. For ontology or graph work, model the question as a read-only SQL query over stable views.
-6. If a workflow repeats, use `bio_create_skill` to write a project-local skill and then ask the user to run `/reload`.
+1. Call `bio_describe_model` to inspect the domain model and SQL contracts.
+2. Call `bio_list_duckdb_extensions` to identify useful DuckDB format/reader substrates before claiming a capability is missing.
+3. Point `bio_query` (ad-hoc SQL) or `bio_run_operation` (a declared operation) at a manifest: declare resources, do schema discovery, and answer with a read-only `SELECT`/`WITH` over the resolved tables. Model ontology/graph work the same way — SQL over stable views.
+4. Use `bio_validate_select` to confirm SQL is a single read-only statement before running it.
+5. If a workflow repeats, use `bio_create_skill` to write a project-local skill, then ask the user to run `/reload`.
 
 ## Ontology modeling
 
