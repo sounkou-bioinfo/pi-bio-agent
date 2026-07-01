@@ -103,6 +103,27 @@ addressable data it queries, distinct from *skills* (activated behavior)
 and *facts* (measured, tool-derived, provenanced). Not prompt-stuffed
 context that rots.
 
+### The spine — one temporal graph, and a governance loop
+
+Facts, memory, and compute status are not three systems — they are rows
+in **one append-only observation ledger** (`bio_observations`), read *as
+of* a time. A `variant:X:classification`, a coloc `PP.H4`, a
+`job:<id>:status`, an activation are the same shape; ontologies and the
+KG are the same graph (`bio_edges` + `entailed_edge`). So *“the current
+fact,”* *“what did the agent learn,”* and *“what was this job’s status
+at t”* are **one query over one DB**.
+
+On that spine sits a **governance loop** for safely changing what the
+agent can do: **declare → validate → test → record → activate →
+rollback**, every step a temporal observation. Activation is **durable
+and gated** — a candidate can be *parked* (`approval = pending`) and
+decided later across a restart, the decision is terminal and
+fail-closed, and the **approval itself, the one irreducible
+human-or-model judgment, is *recorded and gated* by the substrate, never
+computed by it**. Reproducibility (`reproduce()`), long-running jobs,
+and this governance loop all ride the same temporal graph — the DB *is*
+the audit trail.
+
 ### Runs & receipts
 
 Capability resolvers are **host-injected by composition and fail
@@ -180,21 +201,23 @@ Same run, no agent — the CLI/SDK path, for scripts and CI:
 substrate runs it and receipts it:**
 
 ``` sh
-pi-bio-agent query examples/variant-counts/manifest.json --db :memory: --sql "SELECT consequence, count(*) AS n FROM variants GROUP BY consequence ORDER BY consequence"
+pi-bio-agent query examples/variant-counts/manifest.json \
+  --db :memory: \
+  --sql "SELECT consequence, count(*) AS n FROM variants GROUP BY consequence ORDER BY consequence"
 ```
 
 ``` json
 {
   "ok": true,
-  "runId": "query-1782933407596",
+  "runId": "query-1782934160656",
   "status": "succeeded",
   "rowCount": 3,
   "artifacts": {
-    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782933407596/run.json",
-    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782933407596/result.json",
-    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782933407596/receipts.json"
+    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782934160656/run.json",
+    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782934160656/result.json",
+    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782934160656/receipts.json"
   },
-  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782933407596",
+  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782934160656",
   "rows": [
     {
       "consequence": "missense",
@@ -222,21 +245,25 @@ agent might write over the resolved `uniprot_entry` table, not a
 hardcoded answer (run live here):
 
 ``` sh
-pi-bio-agent query examples/connectors/uniprot.json --db :memory: --init-sql "INSTALL ducknng FROM community; LOAD ducknng; SET VARIABLE tls = ducknng_tls_config_from_files(NULL, '/etc/ssl/certs/ca-certificates.crt', '', 1)" --bindings '{"uniprot_acc":"P04637"}' --sql "SELECT primaryAccession, uniProtkbId, sequence.length AS aa FROM uniprot_entry"
+pi-bio-agent query examples/connectors/uniprot.json \
+  --db :memory: \
+  --init-sql "INSTALL ducknng FROM community; LOAD ducknng; SET VARIABLE tls = ducknng_tls_config_from_pem(NULL, NULL, NULL, '', 1)" \
+  --bindings '{"uniprot_acc":"P04637"}' \
+  --sql "SELECT primaryAccession, uniProtkbId, sequence.length AS aa FROM uniprot_entry"
 ```
 
 ``` json
 {
   "ok": true,
-  "runId": "query-1782933407689",
+  "runId": "query-1782934160753",
   "status": "succeeded",
   "rowCount": 1,
   "artifacts": {
-    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782933407689/run.json",
-    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782933407689/result.json",
-    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782933407689/receipts.json"
+    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782934160753/run.json",
+    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782934160753/result.json",
+    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782934160753/receipts.json"
   },
-  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782933407689",
+  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782934160753",
   "rows": [
     {
       "primaryAccession": "P04637",

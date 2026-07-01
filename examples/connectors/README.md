@@ -21,18 +21,23 @@ and [`ols4-grounding`](../ols4-grounding/) for an ontology-service connector.
 
 ```sh
 pi-bio-agent query examples/connectors/uniprot.json --db :memory: \
-  --bindings '{"uniprot_acc":"P04637"}' --sql "SELECT * FROM uniprot_entry"
+  --init-sql "INSTALL ducknng FROM community; LOAD ducknng; SET VARIABLE tls = ducknng_tls_config_from_pem(NULL, NULL, NULL, '', 1)" \
+  --bindings '{"uniprot_acc":"P04637"}' --sql "SELECT primaryAccession, uniProtkbId FROM uniprot_entry"
 ```
 
-The host must provision ducknng once (`INSTALL ducknng FROM community; LOAD ducknng`) via `duckdbInitSql`, and —
-for HTTPS — a TLS config bound to `{tls}`. **Network is the host's capability, never the agent's**: the default
-CLI/extension entrypoint binds no egress, so a connector fails closed until the host allows it.
+The `ncurl_table` connectors are pure SQL, so the host provisions ducknng + a TLS config with `--init-sql` (the
+DuckDB-native path). **Network is the host's capability, never the agent's**: the default CLI/extension entrypoint
+binds no egress, so a connector fails closed until the host allows it. The `http.get` form (e.g.
+[`uniprot-http.json`](uniprot-http.json)) needs no `--init-sql` — the host-supplied `fetch` resolves it, so the
+**agent** can drive it directly and compose the SQL itself.
 
-## Auth, MCP, and streaming
+## Auth, MCP, and streaming (the reach)
 
-`ducknng_ncurl_table` takes **host-provided headers**, so the same pattern reaches:
-- **token-gated APIs** — the host injects an `Authorization` header (a binding/`duckdbConfig` value, never an agent param);
-- **MCP servers** — JSON-RPC over HTTP + SSE is an `ncurl` call;
+These starter manifests hardcode a plain `Accept: application/json` header, but the `headers` argument of
+`ducknng_ncurl_table` is a SQL value — so it *can be composed from a host-owned variable*. That opens the same
+pattern to:
+- **token-gated APIs** — the host sets an `Authorization` header from a `duckdbConfig`/bound variable, never an agent param;
+- **MCP servers** — the HTTP-shaped JSON-RPC of an MCP endpoint is an `ncurl` call (full session/SSE semantics may need a host wrapper);
 - **streaming** — SSE / websockets via ducknng `wss`.
 
-Secrets stay on the host boundary; the manifest only names the shape.
+Secrets stay on the host boundary; the manifest names the shape, the host supplies the auth.

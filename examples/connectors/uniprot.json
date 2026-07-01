@@ -3,7 +3,7 @@
   "id": "connector-uniprot",
   "version": "0.1.0",
   "title": "UniProt connector (REST) — a protein record as SQL",
-  "description": "A connector is a MANIFEST, zero TypeScript. A UniProt entry is a GET to rest.uniprot.org parsed straight into a table by ducknng_ncurl_table; the accession is the agent's binding {uniprot_acc}. Host-provided headers carry any auth (never an agent param).",
+  "description": "A connector is a MANIFEST, zero TypeScript. A UniProt entry is a GET to rest.uniprot.org parsed straight into a table by ducknng_ncurl_table; the accession is the agent's binding {uniprot_acc}. The headers arg is a SQL value, so a host can compose an auth header from an owned variable (never an agent param); this starter hardcodes only Accept.",
   "provides": {
     "resolvers": [{ "id": "duckdb.sql_materialize", "version": "0.1.0", "title": "SQL materialize", "description": "Materialize a table from a read-only SELECT (here a ducknng_ncurl_table GET).", "output": { "mode": "table" } }],
     "resources": [{

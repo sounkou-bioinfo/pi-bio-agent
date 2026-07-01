@@ -68,6 +68,25 @@ const USAGE =
   "  pi-bio-agent query <manifest.json> --db <path|:memory:> --sql \"<SELECT>\" [--resources a,b] [--bindings '{...}'] [--init-sql \"INSTALL ...; LOAD ...\"] [--run-id id]\n" +
   "  pi-bio-agent run   <manifest.json> --db <path|:memory:> --operation <id> [--bindings '{...}'] [--run-id id]";
 
+/** Split a `;`-separated SQL string into statements WITHOUT splitting a `;` inside a single-quoted string literal
+ *  (with `''` escapes). Enough for the provisioning escape hatch (`SET VARIABLE tls = fn('a;b')`); not a full
+ *  SQL lexer (no dollar-quotes or block comments — provisioning SQL doesn't need them). */
+export function splitSqlStatements(sql: string): string[] {
+  const out: string[] = [];
+  let cur = "", inStr = false;
+  for (let i = 0; i < sql.length; i++) {
+    const ch = sql[i];
+    if (ch === "'") {
+      if (inStr && sql[i + 1] === "'") { cur += "''"; i++; continue; } // doubled '' escape stays inside the string
+      inStr = !inStr; cur += ch; continue;
+    }
+    if (ch === ";" && !inStr) { if (cur.trim()) out.push(cur.trim()); cur = ""; continue; }
+    cur += ch;
+  }
+  if (cur.trim()) out.push(cur.trim());
+  return out;
+}
+
 export async function mainRun(sub: string, argv: string[], deps: RunCliDeps): Promise<number> {
   const [manifestPath, ...rest] = argv;
   if (!manifestPath || manifestPath.startsWith("--")) { deps.err(USAGE); return 2; }
@@ -88,7 +107,8 @@ export async function mainRun(sub: string, argv: string[], deps: RunCliDeps): Pr
   const runId = flags["run-id"];
   // host provisioning (INSTALL/LOAD an extension, SET VARIABLE for a TLS config), run once before resolution —
   // `;`-separated statements. This is how a networked connector gets ducknng + TLS; it is NOT agent SQL.
-  const duckdbInitSql = flags["init-sql"] ? flags["init-sql"].split(";").map((s) => s.trim()).filter(Boolean) : undefined;
+  const initStmts = flags["init-sql"] ? splitSqlStatements(flags["init-sql"]) : [];
+  const duckdbInitSql = initStmts.length ? initStmts : undefined;
   const common = { cwd: deps.cwd, dbPath, manifestPath, runId, bindings, duckdbInitSql };
 
   let res;

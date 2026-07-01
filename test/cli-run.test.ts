@@ -88,3 +88,13 @@ describe("sdk: the package entry point re-exports the substrate surface", () => 
     }
   });
 });
+
+describe("cli: splitSqlStatements (--init-sql provisioning)", () => {
+  test("splits on ; but not inside a single-quoted string literal", async () => {
+    const { splitSqlStatements } = await import("../src/cli/run.js");
+    assert.deepEqual(splitSqlStatements("INSTALL ducknng; LOAD ducknng"), ["INSTALL ducknng", "LOAD ducknng"]);
+    assert.deepEqual(splitSqlStatements("SET VARIABLE x = fn('a;b'); LOAD y"), ["SET VARIABLE x = fn('a;b')", "LOAD y"]);
+    assert.deepEqual(splitSqlStatements("SET x = 'it''s; ok'"), ["SET x = 'it''s; ok'"]);
+    assert.deepEqual(splitSqlStatements("  ; ONE ;;  "), ["ONE"]);
+  });
+});

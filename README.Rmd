@@ -23,13 +23,18 @@ knitr::knit_engines$set(pi = function(options) {
 })
 
 # custom knitr engine: run the pi-bio-agent CLI (shown as `pi-bio-agent ...`, executed via the built bin).
-# We control the render: JSON output gets a ```json fence for syntax highlighting.
+# We control the render: capture stderr, FAIL the render on a non-zero exit (never bake a failure as an "answer"),
+# and give JSON output a ```json fence for syntax highlighting.
 knitr::knit_engines$set(biocli = function(options) {
   args <- paste(options$code, collapse = " ")
-  out <- suppressWarnings(system(paste("node dist/cli/bin.js", args), intern = TRUE))
+  out <- suppressWarnings(system(paste("node dist/cli/bin.js", args, "2>&1"), intern = TRUE))
+  status <- attr(out, "status")
   out_txt <- paste(out, collapse = "\n")
+  if (!is.null(status) && status != 0) stop("biocli render failed (exit ", status, "): ", args, "\n", out_txt)
   lang <- if (grepl("^\\s*[\\[{]", out_txt)) "json" else ""
-  knitr::asis_output(paste0("``` sh\npi-bio-agent ", args, "\n```\n\n", "``` ", lang, "\n", out_txt, "\n```\n"))
+  # wrap each flag onto its own continuation line so long commands don't overflow the README
+  cmd <- gsub(" --", " \\\\\n  --", paste("pi-bio-agent", args))
+  knitr::asis_output(paste0("``` sh\n", cmd, "\n```\n\n", "``` ", lang, "\n", out_txt, "\n```\n"))
 })
 ```
 
@@ -98,6 +103,20 @@ sense](https://jacobxli.com/blog/2026/machine-studying/)): the agent retains wha
 projected into the same graph — addressable data it queries, distinct from *skills* (activated behavior) and
 *facts* (measured, tool-derived, provenanced). Not prompt-stuffed context that rots.
 
+### The spine — one temporal graph, and a governance loop
+
+Facts, memory, and compute status are not three systems — they are rows in **one append-only observation ledger**
+(`bio_observations`), read *as of* a time. A `variant:X:classification`, a coloc `PP.H4`, a `job:<id>:status`, an
+activation are the same shape; ontologies and the KG are the same graph (`bio_edges` + `entailed_edge`). So *"the
+current fact,"* *"what did the agent learn,"* and *"what was this job's status at t"* are **one query over one DB**.
+
+On that spine sits a **governance loop** for safely changing what the agent can do: **declare → validate → test →
+record → activate → rollback**, every step a temporal observation. Activation is **durable and gated** — a
+candidate can be *parked* (`approval = pending`) and decided later across a restart, the decision is terminal and
+fail-closed, and the **approval itself, the one irreducible human-or-model judgment, is *recorded and gated* by the
+substrate, never computed by it**. Reproducibility (`reproduce()`), long-running jobs, and this governance loop all
+ride the same temporal graph — the DB *is* the audit trail.
+
 ### Runs & receipts
 Capability resolvers are **host-injected by composition and fail closed** when unbound: no `fetch` → `http.get`
 is off; no `ProcessRunner` → `process.compute` is off. A run bundles the result with its run record and the
@@ -145,7 +164,7 @@ goes stale).
 **writes its own read-only SQL** (we never hand it the query), runs it through the substrate, and answers. This
 is a real transcript, produced when this README is rendered:
 
-```{pi}
+```{pi, cache=TRUE}
 How many variants of each consequence are in examples/variant-counts/manifest.json? Answer with a short table.
 ```
 
@@ -164,7 +183,7 @@ agent does schema discovery and composes **what** to pull — the query below is
 resolved `uniprot_entry` table, not a hardcoded answer (run live here):
 
 ```{biocli}
-query examples/connectors/uniprot.json --db :memory: --init-sql "INSTALL ducknng FROM community; LOAD ducknng; SET VARIABLE tls = ducknng_tls_config_from_files(NULL, '/etc/ssl/certs/ca-certificates.crt', '', 1)" --bindings '{"uniprot_acc":"P04637"}' --sql "SELECT primaryAccession, uniProtkbId, sequence.length AS aa FROM uniprot_entry"
+query examples/connectors/uniprot.json --db :memory: --init-sql "INSTALL ducknng FROM community; LOAD ducknng; SET VARIABLE tls = ducknng_tls_config_from_pem(NULL, NULL, NULL, '', 1)" --bindings '{"uniprot_acc":"P04637"}' --sql "SELECT primaryAccession, uniProtkbId, sequence.length AS aa FROM uniprot_entry"
 ```
 
 This connector is pure SQL (`ncurl_table`), so the **host** provisions ducknng + TLS (`--init-sql`) and grants

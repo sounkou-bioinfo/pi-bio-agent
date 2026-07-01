@@ -11,6 +11,7 @@ import { observationAsOfKey } from "../duckdb/observations.js";
 // recorded phase and, since it is unchanged, does not double-record).
 
 const FUTURE = "9999-12-31T23:59:59.999Z";
+const PHASES = new Set<JobPhase>(["queued", "running", "waiting", "succeeded", "failed", "cancelled"]);
 const isTerminal = (p: JobPhase): boolean => p === "succeeded" || p === "failed" || p === "cancelled";
 
 /** The one transport-specific seam: how a host SENDS a job to a worker — ducknng NNG push/pull, an SSH submit, a
@@ -24,7 +25,13 @@ export function ledgerJobRunner(conn: SqlConn, dispatch: JobDispatch): JobRunner
   const readStatus = async (runId: string): Promise<JobStatus | null> => {
     const row = await observationAsOfKey(conn, statusSlot(runId), FUTURE);
     if (row?.value_json == null) return null;
-    return { runId, phase: JSON.parse(row.value_json) as JobPhase, at: row.recorded_at };
+    // a worker may record either a bare phase ("succeeded") or a richer {phase, message, progress} object
+    const v = JSON.parse(row.value_json) as unknown;
+    const rec = (typeof v === "object" && v !== null ? v : { phase: v }) as { phase?: unknown; message?: string; progress?: JobStatus["progress"] };
+    if (typeof rec.phase !== "string" || !PHASES.has(rec.phase as JobPhase)) {
+      throw new Error(`ledgerJobRunner: job '${runId}' has an invalid status phase ${JSON.stringify(rec.phase)}`);
+    }
+    return { runId, phase: rec.phase as JobPhase, at: row.recorded_at, message: rec.message, progress: rec.progress };
   };
 
   return {
