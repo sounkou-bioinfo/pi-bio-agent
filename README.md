@@ -4,11 +4,23 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen.svg)](package.json)
 
+> **The entire "AI for science" workbench — reproducible artifacts, dozens of connected databases, on-demand
+> *distributed* compute, grounded review — as an open, deterministic, SQL-native library you run on your own
+> infrastructure. Not a hosted product. A substrate.**
+
 Lean, provider-agnostic bioinformatics **substrate** for Pi agents — not a pile of bespoke genomics scripts.
 
 The bet: **manifests, SQL, resources, and ontology data are the PROGRAM; TypeScript is only the interpreter.**
-A new bio question or data source is a new *manifest* (data), never a new `.ts` file. The substrate ships a
-small set of generic primitives and the agent writes the SQL.
+Everything reduces to *data + an injected effect port*, so every layer is just a plug:
+
+- a new **question** is a *manifest* + SQL — never a new `.ts`;
+- a new **data format** is a *DuckDB extension* (`duckhts`, `anndata`, `duckdb_zarr`, `plinking_duck`, …);
+- a new **API** is an `ncurl_table` call over **[ducknng](https://github.com/sounkou-bioinfo/ducknng)** — our
+  owned, community-signed, Arrow-native NNG transport: HTTP-as-SQL, cross-process shared-DB RPC, and **distributed
+  worker pools** (push/pull, pub/sub, survey) with workers in R (`nanonext`/`mirai`), Python (`pynng`), or node;
+- a new **compute backend** (SLURM, Modal, an NNG pool) is one injected `JobDispatch` — the library ships the
+  primitive, you bring the backend;
+- a new **model** is an injected judge. The interpreter stays thin; the agent writes the SQL.
 
 ## How it works
 
@@ -88,6 +100,58 @@ Same destination; we own the road. A hosted product adds features on top of an o
 substrate those features are approximations of. (And yes, a UI is just a thin client over the CLI/SDK — the
 substrate is real without one.)
 
+## Demonstration
+
+Every block below is runnable, and the output is **real** — the same literate-programming discipline that keeps
+[the example docs](examples/) from drifting (each example records a verified run; `npm run check` fails if one
+goes stale).
+
+**The agent speaks.** Point a live Pi agent at a manifest and ask in plain English — it does schema discovery,
+writes the read-only SQL, runs it through the substrate, and answers (this is a real transcript):
+
+```sh
+pi -e extensions/pi-coding-agent/index.ts -p \
+  "Over examples/variant-counts/manifest.json: how many variants of each consequence are there?"
+```
+> | Consequence | Variants |
+> |---|---:|
+> | missense | 2 |
+> | stop_gained | 2 |
+> | synonymous | 1 |
+>
+> *Missense and stop-gained variants are tied as the most common consequences, with two variants each.*
+
+Same run, no agent — the CLI/SDK path, for scripts and CI:
+
+**Ask a question over a manifest — the agent writes the SQL, the substrate runs it and receipts it:**
+
+```sh
+pi-bio-agent query examples/variant-counts/manifest.json --db :memory: \
+  --sql "SELECT consequence, count(*) AS n FROM variants GROUP BY consequence ORDER BY consequence"
+```
+```json
+{ "ok": true, "rowCount": 3, "rows": [
+  { "consequence": "missense",    "n": 2 },
+  { "consequence": "stop_gained", "n": 2 },
+  { "consequence": "synonymous",  "n": 1 } ] }
+```
+
+**A scientific-database connector is a manifest, not a client.** The "60+ connected databases" a hosted
+workbench advertises are, here, one file each — [`examples/connectors/`](examples/connectors/) ships UniProt,
+RCSB PDB, MyGene/BioThings, and Reactome, and a new one is a new URL:
+
+```sh
+pi-bio-agent query examples/connectors/uniprot.json --db :memory: \
+  --bindings '{"uniprot_acc":"P04637"}' --sql "SELECT * FROM uniprot_entry"   # host provisions ducknng + egress
+```
+
+**We port the whole "AI for science" stack as one Pi extension — not a hosted product.** The `pi-coding-agent`
+extension exposes the entire surface over this substrate (query/run a manifest, list DuckDB format extensions,
+validate SQL, plan/read/write study notes), so reproducible artifacts, connected databases, on-demand and
+*distributed* compute, and grounded review are a Pi extension **you** run, on **your** infra. Each
+[example](examples/) carries a recorded, verified run; see [what the substrate closes over](docs/closes-over.md)
+for the topology / Fugu / RLM argument.
+
 ## Install in Pi
 
 ```sh
@@ -159,6 +223,20 @@ New here? Start with the [user guide](docs/guide.md) — write a manifest, run a
 see the [design notes](docs/design.md) and the [roadmap](docs/roadmap.md). The full
 [docs index](docs/INDEX.md) is generated from each doc's frontmatter (`npm run docs:index`; `npm run check`
 fails if it is stale).
+
+## References & lineage
+
+The primitives here are discovered, not invented — [what the substrate closes over](docs/closes-over.md) makes
+that argument with citations. Prior art and lineage:
+
+- **ClawBio** — the origin corpus this factors ("ClawBio for free"): <https://github.com/ClawBio/ClawBio>
+- **Machine studying** (Li, Battle, Khattab, 2026) — <https://jacobxli.com/blog/2026/machine-studying/>
+- **Sakana Fugu** (learned orchestration; we own the substrate it conducts) — <https://sakana.ai/fugu/>
+- **Recursive Language Models / RLM** (REPL-over-context; `bio_query` is the SQL REPL) — <https://arxiv.org/abs/2512.24601>
+- **ducknng** — our owned Arrow-native NNG transport (HTTP-as-SQL, shared-DB RPC, distributed worker pools): <https://github.com/sounkou-bioinfo/ducknng>
+- **NNG** <https://nng.nanomsg.org/> · `nanonext` <https://github.com/r-lib/nanonext> · `mirai` <https://mirai.r-lib.org/> · `pynng` <https://github.com/codypiersall/pynng>
+- **SemanticSQL** (the `bio_edges` + `entailed_edge` graph shape) — <https://github.com/INCATools/semantic-sql>
+- Design thread (sounkou-bioinfo × Manuel) — [LinkedIn](https://www.linkedin.com/feed/update/urn:li:activity:7473824764575436800)
 
 ## Development
 
