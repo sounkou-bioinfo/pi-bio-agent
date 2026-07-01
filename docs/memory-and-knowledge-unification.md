@@ -298,6 +298,6 @@ triple are ever needed, the `UNIQUE` constraint must be revisited.
 - Not a new storage engine: this rides the existing filesystem + DuckDB split in
   `design.md`. Files stay the source of truth; DuckDB indexes them.
 - Not making memory model-authoritative: a unit is procedural guidance, never a measured
-  fact — same stance as `factsMustBeToolDerived` in the `BioToolSpec` safety block.
+  fact — facts stay tool-derived, with provenance; a note is never itself evidence.
 - Not blurring the activation boundary: a skill changes agent behavior on `/reload`; a note
   is pulled on demand. Shared storage shape, different lifecycle.

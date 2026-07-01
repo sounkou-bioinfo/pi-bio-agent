@@ -18,7 +18,7 @@ Host surfaces
   CLI/service surface later
 
 Core contracts
-  BioToolSpec
+  BioManifest (the program: provides resources/resolvers/operations/termSets)
   BioOperationSpec / operation descriptor
   ResourceHandle / BioResolverSpec / VirtualResourceSpec / CAS handle
   BioRunSpec / run record / events
@@ -26,11 +26,13 @@ Core contracts
   study notes / OKF-compatible bundles
 
 Execution adapters
-  restricted code runtime
-  DuckDB read-only SQL
-  HTTP / OpenAPI / GraphQL
-  MCP transport
-  shell / R / Python, where explicitly enabled
+  DuckDB read-only SQL                          (the substrate)
+  ducknng    network as SQL (ncurl_table/_aio), cross-process shared-DB RPC (run_rpc),
+             and NNG topologies (pub/sub, push/pull, survey, bus, pair) — the owned extension
+             that makes network/distributed/multi-agent SQL-native
+  duckhts    HTS readers (VCF/BCF, BAM/CRAM, BED/GFF, tabix) as SQL table functions
+  process    out-of-process R / Python / Go / shell over Arrow IPC (the COMPUTE pillar)
+  http.get   TS resolver + injected fetch — the fallback where a DuckDB build has no ducknng
 
 Storage/index adapters
   filesystem study bundles
@@ -55,7 +57,7 @@ reason; the question-level builders were removed.)
 > **Pre-1.0 core has no compatibility promise.** Remove speculative types rather than maintain unclear
 > abstractions — clarity over hodgepodge. Concrete biomedical behavior enters through operation/extension
 > **manifests with tests**, never through convenience helpers in core. Keep only: (1) true primitives
-> (identity, coordinates, CURIEs, content addresses); (2) contracts with real boundaries (`BioToolSpec`,
+> (identity, coordinates, CURIEs, content addresses); (2) contracts with real boundaries (`BioManifest`,
 > `BioOperationSpec`, `ResourceHandle`, `BioRunSpec`, graph node/edge snapshot, study note); (3) adapters
 > with tests (DuckDB sync/report, Pi extension, CLI, project helpers). Everything else is removed until a
 > real consumer demands it.
@@ -115,7 +117,7 @@ Priority order:
 2. **Pi extension** — exposes registry inspection, study-note operations, skill drafting, SQL validation, and later operation execution inside Pi.
 3. **CLI** — scriptable local entry point for validation, indexing, operation-pack testing, and resource/CAS utilities. CLI output should support `--json` for automation.
 4. **JSON-RPC over stdio** — machine interface for editors, other agents, or wrappers that do not run inside Pi. Start with stdio rather than a daemon.
-5. **MCP server surface** — optional later wrapper that projects selected BioToolSpecs/resources as MCP tools/resources. MCP is a transport, not the core architecture.
+5. **MCP server surface** — optional later wrapper that projects selected operations/resources as MCP tools/resources. MCP is a transport, not the core architecture.
 
 All surfaces should call the same internal functions. The CLI must not reimplement Pi logic; the Pi extension must not hide logic that the CLI/JSON-RPC cannot exercise. This keeps tests surface-independent.
 
@@ -148,7 +150,7 @@ The Pi coding-agent extension is the first concrete integration target. It shoul
 The extension should provide:
 
 - **resource discovery** for project-local bio skills and study bundles
-- **registry inspection** for BioToolSpecs, resolvers/resources, operation packs, DuckDB extensions, and ontology/KG contracts
+- **registry inspection** for operations, resolvers/resources, manifests, DuckDB extensions, and ontology/KG contracts
 - **validation tools** for specs, read-only SQL, resource handles, and operation descriptors
 - **study tools** for planning, writing, listing, reading, and eventually indexing notes
 - **skill drafting** for project-local procedural skills, with `/reload` as the activation boundary
@@ -186,13 +188,6 @@ BioOperationSpec
   identifier namespaces
   cache key policy
   provenance policy
-
-BioToolSpec
-  biomedical meaning
-  domains
-  inputs/outputs/effects
-  safety notes
-  operation references
 ```
 
 Then derive:
@@ -200,7 +195,6 @@ Then derive:
 ```text
 BioOperationSpec
   -> typed operation client
-  -> BioToolSpec surface
   -> BioResolverSpec/VirtualResourceSpec when it resolves content
   -> Pi/MCP/CLI host exposure
   -> tests and docs

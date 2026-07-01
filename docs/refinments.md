@@ -11,13 +11,13 @@ Open design issues and cleanup targets. Keep this file focused on what still nee
 
 ## Naming and layering
 
-- Keep `BioToolSpec` as the biomedical/user-facing contract; avoid mixing transport details into it.
-- Continue refining `BioOperationSpec` with concrete operation-pack fixtures before adding execution.
-- Decide the canonical relationship between `BioToolSpec.inputs/outputs` and `inputSchema/outputSchema` before external consumers rely on either representation.
+- The manifest (`BioManifest`) is the user-facing contract; keep transport details out of it. (The
+  `BioToolSpec` self-description subsystem was removed — it was a hand-kept, drifted, unenforced catalog.)
+- Continue refining `BioOperationSpec` with concrete manifest fixtures before adding execution.
 - Keep broad types in `types.ts` provisional unless they gain validators, tests, or a real consumer.
 - Separate host surfaces from execution adapters in code and docs:
   - host: Pi, future MCP/CLI
-  - execution: HTTP/OpenAPI/GraphQL, DuckDB SQL, MCP transport, R/Python/shell/code runtime
+  - execution: DuckDB SQL, `ducknng` (network/RPC/topologies as SQL), `duckhts` (HTS readers), out-of-process R/Python/shell
 - Move format adapters such as OKF under a `formats/` or `adapters/` namespace rather than making them core primitives.
 
 ## Integration surfaces
@@ -26,7 +26,7 @@ Open design issues and cleanup targets. Keep this file focused on what still nee
 - Pi coding-agent extension remains the first host adapter and proof target.
 - Add a small CLI with `--json` output for validation, indexing, and operation-pack tests.
 - Add JSON-RPC over stdio after CLI commands stabilize; avoid a long-running daemon until there is a real need.
-- Decide whether the MCP surface is generated from BioToolSpecs or hand-curated per operation pack.
+- Decide whether the MCP surface is generated from the manifest's operations or hand-curated.
 - Define one command/RPC schema naming convention and use it consistently across Pi, CLI, JSON-RPC, and future MCP.
 - Ensure network/code execution is opt-in and policy-explicit in every surface, not just Pi.
 - Keep the Pi extension thin: substantial logic moves to shared `src/` functions with tests.
@@ -57,7 +57,7 @@ Open design issues and cleanup targets. Keep this file focused on what still nee
 
 - Base tool, operation, resolver, run, SQL, storage/CAS validators are in place.
 - Add more operation-spec fixtures for valid and invalid provider/API shapes.
-- Add schema-level compatibility checks between BioToolSpec, BioOperationSpec, and BioResolverSpec.
+- Add schema-level compatibility checks between BioOperationSpec, BioResolverSpec, and VirtualResourceSpec.
 
 ### Stage 2 — storage/index substrate
 

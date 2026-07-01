@@ -293,7 +293,7 @@ and analysis as manifest SQL, not per-source TypeScript.
 | Identity | `GenomicInterval`, `VariantKey`, `OntologyTermRef`, `ContentAddress`, `PredicateId=string` | id aliases, `TermRef`/`TermSet`/`PredicateDef` registry |
 | Handle | `ResourceHandle`, `VirtualResourceSpec`, `BioResolverSpec`/`Impl`, `ResolutionReceipt`, `resolveResource`, real resolvers (`duckdb.file_scan`, `duckhts.read_bcf`), `ContentAddress`/`casPathForAddress` | gnomAD/http resolvers, CAS materialization |
 | Fact | `BioGraphNode`/`Edge`/`Snapshot`, `TrustBlock`, `Provenance` | `BioFact` + `EvidenceBlock` + `TemporalValidity`; recording judgments/results as edges |
-| Declaration | `BioToolSpec`, `BioOperationSpec`, `BioManifest` registry (validated, frozen) | `PredicateDef` registry |
+| Declaration | `BioOperationSpec`, `BioResolverSpec`, `BioManifest` registry (validated, frozen) | `PredicateDef` registry |
 | Run | `BioRunSpec`/`Record`/`Event` + host producer (`bio_run_operation` → run/result/receipts persisted) | richer run lifecycle (resume, budgets) |
 | Memory | `StudyNote`, `studyNoteGraph`, KG sync | — (intentionally time-free) |
 

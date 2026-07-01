@@ -27,7 +27,7 @@ skills                   stabilized-workflow packaging
 
 **The harness records itself in the same graph — carefully scoped.** Harness *capabilities, adapters,
 specs, skills, runs, artifacts, and extension declarations* are represented in the same graph substrate
-as domain facts (`extension —declares→ tool`, `tool —implements→ BioToolSpec`, `run —produced→
+as domain facts (`manifest —provides→ operation`, `operation —requires→ resource`, `run —produced→
 artifact`, `skill —derived_from→ study-note`, `operation —requires→ network-policy`). **Executable code
 still lives in package files / CAS / artifacts** — the graph records *declarations, provenance,
 dependencies, activation, and outputs*, not the running code itself. This makes the harness
@@ -64,7 +64,7 @@ the means; the cost-curve is the evidence they were worth it. (This is the
 
 A pyramid, plus a conformance cross-cut. Layers 1–3 substantially exist today; 4–6 do not.
 
-1. **Pure contract tests** — validators/projections (`BioToolSpec`, `BioOperationSpec`,
+1. **Pure contract tests** — validators/projections (`BioManifest`, `BioOperationSpec`,
    `ResourceHandle`, `StudyNote`, `studyNoteGraph`, ontology/KG helpers, interval/variant primitives).
    Deterministic, fail-closed, no I/O.
 2. **SQL/KG tests** — schema DDL, constraints, indexes, dangling links, external-inbound guard, report

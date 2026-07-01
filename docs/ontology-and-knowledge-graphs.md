@@ -31,7 +31,7 @@ the substrate, not its foundation.
 
 **The harness models itself in the same graph — but only its *declarations*, not its running code.**
 Capabilities, operation specs, resolvers, extensions, skills, runs, and artifacts become nodes, with
-edges like `extension —declares→ tool`, `tool —implements→ BioToolSpec`, `run —used→ capability`,
+edges like `manifest —provides→ operation`, `operation —requires→ resource`, `run —used→ capability`,
 `run —produced→ artifact`, `skill —derived_from→ study-note`, `operation —requires→ network-policy`.
 This makes the harness *inspectable as graph data*: the agent queries its own capabilities, provenance,
 and run history with the same graph-as-SQL it uses for biology. Crucially, **executable code still lives

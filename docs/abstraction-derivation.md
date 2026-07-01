@@ -91,15 +91,17 @@ CAS/raw→curated layering** — is evidence the primitives are discovered, not 
 
 The minimum primitives that make many bio workflows simple are:
 
-1. `BioToolSpec` — provider-agnostic executable contract.
+1. `BioManifest` — the program: a serializable bag of resources/resolvers/operations/termSets, bound to
+   runtime impls by a host. Provider-agnostic; no executable code in the manifest itself.
 2. `BioResolverSpec` + `VirtualResourceSpec` — declared resources resolved through a validated registry
    (`resolveResource`, registry-stamped `ResolutionReceipt`s) into content-addressed or virtual handles.
 3. Ontology tables — terms, edges, mappings, term sets.
 4. Knowledge graph tables — nodes, edges, observations, artifacts, trust blocks.
-5. DuckDB substrate — stable SQL views over files, extensions, parquet/lake tables, and catalogs.
+5. DuckDB substrate — stable SQL over files, extensions, parquet/lake tables, and catalogs; `ducknng` extends
+   it to network (`ncurl_table`), cross-process shared-DB RPC, and NNG topologies — network/multi-agent as SQL.
 6. Study notes — indexed, mutable expertise memory distinct from skills.
-7. `BioManifest` registry — serializable spec declarations bound to runtime impls; the boundary
-   where packs register resolvers, resources, views, term sets, and operations.
+7. The registry (`createBioRegistry`) — the runtime boundary where a manifest's serializable spec
+   declarations are bound to executable impls (`bindResolverImpl`) and resolved (`resolveResource`).
 8. Skill writer — promote a stabilized workflow into a project-local Pi skill and reload.
 
 Everything else should be an adapter or a registry entry until proven otherwise.
