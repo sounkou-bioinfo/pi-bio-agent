@@ -48,6 +48,21 @@ const BIO_ORIENTATION = [
   "  `bio_create_skill`.",
 ].join("\n");
 
+// The always-on RECALL INDEX: a compact, current list of memory notes (slug — hook) injected into the system
+// prompt each turn, so recall is cheap and the agent reaches for existing memory before re-deriving — the trick
+// that makes a MEMORY.md-style index useful. Bounded to keep the token cost small; failures are swallowed (an
+// index is a convenience, never a hard dependency).
+async function memoryIndexBlock(cwd: string): Promise<string> {
+  try {
+    const notes = await listStudyNotes(cwd, {});
+    if (notes.length === 0) return "";
+    const lines = studyNoteIndex(notes).slice(0, 30).map((n) => `- ${n.slug} — ${n.hook}`);
+    return `\n\n[memory index] Your current memory (recall with bio_read_study_note / bio_walk_memory before re-deriving):\n${lines.join("\n")}`;
+  } catch {
+    return "";
+  }
+}
+
 export interface BioExtensionOptions {
   network?: { fetch: FetchLike };
 }
@@ -62,8 +77,8 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
   // Give the agent a persistent, drift-resistant orientation to pi-bio-agent on every turn (the pi-coding-agent
   // way: append to the chained system prompt in before_agent_start). It points at DISCOVERY tools + the examples
   // dir rather than enumerating volatile specifics, so it can never lie as the corpus changes.
-  pi.on("before_agent_start", (event) => ({
-    systemPrompt: `${event.systemPrompt}\n\n${BIO_ORIENTATION}`,
+  pi.on("before_agent_start", async (event) => ({
+    systemPrompt: `${event.systemPrompt}\n\n${BIO_ORIENTATION}${await memoryIndexBlock(event.systemPromptOptions?.cwd ?? process.cwd())}`,
   }));
 
   pi.registerTool({

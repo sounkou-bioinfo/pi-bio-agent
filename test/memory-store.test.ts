@@ -41,6 +41,18 @@ describe("temporal memory over bio_observations", () => {
     assert.deepEqual((await listMemory(c, T1)).map((m) => m.slug), ["temp"]); // present as of t1
   });
 
+  test("shared memory is attributed: two agents on one slug -> both retained, current shows the latest author", async () => {
+    const c = await conn();
+    await remember(c, note("risk", "A's view"), T1, "agent:A");
+    await remember(c, note("risk", "B's view"), T2, "agent:B");
+    const now = await recall(c, "risk");
+    assert.equal(now?.body, "B's view");
+    assert.equal(now?.author, "agent:B"); // latest revision's author
+    assert.equal((await recall(c, "risk", T1))?.author, "agent:A"); // as-of earlier -> the other author
+    const hist = await memoryHistory(c, "risk");
+    assert.deepEqual(hist.map((h) => h.author), ["agent:A", "agent:B"]); // both attributions retained
+  });
+
   test("a [[link]] becomes a walkable memory-graph edge (as-of), via the SAME projection as facts", async () => {
     const c = await conn();
     await remember(c, note("a", "see [[b]] for more"), T1);
