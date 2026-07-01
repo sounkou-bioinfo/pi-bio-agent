@@ -1,5 +1,5 @@
 import { promises as fs } from "node:fs";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { systemClock } from "../core/clock.js";
 import { RUN_REPLAY_SPEC_SCHEMA, receiptContentDigest, type RunReplaySpec, type EnvAttestationSummary } from "../core/reproducibility.js";
 import { dirname, isAbsolute, join, resolve } from "node:path";
@@ -350,7 +350,9 @@ export async function runBioOperationFromManifest(req: RunOperationRequest): Pro
   if (!op) throw new Error(`operation '${req.operationId}' is not declared in the manifest`);
   if (op.transport !== "duckdb.sql" || !op.sql) throw new Error(`operation '${req.operationId}' is not a duckdb.sql operation`);
   const now = req.now ?? systemClock();
-  const runId = req.runId ?? `${req.operationId.replace(/[^a-zA-Z0-9._-]/g, "_")}-${Date.now()}`;
+  // A HIGH-ENTROPY suffix, not just Date.now(): `run:<runId>` is the ledger statement_key, and in a SHARED store
+  // (across projects/agents) a bare timestamp collides -> two unrelated runs would conflate into one as-of slot.
+  const runId = req.runId ?? `${req.operationId.replace(/[^a-zA-Z0-9._-]/g, "_")}-${Date.now()}-${randomUUID().slice(0, 8)}`;
   const allResources = (manifest.provides?.resources ?? []).map((r) => r.id);
   const proc = resolvedProcessFacts(manifest, allResources);
   const replay: RunReplaySpec = {
@@ -408,7 +410,7 @@ export async function runBioQueryFromManifest(req: RunQueryRequest): Promise<Run
   const { registry, manifest, raw, manifestDigest } = await prepareRegistry(req);
   const resources = req.resources ?? (manifest.provides?.resources ?? []).map((r) => r.id);
   const now = req.now ?? systemClock();
-  const runId = req.runId ?? `query-${Date.now()}`;
+  const runId = req.runId ?? `query-${Date.now()}-${randomUUID().slice(0, 8)}`; // globally unique: see runBioOperationFromManifest
   const proc = resolvedProcessFacts(manifest, resources);
   const replay: RunReplaySpec = {
     schema: RUN_REPLAY_SPEC_SCHEMA, runId, kind: "query",

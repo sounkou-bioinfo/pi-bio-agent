@@ -46,4 +46,14 @@ describe("run-observations: ad-hoc SQL folds into the ONE store as an as-of, att
     assert.equal(v.sql, "SELECT count(*) AS n FROM variants");
     assert.ok(Array.isArray(v.sourceReceiptDigests) && v.sourceReceiptDigests.length >= 1, "digest refs came from the ACTUAL run's receipts, not a re-read file");
   });
+
+  test("two runs do not clash: auto-generated run ids are globally unique (safe in a shared store)", async () => {
+    const store = await conn();
+    const base = { cwd: process.cwd(), dbPath: ":memory:", manifestPath: "examples/variant-counts/manifest.json", sql: "SELECT count(*) AS n FROM variants", store, author: "agent:test" } as const;
+    const a = await runBioQueryFromManifest({ ...base });
+    const b = await runBioQueryFromManifest({ ...base });
+    assert.notEqual(a.runId, b.runId, "distinct run ids -> distinct run:<id> slots, no supersession clash");
+    assert.ok(await observationAsOfKey(store, `run:${a.runId}`, MEMORY_NOW));
+    assert.ok(await observationAsOfKey(store, `run:${b.runId}`, MEMORY_NOW));
+  });
 });
