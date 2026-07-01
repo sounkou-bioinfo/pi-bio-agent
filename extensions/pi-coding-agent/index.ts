@@ -63,7 +63,7 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
     label: "List BioToolSpec contracts",
     description: "List or search the provider-agnostic BioToolSpec registry. Use before claiming a bioinformatics tool surface is missing.",
     parameters: Type.Object({
-      query: Type.Optional(Type.String({ description: "Optional text search over id, label, description, and domains." })),
+      query: Type.Optional(Type.String({ description: "Optional text search over id, label, and description." })),
     }),
     async execute(_id, params: { query?: string }) {
       const matches = params.query ? findToolSpecs(defaultBioToolRegistry, params.query) : toolSpecIndex(defaultBioToolRegistry);
@@ -74,10 +74,10 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
   pi.registerTool({
     name: "bio_run_operation",
     label: "Run a bio operation",
-    description: "Run a declared duckdb.sql operation from a domain-pack manifest JSON against an explicit DuckDB database, persisting run/result/receipts under .pi/bio-agent/runs/<runId>. Resolvers are bound from built-ins (duckdb.file_scan, duckhts.read_bcf); any other resolver fails closed. The manifest must pass registry validation and the operation must be duckdb.sql.",
+    description: "Run a declared duckdb.sql operation from a manifest JSON against an explicit DuckDB database, persisting run/result/receipts under .pi/bio-agent/runs/<runId>. Resolvers are bound from built-ins (duckdb.file_scan, duckhts.read_bcf); any other resolver fails closed. The manifest must pass registry validation and the operation must be duckdb.sql.",
     parameters: Type.Object({
       dbPath: Type.String({ description: "Explicit DuckDB database path, or ':memory:'." }),
-      manifestPath: Type.String({ description: "Path to a domain-pack manifest JSON file (relative to cwd or absolute)." }),
+      manifestPath: Type.String({ description: "Path to a manifest JSON file (relative to cwd or absolute)." }),
       operationId: Type.String({ description: "Operation id declared in the manifest." }),
       runId: Type.Optional(Type.String({ description: "Stable run id; generated when omitted." })),
     }),
@@ -93,10 +93,10 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
   pi.registerTool({
     name: "bio_query",
     label: "Run an ad-hoc bio query",
-    description: "Resolve a domain-pack manifest's declared resources into DuckDB tables and run YOUR read-only SQL over them, persisting run/result/receipts under .pi/bio-agent/runs/<runId>. This is the general path: the manifest declares only resources; you do schema discovery (e.g. SELECT column_name, data_type FROM information_schema.columns WHERE table_name = '<resource table>', or SELECT * FROM <table> LIMIT 5) and write the SQL that answers the actual question. No need for a declared operation per question. SQL must be a single read-only SELECT/WITH. result.json holds the rows.",
+    description: "Resolve a manifest's declared resources into DuckDB tables and run YOUR read-only SQL over them, persisting run/result/receipts under .pi/bio-agent/runs/<runId>. This is the general path: the manifest declares only resources; you do schema discovery (e.g. SELECT column_name, data_type FROM information_schema.columns WHERE table_name = '<resource table>', or SELECT * FROM <table> LIMIT 5) and write the SQL that answers the actual question. No need for a declared operation per question. SQL must be a single read-only SELECT/WITH. result.json holds the rows.",
     parameters: Type.Object({
       dbPath: Type.String({ description: "Explicit DuckDB database path, or ':memory:'." }),
-      manifestPath: Type.String({ description: "Path to a domain-pack manifest JSON file (relative to cwd or absolute)." }),
+      manifestPath: Type.String({ description: "Path to a manifest JSON file (relative to cwd or absolute)." }),
       sql: Type.String({ description: "A single read-only SELECT/WITH over the manifest's resolved resource tables." }),
       resources: Type.Optional(Type.Array(Type.String(), { description: "Which declared resource ids to resolve first. Defaults to ALL declared; pass the subset your SQL uses to avoid resolving unrelated resources (e.g. a remote one you don't need)." })),
       bindings: Type.Optional(Type.Record(Type.String(), Type.Unknown(), { description: "Agent params as DuckDB session variables: each becomes `SET VARIABLE name = value`, so a resource's url (a SQL expression) composes it via getvariable('name') — e.g. {\"query\":\"asthma\"} for a url like `'...?q=' || getvariable('query')`. The manifest declares the API shape in SQL; you supply the query." })),
@@ -114,7 +114,7 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
     label: "List bio DuckDB extensions",
     description: "List DuckDB extensions useful as bio-data substrates, including HTS, PLINK, AnnData, Zarr, FTS, and remote/object-store access.",
     parameters: Type.Object({
-      query: Type.Optional(Type.String({ description: "Optional text search over name, purpose, and domains." })),
+      query: Type.Optional(Type.String({ description: "Optional text search over name, source, purpose, notes, and examples." })),
     }),
     async execute(_id, params: { query?: string }) {
       const extensions = params.query ? findDuckDbExtensions(params.query) : defaultDuckDbExtensionCatalog.extensions;

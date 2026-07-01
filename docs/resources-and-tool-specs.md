@@ -12,7 +12,6 @@ tags: [resources, cas, tool-spec, operation-spec]
 `BioToolSpec` is the provider-agnostic executable contract. It describes:
 
 - name, version, title, description
-- domains
 - determinism: deterministic, judgment, or hybrid
 - typed inputs and outputs
 - parameter schema

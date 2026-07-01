@@ -120,7 +120,13 @@ export function findToolSpecs(registry: BioToolRegistry, query: string): BioTool
   const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (!terms.length) return registry.tools;
   return registry.tools.filter((tool) => {
-    const hay = [tool.name, tool.title, tool.description, ...(tool.notes ?? [])].join("\n").toLowerCase();
+    // search over REAL declaration content (what the tool is/does/runs-on), not a removed taxonomy tag
+    const hay = [
+      tool.name, tool.title, tool.description, tool.determinism,
+      ...tool.effects,
+      ...tool.surfaces.map((s) => [s.substrate, s.adapter, ...(s.notes ?? [])].join(" ")),
+      ...(tool.notes ?? []),
+    ].join("\n").toLowerCase();
     return terms.every((term) => hay.includes(term));
   });
 }

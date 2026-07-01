@@ -101,8 +101,11 @@ export const defaultDuckDbExtensionCatalog: DuckDbExtensionCatalog = {
   extensions: bioDuckDbExtensions,
 };
 
-/** Substring search over the extension catalog (name + purpose). Used by the pi-agent extension-discovery tool. */
+/** Substring search over the extension catalog's real content (name/source/purpose/notes/examples). Used by the
+ *  pi-agent extension-discovery tool. */
 export function findDuckDbExtensions(query: string): DuckDbExtensionDescriptor[] {
   const q = query.toLowerCase();
-  return bioDuckDbExtensions.filter((ext) => [ext.name, ext.purpose].join("\n").toLowerCase().includes(q));
+  return bioDuckDbExtensions.filter((ext) =>
+    [ext.name, ext.source, ext.purpose, ...(ext.notes ?? []), ...(ext.exampleSql ?? [])].join("\n").toLowerCase().includes(q),
+  );
 }
