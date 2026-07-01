@@ -16,12 +16,14 @@ const conn = async (): Promise<SqlConn> => {
 describe("run-observations: ad-hoc SQL folds into the ONE store as an as-of, attributed observation", () => {
   test("a query run becomes a run:<id> observation carrying its exact SQL, status, and author", async () => {
     const c = await conn();
-    await recordRunObservation(c, { runId: "q1", kind: "query", identity: "ad-hoc.query", status: "succeeded", sql: "SELECT count(*) FROM variants", resources: ["variants"] }, "2026-01-01T00:00:01Z", "agent:A");
+    await recordRunObservation(c, { runId: "q1", kind: "query", identity: "ad-hoc.query", status: "succeeded", sql: "SELECT count(*) FROM variants", resources: ["variants"], sourceReceiptDigests: ["sha256:abc"], manifestDigest: "sha256:def" }, "2026-01-01T00:00:01Z", "agent:A");
     const row = await observationAsOfKey(c, "run:q1", MEMORY_NOW);
     assert.ok(row, "the run is recorded in the store");
     assert.equal(row!.source, "agent:A"); // attributed
     const v = JSON.parse(row!.value_json!);
     assert.equal(v.status, "succeeded");
     assert.equal(v.sql, "SELECT count(*) FROM variants"); // the exact ad-hoc SQL is queryable, not just in a file
+    assert.deepEqual(v.sourceReceiptDigests, ["sha256:abc"]); // the fact REFERENCES the immutable content (bytes stay outside)
+    assert.equal(v.manifestDigest, "sha256:def");
   });
 });

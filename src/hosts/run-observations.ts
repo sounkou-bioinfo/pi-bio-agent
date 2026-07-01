@@ -15,6 +15,11 @@ export interface RunObservation {
   resources?: string[];
   error?: string;
   digest?: string; // e.g. a normalized-SQL digest, for dedup / "already ran?" checks
+  // Datomic + CAS: the fact REFERENCES the immutable content by digest; the bytes (resolved sources, the run
+  // dir's files) stay OUTSIDE the DB. Recorded so receipts/replay/result files become derivable/verifiable.
+  runDir?: string;
+  manifestDigest?: string;
+  sourceReceiptDigests?: string[];
 }
 
 /** Record a run as a `run:<runId>` observation in the shared store, attributed to `author`. Best-effort at the
@@ -24,7 +29,10 @@ export async function recordRunObservation(conn: SqlConn, run: RunObservation, n
     statementKey: `run:${run.runId}`,
     subjectId: `run:${run.runId}`,
     predicate: "run",
-    value: { kind: run.kind, identity: run.identity, status: run.status, sql: run.sql, resources: run.resources, error: run.error },
+    value: {
+      kind: run.kind, identity: run.identity, status: run.status, sql: run.sql, resources: run.resources, error: run.error,
+      runDir: run.runDir, manifestDigest: run.manifestDigest, sourceReceiptDigests: run.sourceReceiptDigests,
+    },
     recordedAt: now,
     source: author,
     digest: run.digest,

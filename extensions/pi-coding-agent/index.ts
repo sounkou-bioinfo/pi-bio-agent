@@ -1,5 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { promises as fs } from "node:fs";
+import { join } from "node:path";
 import { summarizeBioContext, type BioContext } from "../../src/core/context.js";
 import { validateReadOnlySelect } from "../../src/core/knowledge-graph.js";
 import { deriveStudyPlan, studyNoteIndex, walkMemoryGraph, type StudyArtifactKind, type StudyCorpus, type StudyNote } from "../../src/core/study.js";
@@ -69,6 +71,16 @@ async function memoryIndexBlock(cwd: string): Promise<string> {
 // Best-effort: logging to the ledger must NEVER fail the run itself.
 async function logRunToStore(cwd: string, run: RunObservation, author: string): Promise<void> {
   try {
+    // Datomic + CAS: enrich the fact with the immutable-content digest refs from the run's replay.json (the bytes
+    // stay in files/CAS outside; the ledger only references them). Best-effort — a missing file just omits the refs.
+    if (run.runDir) {
+      try {
+        const replay = JSON.parse(await fs.readFile(join(run.runDir, "replay.json"), "utf8")) as { sourceReceiptDigests?: string[]; manifest?: { digest?: string } };
+        run = { ...run, sourceReceiptDigests: replay.sourceReceiptDigests, manifestDigest: replay.manifest?.digest };
+      } catch {
+        /* no/unreadable replay.json: the summary observation still stands */
+      }
+    }
     const store = await openBioStore(cwd);
     try {
       await recordRunObservation(store.conn, run, new Date().toISOString(), author);
@@ -148,7 +160,7 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
       // not strip unknown keys. network/signal are host-composed, never agent-supplied.
       const { dbPath, manifestPath, operationId, runId } = params;
       const res = await runBioOperationFromManifest({ cwd: ctx.cwd, dbPath, manifestPath, operationId, runId, network, signal });
-      await logRunToStore(ctx.cwd, { runId: res.runId, kind: "operation", identity: operationId, status: res.status, error: res.ok ? undefined : res.error }, author);
+      await logRunToStore(ctx.cwd, { runId: res.runId, kind: "operation", identity: operationId, status: res.status, runDir: res.runDir, error: res.ok ? undefined : res.error }, author);
       return text(res);
     },
   });
@@ -169,7 +181,7 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
       // Only schema-approved fields (see bio_run_operation): never spread untrusted params into the host runner.
       const { dbPath, manifestPath, sql, resources, bindings, runId } = params;
       const res = await runBioQueryFromManifest({ cwd: ctx.cwd, dbPath, manifestPath, sql, resources, bindings, runId, network, signal });
-      await logRunToStore(ctx.cwd, { runId: res.runId, kind: "query", identity: "ad-hoc.query", status: res.status, sql, resources, error: res.ok ? undefined : res.error }, author);
+      await logRunToStore(ctx.cwd, { runId: res.runId, kind: "query", identity: "ad-hoc.query", status: res.status, sql, resources, runDir: res.runDir, error: res.ok ? undefined : res.error }, author);
       return text(res);
     },
   });
