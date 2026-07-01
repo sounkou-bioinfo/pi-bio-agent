@@ -9,3 +9,4 @@ export * from "./harness-adaptation.js";
 export * from "./job-store.js";
 export * from "./in-memory-job-runner.js";
 export * from "./reproduce.js";
+export * from "./ledger-job-runner.js";
