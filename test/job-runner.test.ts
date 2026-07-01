@@ -82,6 +82,43 @@ describe("L1: JobRunner + job-store over the job:<runId>:status temporal slot", 
   });
 });
 
+describe("L2/L3: durable resume (no runner) + cancellation", () => {
+  test("resume rehydrates a job's status from the durable record + ledger, WITHOUT the runner", async () => {
+    const { conn, cwd, clock } = await setup();
+    const runner = inMemoryJobRunner({ clock, execute: async () => ({ result: { ok: true } }) });
+    await submitBioJob(conn, runner, { cwd, runId: "r1", replay: replay("r1"), now: "2026-07-01T00:00:01Z" });
+    await runner.settle("r1");
+    await pollBioJob(conn, runner, { cwd, runId: "r1", now: "2026-07-01T00:00:09Z" });
+
+    // resume takes NO runner — the durable substrate (record + observation ledger) is the source of truth
+    const resumed = await resumeBioJob(conn, { cwd, runId: "r1" });
+    assert.equal(resumed.phase, "succeeded", "the ledger holds the truth after the runner is gone");
+    assert.match(resumed.replayDigest, /^sha256:/);
+    assert.equal(resumed.submittedAt, "2026-07-01T00:00:01Z");
+    await assert.rejects(() => resumeBioJob(conn, { cwd, runId: "ghost" }), /no durable record/);
+  });
+
+  test("cancel records the terminal cancelled phase; a mid-flight completion cannot overwrite it", async () => {
+    const { conn, cwd, clock } = await setup();
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => { release = r; });
+    const runner = inMemoryJobRunner({ clock, execute: async () => { await gate; return { result: { ok: true } }; } });
+
+    await submitBioJob(conn, runner, { cwd, runId: "c1", replay: replay("c1"), now: "2026-07-01T00:00:01Z" });
+    // cancel while the work is still gated (running)
+    const cancelled = await cancelBioJob(conn, { cwd, runId: "c1", now: "2026-07-01T00:00:03Z", runner });
+    assert.equal(cancelled.phase, "cancelled");
+    assert.equal((await resumeBioJob(conn, { cwd, runId: "c1" })).phase, "cancelled", "durable cancel is in the ledger");
+
+    release(); await runner.settle("c1"); // the gated work now completes — must NOT overwrite the cancel
+    assert.equal((await runner.status("c1"))!.phase, "cancelled", "a cancelled job's completion is discarded");
+
+    // already terminal -> cancel fails closed; unknown job -> fails closed
+    await assert.rejects(() => cancelBioJob(conn, { cwd, runId: "c1", now: "2026-07-01T00:00:09Z", runner }), /already terminal/);
+    await assert.rejects(() => cancelBioJob(conn, { cwd, runId: "ghost", now: "2026-07-01T00:00:09Z", runner }), /no durable record/);
+  });
+});
+
 describe("L2/L3: durable resume + cancel", () => {
   test("resume rehydrates a job's status from the durable record + ledger WITHOUT the runner", async () => {
     const { conn, cwd, clock } = await setup();
