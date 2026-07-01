@@ -168,10 +168,13 @@ Phase 4 (ACTIVE — the main lane) Safe harness-adaptation surface: extension/sp
                  implementing declare -> validate -> test -> record -> activate -> rollback. CONSUMES
                  Phase 1's leftover: `record` = judgments as KG facts; `activate`/`rollback` = as-of
                  temporality. DONE: 4.0a (bio_observations temporal store + as-of), 4.1 (coloc records
-                 judgments), 4.2 (activate/rollback), 4.3 (declare->validate->test->record->activate, GENERIC).
-                 The substrate is the loop; examples (coloc, …) are interchangeable DATA — never a shape it bends
-                 toward (the bet). Remaining: 4.4 (the real approval workflow — the host's), a 2nd producer when
-                 a real one exists. NEXT: tighten the approval/rollback ergonomics + a candidate-spec fixture.
+                 judgments), 4.2 (activate/rollback), 4.3 (declare->validate->test->record->activate, GENERIC),
+                 4.4 (DURABLE approval: submit parks a validated+tested candidate as `approval="pending"`, decide
+                 resumes it later — across a restart/human delay — approving+activating or rejecting; a decision
+                 is terminal; park+resume is a temporal observation, "candidates awaiting approval as-of t" an
+                 as-of query). The substrate is the loop; examples (coloc, …) are interchangeable DATA — never a
+                 shape it bends toward (the bet). The substrate owns park+resume ONLY — RBAC/quorum/notification/
+                 UI/identity stay the HOST's. Remaining: a 2nd producer when a real one exists.
 ```
 
 The expertise-per-budget measurement (§2) runs continuously now that the Phase 0 skeleton exists.
@@ -221,9 +224,16 @@ Each slice is end-to-end and deterministic-tested; build the foundation only as 
   candidate is **GENERIC DATA** (an operation spec + fixture + expected), deliberately *not* a bio example — the
   substrate is the loop, the examples are interchangeable. `test/harness-adaptation.test.ts`: good→activates,
   wrong-expected→recorded-failed-no-activation, non-read-only→validation-fails, **approval-rejects→not activated**.
-- **4.4 — Rollback + the approval gate.** Revert to a prior active version (as-of). The `activate` decision is
-  the host/human **policy gate** (the boundary) — wire it as a host opt-in now, leave the real approval workflow
-  to the host.
+- **4.4 — Rollback + the approval gate (DURABLE). BUILT.** Revert to a prior active version (as-of) via
+  `recordActivation(reason:"rollback")`. The `activate` decision is the host/human **policy gate** (the boundary).
+  The substrate owns only what is substrate-shaped: **park + resume**. `submitCandidateForApproval` validates +
+  tests + records `approval="pending"` (a temporal observation); `decideCandidateApproval` resumes it LATER (a
+  distinct, strictly-later timestamp = a process restart / a human delay), recording approved/rejected and
+  activating iff approved. A decision is **terminal** (no double-approve); deciding a candidate that didn't pass
+  validation+test, or was never submitted, **fails closed**. "Candidates awaiting approval as-of t" is an as-of
+  query over the `approval` slot. `runCandidateActivation` stays the synchronous convenience wrapper (no time gap
+  → no `pending` row). What stays the HOST's (NOT built, by discipline): RBAC, quorum, notifications, a task
+  queue, an identity provider, any approval UX — `src/hosts/harness-adaptation.ts`.
 
 Discipline: do NOT build the full state machine (4.2) or the loop (4.3) ahead of 4.0/4.1; each slice earns the
 next. The forbidden/allowed table in §6 is the invariant every slice must already satisfy.

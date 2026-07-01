@@ -1,16 +1,23 @@
 import { createHash } from "node:crypto";
 import type { SqlConn } from "../core/ports.js";
 import { validateReadOnlySelect } from "../core/sql-guard.js";
-import { recordObservation } from "../duckdb/observations.js";
+import { recordObservation, observationAsOfKey } from "../duckdb/observations.js";
 import { recordActivation } from "../duckdb/activation.js";
 
-// Phase 4.3 — the GENERIC declare → validate → test → record → activate happy path. NOTHING here is shaped to a
+// Phase 4.3/4.4 — the GENERIC declare → validate → test → record → activate happy path. NOTHING here is shaped to a
 // specific example (no coloc, no rare-high-impact): a candidate is just an operation spec + a fixture + an expected
 // result — DATA. The substrate is the loop; the examples are interchangeable. The flow: validate the SQL is
 // read-only, run it against the fixture in a SANDBOX, RECORD validation + test status as observations, and ACTIVATE
 // only if BOTH pass AND an injected APPROVAL POLICY approves. "tests pass" never silently means "production
-// activation" — the approval is the host/human boundary (the irreducible decision; the real workflow is 4.4's).
+// activation" — the approval is the host/human boundary (the irreducible decision; the real workflow is the host's).
 //   validate → test → record pass/fail → HOST APPROVAL POLICY → activate
+//
+// 4.4 makes the approval boundary DURABLE, not synchronous-only. The substrate does NOT own the approval workflow
+// (RBAC, quorum, notifications, a task queue, an identity provider — all host-owned); it owns the ability to PARK a
+// validated+tested candidate as `approval = "pending"` and RESUME the decision later (across a process restart or a
+// human delay), because "pending" is just another temporal observation and "candidates awaiting approval as of t"
+// is an as-of query. Two-phase: submitCandidateForApproval (park) → decideCandidateApproval (approve/reject +
+// activate). runCandidateActivation stays as the synchronous convenience wrapper (no time gap → no `pending` row).
 
 export interface OperationCandidate {
   id: string;
@@ -33,26 +40,51 @@ export interface CandidateOutcome {
   activated: boolean;
 }
 
+/** The parked state of a validated+tested candidate (4.4). `pendingApproval` = both passed and it now awaits a decision. */
+export interface SubmitOutcome {
+  specDigest: string;
+  validation: "passed" | "failed";
+  test: "passed" | "failed" | "skipped";
+  pendingApproval: boolean;
+}
+
+export interface ApprovalDecision {
+  id: string;
+  version: string;
+  specDigest: string;
+  approved: boolean;
+  decidedAt: string;
+  source: string;
+  approvedBy?: string;
+  reason?: string;
+}
+
 const ID = /^[A-Za-z0-9._-]+$/;
 const specDigestOf = (c: OperationCandidate): string =>
   `sha256:${createHash("sha256").update(JSON.stringify([c.id, c.version, c.fixtureSql, c.sql, c.expected])).digest("hex")}`;
+const parseStatus = (row: { value_json: string | null } | null): string | null => (row?.value_json != null ? JSON.parse(row.value_json) as string : null);
 
-export async function runCandidateActivation(
-  conn: SqlConn,
-  candidate: OperationCandidate,
-  deps: { sandbox: SqlConn; recordedAt: string; source: string; approve: ApprovalPolicy },
-): Promise<CandidateOutcome> {
-  if (!ID.test(candidate.id ?? "")) throw new Error("runCandidateActivation: candidate.id must match [A-Za-z0-9._-]+"); // fail-fast (else it'd only fail at activate)
-  if (!ID.test(candidate.version ?? "")) throw new Error("runCandidateActivation: candidate.version must match [A-Za-z0-9._-]+");
-  const specDigest = specDigestOf(candidate);
+function assertIds(id: string, version: string): void {
+  if (!ID.test(id ?? "")) throw new Error("harness: candidate.id must match [A-Za-z0-9._-]+"); // fail-fast (else it'd only fail at activate)
+  if (!ID.test(version ?? "")) throw new Error("harness: candidate.version must match [A-Za-z0-9._-]+");
+}
+
+/** Record ONE candidate status slot (validation / fixture-test / approval) as a temporal observation. */
+function recStatus(conn: SqlConn, specDigest: string, recordedAt: string, source: string, slot: string, predicate: string, value: string): Promise<string> {
   const candKey = `candidate:${specDigest}`;
-  const recStatus = (slot: string, predicate: string, value: string): Promise<string> =>
-    recordObservation(conn, { statementKey: `${candKey}:${slot}`, subjectId: candKey, predicate, value, recordedAt: deps.recordedAt, source: deps.source, digest: specDigest });
+  return recordObservation(conn, { statementKey: `${candKey}:${slot}`, subjectId: candKey, predicate, value, recordedAt, source, digest: specDigest });
+}
+
+/** validate (read-only) + test-against-fixture-in-sandbox, recording BOTH as observations. Shared by the durable
+ *  (submit) and synchronous (runCandidateActivation) paths so they never diverge. */
+async function validateAndTest(conn: SqlConn, candidate: OperationCandidate, deps: { sandbox: SqlConn; recordedAt: string; source: string }): Promise<{ specDigest: string; validation: "passed" | "failed"; test: "passed" | "failed" | "skipped" }> {
+  assertIds(candidate.id, candidate.version);
+  const specDigest = specDigestOf(candidate);
 
   // 1. VALIDATE — the candidate operation must be a single read-only SELECT/WITH (the existing statement guard)
   let validation: "passed" | "failed" = "passed";
   try { validateReadOnlySelect(candidate.sql); } catch { validation = "failed"; }
-  await recStatus("validation", "harness:validation_status", validation);
+  await recStatus(conn, specDigest, deps.recordedAt, deps.source, "validation", "harness:validation_status", validation);
 
   // 2. TEST — run the candidate over its fixture in a SANDBOX (separate conn — can't touch the real db), compare.
   //    The audit trail is COMPLETE: a skipped test (validation failed) is recorded too, not just absent.
@@ -66,18 +98,57 @@ export async function runCandidateActivation(
       test = canon(actual) === canon(candidate.expected) ? "passed" : "failed";
     } catch { test = "failed"; }
   }
-  await recStatus("fixture-test", "harness:test_status", test);
+  await recStatus(conn, specDigest, deps.recordedAt, deps.source, "fixture-test", "harness:test_status", test);
+  return { specDigest, validation, test };
+}
 
-  // 3. ACTIVATE — only if BOTH pass AND the approval policy approves (the human/policy boundary, NOT "tests pass").
-  //    The approval DECISION is recorded too, so a rejected-but-tested candidate is auditable.
+/** 4.4 phase 1 — validate + test + PARK: if both pass, record `approval = "pending"` so a later (possibly
+ *  after-restart) decideCandidateApproval can resume. Returns the parked outcome; a failed candidate is not parked. */
+export async function submitCandidateForApproval(conn: SqlConn, candidate: OperationCandidate, deps: { sandbox: SqlConn; recordedAt: string; source: string }): Promise<SubmitOutcome> {
+  const { specDigest, validation, test } = await validateAndTest(conn, candidate, deps);
+  const pendingApproval = validation === "passed" && test === "passed";
+  if (pendingApproval) await recStatus(conn, specDigest, deps.recordedAt, deps.source, "approval", "harness:approval_status", "pending");
+  return { specDigest, validation, test, pendingApproval };
+}
+
+/** 4.4 phase 2 — DECIDE a submitted candidate: record approved/rejected and, if approved, ACTIVATE. Fail closed if
+ *  the candidate did not pass validation+test (or was never submitted), or if a TERMINAL decision already exists
+ *  (no double-approve). `decidedAt` MUST be strictly after the submit's recordedAt (the monotonic-per-slot rule). */
+export async function decideCandidateApproval(conn: SqlConn, d: ApprovalDecision): Promise<{ activated: boolean }> {
+  assertIds(d.id, d.version);
+  if (!/^sha256:[0-9a-f]{64}$/.test(d.specDigest ?? "")) throw new Error("decideCandidateApproval: specDigest must be sha256:<64 hex>");
+  const candKey = `candidate:${d.specDigest}`;
+  const validation = parseStatus(await observationAsOfKey(conn, `${candKey}:validation`, d.decidedAt));
+  const test = parseStatus(await observationAsOfKey(conn, `${candKey}:fixture-test`, d.decidedAt));
+  if (validation !== "passed" || test !== "passed") throw new Error(`decideCandidateApproval: candidate ${d.specDigest} did not pass validation+test as of ${d.decidedAt} (or was never submitted) — cannot decide`);
+  const current = parseStatus(await observationAsOfKey(conn, `${candKey}:approval`, d.decidedAt));
+  if (current === "approved" || current === "rejected") throw new Error(`decideCandidateApproval: candidate ${d.specDigest} already ${current} — a decision is terminal`);
+
+  await recStatus(conn, d.specDigest, d.decidedAt, d.source, "approval", "harness:approval_status", d.approved ? "approved" : "rejected");
+  if (d.approved) {
+    await recordActivation(conn, { kind: "operation", id: d.id, version: d.version, specDigest: d.specDigest, recordedAt: d.decidedAt, source: d.source, approvedBy: d.approvedBy, reason: d.reason });
+    return { activated: true };
+  }
+  return { activated: false };
+}
+
+/** Synchronous convenience wrapper (4.3): validate → test → (in-process) approve → activate, in one call. No time
+ *  gap to bridge, so it records NO `pending` row — it composes validateAndTest with an immediate decide. */
+export async function runCandidateActivation(
+  conn: SqlConn,
+  candidate: OperationCandidate,
+  deps: { sandbox: SqlConn; recordedAt: string; source: string; approve: ApprovalPolicy },
+): Promise<CandidateOutcome> {
+  const { specDigest, validation, test } = await validateAndTest(conn, candidate, deps);
   let activated = false;
   if (validation === "passed" && test === "passed") {
+    // ACTIVATE — only if the approval policy approves (the human/policy boundary, NOT "tests pass"). The decision is
+    // recorded even when rejected, so a tested-but-rejected candidate is auditable.
     const approval = await deps.approve({ id: candidate.id, version: candidate.version, specDigest });
-    await recStatus("approval", "harness:approval_status", approval ? "approved" : "rejected");
-    if (approval) {
-      await recordActivation(conn, { kind: "operation", id: candidate.id, version: candidate.version, specDigest, recordedAt: deps.recordedAt, source: deps.source, approvedBy: approval.approvedBy, reason: approval.reason });
-      activated = true;
-    }
+    ({ activated } = await decideCandidateApproval(conn, {
+      id: candidate.id, version: candidate.version, specDigest, approved: approval !== null,
+      decidedAt: deps.recordedAt, source: deps.source, approvedBy: approval?.approvedBy, reason: approval?.reason,
+    }));
   }
   return { specDigest, validation, test, activated };
 }
