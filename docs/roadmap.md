@@ -159,8 +159,11 @@ Phase 3 (DONE: table + file artifacts) Out-of-process COMPUTE: process.compute r
                  table-producing) DONE with timeout/output caps, process-group kill, script-bytes
                  provenance, fail-closed. FILE OUTPUTS now built too (process-artifacts example): declared
                  `outputs` captured into CAS, content-addressed, recorded in the receipt — values in the
-                 IPC, files beside it (the nf-r-ipc/Nextflow split). Remaining: a files-ONLY op (optional
-                 table) + the long-running operation-level `process` transport (multi-output batch).
+                 IPC, files beside it (the nf-r-ipc/Nextflow split). FILES-ONLY ops now built too
+                 (`resultTable:"artifacts"`, process-files-only example): a tool that returns no table —
+                 no inputSql, no out.arrow, no Arrow codec loaded — just writes files; the resource's TABLE
+                 is the captured-artifacts listing (name/path/kind/digest/size), each a CAS handle. Remaining:
+                 the long-running operation-level `process` transport (multi-output batch).
 Phase 4 (ACTIVE — the main lane) Safe harness-adaptation surface: extension/spec/skill scaffold
                  implementing declare -> validate -> test -> record -> activate -> rollback. CONSUMES
                  Phase 1's leftover: `record` = judgments as KG facts; `activate`/`rollback` = as-of

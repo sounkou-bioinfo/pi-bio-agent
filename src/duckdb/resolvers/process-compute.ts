@@ -10,10 +10,12 @@ import type { BioResolverImpl, ProcessRunner } from "../../core/ports.js";
 // shell) over a DuckDB input, exchanging Arrow IPC. The DATA contract stays in SQL/Arrow — this resolver does
 // the marshalling, the injected ProcessRunner only spawns:
 //   1. `COPY (inputSql) TO <in.arrow> (FORMAT arrow)`  — the input table handed to the process, as Arrow IPC
-//   2. run `command` with the in/out Arrow paths APPENDED AS THE LAST TWO ARGV entries (… <in.arrow> <out.arrow>)
-//      — NOT env vars: argv is explicit and does not leak down a process tree (a discipline that matters once
-//      children spawn their own children). The process reads the input path, writes the output path.
-//   3. `CREATE OR REPLACE TABLE <table> AS SELECT * FROM read_arrow(<out.arrow>)`  — the result back as a table
+//      (SKIPPED when inputSql is absent: a FILES-ONLY op reads/writes its own files and gets no Arrow input)
+//   2. run `command` with the Arrow paths APPENDED AS ARGV (… <in.arrow?> <out.arrow?>) — NOT env vars: argv is
+//      explicit and does not leak down a process tree (a discipline that matters once children spawn their own
+//      children). in.arrow is appended only with an input; out.arrow only in "arrow" resultTable mode.
+//   3. arrow mode: `CREATE OR REPLACE TABLE <table> AS SELECT * FROM read_arrow(<out.arrow>)` — the rectangular
+//      result back as a table. artifacts mode: the table IS the captured-artifacts listing (files-only tools).
 // ERROR MODEL (two layers, both defined — not happy-path):
 //   * CATASTROPHIC (the run crashed): no ProcessRunner bound, a non-zero exit, a timeout, or a missing output
 //     file all THROW here -> the run is recorded as FAILED with a receipt, never a silent empty table. Out-of-
@@ -22,9 +24,13 @@ import type { BioResolverImpl, ProcessRunner } from "../../core/ports.js";
 //     TABLE, by convention a `status` column ("ok" / "error: <msg>") the agent branches on in SQL — the COMPUTE
 //     script's job, not the resolver's. So a partial failure (one tissue, one batch) is data, not a crash.
 //
-// params: { table, inputSql, command, env?, timeoutMs?, extensions?, outputs? }
+// params: { table, inputSql?, command, env?, timeoutMs?, extensions?, outputs?, resultTable? }
 //   table       output table (its identity); a valid SQL identifier
-//   inputSql    a single read-only SELECT/WITH producing the input handed to the process (validated)
+//   inputSql    OPTIONAL — a single read-only SELECT/WITH producing the input handed to the process (validated).
+//               Absent = a FILES-ONLY op with no Arrow input (the tool uses its own inputs / command args).
+//   resultTable OPTIONAL — "arrow" (default): the table is read from the tool's out.arrow. "artifacts": a
+//               files-only op — no out.arrow; the table IS the captured-outputs listing (name/path/kind/digest/
+//               size). Requires at least one declared output. Lets samtools/bcftools/a plot be a first-class op.
 //   command     argv array [exe, ...args] (NOT a shell string) — e.g. ["Rscript", "/abs/coloc.R"]
 //   env         extra environment for the child (merged over the host's) — tool knobs only; NOT the Arrow paths
 //               (those are appended as argv)
@@ -41,10 +47,12 @@ const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 export function processComputeResolver(runner: ProcessRunner): BioResolverImpl {
   return async (resource, ctx) => {
-    const p = resource.params as { table?: unknown; inputSql?: unknown; command?: unknown; env?: unknown; timeoutMs?: unknown; extensions?: unknown; outputs?: unknown };
+    const p = resource.params as { table?: unknown; inputSql?: unknown; command?: unknown; env?: unknown; timeoutMs?: unknown; extensions?: unknown; outputs?: unknown; resultTable?: unknown };
     if (typeof p.table !== "string" || !IDENT.test(p.table)) throw new Error("process.compute requires params.table to be a valid SQL identifier");
-    if (typeof p.inputSql !== "string" || !p.inputSql.trim()) throw new Error("process.compute requires params.inputSql (a single read-only SELECT/WITH)");
-    const inner = validateReadOnlySelect(p.inputSql); // input is a read-only query; the side effect is the child, not SQL
+    // inputSql is OPTIONAL: absent = a FILES-ONLY op (the tool reads/writes its own files; no Arrow input handed in).
+    // Present = the op gets its input table as Arrow IPC (in.arrow, appended to argv).
+    if (p.inputSql !== undefined && (typeof p.inputSql !== "string" || !p.inputSql.trim())) throw new Error("process.compute: params.inputSql, when present, must be a non-empty read-only SELECT/WITH");
+    const inner = typeof p.inputSql === "string" && p.inputSql.trim() ? validateReadOnlySelect(p.inputSql) : null;
     if (!Array.isArray(p.command) || p.command.length === 0 || !p.command.every((x) => typeof x === "string")) {
       throw new Error("process.compute requires params.command to be a non-empty array of strings (argv, not a shell string)");
     }
@@ -80,8 +88,19 @@ export function processComputeResolver(runner: ProcessRunner): BioResolverImpl {
       if (!ctx.cas) throw new Error("process.compute: params.outputs requires a host-injected CAS store (none bound) — fail closed");
     }
 
-    // nanoarrow provides the Arrow-IPC COPY/read_arrow codec; LOAD only (fail closed if the host hasn't INSTALLed it)
-    for (const ext of ["nanoarrow", ...extraExt]) {
+    // resultTable: how the resource's TABLE is produced. "arrow" (default) = read the tool's out.arrow (a
+    // rectangular value). "artifacts" = a FILES-ONLY op (no out.arrow required); the table IS the captured artifacts
+    // listing (name, path, kind, digest, size), so a tool that only writes files (BAM/VCF/plots) is still a
+    // first-class resource — its outputs are CAS handles the agent queries + reads downstream.
+    const resultTable: "arrow" | "artifacts" = p.resultTable === undefined ? "arrow" : p.resultTable as "arrow" | "artifacts";
+    if (resultTable !== "arrow" && resultTable !== "artifacts") throw new Error("process.compute: params.resultTable must be 'arrow' or 'artifacts'");
+    if (resultTable === "artifacts" && outputs.length === 0) throw new Error("process.compute: resultTable 'artifacts' requires at least one declared output (it IS the table)");
+
+    // nanoarrow provides the Arrow-IPC COPY/read_arrow codec — LOADed only when Arrow IO is actually used (an input
+    // table, or an "arrow" result). A pure files-only op (no input, artifacts result) exchanges no Arrow and needs
+    // no codec, so it doesn't require nanoarrow at all. LOAD only (fail closed if the host hasn't INSTALLed it).
+    const needsArrow = inner !== null || resultTable === "arrow";
+    for (const ext of [...(needsArrow ? ["nanoarrow"] : []), ...extraExt]) {
       if (!IDENT.test(ext)) throw new Error(`process.compute: invalid extension name '${ext}'`);
       await ctx.conn.run(`LOAD ${ext}`);
     }
@@ -91,14 +110,17 @@ export function processComputeResolver(runner: ProcessRunner): BioResolverImpl {
     const outFile = join(dir, "out.arrow");
     const now = ctx.now ?? systemClock();
     try {
-      // 1. input table -> Arrow IPC file (the process's stdin-equivalent, but a typed columnar contract)
-      await ctx.conn.run(`COPY (${inner}) TO '${inFile.replace(/'/g, "''")}' (FORMAT arrow)`);
+      // 1. input table -> Arrow IPC file (only when an input SQL was declared)
+      if (inner) await ctx.conn.run(`COPY (${inner}) TO '${inFile.replace(/'/g, "''")}' (FORMAT arrow)`);
 
-      // 2. run the out-of-process computation. The Arrow in/out paths are APPENDED AS THE LAST TWO ARGV entries
-      //    (not env vars) — explicit, and never inherited down a process tree. `env` carries only the manifest's
-      //    own child env (tool knobs), never the IO paths.
+      // 2. run the out-of-process computation. The Arrow paths are APPENDED AS ARGV (not env vars) — explicit, and
+      //    never inherited down a process tree: in.arrow only when there's an input table, out.arrow only when the
+      //    tool returns a rectangular value (arrow mode). A files-only op gets neither and uses its own command args.
+      const argvExtra: string[] = [];
+      if (inner) argvExtra.push(inFile);
+      if (resultTable === "arrow") argvExtra.push(outFile);
       const result = await runner.run({
-        command: [...command, inFile, outFile],
+        command: [...command, ...argvExtra],
         env,
         cwd: dir, // the WORK DIR — declared output paths are relative to it (the Nextflow model)
         timeoutMs,
@@ -111,15 +133,16 @@ export function processComputeResolver(runner: ProcessRunner): BioResolverImpl {
         const how = result.exitCode === null ? `was killed by ${result.signal ?? "an unknown signal"}` : `exited ${result.exitCode}`;
         throw new Error(`process.compute: '${command[0]}' ${how}${tail ? `\n${tail}` : ""}`);
       }
-      // the process MUST produce the output file; a clean exit with no output is still a failure (fail closed)
-      try { await fs.access(outFile); } catch { throw new Error(`process.compute: '${command[0]}' exited 0 but wrote no Arrow output to its output path (argv)`); }
+      // 3. Arrow IPC result -> a DuckDB table (arrow mode only). A clean exit with no out.arrow is still a failure
+      //    (fail closed). Files-only ops (resultTable "artifacts") produce no out.arrow — their table is built below.
+      if (resultTable === "arrow") {
+        try { await fs.access(outFile); } catch { throw new Error(`process.compute: '${command[0]}' exited 0 but wrote no Arrow output to its output path (argv)`); }
+        await ctx.conn.run(`CREATE OR REPLACE TABLE ${p.table} AS SELECT * FROM read_arrow('${outFile.replace(/'/g, "''")}')`);
+      }
 
-      // 3. Arrow IPC result -> a DuckDB table
-      await ctx.conn.run(`CREATE OR REPLACE TABLE ${p.table} AS SELECT * FROM read_arrow('${outFile.replace(/'/g, "''")}')`);
-
-      // 3b. FILE ARTIFACTS (#3): capture each declared output into CAS, content-addressed. Values came back via
-      //     Arrow (step 3); FILES go via CAS and never through the IPC (the nf-r-ipc/Nextflow split). A missing
-      //     declared output is fail-closed (a clean exit that skipped a promised file is still a failure).
+      // 3b. FILE ARTIFACTS (#3): capture each declared output into CAS, content-addressed. In arrow mode VALUES came
+      //     back via Arrow (step 3) while FILES go via CAS — never through the IPC (the nf-r-ipc/Nextflow split). A
+      //     missing declared output is fail-closed (a clean exit that skipped a promised file is still a failure).
       const artifacts: Array<{ name: string; path: string; kind: string; digest: string; size: number }> = [];
       for (const o of outputs) {
         let bytes: Buffer;
@@ -128,6 +151,13 @@ export function processComputeResolver(runner: ProcessRunner): BioResolverImpl {
         const digest = createHash("sha256").update(bytes).digest("hex");
         await ctx.cas!.put({ algorithm: "sha256", digest }, bytes); // immutable + idempotent
         artifacts.push({ name: o.name, path: o.path, kind: o.kind, digest: `sha256:${digest}`, size: bytes.length });
+      }
+
+      // 3c. FILES-ONLY result -> the table IS the artifacts listing (one row per captured output). The tool returned
+      //     no rectangular value, but its files are now CAS handles the agent can query (digest) and read downstream.
+      if (resultTable === "artifacts") {
+        await ctx.conn.run(`CREATE OR REPLACE TABLE ${p.table} (name VARCHAR, path VARCHAR, kind VARCHAR, digest VARCHAR, size BIGINT)`);
+        for (const a of artifacts) await ctx.conn.run(`INSERT INTO ${p.table} VALUES (?, ?, ?, ?, ?)`, [a.name, a.path, a.kind, a.digest, a.size]);
       }
 
       // Provenance digest that actually PINS THE COMPUTATION (not just the argv string): for each command entry
@@ -147,12 +177,13 @@ export function processComputeResolver(runner: ProcessRunner): BioResolverImpl {
       }
       parts.push(`env:${Object.keys(env).sort().map((k) => `${k}=${env[k]}`).join("\0")}`);
       const cmdDigest = `sha256:${createHash("sha256").update(parts.join("\0")).digest("hex")}`;
-      const sqlDigest = `sha256:${createHash("sha256").update(inner).digest("hex")}`;
+      // input digest pins the SELECT that fed the child; files-only ops have no input, so the mode stands in for it.
+      const sqlDigest = `sha256:${createHash("sha256").update(inner ?? `no-input:${resultTable}`).digest("hex")}`;
       return {
         result: { schema: "pi-bio.resource_handle.v1", mode: "reference", name: p.table, pointer: { uri: `table:${p.table}`, format: "table" } },
         sourceSnapshots: [{ source: `process:${command[0]}`, version: cmdDigest, retrievedAt: now }],
         provenance: [
-          { source: "process.compute", retrievedAt: now, digest: sqlDigest, notes: ["process.compute", `cmd:${command.join(" ")}`, "arrow-ipc"] },
+          { source: "process.compute", retrievedAt: now, digest: sqlDigest, notes: ["process.compute", `cmd:${command.join(" ")}`, resultTable === "arrow" ? "arrow-ipc" : "files-only"] },
           // one provenance entry per captured FILE artifact (CAS digest = the receipt's "output digest")
           ...artifacts.map((a) => ({ source: `artifact:${a.name}`, retrievedAt: now, digest: a.digest, notes: ["process.compute", "artifact", a.kind, `path:${a.path}`, `size:${a.size}`] })),
         ],
