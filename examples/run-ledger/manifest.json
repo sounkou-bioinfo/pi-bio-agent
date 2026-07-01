@@ -1,0 +1,17 @@
+{
+  "schema": "pi-bio.manifest.v1",
+  "id": "run-ledger",
+  "version": "0.1.0",
+  "title": "The run graph — the substrate's own provenance, as a SQL table",
+  "description": "Where does all of this get stored? Every run the substrate executes persists a run record under .pi/bio-agent/runs/<runId>/run.json (spec, status, timestamps, an event log, and resolution receipts). This manifest reads those records back with DuckDB read_json, so the RUN GRAPH is itself a queryable table: the agent — or a UI — inspects its own provenance with the same SQL it uses for data. Nothing to plot from an opaque runtime; the provenance IS data. A grammar-of-graphics layer (posit's ggsql, https://github.com/posit-dev/ggsql) draws the run timeline straight off this table.",
+  "provides": {
+    "resolvers": [{ "id": "duckdb.sql_materialize", "version": "0.1.0", "title": "SQL materialize", "description": "Materialize a table from a read-only SELECT (here read_json over the run records).", "output": { "mode": "table" } }],
+    "resources": [{
+      "id": "run_ledger", "title": "Run ledger (this repo's .pi runs)", "kind": "virtual", "resolver": "duckdb.sql_materialize",
+      "params": {
+        "table": "run_ledger",
+        "sql": "SELECT spec.id AS run_id, spec.tool.name AS tool, status, createdAt, len(events) AS event_count FROM read_json('.pi/bio-agent/runs/*/run.json', union_by_name = true, maximum_object_size = 100000000)"
+      }
+    }]
+  }
+}

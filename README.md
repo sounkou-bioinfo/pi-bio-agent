@@ -5,8 +5,8 @@
 # pi-bio-agent
 
 [![CI](https://github.com/sounkou-bioinfo/pi-bio-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/sounkou-bioinfo/pi-bio-agent/actions/workflows/ci.yml)
-[![License:
-MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: GPL
+v2+](https://img.shields.io/badge/License-GPL%20v2%2B-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen.svg)](package.json)
 
 > **The entire “AI for science” workbench — reproducible artifacts,
@@ -59,9 +59,20 @@ single-cell AnnData
 Zarr
 ([`duckdb_zarr`](https://duckdb.org/community_extensions/extensions/duckdb_zarr)),
 PLINK
-([`plinking_duck`](https://duckdb.org/community_extensions/extensions/plinking_duck)),
-and whatever ships next. You bring the format; DuckDB’s full reach and
-its community-extension ecosystem *are* the data layer.
+([`plinking_duck`](https://duckdb.org/community_extensions/extensions/plinking_duck))
+— and the surface is not even bio: HTML/XML/web
+([`duckdb_webbed`](https://github.com/teaguesterling/duckdb_webbed)),
+Markdown
+([`duckdb_markdown`](https://github.com/teaguesterling/duckdb_markdown)),
+source-code ASTs across 27 languages
+([`sitting_duck`](https://github.com/teaguesterling/sitting_duck)), and
+git history
+([`duck_tails`](https://github.com/teaguesterling/duck_tails)) all
+become tables too. You bring the format; DuckDB’s full reach and its
+(fast-growing) community-extension ecosystem *are* the data layer.
+Source code **and** its edit history as SQL is, incidentally, a
+*codebase knowledge graph over edits* — the same substrate pointed at
+itself, one more resolver away.
 
 ### 2. Network — HTTP *as SQL*, via the owned **ducknng** extension
 
@@ -185,32 +196,63 @@ answers. This is a real transcript, produced live when this README is
 rendered:
 
 ``` sh
-pi -e extensions/pi-coding-agent/index.ts -p \
+pi --model gpt-5.3-codex-spark -e extensions/pi-coding-agent/index.ts -p \
   "How many variants of each consequence are in " \
   "examples/variant-counts/manifest.json? Answer with a " \
   "short table."
 ```
 
-> | consequence |   n |
-> |-------------|----:|
-> | missense    |   2 |
-> | stop_gained |   2 |
-> | synonymous  |   1 |
+> Here’s the count by consequence (from
+> `examples/variant-counts/data/variants.csv` used by `manifest.json`):
+>
+> | consequence | variants |
+> |-------------|----------|
+> | stop_gained | 2        |
+> | missense    | 2        |
+> | synonymous  | 1        |
 
 **Going bigger — the agent over live ClinVar.** Point it at
 [`clinvar-region.json`](examples/connectors/clinvar-region.json) and it
 reads a **ClinVar VCF region straight over HTTP with `duckhts`** (an
 htslib tabix range read — only the TP53 locus, not the whole file),
-*discovers the 45-column schema*, finds `INFO_CLNSIG` is an array, and
-writes its **own** `UNNEST` + `GROUP BY`. A real run (captured — this
-one takes ~2–3 min, so it’s not re-run every render):
+*discovers the schema*, finds `INFO_CLNSIG` is an array, and writes its
+**own** `UNNEST` + `GROUP BY`. This is a **live agent run**, produced
+when this README is rendered (a small fast model keeps it to ~20s, not
+minutes — the reads are ~2s; the rest was model latency):
 
+``` sh
+pi --model gpt-5.3-codex-spark -e extensions/pi-coding-agent/index.ts -p \
+  "Using the manifest " \
+  "examples/connectors/clinvar-region.json, resolve its " \
+  "'clinvar' resource (a ClinVar VCF region read over HTTP " \
+  "via duckhts). Discover the schema, note that INFO_CLNSIG " \
+  "is an array, then write and run your OWN SQL to count " \
+  "variants by clinical significance (UNNEST + GROUP BY, " \
+  "top 8). Show the SQL you ran and the result table."
+```
+
+> Done — using `examples/connectors/clinvar-region.json` I resolved the
+> `clinvar` resource and ran schema discovery plus my own aggregation
+> query.
+>
+> ### Schema check (discovered)
+>
+> `INFO_CLNSIG` is `VARCHAR[]` (array), not a scalar.
+>
+> ### SQL I ran (top-8 clinical significance counts)
+>
 > ``` sql
-> WITH clnsig AS (SELECT COALESCE(sig,'missing') AS clinical_significance
->                 FROM clinvar, UNNEST(INFO_CLNSIG) AS u(sig))
-> SELECT clinical_significance, COUNT(*) AS variant_count
-> FROM clnsig GROUP BY 1 ORDER BY variant_count DESC LIMIT 8;
+> SELECT
+>   significance AS clinical_significance,
+>   COUNT(*) AS variant_count
+> FROM clinvar,
+>      UNNEST(INFO_CLNSIG) AS u(significance)
+> GROUP BY significance
+> ORDER BY variant_count DESC
+> LIMIT 8;
 > ```
+>
+> ### Result table
 >
 > | clinical_significance                        | variant_count |
 > |----------------------------------------------|--------------:|
@@ -220,8 +262,68 @@ one takes ~2–3 min, so it’s not re-run every render):
 > | Uncertain_significance                       |          2445 |
 > | Benign                                       |           704 |
 > | Likely_pathogenic                            |           263 |
+> | Pathogenic/Likely_pathogenic                 |           226 |
+> | Benign/Likely_benign                         |            94 |
 
-Same run, no agent — the CLI/SDK path, for scripts and CI:
+The **same run with no agent** — the deterministic CLI/SDK path, for
+scripts and CI (the substrate runs and *receipts* the SQL; identical
+numbers, no model in the loop):
+
+``` sh
+pi-bio-agent query examples/connectors/clinvar-region.json \
+  --db :memory: \
+  --init-sql "INSTALL duckhts FROM community; LOAD duckhts;" \
+  --sql "WITH clnsig AS (SELECT unnest(INFO_CLNSIG) AS sig FROM clinvar) SELECT sig AS clinical_significance, COUNT(*) AS variant_count FROM clnsig WHERE sig IS NOT NULL GROUP BY sig ORDER BY variant_count DESC LIMIT 8"
+```
+
+``` json
+{
+  "ok": true,
+  "runId": "query-1782939253055",
+  "status": "succeeded",
+  "rowCount": 8,
+  "artifacts": {
+    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782939253055/run.json",
+    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782939253055/result.json",
+    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782939253055/receipts.json"
+  },
+  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782939253055",
+  "rows": [
+    {
+      "clinical_significance": "Pathogenic",
+      "variant_count": 3593
+    },
+    {
+      "clinical_significance": "Conflicting_classifications_of_pathogenicity",
+      "variant_count": 2918
+    },
+    {
+      "clinical_significance": "Likely_benign",
+      "variant_count": 2891
+    },
+    {
+      "clinical_significance": "Uncertain_significance",
+      "variant_count": 2445
+    },
+    {
+      "clinical_significance": "Benign",
+      "variant_count": 704
+    },
+    {
+      "clinical_significance": "Likely_pathogenic",
+      "variant_count": 263
+    },
+    {
+      "clinical_significance": "Pathogenic/Likely_pathogenic",
+      "variant_count": 226
+    },
+    {
+      "clinical_significance": "Benign/Likely_benign",
+      "variant_count": 94
+    }
+  ]
+}
+```
 
 **Ask a question over a manifest — the agent writes the SQL, the
 substrate runs it and receipts it:**
@@ -235,15 +337,15 @@ pi-bio-agent query examples/variant-counts/manifest.json \
 ``` json
 {
   "ok": true,
-  "runId": "query-1782936505825",
+  "runId": "query-1782939255187",
   "status": "succeeded",
   "rowCount": 3,
   "artifacts": {
-    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782936505825/run.json",
-    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782936505825/result.json",
-    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782936505825/receipts.json"
+    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782939255187/run.json",
+    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782939255187/result.json",
+    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782939255187/receipts.json"
   },
-  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782936505825",
+  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782939255187",
   "rows": [
     {
       "consequence": "missense",
@@ -260,6 +362,77 @@ pi-bio-agent query examples/variant-counts/manifest.json \
   ]
 }
 ```
+
+**Where is all of this stored? The run graph is itself a table.** Every
+run above persisted a record under `.pi/bio-agent/runs/<runId>/run.json`
+— its spec, status, timestamps, event log, and resolution receipts.
+[`run-ledger`](examples/run-ledger/manifest.json) reads those records
+back with DuckDB `read_json`, so the substrate’s **own provenance is
+queryable with the same SQL it uses for data** — no opaque runtime to
+introspect. This is the live run graph produced *by this very render*:
+
+``` sh
+pi-bio-agent query examples/run-ledger/manifest.json \
+  --db :memory: \
+  --sql "SELECT tool, status, count(*) AS runs, min(createdAt) AS first_run FROM run_ledger GROUP BY 1, 2 ORDER BY runs DESC"
+```
+
+``` json
+{
+  "ok": true,
+  "runId": "query-1782939255280",
+  "status": "succeeded",
+  "rowCount": 4,
+  "artifacts": {
+    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782939255280/run.json",
+    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782939255280/result.json",
+    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782939255280/receipts.json"
+  },
+  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782939255280",
+  "rows": [
+    {
+      "tool": "ad-hoc.query",
+      "status": "succeeded",
+      "runs": 86,
+      "first_run": {
+        "micros": 1782757322953000
+      }
+    },
+    {
+      "tool": "ad-hoc.query",
+      "status": "failed",
+      "runs": 1,
+      "first_run": {
+        "micros": 1782932194696000
+      }
+    },
+    {
+      "tool": "rare_high_impact.report",
+      "status": "succeeded",
+      "runs": 1,
+      "first_run": {
+        "micros": 1782758451301000
+      }
+    },
+    {
+      "tool": "counts.by_consequence",
+      "status": "succeeded",
+      "runs": 1,
+      "first_run": {
+        "micros": 1782756761953000
+      }
+    }
+  ]
+}
+```
+
+Because the graph is a table, a UI is a thin SQL client and a chart is a
+query: a grammar-of-graphics layer like posit’s
+[**ggsql**](https://github.com/posit-dev/ggsql) draws the run timeline,
+status breakdown, or a manifest→run→receipt DAG straight off
+`run_ledger` — the plot *is* `ggplot(run_ledger) + ...` over SQL,
+nothing bespoke. Agent conversations, jobs, and coloc results land in
+the same ledger, so the whole workbench view is composed, not coded.
 
 **A scientific-database connector is a manifest, not a client.** The
 “60+ connected databases” a hosted workbench advertises are, here, one
@@ -281,15 +454,15 @@ pi-bio-agent query examples/connectors/uniprot.json \
 ``` json
 {
   "ok": true,
-  "runId": "query-1782936505959",
+  "runId": "query-1782939255409",
   "status": "succeeded",
   "rowCount": 1,
   "artifacts": {
-    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782936505959/run.json",
-    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782936505959/result.json",
-    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782936505959/receipts.json"
+    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782939255409/run.json",
+    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782939255409/result.json",
+    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782939255409/receipts.json"
   },
-  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782936505959",
+  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782939255409",
   "rows": [
     {
       "primaryAccession": "P04637",
