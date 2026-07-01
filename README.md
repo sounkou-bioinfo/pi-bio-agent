@@ -486,7 +486,7 @@ levers.)
 **We port the whole “AI for science” stack as one Pi extension — not a
 hosted product.** The `pi-coding-agent` extension exposes the entire
 surface over this substrate (query/run a manifest, list DuckDB format
-extensions, validate SQL, plan/read/write study notes), so reproducible
+extensions, validate SQL, and remember/recall/walk a temporal memory graph), so reproducible
 artifacts, connected databases, on-demand and *distributed* compute, and
 grounded review are a Pi extension **you** run, on **your** infra. Each
 [example](examples/) carries a recorded, verified run; see [what the
