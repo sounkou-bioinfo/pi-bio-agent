@@ -48,7 +48,7 @@ const manifest: BioManifest = {
     resources: [{ id: "variant_calls", title: "Variant calls", kind: "virtual", resolver: "inline.table", params: { table: "variant_calls", columns: [{ name: "variant_key", type: "TEXT" }, { name: "acmg_classification", type: "TEXT" }], rows: VARIANTS } }],
     termSets: [ACMG],
     operations: [{
-      schema: "pi-bio.operation_spec.v1", id: "acmg.threshold", version: "0.1.0",
+      id: "acmg.threshold", version: "0.1.0",
       title: "ACMG threshold", description: "Variants at or above likely_pathogenic by ACMG rank.",
       transport: "duckdb.sql", inputSchema: { type: "object" },
       sql: { sqlTemplate: SQL, readOnly: true, requiredResources: ["variant_calls"] },

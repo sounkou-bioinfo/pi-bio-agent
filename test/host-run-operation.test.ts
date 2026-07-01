@@ -40,7 +40,7 @@ const manifest: BioManifest = {
       { id: "so_loss_of_function", title: "LoF SO terms", kind: "virtual", resolver: "duckdb.file_scan", params: { path: "data/so_loss_of_function.csv", table: "so_loss_of_function" } },
     ],
     operations: [{
-      schema: "pi-bio.operation_spec.v1", id: "rare_high_impact.report", version: "0.1.0",
+      id: "rare_high_impact.report", version: "0.1.0",
       title: "Rare high-impact variant classification", description: "Classify variants, abstaining on unknown frequency.",
       transport: "duckdb.sql", inputSchema: { type: "object" },
       sql: { sqlTemplate: RARE_HIGH_IMPACT_SQL, readOnly: true, singleStatement: true, requiredResources: ["annotated_variants", "so_loss_of_function"] },
@@ -101,7 +101,7 @@ describe("host: bio_run_operation end-to-end", () => {
       provides: {
         ...manifest.provides,
         operations: [{
-          schema: "pi-bio.operation_spec.v1", id: "bad.op", version: "0.1.0",
+          id: "bad.op", version: "0.1.0",
           title: "Bad op", description: "References a column that does not exist.",
           transport: "duckdb.sql", inputSchema: { type: "object" },
           sql: { sqlTemplate: "SELECT no_such_column FROM annotated_variants", readOnly: true, requiredResources: ["annotated_variants"] },
@@ -137,7 +137,7 @@ describe("host: bio_run_operation end-to-end", () => {
         resolvers: [{ id: "http.get", version: "0.1.0", title: "HTTP get", description: "Fetch a URL into a table.", output: { mode: "table" } }],
         resources: [{ id: "candidates", title: "Candidates", kind: "virtual", resolver: "http.get", params: { url: "https://example.org/api?q=asthma", table: "candidates", format: "json" } }],
         operations: [{
-          schema: "pi-bio.operation_spec.v1", id: "list.candidates", version: "0.1.0", title: "List", description: "List candidates.",
+          id: "list.candidates", version: "0.1.0", title: "List", description: "List candidates.",
           transport: "duckdb.sql", inputSchema: { type: "object" },
           sql: { sqlTemplate: "SELECT obo_id FROM candidates ORDER BY obo_id", readOnly: true, requiredResources: ["candidates"] },
         }],
@@ -227,7 +227,7 @@ describe("host: bio_run_operation end-to-end", () => {
         resolvers: [{ id: "mystery.scan", version: "0.1.0", title: "Mystery", description: "Not a built-in.", output: { mode: "table" } }],
         resources: [{ id: "annotated_variants", title: "AV", kind: "virtual", resolver: "mystery.scan", params: { path: "x" } }],
         operations: [{
-          schema: "pi-bio.operation_spec.v1", id: "rare_high_impact.report", version: "0.1.0", title: "T", description: "t",           transport: "duckdb.sql", inputSchema: { type: "object" },
+          id: "rare_high_impact.report", version: "0.1.0", title: "T", description: "t",           transport: "duckdb.sql", inputSchema: { type: "object" },
           sql: { sqlTemplate: "SELECT 1 AS variant_key FROM annotated_variants", readOnly: true, requiredResources: ["annotated_variants"] },
         }],
       },

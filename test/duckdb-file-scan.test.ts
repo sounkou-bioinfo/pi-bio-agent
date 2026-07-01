@@ -45,7 +45,7 @@ const manifest: BioManifest = {
       { id: "so_loss_of_function", title: "LoF SO terms", kind: "virtual", resolver: "inline.table", params: { table: "so_loss_of_function", columns: [{ name: "id", type: "TEXT" }], rows: [{ id: "SO:0001587" }, { id: "SO:0001575" }, { id: "SO:0001589" }] } },
     ],
     operations: [defineBioOperationSpec({
-      schema: "pi-bio.operation_spec.v1", id: "rare_high_impact.report", version: "0.1.0",
+      id: "rare_high_impact.report", version: "0.1.0",
       title: "Rare high-impact variant classification", description: "Classify variants, abstaining on unknown frequency.",
       transport: "duckdb.sql", inputSchema: { type: "object" },
       sql: { sqlTemplate: RARE_HIGH_IMPACT_SQL, readOnly: true, singleStatement: true, requiredResources: ["annotated_variants", "so_loss_of_function"] },

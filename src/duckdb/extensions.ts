@@ -8,6 +8,7 @@ export interface DuckDbExtensionDescriptor {
   notes?: string[];
 }
 
+// Served on the pi wire as `text({ schema, extensions })` — the schema is a real envelope tag at that boundary.
 export interface DuckDbExtensionCatalog {
   schema: "pi-bio.duckdb_extension_catalog.v1";
   extensions: DuckDbExtensionDescriptor[];

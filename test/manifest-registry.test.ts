@@ -42,7 +42,7 @@ describe("validateBioManifest: fail closed", () => {
     assert.ok(validateBioManifest(onResource).some((e) => e.includes("unknown key 'columnRoles'")));
 
     const onSql = baseManifest({ operations: [{
-      schema: "pi-bio.operation_spec.v1", id: "op1", version: "0.1.0", title: "Op", description: "d",       transport: "duckdb.sql", inputSchema: { type: "object" },
+      id: "op1", version: "0.1.0", title: "Op", description: "d",       transport: "duckdb.sql", inputSchema: { type: "object" },
       sql: { sqlTemplate: "SELECT 1 AS x FROM t1", readOnly: true, requiredResources: ["t1"], requiredColumns: ["x"] } as never,
     }] });
     assert.ok(validateBioManifest(onSql).some((e) => e.includes("unknown key 'requiredColumns'")));
@@ -82,7 +82,7 @@ describe("validateBioManifest: fail closed", () => {
 
   test("rejects an operation requiring an undeclared resource", () => {
     const m = baseManifest({ operations: [{
-      schema: "pi-bio.operation_spec.v1", id: "op.x", version: "0.1.0", title: "X", description: "x",       transport: "duckdb.sql", inputSchema: { type: "object" }, sql: { sqlTemplate: "SELECT 1", readOnly: true, requiredResources: ["missing"] },
+      id: "op.x", version: "0.1.0", title: "X", description: "x",       transport: "duckdb.sql", inputSchema: { type: "object" }, sql: { sqlTemplate: "SELECT 1", readOnly: true, requiredResources: ["missing"] },
     }] });
     assert.ok(validateBioManifest(m).some((e) => e.includes("undeclared resource 'missing'")));
   });
@@ -104,7 +104,7 @@ describe("validateBioManifest: fail closed", () => {
 
   test("rejects an invalid operation spec (delegates to validateBioOperationSpec)", () => {
     const m = baseManifest({ operations: [{
-      schema: "pi-bio.operation_spec.v1", id: "op.y", version: "0.1.0", title: "Y", description: "y",       transport: "duckdb.sql", inputSchema: { type: "object" }, sql: { sqlTemplate: "SELECT 1", readOnly: false as never },
+      id: "op.y", version: "0.1.0", title: "Y", description: "y",       transport: "duckdb.sql", inputSchema: { type: "object" }, sql: { sqlTemplate: "SELECT 1", readOnly: false as never },
     }] });
     assert.ok(validateBioManifest(m).some((e) => e.includes("sql.readOnly must be true")));
   });
@@ -135,7 +135,7 @@ describe("registry: registration is fail-closed, frozen, and id-unique", () => {
     // pack-b reuses resolver id inline.table (collision) but also brings a fresh op that must NOT leak in.
     const partial: BioManifest = { ...baseManifest(), id: "pack-b", provides: {
       resolvers: [inlineResolver],
-      operations: [{ schema: "pi-bio.operation_spec.v1", id: "op.leak", version: "0.1.0", title: "L", description: "l", transport: "duckdb.sql", inputSchema: { type: "object" }, sql: { sqlTemplate: "SELECT 1", readOnly: true } }],
+      operations: [{ id: "op.leak", version: "0.1.0", title: "L", description: "l", transport: "duckdb.sql", inputSchema: { type: "object" }, sql: { sqlTemplate: "SELECT 1", readOnly: true } }],
     } };
     assert.throws(() => r.registerManifest(partial), /already registered/);
     assert.equal(r.getOperation("op.leak"), undefined); // nothing from the failed manifest committed

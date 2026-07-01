@@ -38,7 +38,7 @@ describe("schema discovery (no record-type taxonomy)", () => {
         resolvers: [{ id: "inline.table", version: "0.1.0", title: "Inline", description: "Inline.", output: { mode: "table" } }],
         resources: [{ id: "variants", title: "Variants", kind: "virtual", resolver: "inline.table", params: { table: "variants", columns: [{ name: "variant_key", type: "TEXT" }], rows: [{ variant_key: "1:1:A:T" }] } }],
         operations: [defineBioOperationSpec({
-          schema: "pi-bio.operation_spec.v1", id: "needs.af", version: "0.1.0", title: "Needs AF", description: "x",           transport: "duckdb.sql", inputSchema: { type: "object" },
+          id: "needs.af", version: "0.1.0", title: "Needs AF", description: "x",           transport: "duckdb.sql", inputSchema: { type: "object" },
           sql: { sqlTemplate: "SELECT variant_key, allele_frequency FROM variants", readOnly: true },
         })],
       },

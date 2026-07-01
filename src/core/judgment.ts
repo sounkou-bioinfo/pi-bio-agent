@@ -22,7 +22,6 @@ export interface JudgeInput {
 export type BioJudgeImpl = (input: JudgeInput) => Promise<BioJudgeProposal>;
 
 export interface GroundingJudgment {
-  schema: "pi-bio.grounding_judgment.v1";
   status: "grounded" | "abstained";
   termSetId: string;
   question: string;
@@ -79,7 +78,6 @@ export async function runGroundingJudgment(
   const proposal = await judge({ question: opts.question, candidates: termSet.members });
   const decided = decideGrounding(proposal, termSet, { minConfidence: opts.minConfidence });
   return {
-    schema: "pi-bio.grounding_judgment.v1",
     status: decided.status,
     termSetId: termSet.id,
     question: opts.question,

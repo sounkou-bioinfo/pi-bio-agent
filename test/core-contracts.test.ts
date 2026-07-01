@@ -9,7 +9,6 @@ import { makeConceptNode, validateReadOnlySelect } from "../src/core/knowledge-g
 import { deriveStudyPlan, memoryNodeId, parseStudyNoteLinks, studyNoteGraph, studyNoteIndex, studyNoteLinkEdges, studyNoteNode, validateStudyNote, STUDY_DEFAULT_LINK_PREDICATE, type StudyNote } from "../src/core/study.js";
 
 const validTool: BioToolSpec = {
-  schema: "pi-bio.tool_spec.v1",
   name: "test.echo",
   version: "0.1.0",
   title: "Echo",
@@ -22,7 +21,6 @@ const validTool: BioToolSpec = {
 };
 
 const validOperation: BioOperationSpec = {
-  schema: "pi-bio.operation_spec.v1",
   id: "variants.classify",
   version: "0.1.0",
   title: "Classify variants",
@@ -56,8 +54,7 @@ describe("BioToolSpec validation", () => {
   });
 
   test("reports malformed specs without throwing", () => {
-    const errors = validateBioToolSpec({ schema: "nope", name: "Bad Name" } as unknown as BioToolSpec);
-    assert.ok(errors.includes("schema must be pi-bio.tool_spec.v1"));
+    const errors = validateBioToolSpec({ name: "Bad Name" } as unknown as BioToolSpec);
     assert.ok(errors.some((e) => e.includes("name must be lowercase")));
     assert.ok(errors.includes("at least one execution surface is required"));
     assert.ok(errors.includes("at least one effect is required"));
@@ -84,8 +81,7 @@ describe("BioOperationSpec validation", () => {
   });
 
   test("reports malformed operation specs without throwing", () => {
-    const errors = validateBioOperationSpec({ schema: "x", id: "Bad Operation", transport: "graphql" } as unknown as BioOperationSpec);
-    assert.ok(errors.includes("schema must be pi-bio.operation_spec.v1"));
+    const errors = validateBioOperationSpec({ id: "Bad Operation", transport: "graphql" } as unknown as BioOperationSpec);
     assert.ok(errors.some((e) => e.includes("id must be lowercase")));
     assert.ok(errors.includes("inputSchema is required"));
     assert.ok(errors.includes("transport must be duckdb.sql"));

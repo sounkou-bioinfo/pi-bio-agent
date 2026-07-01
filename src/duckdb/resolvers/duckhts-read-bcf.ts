@@ -79,7 +79,7 @@ export const duckhtsReadBcfResolver: BioResolverImpl = async (resource, ctx) => 
 
   const sourceUri = path.includes("://") ? path : `file:${path}`; // a remote input is its own URI, not file:
   return {
-    result: { schema: "pi-bio.resource_handle.v1", mode: "reference", name: table, pointer: { uri: `table:${table}`, format: "table" } },
+    result: { mode: "reference", name: table, pointer: { uri: `table:${table}`, format: "table" } },
     sourceSnapshots: [
       { source: "duckhts", version: duckhtsVersion, retrievedAt: now },
       { source: sourceUri, version: inputDigest, retrievedAt: now },

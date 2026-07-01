@@ -28,7 +28,7 @@ export const inlineTableResolver: BioResolverImpl = async (resource, ctx) => {
     await ctx.conn.run(`INSERT INTO ${table} (${names.join(", ")}) VALUES (${placeholders})`, names.map((n) => row[n] ?? null));
   }
   return {
-    result: { schema: "pi-bio.resource_handle.v1", mode: "reference", name: table, pointer: { uri: `table:${table}`, format: "table" } },
+    result: { mode: "reference", name: table, pointer: { uri: `table:${table}`, format: "table" } },
     sourceSnapshots: [{ source: "inline", retrievedAt: now }],
     provenance: [{ source: "inline.table", retrievedAt: now }],
   };

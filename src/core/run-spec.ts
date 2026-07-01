@@ -45,8 +45,9 @@ export interface BioRunSpec {
   provenance?: Provenance[];
 }
 
+// Nested inside BioRunRecord (run.json) — the record's schema governs the whole file; an event never travels
+// standalone, so it carries no envelope tag of its own.
 export interface BioRunEvent {
-  schema: "pi-bio.run_event.v1";
   runId: string;
   at: string;
   type: BioRunEventType;
@@ -101,7 +102,6 @@ export function defineBioRunSpec(spec: BioRunSpec): BioRunSpec {
 
 export function validateBioRunEvent(event: BioRunEvent): string[] {
   const errors: string[] = [];
-  if (event.schema !== "pi-bio.run_event.v1") errors.push("schema must be pi-bio.run_event.v1");
   if (typeof event.runId !== "string" || !event.runId.trim()) errors.push("runId is required");
   if (typeof event.at !== "string" || !event.at.trim()) errors.push("at is required");
   if (!EVENT_TYPES.includes(event.type)) errors.push("type is invalid");
@@ -119,13 +119,13 @@ export function newRunRecord(spec: BioRunSpec, now = systemClock()): BioRunRecor
     status: "queued",
     createdAt: now,
     updatedAt: now,
-    events: [{ schema: "pi-bio.run_event.v1", runId: spec.id, at: now, type: "created", message: spec.title }],
+    events: [{ runId: spec.id, at: now, type: "created", message: spec.title }],
   };
 }
 
-export function appendRunEvent(record: BioRunRecord, event: Omit<BioRunEvent, "schema" | "runId" | "at"> & { at?: string }): BioRunRecord {
+export function appendRunEvent(record: BioRunRecord, event: Omit<BioRunEvent, "runId" | "at"> & { at?: string }): BioRunRecord {
   const at = event.at ?? systemClock();
-  const fullEvent: BioRunEvent = { schema: "pi-bio.run_event.v1", runId: record.spec.id, at, ...event };
+  const fullEvent: BioRunEvent = { runId: record.spec.id, at, ...event };
   const errors = validateBioRunEvent(fullEvent);
   if (errors.length) throw new Error(`invalid BioRunEvent: ${errors.join("; ")}`);
   const next: BioRunRecord = {

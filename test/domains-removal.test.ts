@@ -10,7 +10,7 @@ import { findDuckDbExtensions } from "../src/duckdb/extensions.js";
 // a taxonomy tag. A stray `domains` key must fail closed under the strict-manifest doctrine (not ride as inert JSON).
 
 const tool = (over: Partial<BioToolSpec>): BioToolSpec => ({
-  schema: "pi-bio.tool_spec.v1", name: "x.tool", version: "0.1.0", title: "T", description: "d",
+  name: "x.tool", version: "0.1.0", title: "T", description: "d",
   determinism: "deterministic", inputs: [{ name: "i", kind: "question" }], outputs: [{ name: "o", kind: "report" }],
   surfaces: [{ substrate: "pi" }], effects: ["read"], ...over,
 });
@@ -23,7 +23,7 @@ describe("domain-pack cut: no domains field, search over real content", () => {
     };
     assert.deepEqual(validateBioManifest(manifest), []);
     const op: BioOperationSpec = {
-      schema: "pi-bio.operation_spec.v1", id: "op.x", version: "0.1.0", title: "Op", description: "d",
+      id: "op.x", version: "0.1.0", title: "Op", description: "d",
       transport: "duckdb.sql", inputSchema: { type: "object" }, sql: { sqlTemplate: "SELECT 1", readOnly: true },
     };
     assert.deepEqual(validateBioOperationSpec(op), []);

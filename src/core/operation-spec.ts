@@ -23,8 +23,9 @@ export interface BioOperationIdentifierHint {
   description?: string;
 }
 
+// Nested inside a manifest's `provides.operations[]` (and the in-memory operation registry, which carries its own
+// envelope tag). The manifest/registry schema governs; an operation spec never travels standalone -> no own tag.
 export interface BioOperationSpec {
-  schema: "pi-bio.operation_spec.v1";
   id: string;
   version: string;
   title: string;
@@ -63,7 +64,6 @@ export function defineBioOperationSpec(spec: BioOperationSpec): BioOperationSpec
 
 export function validateBioOperationSpec(spec: BioOperationSpec): string[] {
   const errors: string[] = [];
-  if (spec.schema !== "pi-bio.operation_spec.v1") errors.push("schema must be pi-bio.operation_spec.v1");
   if (typeof spec.id !== "string" || !OPERATION_ID_RE.test(spec.id)) errors.push("id must be lowercase and may use '.', '_' or '-' separators");
   if (typeof spec.version !== "string" || !spec.version.trim()) errors.push("version is required");
   if (typeof spec.title !== "string" || !spec.title.trim()) errors.push("title is required");

@@ -39,7 +39,6 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
     parameters: Type.Object({}),
     async execute() {
       const ctx: BioContext = {
-        schema: "pi-bio.context.v1",
         sources: [],
         toolRegistry: defaultBioToolRegistry,
         duckdbExtensions: defaultDuckDbExtensionCatalog,

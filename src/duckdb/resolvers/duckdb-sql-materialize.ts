@@ -49,7 +49,7 @@ export const duckdbSqlMaterializeResolver: BioResolverImpl = async (resource, ct
   const sqlDigest = `sha256:${createHash("sha256").update(inner).digest("hex")}`;
   return {
     // the handle identifies the materialized table; we have no byte digest (the SQL/sources are the provenance)
-    result: { schema: "pi-bio.resource_handle.v1", mode: "reference", name: p.table, pointer: { uri: `table:${p.table}`, format: "table" } },
+    result: { mode: "reference", name: p.table, pointer: { uri: `table:${p.table}`, format: "table" } },
     sourceSnapshots: declaredSources.map((source) => ({ source, retrievedAt: now })),
     provenance: [{ source: "duckdb.sql_materialize", retrievedAt: now, digest: sqlDigest, notes: ["sql_materialize", ...extensions.map((e) => `ext:${e}`)] }],
   };

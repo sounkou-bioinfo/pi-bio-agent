@@ -5,7 +5,6 @@ const stringParam = (description: string) => ({ type: "string", description });
 
 export const bioAgentToolSpecs: BioToolSpec[] = [
   defineBioToolSpec({
-    schema: "pi-bio.tool_spec.v1",
     name: "bio.describe-model",
     version: "0.1.0",
     title: "Describe bio agent model",
@@ -18,7 +17,6 @@ export const bioAgentToolSpecs: BioToolSpec[] = [
     safety: { localFirst: true, factsMustBeToolDerived: true, networkPolicy: "forbidden" },
   }),
   defineBioToolSpec({
-    schema: "pi-bio.tool_spec.v1",
     name: "bio.list-tools",
     version: "0.1.0",
     title: "List bio tool specs",
@@ -32,7 +30,6 @@ export const bioAgentToolSpecs: BioToolSpec[] = [
     safety: { localFirst: true, networkPolicy: "forbidden" },
   }),
   defineBioToolSpec({
-    schema: "pi-bio.tool_spec.v1",
     name: "bio.list-duckdb-extensions",
     version: "0.1.0",
     title: "List relevant DuckDB extensions",
@@ -46,7 +43,6 @@ export const bioAgentToolSpecs: BioToolSpec[] = [
     safety: { localFirst: true, networkPolicy: "forbidden" },
   }),
   defineBioToolSpec({
-    schema: "pi-bio.tool_spec.v1",
     name: "bio.validate-select",
     version: "0.1.0",
     title: "Validate read-only SQL",
@@ -60,7 +56,6 @@ export const bioAgentToolSpecs: BioToolSpec[] = [
     safety: { localFirst: true, networkPolicy: "forbidden" },
   }),
   defineBioToolSpec({
-    schema: "pi-bio.tool_spec.v1",
     name: "bio.create-skill",
     version: "0.1.0",
     title: "Create project-local skill",
@@ -74,7 +69,6 @@ export const bioAgentToolSpecs: BioToolSpec[] = [
     safety: { localFirst: true, networkPolicy: "forbidden" },
   }),
   defineBioToolSpec({
-    schema: "pi-bio.tool_spec.v1",
     name: "bio.study-notes",
     version: "0.1.0",
     title: "Study-note memory",

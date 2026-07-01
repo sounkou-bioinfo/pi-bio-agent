@@ -18,8 +18,9 @@ export interface ResourcePointer {
   address?: ContentAddress;
 }
 
+// Nested inside a ResolutionReceipt (the persisted `result`); the receipt's schema governs. Never travels
+// standalone and nothing reads a handle's schema, so it carries no envelope tag of its own.
 export interface ResourceHandle {
-  schema: "pi-bio.resource_handle.v1";
   mode: ResourceHandleMode;
   name?: string;
   inline?: JsonValue;

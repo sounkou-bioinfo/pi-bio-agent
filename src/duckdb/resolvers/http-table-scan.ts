@@ -79,7 +79,7 @@ export function httpTableResolver(fetchImpl: FetchLike): BioResolverImpl {
     const materializeFrom = (file: string) => ctx.conn.run(`CREATE OR REPLACE TABLE ${table} AS SELECT * FROM ${reader}(?)`, [file]);
     const outputFor = (digest: string): ResolverOutput => ({
       // the handle identifies what downstream SQL uses — the materialized table; the URL is provenance, below
-      result: { schema: "pi-bio.resource_handle.v1", mode: "reference", name: table, pointer: { uri: `table:${table}`, format: "table" }, address: { algorithm: "sha256", digest } },
+      result: { mode: "reference", name: table, pointer: { uri: `table:${table}`, format: "table" }, address: { algorithm: "sha256", digest } },
       sourceSnapshots: [{ source: url, retrievedAt: now, version: `sha256:${digest}` }],
       provenance: [{ source: url, retrievedAt: now, digest: `sha256:${digest}`, notes: cas ? ["http.get", "cas"] : ["http.get"] }],
     });

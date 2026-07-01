@@ -53,8 +53,9 @@ export interface BioToolExecutionSurface {
   };
 }
 
+// Nested inside the in-memory tool registry (which carries the envelope tag served on the pi wire); a tool spec
+// is never parsed standalone from untrusted bytes, so the interface is its contract — no own schema tag.
 export interface BioToolSpec {
-  schema: "pi-bio.tool_spec.v1";
   name: string;
   version: string;
   title: string;
@@ -99,7 +100,6 @@ export function validateBioToolSpec(spec: BioToolSpec): string[] {
   const outputs = Array.isArray(spec.outputs) ? spec.outputs : undefined;
   const surfaces = Array.isArray(spec.surfaces) ? spec.surfaces : [];
   const effects = Array.isArray(spec.effects) ? spec.effects : [];
-  if (spec.schema !== "pi-bio.tool_spec.v1") errors.push("schema must be pi-bio.tool_spec.v1");
   if (typeof spec.name !== "string" || !TOOL_NAME_RE.test(spec.name)) errors.push("name must be lowercase and may use '.', '_' or '-' separators");
   if (typeof spec.version !== "string" || !spec.version.trim()) errors.push("version is required");
   if (typeof spec.title !== "string" || !spec.title.trim()) errors.push("title is required");

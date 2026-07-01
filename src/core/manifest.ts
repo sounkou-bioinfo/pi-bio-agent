@@ -199,7 +199,7 @@ export function validateBioManifest(manifest: BioManifest): string[] {
   for (const op of operations) {
     for (const e of validateBioOperationSpec(op)) errors.push(`operation '${op.id}': ${e}`);
     // inputSchema/outputSchema are JSON Schemas — opaque, not key-checked.
-    rejectUnknownKeys(op, ["schema", "id", "version", "title", "description", "transport", "inputSchema", "outputSchema", "identifiers", "sql", "cache", "provenance", "notes"], `operation '${op.id}'`, errors);
+    rejectUnknownKeys(op, ["id", "version", "title", "description", "transport", "inputSchema", "outputSchema", "identifiers", "sql", "cache", "provenance", "notes"], `operation '${op.id}'`, errors);
     if (op.sql) rejectUnknownKeys(op.sql, ["sqlTemplate", "readOnly", "singleStatement", "requiredResources"], `operation '${op.id}'.sql`, errors);
     for (const rid of op.sql?.requiredResources ?? []) {
       if (!resourceIds.has(rid)) errors.push(`operation '${op.id}' requires undeclared resource '${rid}'`);

@@ -51,7 +51,7 @@ const flagshipManifest: BioManifest = {
     ],
     resolvers: [{ id: "inline.table", version: "0.1.0", title: "Inline table", description: "Materialize a declared inline table.", output: { mode: "table" } }],
     operations: [defineBioOperationSpec({
-      schema: "pi-bio.operation_spec.v1", id: "rare_high_impact.report", version: "0.1.0",
+      id: "rare_high_impact.report", version: "0.1.0",
       title: "Rare high-impact variant classification", description: "Classify variants, abstaining on unknown frequency.",
       transport: "duckdb.sql", inputSchema: { type: "object" },
       sql: { sqlTemplate: RARE_HIGH_IMPACT_SQL, readOnly: true, singleStatement: true, requiredResources: ["annotated_variants", "so_loss_of_function"] },

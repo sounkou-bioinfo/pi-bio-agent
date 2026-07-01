@@ -14,7 +14,7 @@
     ],
     "operations": [
       {
-        "schema": "pi-bio.operation_spec.v1", "id": "rare_high_impact.report", "version": "0.1.0",
+        "id": "rare_high_impact.report", "version": "0.1.0",
         "title": "Rare high-impact variant classification",
         "description": "Classify each variant; the 'included' bucket is the defensible count. Unknown allele frequency is abstained from (NOT counted as rare); benign LoF is excluded.",
         "transport": "duckdb.sql", "inputSchema": { "type": "object" },

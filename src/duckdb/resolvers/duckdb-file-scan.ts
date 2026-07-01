@@ -62,7 +62,7 @@ export const duckdbFileScanResolver: BioResolverImpl = async (resource, ctx) => 
 
   const sourceUri = path.includes("://") ? path : `file:${path}`; // a remote input is its own URI, not file:
   const output: ResolverOutput = {
-    result: { schema: "pi-bio.resource_handle.v1", mode: "reference", name: table, pointer: { uri: `table:${table}`, format: "table" } },
+    result: { mode: "reference", name: table, pointer: { uri: `table:${table}`, format: "table" } },
     sourceSnapshots: [
       { source: sourceUri, version: inputDigest, retrievedAt: now },
       { source: `duckdb.${fn}`, retrievedAt: now },

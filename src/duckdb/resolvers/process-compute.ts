@@ -240,7 +240,7 @@ export function processComputeResolver(runner: ProcessRunner): BioResolverImpl {
         envNotes.length ? envNotes : undefined,
       );
       return {
-        result: { schema: "pi-bio.resource_handle.v1", mode: "reference", name: p.table, pointer: { uri: `table:${p.table}`, format: "table" } },
+        result: { mode: "reference", name: p.table, pointer: { uri: `table:${p.table}`, format: "table" } },
         sourceSnapshots: [{ source: `process:${command[0]}`, version: cmdDigest, retrievedAt: now }],
         provenance: [
           { source: "process.compute", retrievedAt: now, digest: sqlDigest, notes: ["process.compute", `cmd:${command.join(" ")}`, resultTable === "arrow" ? "arrow-ipc" : "files-only"] },
