@@ -4,8 +4,12 @@ import { DuckDBInstance } from "@duckdb/node-api";
 import { duckdbNodeConn } from "../src/duckdb/node-api.js";
 import type { SqlConn } from "../src/core/ports.js";
 import { createBioObservationSchema, observationAsOfKey } from "../src/duckdb/observations.js";
+import { promises as fsp } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { recordRunObservation } from "../src/hosts/run-observations.js";
 import { runBioQueryFromManifest } from "../src/hosts/run-store.js";
+import { fsCasStore } from "../src/hosts/fs-cas.js";
 import { MEMORY_NOW } from "../src/hosts/memory-store.js";
 
 const conn = async (): Promise<SqlConn> => {
@@ -55,5 +59,16 @@ describe("run-observations: ad-hoc SQL folds into the ONE store as an as-of, att
     assert.notEqual(a.runId, b.runId, "distinct run ids -> distinct run:<id> slots, no supersession clash");
     assert.ok(await observationAsOfKey(store, `run:${a.runId}`, MEMORY_NOW));
     assert.ok(await observationAsOfKey(store, `run:${b.runId}`, MEMORY_NOW));
+  });
+
+  test("result rows go to CAS by digest; the run fact references them (bytes OUTSIDE the DB)", async () => {
+    const store = await conn();
+    const cas = fsCasStore(await fsp.mkdtemp(join(tmpdir(), "cas-")));
+    const res = await runBioQueryFromManifest({ cwd: process.cwd(), dbPath: ":memory:", manifestPath: "examples/variant-counts/manifest.json", sql: "SELECT count(*) AS n FROM variants", store, author: "agent:test", cas });
+    const row = await observationAsOfKey(store, `run:${res.runId}`, MEMORY_NOW);
+    const v = JSON.parse(row!.value_json!);
+    assert.match(v.resultDigest, /^sha256:[a-f0-9]{64}$/); // the fact REFERENCES the result by content digest
+    const digest = v.resultDigest.slice("sha256:".length);
+    assert.equal(await cas.has({ algorithm: "sha256", digest }), true); // and the bytes actually live in CAS, not the DB
   });
 });

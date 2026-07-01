@@ -20,6 +20,9 @@ export interface RunObservation {
   runDir?: string;
   manifestDigest?: string;
   sourceReceiptDigests?: string[];
+  /** The result rows' content address (sha256:…) — the rows themselves live in CAS (bytes OUTSIDE the DB); the
+   *  fact only references them, so result.json becomes an optional serialize/export, fetchable from CAS by digest. */
+  resultDigest?: string;
 }
 
 /** Record a run as a `run:<runId>` observation in the shared store, attributed to `author`. Best-effort at the
@@ -31,7 +34,7 @@ export async function recordRunObservation(conn: SqlConn, run: RunObservation, n
     predicate: "run",
     value: {
       kind: run.kind, identity: run.identity, status: run.status, sql: run.sql, resources: run.resources, error: run.error,
-      runDir: run.runDir, manifestDigest: run.manifestDigest, sourceReceiptDigests: run.sourceReceiptDigests,
+      runDir: run.runDir, manifestDigest: run.manifestDigest, sourceReceiptDigests: run.sourceReceiptDigests, resultDigest: run.resultDigest,
     },
     recordedAt: now,
     source: author,

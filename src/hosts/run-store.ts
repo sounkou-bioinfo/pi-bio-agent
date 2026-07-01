@@ -259,7 +259,7 @@ function enrichReplay(replay: RunReplaySpec, receipts: ResolutionReceipt[]): Run
 async function recordRun(
   runLog: { store: SqlConn; author?: string } | undefined,
   now: string,
-  args: { runId: string; identity: string; status: string; error: string | undefined; dir: string; replay?: RunReplaySpec; enriched?: RunReplaySpec },
+  args: { runId: string; identity: string; status: string; error: string | undefined; dir: string; replay?: RunReplaySpec; enriched?: RunReplaySpec; resultDigest?: string },
 ): Promise<void> {
   if (!runLog) return;
   const obs: RunObservation = {
@@ -273,6 +273,7 @@ async function recordRun(
     runDir: args.dir,
     manifestDigest: args.replay?.manifest?.digest,
     sourceReceiptDigests: args.enriched?.sourceReceiptDigests,
+    resultDigest: args.resultDigest,
   };
   try {
     await recordRunObservation(runLog.store, obs, now, runLog.author);
@@ -290,6 +291,7 @@ async function runAndPersist(
   duckdbConfig?: Record<string, string>,
   replay?: RunReplaySpec,
   runLog?: { store: SqlConn; author?: string },
+  cas?: CasStore,
 ): Promise<RunOperationResponse> {
   const instance = await DuckDBInstance.create(resolveInCwd(cwd, dbPath), duckdbConfig);
   const connection = await instance.connect();
@@ -315,8 +317,17 @@ async function runAndPersist(
       // ENRICHED now that receipts exist (their digests + the env attestation summary from provenance).
       const enriched = replay ? enrichReplay(replay, receipts) : undefined;
       if (enriched) await writeRunFile(persisted.dir, "replay.json", enriched);
+      // Step 2: the result ROWS go to CAS (bytes OUTSIDE the DB); the run fact references them by digest, so
+      // result.json becomes an optional serialize/export. Only when the host opted into a CAS.
+      let resultDigest: string | undefined;
+      if (cas) {
+        const bytes = Buffer.from(JSON.stringify(result.rows, bigintToNumber), "utf8"); // same BigInt coercion as the file path
+        const digest = createHash("sha256").update(bytes).digest("hex");
+        await cas.put({ algorithm: "sha256", digest }, bytes); // immutable + idempotent
+        resultDigest = `sha256:${digest}`;
+      }
       // Datomic + CAS: record the run as a fact in the ONE store, referencing content by digest (bytes stay outside).
-      await recordRun(runLog, now, { runId, identity, status: run.status, error: undefined, dir: persisted.dir, replay, enriched });
+      await recordRun(runLog, now, { runId, identity, status: run.status, error: undefined, dir: persisted.dir, replay, enriched, resultDigest });
       return { ok: true, runId, operationId: identity, status: run.status, rowCount: result.rows.length, artifacts: persisted.files, runDir: persisted.dir };
     } catch (error) {
       // A run that started and failed at runtime persists a failed-run receipt and returns ok:false; the
@@ -362,7 +373,7 @@ export async function runBioOperationFromManifest(req: RunOperationRequest): Pro
     ...(req.bindings ? { bindings: req.bindings } : {}), ...(req.duckdbInitSql ? { duckdbInitSql: req.duckdbInitSql } : {}),
     ...(proc ? { process: proc } : {}),
   };
-  return runAndPersist(req.cwd, req.dbPath, runId, req.operationId, (conn) => runOperation(registry, conn, { operationId: req.operationId, runId, now, signal: req.signal, cas: req.cas }), now, req.duckdbInitSql, req.bindings, req.duckdbConfig, replay, req.store ? { store: req.store, author: req.author } : undefined);
+  return runAndPersist(req.cwd, req.dbPath, runId, req.operationId, (conn) => runOperation(registry, conn, { operationId: req.operationId, runId, now, signal: req.signal, cas: req.cas }), now, req.duckdbInitSql, req.bindings, req.duckdbConfig, replay, req.store ? { store: req.store, author: req.author } : undefined, req.cas);
 }
 
 export interface RunQueryRequest {
@@ -419,5 +430,5 @@ export async function runBioQueryFromManifest(req: RunQueryRequest): Promise<Run
     ...(req.bindings ? { bindings: req.bindings } : {}), ...(req.duckdbInitSql ? { duckdbInitSql: req.duckdbInitSql } : {}),
     ...(proc ? { process: proc } : {}),
   };
-  return runAndPersist(req.cwd, req.dbPath, runId, "ad-hoc.query", (conn) => runQuery(registry, conn, { sql: req.sql, resources, runId, now, signal: req.signal, cas: req.cas }), now, req.duckdbInitSql, req.bindings, req.duckdbConfig, replay, req.store ? { store: req.store, author: req.author } : undefined);
+  return runAndPersist(req.cwd, req.dbPath, runId, "ad-hoc.query", (conn) => runQuery(registry, conn, { sql: req.sql, resources, runId, now, signal: req.signal, cas: req.cas }), now, req.duckdbInitSql, req.bindings, req.duckdbConfig, replay, req.store ? { store: req.store, author: req.author } : undefined, req.cas);
 }
