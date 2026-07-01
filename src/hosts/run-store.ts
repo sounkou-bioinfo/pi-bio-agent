@@ -5,6 +5,7 @@ import { RUN_REPLAY_SPEC_SCHEMA, receiptContentDigest, type RunReplaySpec, type 
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { createBioRegistry, describeManifest, validateBioManifest, type BioRegistry, type BioManifest, type ManifestDescription, type ResolutionReceipt } from "../core/manifest.js";
+import { recordRunObservation, type RunObservation } from "./run-observations.js";
 import type { CasStore } from "../core/cas.js";
 import type { BioResolverImpl, ProcessRunner, SqlConn } from "../core/ports.js";
 import { OperationRunError, runOperation, runQuery, type OperationResult } from "../core/operations.js";
@@ -132,6 +133,10 @@ export interface RunOperationRequest {
   operationId: string;
   runId?: string;
   now?: string;
+  /** Shared-store opt-in: when the host passes its bio_observations connection, the run records a `run:<id>` fact
+   *  (status + SQL + digest refs, attributed to `author`) directly into the ONE store — no run.json read-back. */
+  store?: SqlConn;
+  author?: string;
   /** Network opt-in: pass a fetch to enable the http.get resolver. Absent = http.get stays unbound and any
    *  networked resource fails closed. The host (not core) owns this policy; nothing is read from ambient state. */
   network?: { fetch: FetchLike };
@@ -249,13 +254,42 @@ function enrichReplay(replay: RunReplaySpec, receipts: ResolutionReceipt[]): Run
 
 /** Acquire → use → release: own a DuckDB instance/connection for one run, persist the result (or a failed-run
  *  receipt), and close on EVERY path so no handle leaks. `body` does the actual core run. */
+/** Record a run as a `run:<id>` fact in the shared store, referencing the immutable content (receipt/manifest
+ *  digests) — bytes stay in files/CAS outside. Best-effort: the shared-ledger log must never fail the run. */
+async function recordRun(
+  runLog: { store: SqlConn; author?: string } | undefined,
+  now: string,
+  args: { runId: string; identity: string; status: string; error: string | undefined; dir: string; replay?: RunReplaySpec; enriched?: RunReplaySpec },
+): Promise<void> {
+  if (!runLog) return;
+  const obs: RunObservation = {
+    runId: args.runId,
+    kind: args.identity === "ad-hoc.query" ? "query" : "operation",
+    identity: args.identity,
+    status: args.status,
+    sql: args.replay?.sql,
+    resources: args.replay?.resources,
+    error: args.error,
+    runDir: args.dir,
+    manifestDigest: args.replay?.manifest?.digest,
+    sourceReceiptDigests: args.enriched?.sourceReceiptDigests,
+  };
+  try {
+    await recordRunObservation(runLog.store, obs, now, runLog.author);
+  } catch {
+    /* best-effort: never fail a run because the shared-ledger log failed */
+  }
+}
+
 async function runAndPersist(
   cwd: string, dbPath: string, runId: string, identity: string,
   body: (conn: SqlConn) => Promise<{ run: BioRunRecord; result: OperationResult; receipts: ResolutionReceipt[] }>,
+  now: string,
   initSql?: string[],
   bindings?: Record<string, unknown>,
   duckdbConfig?: Record<string, string>,
   replay?: RunReplaySpec,
+  runLog?: { store: SqlConn; author?: string },
 ): Promise<RunOperationResponse> {
   const instance = await DuckDBInstance.create(resolveInCwd(cwd, dbPath), duckdbConfig);
   const connection = await instance.connect();
@@ -279,14 +313,19 @@ async function runAndPersist(
       const persisted = await persistRun(cwd, runId, { run, result, receipts });
       // C1: seed the REPLAY bundle beside result/receipts — the actual inputs C2's reproduce() will re-execute,
       // ENRICHED now that receipts exist (their digests + the env attestation summary from provenance).
-      if (replay) await writeRunFile(persisted.dir, "replay.json", enrichReplay(replay, receipts));
+      const enriched = replay ? enrichReplay(replay, receipts) : undefined;
+      if (enriched) await writeRunFile(persisted.dir, "replay.json", enriched);
+      // Datomic + CAS: record the run as a fact in the ONE store, referencing content by digest (bytes stay outside).
+      await recordRun(runLog, now, { runId, identity, status: run.status, error: undefined, dir: persisted.dir, replay, enriched });
       return { ok: true, runId, operationId: identity, status: run.status, rowCount: result.rows.length, artifacts: persisted.files, runDir: persisted.dir };
     } catch (error) {
       // A run that started and failed at runtime persists a failed-run receipt and returns ok:false; the
       // failure is auditable, not lost. Pre-flight/config errors (which never became a run) still throw.
       if (error instanceof OperationRunError) {
         const persisted = await persistFailedRun(cwd, runId, { run: error.run, receipts: error.receipts });
-        if (replay) await writeRunFile(persisted.dir, "replay.json", enrichReplay(replay, error.receipts)); // a failed run is replayable too
+        const enriched = replay ? enrichReplay(replay, error.receipts) : undefined;
+        if (enriched) await writeRunFile(persisted.dir, "replay.json", enriched); // a failed run is replayable too
+        await recordRun(runLog, now, { runId, identity, status: error.run.status, error: error.message, dir: persisted.dir, replay, enriched });
         return { ok: false, runId, operationId: identity, status: error.run.status, error: error.message, runDir: persisted.dir };
       }
       throw error;
@@ -321,7 +360,7 @@ export async function runBioOperationFromManifest(req: RunOperationRequest): Pro
     ...(req.bindings ? { bindings: req.bindings } : {}), ...(req.duckdbInitSql ? { duckdbInitSql: req.duckdbInitSql } : {}),
     ...(proc ? { process: proc } : {}),
   };
-  return runAndPersist(req.cwd, req.dbPath, runId, req.operationId, (conn) => runOperation(registry, conn, { operationId: req.operationId, runId, now, signal: req.signal, cas: req.cas }), req.duckdbInitSql, req.bindings, req.duckdbConfig, replay);
+  return runAndPersist(req.cwd, req.dbPath, runId, req.operationId, (conn) => runOperation(registry, conn, { operationId: req.operationId, runId, now, signal: req.signal, cas: req.cas }), now, req.duckdbInitSql, req.bindings, req.duckdbConfig, replay, req.store ? { store: req.store, author: req.author } : undefined);
 }
 
 export interface RunQueryRequest {
@@ -335,6 +374,9 @@ export interface RunQueryRequest {
   resources?: string[];
   runId?: string;
   now?: string;
+  /** Shared-store opt-in (see RunOperationRequest.store): record the run as a `run:<id>` fact in the ONE store. */
+  store?: SqlConn;
+  author?: string;
   network?: { fetch: FetchLike };
   /** COMPUTE opt-in (host grants out-of-process compute): pass a ProcessRunner to enable the process.compute resolver. Absent => process.compute stays unbound and fails closed. */
   process?: { runner: ProcessRunner };
@@ -375,5 +417,5 @@ export async function runBioQueryFromManifest(req: RunQueryRequest): Promise<Run
     ...(req.bindings ? { bindings: req.bindings } : {}), ...(req.duckdbInitSql ? { duckdbInitSql: req.duckdbInitSql } : {}),
     ...(proc ? { process: proc } : {}),
   };
-  return runAndPersist(req.cwd, req.dbPath, runId, "ad-hoc.query", (conn) => runQuery(registry, conn, { sql: req.sql, resources, runId, now, signal: req.signal, cas: req.cas }), req.duckdbInitSql, req.bindings, req.duckdbConfig, replay);
+  return runAndPersist(req.cwd, req.dbPath, runId, "ad-hoc.query", (conn) => runQuery(registry, conn, { sql: req.sql, resources, runId, now, signal: req.signal, cas: req.cas }), now, req.duckdbInitSql, req.bindings, req.duckdbConfig, replay, req.store ? { store: req.store, author: req.author } : undefined);
 }
