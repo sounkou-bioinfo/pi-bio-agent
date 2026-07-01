@@ -159,6 +159,21 @@ export function attestEnvironment(
 // resolved on THIS host (process.compute `./script.R` → an absolute path), keep BOTH the authored manifest snapshot
 // (portable intent) and the resolved execution facts (what actually ran) — see run-store's path resolution.
 
+/** A stable digest over any JSON value (canonical key order). Used for `sourceReceiptDigests` — a fixed handle
+ *  over the receipts a run actually produced, so reproduce() can pin them. */
+export function canonicalDigest(value: unknown): `sha256:${string}` {
+  return `sha256:${createHash("sha256").update(stableStringify(value)).digest("hex")}`;
+}
+
+/** The env attestation SUMMARY carried in a replay spec — status + digests only (the full EnvironmentAttestation
+ *  lives in receipts.json). Kept a summary so replaySpecDigest stays order-stable (embedding full descriptors
+ *  would make the replay digest sensitive to layer/package order unless re-canonicalized). */
+export interface EnvAttestationSummary {
+  status: EnvironmentAttestation["status"];
+  declaredDigest?: string;
+  observedDigest?: string;
+}
+
 export interface RunReplaySpec {
   schema: typeof RUN_REPLAY_SPEC_SCHEMA;
   runId: string;
@@ -174,7 +189,9 @@ export interface RunReplaySpec {
   duckdbConfigDigest?: string;
   /** the RESOLVED process execution facts (what actually ran on this host). */
   process?: { resourceId?: string; table?: string; command?: readonly string[]; inputSql?: string; resultTable?: "arrow" | "artifacts"; outputs?: Array<{ name: string; path: string; kind?: string }> };
-  environment?: EnvironmentAttestation;
+  /** env SUMMARY (status + digests); the full attestation is in receipts.json. Enriched AFTER the run resolves. */
+  environment?: EnvAttestationSummary;
+  /** stable digests of the receipts this run produced — reproduce()'s pin on the exact provenance it should match. */
   sourceReceiptDigests?: string[];
 }
 

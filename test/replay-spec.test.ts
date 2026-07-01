@@ -45,6 +45,13 @@ describe("C1b-ii: replay.json seed", () => {
     assert.equal(replay.process!.command![0], "sh");
     assert.ok(isAbsolute(replay.process!.command![1] as string), "resolved command path is absolute (execution fact)");
     assert.equal(replay.process!.command![1], resolve(process.cwd(), "examples", "process-files-only", "render.sh"));
+
+    // C1b-iii enrichment: receipts exist now, so replay is pinned to their digests + carries the env summary
+    assert.ok(Array.isArray(replay.sourceReceiptDigests) && replay.sourceReceiptDigests.length > 0, "receipt digests pinned");
+    assert.ok(replay.sourceReceiptDigests!.every((d) => /^sha256:[0-9a-f]{64}$/.test(d)));
+    assert.ok(replay.environment, "env attestation summary present");
+    assert.equal(replay.environment!.status, "observed_only", "nodeProcessRunner probed, no declaration");
+    assert.match(replay.environment!.observedDigest!, /^sha256:[0-9a-f]{64}$/);
   });
 
   test("a plain (non-process) query persists replay.json without a process block", async () => {

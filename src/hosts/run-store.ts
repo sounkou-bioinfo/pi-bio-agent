@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import { createHash } from "node:crypto";
 import { systemClock } from "../core/clock.js";
-import { RUN_REPLAY_SPEC_SCHEMA, type RunReplaySpec } from "../core/reproducibility.js";
+import { RUN_REPLAY_SPEC_SCHEMA, canonicalDigest, type RunReplaySpec, type EnvAttestationSummary } from "../core/reproducibility.js";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { createBioRegistry, type BioRegistry, type DomainPackManifest, type ResolutionReceipt } from "../core/manifest.js";
@@ -194,6 +194,28 @@ function resolvedProcessFacts(manifest: DomainPackManifest, resources: string[])
   return { resourceId: r.id, table: p.table, command: p.command, inputSql: p.inputSql, resultTable: p.resultTable, outputs: p.outputs };
 }
 
+/** The env attestation SUMMARY lifted from the receipts' `environment` provenance entry (process.compute records
+ *  it as notes). First process receipt that carries one (walking-skeleton: one process resource). */
+function envSummaryFromReceipts(receipts: ResolutionReceipt[]): EnvAttestationSummary | undefined {
+  for (const r of receipts) {
+    const e = r.provenance.find((p) => p.source === "environment");
+    const notes = e?.notes ?? [];
+    const status = notes.find((n) => n.startsWith("env_status:"))?.slice("env_status:".length) as EnvAttestationSummary["status"] | undefined;
+    if (!status) continue;
+    const declaredDigest = notes.find((n) => n.startsWith("env_declared:"))?.slice("env_declared:".length);
+    const observedDigest = notes.find((n) => n.startsWith("env_observed:"))?.slice("env_observed:".length);
+    return { status, ...(declaredDigest ? { declaredDigest } : {}), ...(observedDigest ? { observedDigest } : {}) };
+  }
+  return undefined;
+}
+
+/** Enrich the pre-run replay SEED once receipts exist: pin the receipt digests + the env attestation summary, so
+ *  reproduce() has stable handles and a status without re-parsing provenance. */
+function enrichReplay(replay: RunReplaySpec, receipts: ResolutionReceipt[]): RunReplaySpec {
+  const environment = envSummaryFromReceipts(receipts);
+  return { ...replay, sourceReceiptDigests: receipts.map((r) => canonicalDigest(r)), ...(environment ? { environment } : {}) };
+}
+
 /** Acquire → use → release: own a DuckDB instance/connection for one run, persist the result (or a failed-run
  *  receipt), and close on EVERY path so no handle leaks. `body` does the actual core run. */
 async function runAndPersist(
@@ -224,15 +246,16 @@ async function runAndPersist(
     try {
       const { run, result, receipts } = await body(conn);
       const persisted = await persistRun(cwd, runId, { run, result, receipts });
-      // C1: seed the REPLAY bundle beside result/receipts — the actual inputs C2's reproduce() will re-execute.
-      if (replay) await writeRunFile(persisted.dir, "replay.json", replay);
+      // C1: seed the REPLAY bundle beside result/receipts — the actual inputs C2's reproduce() will re-execute,
+      // ENRICHED now that receipts exist (their digests + the env attestation summary from provenance).
+      if (replay) await writeRunFile(persisted.dir, "replay.json", enrichReplay(replay, receipts));
       return { ok: true, runId, operationId: identity, status: run.status, rowCount: result.rows.length, artifacts: persisted.files, runDir: persisted.dir };
     } catch (error) {
       // A run that started and failed at runtime persists a failed-run receipt and returns ok:false; the
       // failure is auditable, not lost. Pre-flight/config errors (which never became a run) still throw.
       if (error instanceof OperationRunError) {
         const persisted = await persistFailedRun(cwd, runId, { run: error.run, receipts: error.receipts });
-        if (replay) await writeRunFile(persisted.dir, "replay.json", replay); // a failed run is replayable too (reproduce the failure)
+        if (replay) await writeRunFile(persisted.dir, "replay.json", enrichReplay(replay, error.receipts)); // a failed run is replayable too
         return { ok: false, runId, operationId: identity, status: error.run.status, error: error.message, runDir: persisted.dir };
       }
       throw error;
