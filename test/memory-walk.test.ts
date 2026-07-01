@@ -5,7 +5,7 @@ import { makeStudyNote } from "../src/hosts/pi-project.js";
 
 // a note whose body [[slug]] links become memory-graph edges
 const note = (slug: string, links: string[] = []) =>
-  makeStudyNote({ kind: "memory_note", title: slug, hook: `hook ${slug}`, body: links.map((l) => `[[${l}]]`).join(" "), slug });
+  makeStudyNote({ kind: "memory_note", title: slug, hook: `hook ${slug}`, body: `note ${slug} ${links.map((l) => `[[${l}]]`).join(" ")}`.trim(), slug });
 
 describe("walkMemoryGraph: study-note memory is a walkable graph", () => {
   const notes = [note("a", ["b"]), note("b", ["c"]), note("c"), note("island")];

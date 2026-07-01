@@ -56,14 +56,24 @@ JSON-RPC facade is the next build, not a claim of done.)
 trained ~7B **conductor** that learns which expert models to activate, what roles they take (Thinker / Worker /
 Verifier), how they communicate, and how to combine their work — orchestration *learned*, not hand-designed.
 
-We have every **substrate** piece a conductor needs, as data:
-- **workflow-as-data** — manifests + study scaffolds are the plan;
-- **shared memory** — CAS (content-addressed) is the cross-agent store;
-- **access lists** — study-scaffold worker access-lists route exactly what each agent may see.
+We have every **substrate** piece a conductor needs, as data. The report's §3.2.2 ("Function Calling Agentic
+Workflows") names two mechanisms explicitly, and each has a direct substrate analogue:
+- **"persistent shared memory"** — Fugu keeps *inter-workflow shared memory* so agents "observe tool calling from
+  previous workflows" and "not make redundant, repeated tool calls." Our **`bio_observations` temporal ledger is
+  exactly that**: every run and tool call is a queryable, as-of fact (the run-graph), so a later agent/workflow
+  reads what already happened instead of repeating it — and now **memory notes live in the same store** (`agent:memory:`
+  namespace, append-only revisions + as-of), so shared memory spans facts *and* learned notes, persisted in a DB
+  (better semantics than a prompt), shareable across processes via ducknng RPC / CAS.
+- **"access list"** — Fugu's plan "specifies … an access list indexing which subtask solutions from the previous
+  steps to include in the worker's context," with intra-workflow isolation to avoid "orchestration collapse." Our
+  **study-scaffold worker access-lists** (`accessList` in `src/core/study.ts`) route exactly which prior notes each
+  worker sees — the same selective-visibility model.
+- **workflow-as-data** — manifests + study scaffolds are the plan the conductor would route.
 
 What we deliberately *lack* is the **trained orchestrator** — the agent is an *un-trained* conductor over the same
-substrate. That is a policy on top, not a different architecture: Fugu learns the routing; we make the thing being
-routed inspectable and composable. (A hosted product ships the learned conductor; we own the substrate it conducts.)
+substrate. That is a policy on top, not a different architecture: Fugu *learns* the routing over its persistent
+shared memory + access lists; we make that memory and routing inspectable, as-of-queryable data. (A hosted product
+ships the learned conductor; we own the substrate it conducts.)
 
 ## RLM — a REPL over context
 

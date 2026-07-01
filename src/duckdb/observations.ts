@@ -103,6 +103,15 @@ export async function observationsAsOf(conn: SqlConn, t: string): Promise<Observ
   return conn.all<ObservationRow>(asOfSql(TABLE), [t, t, t]);
 }
 
+/** Every revision of ONE slot, oldest-first — the CHANGE HISTORY (what a memory/audit view surfaces). Unlike
+ *  observationAsOfKey (latest as-of), this returns the whole append-only trail so callers can show what changed. */
+export async function observationHistory(conn: SqlConn, statementKey: string): Promise<ObservationRow[]> {
+  return conn.all<ObservationRow>(
+    `SELECT * FROM ${TABLE} WHERE statement_key = ? ORDER BY recorded_at ASC, observation_id ASC`,
+    [statementKey],
+  );
+}
+
 /** The single latest statement for ONE slot as of t — keyed, no full-table scan (what a state machine wants). */
 export async function observationAsOfKey(conn: SqlConn, statementKey: string, t: string): Promise<ObservationRow | null> {
   const rows = await conn.all<ObservationRow>(
