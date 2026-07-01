@@ -110,18 +110,40 @@ Generated project-local skills and study notes live under `.pi/bio-agent/` in th
 
 ## CLI
 
-Project study notes (under `.pi/bio-agent/study-notes`) project into the memory subgraph
-(`bio_nodes`/`bio_edges`) of a DuckDB database. `sync` is a dry run unless `--write`; output and
-`--json` go to stdout, usage/errors to stderr.
+The substrate is provider-agnostic — you don't need Pi to use it. `query`/`run` execute a manifest through the
+**same** host functions the Pi extension uses; both are fail-closed by default (no network/compute unless the
+host binds them). Results print as JSON; a failed run exits `1`, a usage error exits `2`.
 
 ```sh
-pi-bio-agent notes sync   --db graph.duckdb --create-schema   # dry run (counts only)
-pi-bio-agent notes sync   --db graph.duckdb --write           # apply
-pi-bio-agent notes report --db graph.duckdb --json            # counts + dangling/inbound rows
+# run the agent's ad-hoc SQL over a manifest's declared resources
+pi-bio-agent query examples/variant-counts/manifest.json --db :memory: \
+  --sql "SELECT consequence, count(*) AS n FROM variants GROUP BY consequence ORDER BY consequence"
+
+# run a declared, tested operation
+pi-bio-agent run examples/rare-high-impact/manifest.json --db :memory: --operation rare_high_impact.report
+
+# study notes project into the DuckDB memory subgraph (bio_nodes/bio_edges); sync is a dry run unless --write
+pi-bio-agent notes sync   --db graph.duckdb --write
+pi-bio-agent notes report --db graph.duckdb --json
 ```
 
-The bin is compiled to `dist/` via `npm run build` (run by `prepare`); the package also ships `src`
-for Pi to consume directly.
+## As a library (SDK)
+
+```ts
+import { runBioQueryFromManifest } from "pi-bio-agent";          // whole surface
+import { validateBioManifest } from "pi-bio-agent/core";         // core contracts
+import { duckdbNodeConn } from "pi-bio-agent/duckdb";            // DuckDB adapters
+import { fsCasStore, ledgerJobRunner } from "pi-bio-agent/hosts"; // host helpers
+
+const out = await runBioQueryFromManifest({
+  cwd: process.cwd(), dbPath: ":memory:", manifestPath: "manifest.json",
+  sql: "SELECT * FROM variants LIMIT 5",
+});
+```
+
+Host effects are injected by composition — a `fetch` for `http.get`, a `ProcessRunner` for `process.compute`, a
+`JobDispatch` for a distributed `JobRunner` — and each **fails closed** when unbound. The bin compiles to `dist/`
+via `npm run build` (run by `prepare`); the package also ships `src` for Pi to consume directly.
 
 ## Docs
 
@@ -139,3 +161,14 @@ npm run check     # typecheck + tests + docs-index staleness gate (the single ga
 
 `npm run provision:duckhts` installs the DuckHTS community extension for the `duckhts.read_bcf` resolver
 (explicit; never auto-installed during `check`). Runtime Pi APIs are peer dependencies supplied by Pi itself.
+
+## Status & contributing
+
+Pre-1.0 (`0.1.0`) — the substrate shape is settled (see the [roadmap](docs/roadmap.md)) but the public API may
+still move. Issues and PRs welcome; `npm run check` is the single gate (typecheck + tests + docs/readme/examples
+staleness) and CI runs it on every push. Please keep changes fail-closed and manifest/SQL-first — new capability
+should enter as a manifest, a resolver adapter, or SQL, not as bespoke core code.
+
+## License
+
+[MIT](LICENSE) © sounkou-bioinfo

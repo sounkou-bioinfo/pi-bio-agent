@@ -4,6 +4,11 @@
   "private": false,
   "description": "Provider-agnostic bioinformatics agent primitives, DuckDB SQL planning, and Pi coding-agent integration.",
   "license": "MIT",
+  "author": "sounkou-bioinfo",
+  "repository": { "type": "git", "url": "git+https://github.com/sounkou-bioinfo/pi-bio-agent.git" },
+  "homepage": "https://github.com/sounkou-bioinfo/pi-bio-agent#readme",
+  "bugs": { "url": "https://github.com/sounkou-bioinfo/pi-bio-agent/issues" },
+  "engines": { "node": ">=20" },
   "type": "module",
   "keywords": [
     "pi-package",
