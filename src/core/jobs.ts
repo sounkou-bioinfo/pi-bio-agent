@@ -65,4 +65,8 @@ export interface JobRunner {
   submit(spec: JobSubmitSpec): Promise<void>;
   status(runId: string): Promise<JobStatus | null>;
   collect(runId: string): Promise<JobResult | null>;
+  /** OPTIONAL best-effort cancellation (L3). A runner that can stop in-flight work implements it (the in-memory
+   *  fake flips a not-yet-terminal job to cancelled; a real runner sends a process-group kill). The DURABLE cancel
+   *  — recording the `cancelled` phase in the ledger — is the job-store's job and does not require this. */
+  cancel?(runId: string): Promise<void>;
 }

@@ -7,7 +7,7 @@ import { DuckDBInstance } from "@duckdb/node-api";
 import { duckdbNodeConn } from "../src/duckdb/node-api.js";
 import { createBioObservationSchema, observationAsOfKey } from "../src/duckdb/observations.js";
 import { inMemoryJobRunner } from "../src/hosts/in-memory-job-runner.js";
-import { submitBioJob, pollBioJob, collectBioJob, readJobRecord } from "../src/hosts/job-store.js";
+import { submitBioJob, pollBioJob, collectBioJob, readJobRecord, resumeBioJob, cancelBioJob } from "../src/hosts/job-store.js";
 import type { RunReplaySpec } from "../src/core/reproducibility.js";
 
 // L1 — the async job lane over the SAME temporal substrate as Phase 4: a `job:<runId>:status` observation slot,
@@ -79,5 +79,40 @@ describe("L1: JobRunner + job-store over the job:<runId>:status temporal slot", 
     await submitBioJob(conn, r2, { cwd, runId: "j5", replay: replay("j5"), now: "2026-07-01T00:00:05Z" });
     await r2.settle("j5");
     await assert.rejects(() => pollBioJob(conn, r2, { cwd, runId: "j5", now: "2026-07-01T00:00:05Z" }), /strictly after/);
+  });
+});
+
+describe("L2/L3: durable resume + cancel", () => {
+  test("resume rehydrates a job's status from the durable record + ledger WITHOUT the runner", async () => {
+    const { conn, cwd, clock } = await setup();
+    const runner = inMemoryJobRunner({ clock, execute: async () => ({ result: { ok: true } }) });
+    await submitBioJob(conn, runner, { cwd, runId: "r1", replay: replay("r1"), now: "2026-07-01T00:00:01Z" });
+    await runner.settle("r1");
+    await pollBioJob(conn, runner, { cwd, runId: "r1", now: "2026-07-01T00:00:09Z" });
+
+    // resume takes NO runner (it's gone after a restart) — the durable substrate holds the truth
+    const resumed = await resumeBioJob(conn, { cwd, runId: "r1" });
+    assert.equal(resumed.phase, "succeeded");
+    assert.match(resumed.replayDigest, /^sha256:/);
+    await assert.rejects(() => resumeBioJob(conn, { cwd, runId: "ghost" }), /no durable record/);
+  });
+
+  test("cancel records the terminal cancelled phase; a mid-flight completion cannot overwrite it", async () => {
+    const { conn, cwd, clock } = await setup();
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => { release = r; });
+    const runner = inMemoryJobRunner({ clock, execute: async () => { await gate; return { result: { too: "late" } }; } });
+
+    await submitBioJob(conn, runner, { cwd, runId: "c1", replay: replay("c1"), now: "2026-07-01T00:00:01Z" });
+    const cancelled = await cancelBioJob(conn, { cwd, runId: "c1", now: "2026-07-01T00:00:05Z", runner });
+    assert.equal(cancelled.phase, "cancelled");
+    assert.equal((await resumeBioJob(conn, { cwd, runId: "c1" })).phase, "cancelled", "durable state is cancelled");
+
+    release(); await runner.settle("c1"); // the work finishes AFTER cancel — must not resurrect the job
+    assert.equal((await runner.status("c1"))!.phase, "cancelled", "completion did not overwrite cancelled");
+
+    // fail closed: cancelling an already-terminal job, or an unknown one
+    await assert.rejects(() => cancelBioJob(conn, { cwd, runId: "c1", now: "2026-07-01T00:00:09Z", runner }), /already terminal/);
+    await assert.rejects(() => cancelBioJob(conn, { cwd, runId: "ghost", now: "2026-07-01T00:00:09Z" }), /no durable record/);
   });
 });

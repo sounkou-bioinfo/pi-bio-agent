@@ -22,7 +22,7 @@ export interface InMemoryJobRunnerDeps {
 export type InMemoryJobRunner = JobRunner & { settle(runId: string): Promise<void> };
 
 export function inMemoryJobRunner(deps: InMemoryJobRunnerDeps): InMemoryJobRunner {
-  interface Entry { status: JobStatus; result?: JobResult; done: Promise<void>; }
+  interface Entry { status: JobStatus; result?: JobResult; done: Promise<void>; cancelled: boolean; }
   const jobs = new Map<string, Entry>();
 
   return {
@@ -32,15 +32,17 @@ export function inMemoryJobRunner(deps: InMemoryJobRunnerDeps): InMemoryJobRunne
       // install a DEFERRED done before starting work, so settle() can never observe a placeholder promise
       let resolveDone: () => void = () => {};
       const done = new Promise<void>((r) => { resolveDone = r; });
-      const entry: Entry = { status: { runId: spec.runId, phase: "running", at: deps.clock() }, done };
+      const entry: Entry = { status: { runId: spec.runId, phase: "running", at: deps.clock() }, done, cancelled: false };
       jobs.set(spec.runId, entry);
       // run the work in the background; submit resolves now (job accepted), not on completion.
       void (async () => {
         try {
           const out = await deps.execute(spec.replay);
+          if (entry.cancelled) return; // a cancel that landed mid-flight wins — don't overwrite it with the result
           entry.status = { runId: spec.runId, phase: "succeeded", at: deps.clock() };
           entry.result = { runId: spec.runId, phase: "succeeded", result: out.result, artifacts: out.artifacts };
         } catch (e) {
+          if (entry.cancelled) return;
           const error = e instanceof Error ? e.message : String(e);
           entry.status = { runId: spec.runId, phase: "failed", at: deps.clock() };
           entry.result = { runId: spec.runId, phase: "failed", error };
@@ -54,6 +56,14 @@ export function inMemoryJobRunner(deps: InMemoryJobRunnerDeps): InMemoryJobRunne
     },
     async collect(runId: string): Promise<JobResult | null> {
       return jobs.get(runId)?.result ?? null;
+    },
+    async cancel(runId: string): Promise<void> {
+      const entry = jobs.get(runId);
+      if (!entry) throw new Error(`in-memory job runner: unknown job '${runId}'`);
+      if (entry.status.phase === "succeeded" || entry.status.phase === "failed" || entry.status.phase === "cancelled") return; // terminal — nothing to cancel
+      entry.cancelled = true;
+      entry.status = { runId, phase: "cancelled", at: deps.clock() };
+      entry.result = { runId, phase: "cancelled" };
     },
     async settle(runId: string): Promise<void> {
       const entry = jobs.get(runId);

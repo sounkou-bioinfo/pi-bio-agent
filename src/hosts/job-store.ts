@@ -103,6 +103,39 @@ export async function pollBioJob(conn: SqlConn, runner: JobRunner, req: { cwd: s
   return st;
 }
 
+/** L2 — durable RESUME. Rehydrate a job's status from the persisted record + the observation ledger WITHOUT the
+ *  in-memory runner (which is gone after a process restart). The ledger slot is the source of truth; the record
+ *  is a snapshot. Fails closed if there is no durable record. This is what makes a long-running job survive a
+ *  restart: the durable substrate, not process memory, holds the truth. */
+export async function resumeBioJob(conn: SqlConn, req: { cwd: string; runId: string }): Promise<JobStatus & { replayDigest: string; submittedAt: string }> {
+  const rec = await readJobRecord(req.cwd, req.runId);
+  if (!rec) throw new Error(`job-store: no durable record for job '${req.runId}' to resume`);
+  const latest = await latestSlotRow(conn, req.runId);
+  return {
+    runId: req.runId,
+    phase: latest?.phase ?? rec.phase, // the ledger wins; the record is a fallback snapshot
+    at: latest?.at ?? rec.updatedAt,
+    replayDigest: rec.replayDigest,
+    submittedAt: rec.submittedAt,
+  };
+}
+
+/** L3 — CANCEL. Record the terminal `cancelled` phase in the ledger (the DURABLE cancel), refresh the snapshot,
+ *  and — if the runner supports it — best-effort stop the in-flight work. Fails closed on a missing record, on a
+ *  job that is already terminal, and on a non-monotonic `now` (same strictly-after guard as poll). */
+export async function cancelBioJob(conn: SqlConn, req: { cwd: string; runId: string; now: string; runner?: JobRunner; source?: string }): Promise<JobStatus> {
+  const rec = await readJobRecord(req.cwd, req.runId);
+  if (!rec) throw new Error(`job-store: no durable record for job '${req.runId}' to cancel`);
+  const latest = await latestSlotRow(conn, req.runId);
+  const phase = latest?.phase ?? rec.phase;
+  if (phase === "succeeded" || phase === "failed" || phase === "cancelled") throw new Error(`job-store: job '${req.runId}' is already terminal (${phase}) — cannot cancel`);
+  if (latest && !(req.now > latest.at)) throw new Error(`job-store: now '${req.now}' must be strictly after the last status at '${latest.at}' to cancel`);
+  if (req.runner?.cancel) await req.runner.cancel(req.runId); // best-effort stop of in-flight work
+  await recordPhase(conn, req.runId, "cancelled", req.now, req.source ?? "job-store", rec.replayDigest);
+  await persistJob(req.cwd, { ...rec, phase: "cancelled", updatedAt: req.now });
+  return { runId: req.runId, phase: "cancelled", at: req.now };
+}
+
 /** Collect a job's result — null until it is terminal (succeeded/failed/cancelled). */
 export async function collectBioJob(runner: JobRunner, runId: string): Promise<JobResult | null> {
   const res = await runner.collect(runId);
