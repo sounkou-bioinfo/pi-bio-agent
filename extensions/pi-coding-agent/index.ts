@@ -2,11 +2,14 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { summarizeBioContext, type BioContext } from "../../src/core/context.js";
 import { validateReadOnlySelect } from "../../src/core/knowledge-graph.js";
-import { deriveStudyPlan, studyNoteIndex, walkMemoryGraph, type StudyArtifactKind, type StudyCorpus, type StudyNote } from "../../src/core/study.js";
-import { deleteStudyNote, listStudyNotes, makeStudyNote, readStudyNotes, runtimeSkillRoot, runtimeStudyRoot, writeProjectSkill, writeStudyNote } from "../../src/hosts/pi-project.js";
+import { deriveStudyPlan, walkMemoryGraph, type StudyArtifactKind, type StudyCorpus, type StudyNote } from "../../src/core/study.js";
+import { deleteStudyNote, makeStudyNote, runtimeSkillRoot, runtimeStudyRoot, writeProjectSkill, writeStudyNote } from "../../src/hosts/pi-project.js";
 import { defaultDuckDbExtensionCatalog, findDuckDbExtensions } from "../../src/duckdb/extensions.js";
 import { describeBioManifestFromPath, runBioOperationFromManifest, runBioQueryFromManifest } from "../../src/hosts/run-store.js";
 import { openBioStore, type BioStore } from "../../src/hosts/bio-store.js";
+import { forget, listMemory, recall, remember, memorySubjectId, MEMORY_NOW, type MemoryContent } from "../../src/hosts/memory-store.js";
+import { systemClock } from "../../src/core/clock.js";
+import type { SqlConn } from "../../src/core/ports.js";
 import type { FetchLike } from "../../src/duckdb/resolvers/http-table-scan.js";
 
 function text(payload: unknown) {
@@ -42,11 +45,11 @@ const BIO_ORIENTATION = [
   "  `bio_describe_model` on it to validate + discover its operation ids, then `bio_run_operation`. `bio_run_operation`",
   "  binds the built-in resolvers `duckdb.file_scan` and `duckhts.read_bcf`; network (`ncurl_table`) and",
   "  out-of-process `process.compute` are HOST capabilities that fail closed unless the operator granted them.",
-  "- REMEMBER (machine studying): `bio_study_plan`, then `bio_write_study_note` (link notes with `[[slug]]` or typed",
-  "  links) / `bio_list_study_notes` (flat index) / `bio_walk_memory` (walk the memory GRAPH: nodes + link",
-  "  edges) / `bio_read_study_note`. Notes under `.pi/bio-agent/study-notes` are retained expertise, not prompt",
-  "  context — prefer walking your own memory over re-reading the corpus. Promote a stable workflow to a skill with",
-  "  `bio_create_skill`.",
+  "- REMEMBER (machine studying): memory is an append-only, as-of, ATTRIBUTED store (the same temporal ledger as",
+  "  facts) — `bio_write_study_note` (link with `[[slug]]`; re-writing supersedes, never clobbers) / `bio_list_study_notes`",
+  "  / `bio_walk_memory` (walk the graph) / `bio_read_study_note`. list/read take an `asOf` time (time-travel), and",
+  "  `bio_delete_study_note` is a RETRACTION (recall as-of earlier still sees it) — memory is never erased. Prefer",
+  "  walking your own memory over re-reading the corpus. Promote a stable workflow to a skill with `bio_create_skill`.",
 ].join("\n");
 
 // The always-on RECALL INDEX: a compact, current list of memory notes (slug — hook) injected into the system
@@ -55,9 +58,9 @@ const BIO_ORIENTATION = [
 // index is a convenience, never a hard dependency).
 async function memoryIndexBlock(cwd: string): Promise<string> {
   try {
-    const notes = await listStudyNotes(cwd, {});
-    if (notes.length === 0) return "";
-    const lines = studyNoteIndex(notes).slice(0, 30).map((n) => `- ${n.slug} — ${n.hook}`);
+    const mems = await withStore(cwd, (conn) => listMemory(conn, MEMORY_NOW));
+    if (mems.length === 0) return "";
+    const lines = mems.slice(0, 30).map((m) => `- ${m.slug} — ${m.hook}${m.author ? ` (${m.author})` : ""}`);
     return `\n\n[memory index] Your current memory (recall with bio_read_study_note / bio_walk_memory before re-deriving):\n${lines.join("\n")}`;
   } catch {
     return "";
@@ -71,6 +74,17 @@ async function openStoreBestEffort(cwd: string): Promise<BioStore | undefined> {
     return await openBioStore(cwd);
   } catch {
     return undefined;
+  }
+}
+
+// open → use → close the ONE store for a memory operation (the store is the source of truth; a re-write here
+// supersedes, a delete tombstones, reads are as-of). Failures propagate (unlike the run-log, memory IS the point).
+async function withStore<T>(cwd: string, fn: (conn: SqlConn) => Promise<T>): Promise<T> {
+  const store = await openBioStore(cwd);
+  try {
+    return await fn(store.conn);
+  } finally {
+    store.close();
   }
 }
 
@@ -252,8 +266,12 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
       }))),
     }),
     async execute(_id, params: { kind: StudyArtifactKind; title: string; hook: string; body: string; slug?: string; tags?: string[]; sources?: StudyNote["sources"] }, _signal, _onUpdate, ctx) {
-      const { path, note, created } = await writeStudyNote(ctx.cwd, makeStudyNote(params));
-      return text({ path, created, note: { slug: note.slug, id: note.id, kind: note.kind, title: note.title, hook: note.hook, tags: note.tags } });
+      const note = makeStudyNote(params); // normalize slug + parse [[links]] from the body
+      const mem: MemoryContent = { slug: note.slug, kind: note.kind, title: note.title, hook: note.hook, body: note.body, tags: note.tags ?? [] };
+      // The ledger is the source of truth (append-only, as-of, attributed); the file is a legible git-diffable view.
+      await withStore(ctx.cwd, (conn) => remember(conn, mem, systemClock(), author));
+      const { path } = await writeStudyNote(ctx.cwd, note);
+      return text({ stored: memorySubjectId(note.slug), author, materialized: path, note: { slug: note.slug, kind: note.kind, title: note.title, hook: note.hook, tags: note.tags } });
     },
   });
 
@@ -264,10 +282,16 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
     parameters: Type.Object({
       query: Type.Optional(Type.String()),
       limit: Type.Optional(Type.Number()),
+      asOf: Type.Optional(Type.String({ description: "ISO time — list memory AS OF then (time-travel; default now)." })),
     }),
-    async execute(_id, params: { query?: string; limit?: number }, _signal, _onUpdate, ctx) {
-      const notes = await listStudyNotes(ctx.cwd, params);
-      return text({ notes: studyNoteIndex(notes), root: runtimeStudyRoot(ctx.cwd) });
+    async execute(_id, params: { query?: string; limit?: number; asOf?: string }, _signal, _onUpdate, ctx) {
+      let mems = await withStore(ctx.cwd, (conn) => listMemory(conn, params.asOf ?? MEMORY_NOW));
+      if (params.query) {
+        const q = params.query.toLowerCase();
+        mems = mems.filter((m) => `${m.slug} ${m.title} ${m.hook} ${m.body}`.toLowerCase().includes(q));
+      }
+      if (params.limit) mems = mems.slice(0, params.limit);
+      return text({ notes: mems.map((m) => ({ slug: m.slug, kind: m.kind, title: m.title, hook: m.hook, tags: m.tags, author: m.author })), root: runtimeStudyRoot(ctx.cwd) });
     },
   });
 
@@ -282,8 +306,9 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
     async execute(_id, params: { start?: string; depth?: number }, _signal, _onUpdate, ctx) {
       const root = runtimeStudyRoot(ctx.cwd);
       try {
-        const notes = await readStudyNotes(ctx.cwd);
-        const graph = walkMemoryGraph(notes, { start: params.start, depth: params.depth });
+        // walkMemoryGraph reads slug/kind/title/hook/tags + parses [[links]] from body — all carried by MemoryContent.
+        const mems = await withStore(ctx.cwd, (conn) => listMemory(conn, MEMORY_NOW));
+        const graph = walkMemoryGraph(mems as unknown as StudyNote[], { start: params.start, depth: params.depth });
         return text({ root, start: params.start ?? null, depth: params.start ? params.depth ?? 1 : null, nodeCount: graph.nodes.length, edgeCount: graph.edges.length, graph });
       } catch (e) {
         // Return the error AS DATA so the agent can correct itself (e.g. a malformed start slug) — never swallow it.
@@ -295,12 +320,14 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
   pi.registerTool({
     name: "bio_read_study_note",
     label: "Read bio study note",
-    description: "Read a full project-local study note by slug (or id) after finding it with bio_list_study_notes.",
-    parameters: Type.Object({ id: Type.String({ description: "Note slug or id (prefix match allowed)." }) }),
-    async execute(_id, params: { id: string }, _signal, _onUpdate, ctx) {
-      const notes = await readStudyNotes(ctx.cwd);
-      const note = notes.find((x) => x.slug === params.id || x.id === params.id || x.slug.startsWith(params.id) || x.id.startsWith(params.id));
-      if (!note) throw new Error(`no study note found for slug or id '${params.id}'`);
+    description: "Read a memory note's full content by slug from the store, optionally AS OF a past time (time-travel). Find slugs with bio_list_study_notes / bio_walk_memory.",
+    parameters: Type.Object({
+      id: Type.String({ description: "Note slug." }),
+      asOf: Type.Optional(Type.String({ description: "ISO time — read the revision that was current AS OF then (default now)." })),
+    }),
+    async execute(_id, params: { id: string; asOf?: string }, _signal, _onUpdate, ctx) {
+      const note = await withStore(ctx.cwd, (conn) => recall(conn, params.id, params.asOf ?? MEMORY_NOW));
+      if (!note) throw new Error(`no memory found for slug '${params.id}'${params.asOf ? ` as of ${params.asOf}` : ""}`);
       return text(note);
     },
   });
@@ -308,12 +335,12 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
   pi.registerTool({
     name: "bio_delete_study_note",
     label: "Delete bio study note",
-    description: "Delete a project-local study note by slug when it is wrong or stale. Memory hygiene: prefer updating by slug via bio_write_study_note; delete only rotten units.",
-    parameters: Type.Object({ slug: Type.String({ description: "Slug of the note to delete." }) }),
+    description: "Forget a memory note by slug — a TEMPORAL RETRACTION, not destruction: recall(now) becomes null and it drops from the current list, but recall AS OF an earlier time still sees it (memory is never erased). Prefer updating by slug via bio_write_study_note; forget only rotten units.",
+    parameters: Type.Object({ slug: Type.String({ description: "Slug of the note to forget." }) }),
     async execute(_id, params: { slug: string }, _signal, _onUpdate, ctx) {
-      const deleted = await deleteStudyNote(ctx.cwd, params.slug);
-      if (!deleted) throw new Error(`no study note found for slug '${params.slug}'`);
-      return text({ deleted: true, slug: params.slug });
+      await withStore(ctx.cwd, (conn) => forget(conn, params.slug, systemClock(), author));
+      await deleteStudyNote(ctx.cwd, params.slug); // remove the legible file view too (the ledger keeps the history)
+      return text({ forgotten: true, slug: params.slug, note: "temporal retraction — recall as-of an earlier time still sees it" });
     },
   });
   };
