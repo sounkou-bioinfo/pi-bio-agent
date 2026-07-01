@@ -6,6 +6,8 @@ import { deriveStudyPlan, studyNoteIndex, walkMemoryGraph, type StudyArtifactKin
 import { deleteStudyNote, listStudyNotes, makeStudyNote, readStudyNotes, runtimeSkillRoot, runtimeStudyRoot, writeProjectSkill, writeStudyNote } from "../../src/hosts/pi-project.js";
 import { defaultDuckDbExtensionCatalog, findDuckDbExtensions } from "../../src/duckdb/extensions.js";
 import { describeBioManifestFromPath, runBioOperationFromManifest, runBioQueryFromManifest } from "../../src/hosts/run-store.js";
+import { openBioStore } from "../../src/hosts/bio-store.js";
+import { recordRunObservation, type RunObservation } from "../../src/hosts/run-observations.js";
 import type { FetchLike } from "../../src/duckdb/resolvers/http-table-scan.js";
 
 function text(payload: unknown) {
@@ -63,12 +65,30 @@ async function memoryIndexBlock(cwd: string): Promise<string> {
   }
 }
 
+// Fold a run into the shared store so the tool-call history is as-of-queryable memory, not only run.json files.
+// Best-effort: logging to the ledger must NEVER fail the run itself.
+async function logRunToStore(cwd: string, run: RunObservation, author: string): Promise<void> {
+  try {
+    const store = await openBioStore(cwd);
+    try {
+      await recordRunObservation(store.conn, run, new Date().toISOString(), author);
+    } finally {
+      store.close();
+    }
+  } catch {
+    /* ignore: the shared-ledger log is a convenience, never a hard dependency of the query */
+  }
+}
+
 export interface BioExtensionOptions {
   network?: { fetch: FetchLike };
+  /** The authoring agent id stamped on runs/memory this instance records (shared-store attribution). */
+  author?: string;
 }
 
 export function createBioExtension(options: BioExtensionOptions = {}): (pi: ExtensionAPI) => void {
   const network = options.network;
+  const author = options.author ?? "agent:local";
   return function piBioAgentExtension(pi: ExtensionAPI): void {
   pi.on("resources_discover", (event) => ({
     skillPaths: [runtimeSkillRoot(event.cwd)],
@@ -127,7 +147,9 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
       // host-only capabilities the tool schema omits (duckdbInitSql / now / cwd) if the schema validator does
       // not strip unknown keys. network/signal are host-composed, never agent-supplied.
       const { dbPath, manifestPath, operationId, runId } = params;
-      return text(await runBioOperationFromManifest({ cwd: ctx.cwd, dbPath, manifestPath, operationId, runId, network, signal }));
+      const res = await runBioOperationFromManifest({ cwd: ctx.cwd, dbPath, manifestPath, operationId, runId, network, signal });
+      await logRunToStore(ctx.cwd, { runId: res.runId, kind: "operation", identity: operationId, status: res.status, error: res.ok ? undefined : res.error }, author);
+      return text(res);
     },
   });
 
@@ -146,7 +168,9 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
     async execute(_id, params: { dbPath: string; manifestPath: string; sql: string; resources?: string[]; bindings?: Record<string, unknown>; runId?: string }, signal, _onUpdate, ctx) {
       // Only schema-approved fields (see bio_run_operation): never spread untrusted params into the host runner.
       const { dbPath, manifestPath, sql, resources, bindings, runId } = params;
-      return text(await runBioQueryFromManifest({ cwd: ctx.cwd, dbPath, manifestPath, sql, resources, bindings, runId, network, signal }));
+      const res = await runBioQueryFromManifest({ cwd: ctx.cwd, dbPath, manifestPath, sql, resources, bindings, runId, network, signal });
+      await logRunToStore(ctx.cwd, { runId: res.runId, kind: "query", identity: "ad-hoc.query", status: res.status, sql, resources, error: res.ok ? undefined : res.error }, author);
+      return text(res);
     },
   });
 
