@@ -20,16 +20,24 @@ export interface RunCliDeps {
   err: (line: string) => void;
 }
 
-/** Parse `--key value` / `--flag` pairs after the positional manifest path. Repeated keys keep the last. */
-function parseFlags(args: string[]): Record<string, string> {
+/** Parse `--key value` and `--key=value` pairs after the positional manifest path. Repeated keys keep the last.
+ *  Every flag here TAKES a value, so `--key value` consumes the next token even when it looks like a flag (a SQL
+ *  value can legitimately start with `--`, e.g. a `-- comment`); use `--key=value` for any value that is itself
+ *  ambiguous. */
+export function parseFlags(args: string[]): Record<string, string> {
   const flags: Record<string, string> = {};
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
-    if (!a.startsWith("--")) throw new Error(`unexpected argument '${a}' (expected --key value)`);
+    if (!a.startsWith("--")) throw new Error(`unexpected argument '${a}' (expected --key value or --key=value)`);
+    const eq = a.indexOf("=");
+    if (eq !== -1) {
+      flags[a.slice(2, eq)] = a.slice(eq + 1); // --key=value: value may start with --, contain spaces/newlines, etc.
+      continue;
+    }
     const key = a.slice(2);
     const next = args[i + 1];
-    if (next === undefined || next.startsWith("--")) throw new Error(`flag --${key} requires a value`);
-    flags[key] = next;
+    if (next === undefined) throw new Error(`flag --${key} requires a value`);
+    flags[key] = next; // consume the next token AS the value (all flags take values), even if it looks like a flag
     i++;
   }
   return flags;
@@ -51,12 +59,16 @@ const USAGE =
 export async function mainRun(sub: string, argv: string[], deps: RunCliDeps): Promise<number> {
   const [manifestPath, ...rest] = argv;
   if (!manifestPath || manifestPath.startsWith("--")) { deps.err(USAGE); return 2; }
+  // flag AND bindings parsing are both CLI-usage errors -> exit 2 with usage, never an unhandled throw
   let flags: Record<string, string>;
-  try { flags = parseFlags(rest); } catch (e) { deps.err(e instanceof Error ? e.message : String(e)); deps.err(USAGE); return 2; }
+  let bindings: Record<string, unknown> | undefined;
+  try {
+    flags = parseFlags(rest);
+    bindings = parseBindings(flags.bindings);
+  } catch (e) { deps.err(e instanceof Error ? e.message : String(e)); deps.err(USAGE); return 2; }
 
   const dbPath = flags.db ?? ":memory:";
   const runId = flags["run-id"];
-  const bindings = parseBindings(flags.bindings);
   const common = { cwd: deps.cwd, dbPath, manifestPath, runId, bindings };
 
   let res;
