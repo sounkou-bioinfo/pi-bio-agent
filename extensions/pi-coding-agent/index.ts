@@ -8,6 +8,7 @@ import { defaultDuckDbExtensionCatalog, findDuckDbExtensions } from "../../src/d
 import { describeBioManifestFromPath, runBioOperationFromManifest, runBioQueryFromManifest } from "../../src/hosts/run-store.js";
 import { openBioStore, type BioStore } from "../../src/hosts/bio-store.js";
 import { forget, listMemory, recall, remember, memorySubjectId, MEMORY_NOW, type MemoryContent } from "../../src/hosts/memory-store.js";
+import { recordSkill, skillSubjectId } from "../../src/hosts/skill-store.js";
 import { systemClock } from "../../src/core/clock.js";
 import type { SqlConn } from "../../src/core/ports.js";
 import type { FetchLike } from "../../src/duckdb/resolvers/http-table-scan.js";
@@ -223,8 +224,11 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
       body: Type.String({ description: "Markdown instructions for the skill body." }),
     }),
     async execute(_id, params: { name: string; description: string; body: string }, _signal, _onUpdate, ctx) {
+      // Temporal + attributed like memory (a re-create supersedes, prior revision kept); the SKILL.md file is the
+      // current view pi loads.
+      await withStore(ctx.cwd, (conn) => recordSkill(conn, params, systemClock(), author));
       const path = await writeProjectSkill(ctx.cwd, params.name, params.description, params.body);
-      return text({ path, message: "Skill written. Run /reload to load it in this Pi session." });
+      return text({ path, stored: skillSubjectId(params.name), author, message: "Skill recorded (temporal, superseded on re-create) + written. Run /reload to load it in this Pi session." });
     },
   });
 

@@ -11,6 +11,7 @@ export * from "./bio-store.js";
 export * from "./memory-store.js";
 export * from "./run-observations.js";
 export * from "./action-cache.js";
+export * from "./skill-store.js";
 export * from "./in-memory-job-runner.js";
 export * from "./reproduce.js";
 export * from "./ledger-job-runner.js";
