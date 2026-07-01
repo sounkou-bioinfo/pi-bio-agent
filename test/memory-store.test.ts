@@ -60,4 +60,17 @@ describe("temporal memory over bio_observations", () => {
     const edges = await c.all<{ from_id: string; to_id: string }>("SELECT from_id, to_id FROM bio_edges_as_of WHERE from_id = ?", [memorySubjectId("a")]);
     assert.ok(edges.some((e) => e.to_id === memorySubjectId("b")), "memory link a->b projects into bio_edges_as_of");
   });
+
+  test("re-writing a note that DROPS a [[link]] retracts the edge (no phantom in bio_edges_as_of)", async () => {
+    const c = await conn();
+    await remember(c, note("a", "see [[b]] and [[cc]]"), T1, "agent:A");
+    await materializeBioEdgesAsOf(c, MEMORY_NOW);
+    let tos = (await c.all<{ to_id: string }>("SELECT to_id FROM bio_edges_as_of WHERE from_id = ?", [memorySubjectId("a")])).map((e) => e.to_id).sort();
+    assert.deepEqual(tos, [memorySubjectId("b"), memorySubjectId("cc")]);
+
+    await remember(c, note("a", "see [[b]] only now"), T2, "agent:A"); // dropped [[cc]]
+    await materializeBioEdgesAsOf(c, MEMORY_NOW);
+    tos = (await c.all<{ to_id: string }>("SELECT to_id FROM bio_edges_as_of WHERE from_id = ?", [memorySubjectId("a")])).map((e) => e.to_id);
+    assert.deepEqual(tos, [memorySubjectId("b")], "the dropped link's edge is retracted, only b remains");
+  });
 });

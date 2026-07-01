@@ -154,14 +154,17 @@ declared operation — must be a single read-only `SELECT`/`WITH`. Resolvers fai
 is not bound. Everything a query reads, it reads through a resolved resource that leaves a receipt — so a run
 is reproducible and every answer has a source path.
 
-## 7. Study notes (the CLI)
+## 7. Memory (the CLI)
 
-Separately from operations, project study notes into a DuckDB memory subgraph for machine-studying recall:
+Memory (notes and skills) is append-only, as-of, attributed observations in the ONE temporal store
+(`.pi/bio-agent/store.duckdb`, `agent:memory:<slug>` / `skill:<name>`). Read it provider-agnostically:
 
 ```sh
-pi-bio-agent notes sync   --db graph.duckdb --create-schema --write
-pi-bio-agent notes report --db graph.duckdb --json
+pi-bio-agent memory list                                      # current notes (as of now)
+pi-bio-agent memory show <slug> --as-of 2026-07-01T00:00:00Z  # time-travel: what memory said then
+pi-bio-agent memory history <slug>                            # what changed, when, by whom
 ```
 
 Notes are mutable procedural memory and retrieval hooks — not authoritative facts. Measured facts live in
-resources, tables, and provenance-bearing observations, never in a note.
+resources, tables, and provenance-bearing observations. (The prior `notes sync/report` command, which projected
+file notes into a separate `graph.duckdb`, is superseded by memory-as-observations in the one store.)

@@ -58,16 +58,27 @@ export async function remember(conn: SqlConn, note: MemoryContent, now: string, 
     recordedAt: now,
     source: author,
   });
+  const newKeys = new Set<string>();
   for (const link of parseStudyNoteLinks({ body: note.body, links: [] })) {
     const to = memorySubjectId(link.to);
+    const key = `${subject}|${link.predicate}|${to}`;
+    newKeys.add(key);
     await recordObservation(conn, {
-      statementKey: `${subject}|${link.predicate}|${to}`,
+      statementKey: key,
       subjectId: subject,
       predicate: link.predicate,
       objectId: to, // edge-like -> projects into bio_edges_as_of for a walkable memory graph
       recordedAt: now,
       source: author,
     });
+  }
+  // RETRACT links that this revision dropped: without a tombstone, a removed [[link]]'s edge observation is never
+  // superseded, so it lingers in bio_edges_as_of forever (a phantom edge). Record a tombstone (no objectId) on the
+  // same statementKey for every currently-live edge from this subject that the new revision no longer declares.
+  for (const row of await observationsAsOf(conn, MEMORY_NOW)) {
+    if (row.subject_id === subject && row.object_id != null && row.statement_key.startsWith(`${subject}|`) && !newKeys.has(row.statement_key)) {
+      await recordObservation(conn, { statementKey: row.statement_key, subjectId: subject, predicate: row.predicate, recordedAt: now, source: author });
+    }
   }
 }
 

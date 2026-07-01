@@ -60,7 +60,7 @@ on. That is why this lineage note lives next to the KG/ontology design, not only
 
 ## Design guardrails
 
-- Do not expose `study sync` as a bio-facing command; prefer `notes sync` / `notes report`.
+- Do not expose `study sync` as a bio-facing command; the memory CLI is `memory list` / `memory show` / `memory history` over the one temporal store.
 - Do not let `StudyArtifactKind` grow behavior until a consumer needs it. Today the durable primitive is still slug + hook + body + tags + sources + links.
 - Do not turn notes into a parallel evidence model. As-of dates, trust, supersession, and evidence aggregation belong on KG facts/edges, not mutable procedural memory.
 - Do not call a note a source of truth. It is an indexable reminder with provenance pointers.

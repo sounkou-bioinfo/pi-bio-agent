@@ -290,13 +290,12 @@ a separate file (see below).
   control the memory-subgraph *row* sync (dry-run by default). A dry run with `createSchema: true`
   still writes the schema; for a run that performs **no database writes**, leave `createSchema` false
   (the schema must already exist) — note a dry run still *reads* (it SELECTs counts).
-- **CLI.** `src/cli/notes.ts` — `parseNotesArgs` (pure, `node:util parseArgs`, no dependency) and
-  `mainNotes(argv, { cwd, openConn, out })` (injected connection-factory + output sink, returns an exit
-  code, never calls `process.exit`). Surface: `notes sync --db <path> [--write] [--create-schema]
-  [--json]` (dry-run unless `--write`) and `notes report --db <path> [--limit N] [--json]`. `--db`
-  required; write gated behind `--write`; each command has its **own** option set so an inapplicable
-  flag fails closed (`Unknown option`); `report` rows default to `DEFAULT_NOTES_REPORT_LIMIT` (100) with
-  exact counts, deterministically ordered before the cap. User-facing name is **`notes`**, not `study`.
+- **CLI.** `src/cli/memory.ts` — `mainMemory(argv, { cwd, out, err })` (injected sinks, returns an exit code,
+  never calls `process.exit`). Surface: `memory list [--as-of <iso>]`, `memory show <slug> [--as-of <iso>]`,
+  `memory history <slug>` — reads the ONE temporal store (`.pi/bio-agent/store.duckdb`), as-of by default now.
+  The prior `src/cli/notes.ts` (`notes sync/report`, which projected file notes into a separate `graph.duckdb`
+  via `kg-sync`) is superseded and removed; the `kg-sync`/`study-sync` SDK modules remain but are candidates for
+  retirement.
   The executable is `src/cli/bin.ts` (the only file touching real argv/stdout/driver/`process.exit`),
   compiled to `dist/cli/bin.js` and exposed as the `pi-bio-agent` bin via a `tsc` build
   (`tsconfig.build.json`, run by `prepare`/`npm run build`). `src` still ships for Pi; `dist` is added
