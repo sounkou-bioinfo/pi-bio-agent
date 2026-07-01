@@ -101,4 +101,4 @@ what it learns as queryable notes, not prompt context.
 - NNG scalability protocols — <https://nng.nanomsg.org/> · `nanonext` <https://github.com/r-lib/nanonext> · `mirai` <https://mirai.r-lib.org/> · `pynng` <https://github.com/codypiersall/pynng>
 - ducknng (owned Arrow-native NNG transport) — <https://github.com/sounkou-bioinfo/ducknng>
 - SemanticSQL (the `bio_edges` + `entailed_edge` graph shape) — <https://github.com/INCATools/semantic-sql>
-- LinkedIn design thread (sounkou-bioinfo × Manuel) — _URL: add the thread link here_
+- LinkedIn design thread (sounkou-bioinfo × Manuel) — [comment thread](https://www.linkedin.com/feed/update/urn:li:activity:7473824764575436800?commentUrn=urn%3Ali%3Acomment%3A%28activity%3A7473824764575436800%2C7473848362723680256%29&replyUrn=urn%3Ali%3Acomment%3A%28activity%3A7473824764575436800%2C7476647053071114241%29)
