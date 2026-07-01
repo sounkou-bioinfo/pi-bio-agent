@@ -117,4 +117,19 @@ describe("L2/L3: durable resume (no runner) + cancellation", () => {
     await assert.rejects(() => cancelBioJob(conn, { cwd, runId: "c1", now: "2026-07-01T00:00:09Z", runner }), /already terminal/);
     await assert.rejects(() => cancelBioJob(conn, { cwd, runId: "ghost", now: "2026-07-01T00:00:09Z", runner }), /no durable record/);
   });
+
+  test("a durable cancel (no runner) is FINAL — a later poll cannot resurrect it to the runner's succeeded", async () => {
+    const { conn, cwd, clock } = await setup();
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => { release = r; });
+    const runner = inMemoryJobRunner({ clock, execute: async () => { await gate; return { result: { ok: true } }; } });
+    await submitBioJob(conn, runner, { cwd, runId: "d1", replay: replay("d1"), now: "2026-07-01T00:00:01Z" });
+    // durable cancel WITHOUT the runner — the runner keeps running and will report succeeded
+    await cancelBioJob(conn, { cwd, runId: "d1", now: "2026-07-01T00:00:03Z" });
+    release(); await runner.settle("d1");
+    assert.equal((await runner.status("d1"))!.phase, "succeeded", "the runner itself completed to succeeded");
+    // but the durable ledger is terminal (cancelled) -> poll must NOT append succeeded over it
+    const st = await pollBioJob(conn, runner, { cwd, runId: "d1", now: "2026-07-01T00:00:09Z" });
+    assert.equal(st.phase, "cancelled", "durably-terminal wins; poll never resurrects");
+  });
 });

@@ -18,6 +18,7 @@ import { recordObservation, observationAsOfKey } from "../duckdb/observations.js
 // (reproducible provenance); the snapshot is written atomically (temp+rename) and read back ENOENT-tolerant only.
 
 const FUTURE = "9999-12-31T23:59:59.999Z"; // sentinel for "the absolute latest row of a slot, regardless of now"
+const isTerminal = (p: JobPhase): boolean => p === "succeeded" || p === "failed" || p === "cancelled";
 const slotOf = (runId: string): string => `job:${runId}:status`;
 const subjectOf = (runId: string): string => `job:${runId}`;
 const jobsDir = (cwd: string): string => join(cwd, ".pi", "bio-agent", "jobs");
@@ -92,9 +93,15 @@ export async function submitBioJob(conn: SqlConn, runner: JobRunner, req: Submit
 export async function pollBioJob(conn: SqlConn, runner: JobRunner, req: { cwd: string; runId: string; now: string; source?: string }): Promise<JobStatus> {
   const existing = await readJobRecord(req.cwd, req.runId);
   if (!existing) throw new Error(`job-store: no durable record for job '${req.runId}' (submit it first)`);
+  const latest = await latestSlotRow(conn, req.runId);
+  // a durably-TERMINAL job is FINAL: never append a later runner phase over it (e.g. a job cancelled in the ledger
+  // while the runner still reports succeeded must stay cancelled — the durable ledger wins, not process memory).
+  if (latest && isTerminal(latest.phase)) {
+    await persistJob(req.cwd, { ...existing, phase: latest.phase, updatedAt: req.now });
+    return { runId: req.runId, phase: latest.phase, at: latest.at };
+  }
   const st = await runner.status(req.runId);
   if (!st) throw new Error(`job-store: no job '${req.runId}' is known to the runner`);
-  const latest = await latestSlotRow(conn, req.runId);
   if (!latest || latest.phase !== st.phase) {
     if (latest && !(req.now > latest.at)) throw new Error(`job-store: now '${req.now}' must be strictly after the last status at '${latest.at}' to record a transition`);
     await recordPhase(conn, req.runId, st.phase, req.now, req.source ?? "job-store", existing.replayDigest);
@@ -128,11 +135,14 @@ export async function cancelBioJob(conn: SqlConn, req: { cwd: string; runId: str
   if (!rec) throw new Error(`job-store: no durable record for job '${req.runId}' to cancel`);
   const latest = await latestSlotRow(conn, req.runId);
   const phase = latest?.phase ?? rec.phase;
-  if (phase === "succeeded" || phase === "failed" || phase === "cancelled") throw new Error(`job-store: job '${req.runId}' is already terminal (${phase}) — cannot cancel`);
-  if (latest && !(req.now > latest.at)) throw new Error(`job-store: now '${req.now}' must be strictly after the last status at '${latest.at}' to cancel`);
-  if (req.runner?.cancel) await req.runner.cancel(req.runId); // best-effort stop of in-flight work
+  if (isTerminal(phase)) throw new Error(`job-store: job '${req.runId}' is already terminal (${phase}) — cannot cancel`);
+  const lastAt = latest?.at ?? rec.updatedAt; // guard against a non-monotonic `now` even when no ledger row exists yet
+  if (!(req.now > lastAt)) throw new Error(`job-store: now '${req.now}' must be strictly after the last status at '${lastAt}' to cancel`);
+  // record the DURABLE cancel FIRST, then best-effort stop the work — a runner.cancel that throws must NOT lose the
+  // durable cancel (the ledger is the truth; the runner kill is a courtesy).
   await recordPhase(conn, req.runId, "cancelled", req.now, req.source ?? "job-store", rec.replayDigest);
   await persistJob(req.cwd, { ...rec, phase: "cancelled", updatedAt: req.now });
+  if (req.runner?.cancel) { try { await req.runner.cancel(req.runId); } catch { /* best-effort: durable cancel already recorded */ } }
   return { runId: req.runId, phase: "cancelled", at: req.now };
 }
 
