@@ -65,7 +65,7 @@ function parseBindings(raw: string | undefined): Record<string, unknown> | undef
 
 const USAGE =
   "usage:\n" +
-  "  pi-bio-agent query <manifest.json> --db <path|:memory:> --sql \"<SELECT>\" [--resources a,b] [--bindings '{...}'] [--run-id id]\n" +
+  "  pi-bio-agent query <manifest.json> --db <path|:memory:> --sql \"<SELECT>\" [--resources a,b] [--bindings '{...}'] [--init-sql \"INSTALL ...; LOAD ...\"] [--run-id id]\n" +
   "  pi-bio-agent run   <manifest.json> --db <path|:memory:> --operation <id> [--bindings '{...}'] [--run-id id]";
 
 export async function mainRun(sub: string, argv: string[], deps: RunCliDeps): Promise<number> {
@@ -76,7 +76,7 @@ export async function mainRun(sub: string, argv: string[], deps: RunCliDeps): Pr
   let bindings: Record<string, unknown> | undefined;
   try {
     flags = parseFlags(rest);
-    const KNOWN = new Set(["db", "sql", "resources", "operation", "bindings", "run-id"]);
+    const KNOWN = new Set(["db", "sql", "resources", "operation", "bindings", "run-id", "init-sql"]);
     const unknown = Object.keys(flags).filter((k) => !KNOWN.has(k));
     if (unknown.length) throw new Error(`unknown flag(s): ${unknown.map((k) => `--${k}`).join(", ")}`); // a typo must not silently fall back
     const empty = Object.entries(flags).filter(([, v]) => v === "").map(([k]) => k);
@@ -86,7 +86,10 @@ export async function mainRun(sub: string, argv: string[], deps: RunCliDeps): Pr
 
   const dbPath = flags.db ?? ":memory:";
   const runId = flags["run-id"];
-  const common = { cwd: deps.cwd, dbPath, manifestPath, runId, bindings };
+  // host provisioning (INSTALL/LOAD an extension, SET VARIABLE for a TLS config), run once before resolution —
+  // `;`-separated statements. This is how a networked connector gets ducknng + TLS; it is NOT agent SQL.
+  const duckdbInitSql = flags["init-sql"] ? flags["init-sql"].split(";").map((s) => s.trim()).filter(Boolean) : undefined;
+  const common = { cwd: deps.cwd, dbPath, manifestPath, runId, bindings, duckdbInitSql };
 
   let res;
   if (sub === "query") {

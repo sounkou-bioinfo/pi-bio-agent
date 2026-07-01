@@ -142,8 +142,17 @@ RCSB PDB, MyGene/BioThings, and Reactome, and a new one is a new URL:
 
 ```sh
 pi-bio-agent query examples/connectors/uniprot.json --db :memory: \
-  --bindings '{"uniprot_acc":"P04637"}' --sql "SELECT * FROM uniprot_entry"   # host provisions ducknng + egress
+  --init-sql "INSTALL ducknng FROM community; LOAD ducknng; SET VARIABLE tls = ducknng_tls_config_from_files(NULL, '/etc/ssl/certs/ca-certificates.crt', '', 1)" \
+  --bindings '{"uniprot_acc":"P04637"}' \
+  --sql "SELECT primaryAccession, uniProtkbId, entryType, annotationScore FROM uniprot_entry"
 ```
+```json
+{ "ok": true, "rows": [
+  { "primaryAccession": "P04637", "uniProtkbId": "P53_HUMAN",
+    "entryType": "UniProtKB reviewed (Swiss-Prot)", "annotationScore": 5 } ] }
+```
+Real — a live GET to UniProt over ducknng (`--init-sql` is host provisioning: it INSTALLs/LOADs ducknng and
+sets a TLS config; network is the host's to grant, so this needs egress and is not part of the offline CI gate).
 
 **We port the whole "AI for science" stack as one Pi extension — not a hosted product.** The `pi-coding-agent`
 extension exposes the entire surface over this substrate (query/run a manifest, list DuckDB format extensions,
