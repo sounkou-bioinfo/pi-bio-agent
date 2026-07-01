@@ -64,8 +64,9 @@ not a new `.ts` file.
 
 The hosted "AI for science" workbenches (e.g. [Claude Science](https://www.anthropic.com/news/claude-science-ai-workbench))
 ship the same primitives we do — auditable/reproducible artifacts, on-demand compute, dozens of connected
-databases, reviewer agents. We built that spine independently, which tells you the architecture is sound. The
-difference is what it runs *on*:
+databases, reviewer agents. We arrived at that spine independently — convergent design on primitives that are
+discovered, not invented. We owe them nothing; the overlap only confirms the substrate is real. The difference
+is what it runs *on*:
 
 | | a hosted AI-science workbench | **pi-bio-agent** |
 |---|---|---|
