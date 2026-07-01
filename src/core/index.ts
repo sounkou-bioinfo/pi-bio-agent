@@ -16,3 +16,4 @@ export * from "./scales.js";
 export * from "./judgment.js";
 export * from "./context.js";
 export * from "./study.js";
+export * from "./reproducibility.js";
