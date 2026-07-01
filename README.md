@@ -14,10 +14,14 @@ digest, source snapshot). The built-ins span three concerns:
 - **Data** — read a file natively (`duckdb.file_scan` over csv/tsv/parquet/json), a VCF/BCF region
   (`duckhts.read_bcf`), or any read-only query over what DuckDB can reach including httpfs/s3
   (`duckdb.sql_materialize`).
-- **Network** — fetch an HTTP/JSON endpoint *as SQL*: DuckDB's `ducknng_ncurl_table` table function, with the
-  URL/headers/body composed in SQL (`getvariable` + `url_encode`) and the JSON parsed straight into a table —
-  no bespoke TypeScript. `http.get` (whose fetch is host-supplied) is the fallback for a DuckDB build with no
-  ducknng, and the multi-request retry/fanout over a rate-limited API lives in one host helper.
+- **Network** — fetch an HTTP/JSON endpoint *as SQL* via **ducknng**, the owned Arrow-native extension that is
+  central to the bet: `ducknng_ncurl_table` makes HTTP a table function (URL/headers/body composed in SQL with
+  `getvariable` + `url_encode`, JSON parsed straight into a table — no bespoke TypeScript); `ducknng_run_rpc`
+  makes a live DuckDB a *shared mutable database many agent processes write through*; and its NNG topologies
+  (pub/sub, push/pull, survey, bus, pair) make multi-agent coordination transport-native. So network,
+  cross-process state, and multi-agent are all SQL — not TypeScript machinery. `http.get` (host-supplied fetch)
+  is the fallback for a DuckDB build with no ducknng, and multi-request retry/fanout over a rate-limited API
+  lives in one host helper (the single seam a DuckDB table-function limit forces out of pure SQL).
 - **Compute** — run an out-of-process computation (R/Python/Go/shell) over Arrow IPC (`process.compute`): a
   DuckDB table is exported as Arrow, the child computes, the result is read back as a table. The compute is
   external (a thing SQL is poor at, e.g. an `lm()` fit); only the *data contract* is SQL/Arrow.
@@ -42,6 +46,18 @@ falls back to a model only on a miss, where the model may propose a candidate bu
 abstains below a confidence threshold. Ordered TermSets become a `scale_members` table so SQL can threshold on
 rank (ACMG, variant impact, clinical stage). Manifests are validated against a strict allowlist, so cut
 surface cannot ride back in as inert keys.
+
+**Memory is machine studying, and it lives in the same SQL graph.** "Study" here is the [machine
+studying](https://jacobxli.com/blog/2026/machine-studying/) sense — the agent works a corpus *before* a task
+is known and retains what it learns as **study notes** projected into the KG (a cheatsheet, a concept map, a
+failure case), distinct from *skills* (activated behavior) and from *facts* (measured, tool-derived, with
+provenance). Expertise is addressable data the agent queries, not prompt-stuffed context that rots — the same
+`bio_edges`/`entailed_edge` shape the ontologies use.
+
+The bet therefore stands on four legs, all SQL over one DuckDB substrate: **data** (files/formats),
+**network** (ducknng), **compute** (out-of-process code execution over Arrow), and **knowledge + memory**
+(ontology/KG + machine-studying notes). TypeScript is only the interpreter that binds host effects — a new bio
+question is a manifest and some SQL, not a new `.ts` file.
 
 ## Install in Pi
 

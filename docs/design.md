@@ -7,7 +7,19 @@ tags: [architecture, boundaries, adapters, harness]
 
 # Design notes
 
-`pi-bio-agent` should remain a lean, provider-agnostic substrate for biomedical agents. The core should define the durable primitives; adapters, operation packs, skills, and study notes compose those primitives for particular workflows.
+`pi-bio-agent` should remain a lean, provider-agnostic substrate for biomedical agents. The core should define the durable primitives; adapters, operations, skills, and study notes compose those primitives for particular workflows.
+
+## The bets (the roots everything else derives from)
+
+1. **The manifest is the program; TypeScript is the interpreter.** A bio agent is not a pile of skills. Manifests, SQL, resources, and ontology data are the PROGRAM; core is a small set of generic primitives that runs them. A new question or data source is a new *manifest* (data), never a new `.ts`. If a question needs a new core file instead of a manifest/SQL/adapter, the bet is failing — redesign it as data.
+
+2. **In SQL we trust — four legs on one DuckDB substrate.**
+   - **Data** — files and formats as SQL (`file_scan`, `duckhts` for VCF/BAM/BED/…).
+   - **Network** — HTTP, cross-process shared state, and multi-agent coordination as SQL, via the owned **ducknng** extension: `ncurl_table` (HTTP is a table function), `run_rpc` (a live shared mutable DB many processes write through), NNG topologies (pub/sub, push/pull, survey, bus, pair). ducknng is central, not a vehicle.
+   - **Compute (code execution)** — code SQL is poor at (an `lm()` fit, an R/Python/Go tool) runs **out-of-process over Arrow IPC** (`process.compute`); only the data contract is SQL/Arrow, the computation is a contained child.
+   - **Knowledge + memory** — ontologies and our own KG share one shape (`bio_edges` + `entailed_edge` closure, from SemanticSQL); grounding is deterministic-SQL-first with fail-closed model fallback. **Memory is machine studying**: the agent studies a corpus before a task is known and retains expertise as *study notes* projected into the KG — data it queries, distinct from *skills* (activated behavior) and *facts* (measured, tool-derived).
+
+3. **The discipline that keeps the bet honest.** Interfaces are the contract for in-process code; DI injects host **effects** (SQL conn, fetch, ProcessRunner, CAS), which **fail closed** when unbound. Identity is a **digest**; a human `version` is only a label; a `schema`/`.v1` tag lives only where bytes cross a real serialization/IPC boundary, never on every nested value. Manifests pass a **strict allowlist** so cut surface can't ride back as inert keys. The **judgment / approval decision** (model or human) is the one irreducible boundary — the substrate records and gates it, never computes it.
 
 ## Main boundary
 
@@ -174,7 +186,7 @@ explicit opt-in later:
 
 ## HTTP/API integrations
 
-Many biomedical APIs are mostly the same shape: HTTP or GraphQL plus a thin layer of biomedical semantics. OpenTargets, Monarch, Ensembl REST/VEP REST, BioThings, ClinVar-style APIs, and similar services should not each become bespoke framework code.
+Many biomedical APIs are mostly the same shape: HTTP (REST or GraphQL) plus a thin layer of biomedical semantics. OpenTargets, Monarch, Ensembl REST/VEP REST, BioThings, ClinVar-style APIs, and similar services should not each become bespoke framework code — they are the **network pillar**: a REST GET or a GraphQL POST is a `ducknng_ncurl_table` call whose URL/body composes in SQL, so a new API is a new manifest, not a new client.
 
 Target shape:
 
