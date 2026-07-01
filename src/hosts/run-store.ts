@@ -331,9 +331,11 @@ async function runAndPersist(
       await recordRun(runLog, now, { runId, identity, status: run.status, error: undefined, dir: persisted.dir, replay, enriched, resultDigest });
       // ActionCache (LLVM CAS): map this input's CASID -> the result's CASID, so an identical future run can be
       // memoized/deduped and reproduce() has an input->output handle. Only when both a CAS and the store are present.
-      if (resultDigest && runLog && replay) {
+      if (resultDigest && runLog && enriched) {
         try {
-          await actionCachePut(runLog.store, actionInputDigest(replay), resultDigest, now, runLog.author);
+          // key on the ENRICHED replay so the action key is CONTENT-addressed (includes sourceReceiptDigests) —
+          // a changed source yields a different key, so a future memoized hit can never serve a stale result.
+          await actionCachePut(runLog.store, actionInputDigest(enriched), resultDigest, now, runLog.author);
         } catch {
           /* best-effort memo: never fail a run because the action-cache write failed */
         }

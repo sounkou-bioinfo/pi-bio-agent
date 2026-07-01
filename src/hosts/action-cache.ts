@@ -13,10 +13,13 @@ const actionKey = (inputDigest: string): string => `action:${inputDigest}`;
 
 /**
  * The ACTION KEY: a content digest over a run's REPRODUCIBLE inputs — kind, manifest digest, operation/SQL,
- * resources, bindings. Volatile bits (runId, timestamps) are excluded, so identical inputs across runs/projects
- * produce the same key. This is the CASID of the computation's input DAG.
+ * resources, bindings, AND `sourceReceiptDigests` (the digests of the RESOLVED input content). Volatile bits
+ * (runId, timestamps) are excluded. Including the resolved-content digests is what makes this a true LLVM-style
+ * input CASID: two runs whose declaration matches but whose SOURCE CONTENT differs (a changed file, a live
+ * endpoint) get DIFFERENT keys — so a cache hit can never serve a stale result. Pass the ENRICHED replay (the one
+ * carrying sourceReceiptDigests); before resolution those digests are absent and the key is content-blind.
  */
-export function actionInputDigest(replay: Pick<RunReplaySpec, "kind" | "manifest" | "operationId" | "sql" | "resources" | "bindings">): string {
+export function actionInputDigest(replay: Pick<RunReplaySpec, "kind" | "manifest" | "operationId" | "sql" | "resources" | "bindings" | "sourceReceiptDigests">): string {
   const canonical = JSON.stringify([
     replay.kind,
     replay.manifest?.digest ?? null,
@@ -24,6 +27,7 @@ export function actionInputDigest(replay: Pick<RunReplaySpec, "kind" | "manifest
     replay.sql ?? null,
     [...(replay.resources ?? [])].sort(),
     replay.bindings ?? null,
+    [...(replay.sourceReceiptDigests ?? [])].sort(), // resolved-content refs -> key captures the input DAG, not just the declaration
   ]);
   return `sha256:${createHash("sha256").update(canonical).digest("hex")}`;
 }

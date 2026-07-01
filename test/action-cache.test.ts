@@ -19,12 +19,16 @@ const conn = async (): Promise<SqlConn> => {
 };
 
 describe("ActionCache: input CASID -> output CASID (LLVM CAS ActionCache in the ONE store)", () => {
-  const base = { kind: "query" as const, manifest: { digest: "sha256:m", snapshot: {} as never, path: "x" }, sql: "SELECT 1", resources: ["a", "b"], bindings: undefined };
+  const base = { kind: "query" as const, manifest: { digest: "sha256:m", snapshot: {} as never, path: "x" }, sql: "SELECT 1", resources: ["a", "b"], bindings: undefined, sourceReceiptDigests: ["sha256:s1"] };
 
-  test("the input digest is stable, resource-order-insensitive, and sensitive to the SQL", () => {
+  test("the input digest is stable, resource-order-insensitive, and sensitive to SQL/manifest", () => {
     assert.equal(actionInputDigest(base), actionInputDigest({ ...base, resources: ["b", "a"] }));
     assert.notEqual(actionInputDigest(base), actionInputDigest({ ...base, sql: "SELECT 2" }));
     assert.notEqual(actionInputDigest(base), actionInputDigest({ ...base, manifest: { ...base.manifest, digest: "sha256:other" } }));
+  });
+
+  test("content-addressed: a changed source (different sourceReceiptDigests) yields a DIFFERENT key — no stale dedup", () => {
+    assert.notEqual(actionInputDigest(base), actionInputDigest({ ...base, sourceReceiptDigests: ["sha256:s2"] }));
   });
 
   test("put/get round-trips input -> output; a miss is null", async () => {
