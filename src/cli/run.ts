@@ -31,10 +31,13 @@ export function parseFlags(args: string[]): Record<string, string> {
     if (!a.startsWith("--")) throw new Error(`unexpected argument '${a}' (expected --key value or --key=value)`);
     const eq = a.indexOf("=");
     if (eq !== -1) {
-      flags[a.slice(2, eq)] = a.slice(eq + 1); // --key=value: value may start with --, contain spaces/newlines, etc.
+      const key = a.slice(2, eq);
+      if (!key) throw new Error(`invalid flag '${a}' (empty flag name)`);
+      flags[key] = a.slice(eq + 1); // --key=value: value may start with --, contain spaces/newlines, etc.
       continue;
     }
     const key = a.slice(2);
+    if (!key) throw new Error(`invalid flag '${a}' (empty flag name)`); // '--' / '-- value'
     const next = args[i + 1];
     if (next === undefined) throw new Error(`flag --${key} requires a value`);
     flags[key] = next; // consume the next token AS the value (all flags take values), even if it looks like a flag
@@ -48,6 +51,11 @@ function parseBindings(raw: string | undefined): Record<string, unknown> | undef
   let parsed: unknown;
   try { parsed = JSON.parse(raw); } catch { throw new Error("--bindings must be a JSON object"); }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("--bindings must be a JSON object");
+  // each binding becomes a DuckDB session variable (SET VARIABLE <name> = ...), so the name must be a valid
+  // identifier — reject at the CLI boundary (a usage error -> exit 2) rather than letting it throw deep in the runner.
+  for (const k of Object.keys(parsed)) {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) throw new Error(`--bindings key '${k}' must be a valid variable name ([A-Za-z_][A-Za-z0-9_]*)`);
+  }
   return parsed as Record<string, unknown>;
 }
 
@@ -64,6 +72,9 @@ export async function mainRun(sub: string, argv: string[], deps: RunCliDeps): Pr
   let bindings: Record<string, unknown> | undefined;
   try {
     flags = parseFlags(rest);
+    const KNOWN = new Set(["db", "sql", "resources", "operation", "bindings", "run-id"]);
+    const unknown = Object.keys(flags).filter((k) => !KNOWN.has(k));
+    if (unknown.length) throw new Error(`unknown flag(s): ${unknown.map((k) => `--${k}`).join(", ")}`); // a typo must not silently fall back
     bindings = parseBindings(flags.bindings);
   } catch (e) { deps.err(e instanceof Error ? e.message : String(e)); deps.err(USAGE); return 2; }
 

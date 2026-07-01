@@ -49,6 +49,17 @@ describe("cli: query/run over a manifest (provider-agnostic entry point)", () =>
     assert.deepEqual(parseFlags(["--sql=SELECT 1", "--run-id=abc"]), { sql: "SELECT 1", "run-id": "abc" });
     assert.throws(() => parseFlags(["--db"]), /requires a value/);
     assert.throws(() => parseFlags(["pos"]), /unexpected argument/);
+    assert.throws(() => parseFlags(["--=x"]), /empty flag name/);
+    assert.throws(() => parseFlags(["--", "value"]), /empty flag name/);
+  });
+
+  test("usage errors (exit 2): malformed binding key, unknown flag", async () => {
+    const s = sink();
+    assert.equal(await mainRun("query", [MANIFEST, "--sql", "SELECT 1", "--bindings", '{"bad-key":1}'], s.deps), 2, "invalid binding name");
+    assert.match(s.err.join("\n"), /valid variable name/);
+    const s2 = sink();
+    assert.equal(await mainRun("query", [MANIFEST, "--sql", "SELECT 1", "--resource", "x"], s2.deps), 2, "unknown --resource typo");
+    assert.match(s2.err.join("\n"), /unknown flag/);
   });
 
   test("--key=value runs end to end (equals form)", async () => {
