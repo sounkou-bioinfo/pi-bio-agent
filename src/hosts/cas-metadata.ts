@@ -17,7 +17,7 @@ import type { ContentAddress } from "../core/resources.js";
 // SQL below runs over either SqlConn, and the ducknng RPC server that already serializes the shared blackboard
 // table serializes these too ([[duckdb-process-boundary-locking]]). Transport is orthogonal; correctness is SQL.
 //
-//   cas_object  the heap: every stored blob + its lifecycle state (committed -> tombstoned -> deleted)
+//   cas_object  the heap: every stored blob + its lifecycle state (committed -> tombstoned -> deleting -> deleted)
 //   cas_ref     durable references (a run, an artifact, a remote-index entry, a manual pin) — the ROOT SET as rows
 //   cas_lease   in-flight reads/writes — protects bytes a writer is about to REUSE but has not yet rooted
 //
@@ -67,9 +67,9 @@ export async function recordCasObject(conn: SqlConn, address: ContentAddress, si
   await conn.run(
     `INSERT INTO cas_object (algorithm, digest, size_bytes, state, committed_at, tombstoned_at)
      VALUES (?, ?, ?, 'committed', ?, NULL)
-     ON CONFLICT (algorithm, digest) DO UPDATE SET state = 'committed', tombstoned_at = NULL`,
+     ON CONFLICT (algorithm, digest) DO UPDATE SET size_bytes = excluded.size_bytes, state = 'committed', committed_at = excluded.committed_at, tombstoned_at = NULL`,
     [address.algorithm, address.digest, sizeBytes, nowMs],
-  );
+  ); // resurrect refreshes committed_at too, else the revived object is immediately mark-eligible again
 }
 
 export interface CasRefSpec { refId: string; refType: string; address: ContentAddress; expiresAt?: number | null; }
@@ -135,7 +135,10 @@ export async function withCasObject<R>(
       [address.algorithm, address.digest],
     );
     const state = rows[0]?.state;
-    if (state === "deleted" || state === undefined) return { hit: false }; // bytes gone (or never recorded) -> miss
+    // `deleting` = the sweeper has atomically CLAIMED this object for byte removal (it saw no live lease at claim
+    // time) -> its bytes are going away, treat as a miss. `deleted`/absent are misses too. Only `tombstoned`/
+    // `committed` are safe to hold under our lease.
+    if (state === "deleted" || state === "deleting" || state === undefined) return { hit: false };
     if (state === "tombstoned") {
       // bytes still present (not swept yet) and we hold a lease -> revive rather than re-fetch
       await conn.run(`UPDATE cas_object SET state = 'committed', tombstoned_at = NULL WHERE algorithm = ? AND digest = ?`, [address.algorithm, address.digest]);
@@ -170,15 +173,28 @@ export async function gcMark(conn: SqlConn, opts: { cutoffMs: number; nowMs: num
  *  removed. */
 export async function gcSweep(conn: SqlConn, cas: CasStore, opts: { graceMs: number; nowMs: number }): Promise<ContentAddress[]> {
   await conn.run(`DELETE FROM cas_lease WHERE expires_at <= ?`, [opts.nowMs]); // reap expired leases
-  const due = await conn.all<{ algorithm: string; digest: string }>(
-    `SELECT algorithm, digest FROM cas_object WHERE state = 'tombstoned' AND tombstoned_at <= ?`,
-    [opts.nowMs - opts.graceMs],
+  // ATOMICALLY CLAIM the due objects: transition tombstoned -> `deleting` in ONE statement that RE-CHECKS no live
+  // ref and no live lease. This closes the sweep race: a withCasObject lease (or a new cas_ref) that lands BEFORE
+  // the claim is seen by the NOT EXISTS -> the object is not claimed (stays tombstoned, gets resurrected); one that
+  // lands AFTER sees state=`deleting` -> a miss. Only the rows this statement returned are deleted, so we never
+  // remove bytes another writer just re-rooted/leased between a select and the delete (the old SELECT-then-loop bug).
+  const claimed = await conn.all<{ algorithm: string; digest: string }>(
+    `UPDATE cas_object SET state = 'deleting'
+     WHERE state = 'tombstoned' AND tombstoned_at <= ?
+       AND NOT EXISTS (SELECT 1 FROM cas_ref r
+                       WHERE r.algorithm = cas_object.algorithm AND r.digest = cas_object.digest
+                         AND (r.expires_at IS NULL OR r.expires_at > ?))
+       AND NOT EXISTS (SELECT 1 FROM cas_lease l
+                       WHERE l.algorithm = cas_object.algorithm AND l.digest = cas_object.digest
+                         AND l.expires_at > ?)
+     RETURNING algorithm, digest`,
+    [opts.nowMs - opts.graceMs, opts.nowMs, opts.nowMs],
   );
   const swept: ContentAddress[] = [];
-  for (const { algorithm, digest } of due) {
+  for (const { algorithm, digest } of claimed) {
     const address: ContentAddress = { algorithm: algorithm as ContentAddress["algorithm"], digest };
     await cas.remove(address);
-    await conn.run(`UPDATE cas_object SET state = 'deleted' WHERE algorithm = ? AND digest = ?`, [algorithm, digest]);
+    await conn.run(`UPDATE cas_object SET state = 'deleted' WHERE algorithm = ? AND digest = ? AND state = 'deleting'`, [algorithm, digest]);
     swept.push(address);
   }
   return swept;

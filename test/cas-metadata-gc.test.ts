@@ -111,6 +111,26 @@ describe("CAS metadata GC: ref/lease anti-join (the distributed-safe sweep)", ()
     assert.deepEqual(r3, { hit: false }, "deleted object -> miss (caller re-fetches)");
   });
 
+  test("sweep RE-CHECKS refs/leases at claim time — a ref or lease added AFTER mark protects bytes from the sweep", async () => {
+    // the race the atomic claim closes: the old SELECT-then-loop sweep would delete an object that got re-rooted or
+    // leased between the mark and the delete. The claim's NOT EXISTS must re-check, so such an object is skipped.
+    const { conn, cas } = await setup();
+
+    // a NEW REF lands after the tombstone but before the sweep
+    const a = await store(cas, conn, "re-rooted between mark and sweep", 1000);
+    await gcMark(conn, { cutoffMs: 2000, nowMs: 2000 });
+    await addCasRef(conn, { refId: "late-run", refType: "run", address: a }, 2500);
+    assert.deepEqual(await gcSweep(conn, cas, { graceMs: 0, nowMs: 3000 }), [], "a freshly-rooted tombstoned object is NOT swept");
+    assert.equal(await cas.has(a), true, "its bytes survive");
+
+    // a LEASE lands after the tombstone but before the sweep
+    const b = await store(cas, conn, "leased between mark and sweep", 1000);
+    await gcMark(conn, { cutoffMs: 2000, nowMs: 2000 });
+    await acquireCasLease(conn, "late-reader", b, 5000, 2500);
+    assert.deepEqual(await gcSweep(conn, cas, { graceMs: 0, nowMs: 3000 }), [], "a freshly-leased tombstoned object is NOT swept");
+    assert.equal(await cas.has(b), true, "its bytes survive");
+  });
+
   test("sweep respects the grace window (a freshly-tombstoned object is not deleted until grace elapses)", async () => {
     const { conn, cas } = await setup();
     const a = await store(cas, conn, "just-tombstoned", 1000);
