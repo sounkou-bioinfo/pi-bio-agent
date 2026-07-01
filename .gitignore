@@ -7,3 +7,6 @@ dist-test/
 .env
 .pi-bio-runs/
 .pi/
+README.html
+README_files/
+*_cache/
