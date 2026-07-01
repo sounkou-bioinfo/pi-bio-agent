@@ -28,8 +28,8 @@ when a DuckDB version has no ducknng build.
 
 ## Single batch is pure SQL; chunking a whole VCF is request fanout (not a row-count limit)
 
-The earlier write-up of this example claimed batched annotation "can't be pure SQL." That was **wrong**, and
-worth correcting precisely:
+A within-limit batch of variants annotates in pure SQL; only splitting a *whole VCF* into many capped POSTs is
+a host-driven fanout. Precisely:
 
 - **One within-limit batch is one POST, fully SQL** (proven by the deterministic test below). `ncurl_table`
   returns a large *response* fine (many rows); response size is never the constraint.
