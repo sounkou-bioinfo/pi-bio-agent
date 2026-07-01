@@ -79,8 +79,8 @@ export interface SubmitBioJobRequest {
 export async function submitBioJob(conn: SqlConn, runner: JobRunner, req: SubmitBioJobRequest): Promise<JobStatus> {
   assertJobReplay(req.runId, req.replay);
   if (await readJobRecord(req.cwd, req.runId)) throw new Error(`job-store: job '${req.runId}' already submitted`);
-  await runner.submit({ runId: req.runId, replay: req.replay }); // acceptance first — throws if the runner rejects
-  const digest = replaySpecDigest(req.replay);
+  const digest = replaySpecDigest(req.replay); // compute BEFORE acceptance — a digest failure must not leave a phantom job in the runner
+  await runner.submit({ runId: req.runId, replay: req.replay }); // acceptance — throws if the runner rejects
   await recordPhase(conn, req.runId, "queued", req.now, req.source ?? "job-store", digest);
   await persistJob(req.cwd, { schema: "pi-bio.job_record.v1", runId: req.runId, phase: "queued", replayDigest: digest, submittedAt: req.now, updatedAt: req.now });
   return { runId: req.runId, phase: "queued", at: req.now };
