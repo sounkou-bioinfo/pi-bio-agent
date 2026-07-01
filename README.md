@@ -59,6 +59,27 @@ The bet therefore stands on four legs, all SQL over one DuckDB substrate: **data
 (ontology/KG + machine-studying notes). TypeScript is only the interpreter that binds host effects — a new bio
 question is a manifest and some SQL, not a new `.ts` file.
 
+## Why a substrate, not a hosted workbench
+
+The hosted "AI for science" workbenches (e.g. [Claude Science](https://www.anthropic.com/news/claude-science-ai-workbench))
+ship the same primitives we do — auditable/reproducible artifacts, on-demand compute, dozens of connected
+databases, reviewer agents. We built that spine independently, which tells you the architecture is sound. The
+difference is what it runs *on*:
+
+| | a hosted AI-science workbench | **pi-bio-agent** |
+|---|---|---|
+| the program | agent-orchestrated code | a **manifest + SQL** — data, not code; a new question is a new manifest, zero new `.ts` |
+| reproducibility | "keep the exact code + environment" | **content-addressed receipts + a deterministic `receiptContentDigest` + an as-of temporal ledger** — a re-run *matches by content*, and counting is a `GROUP BY`, not re-executed code |
+| where it runs | a vendor's cloud | **your** laptop / cluster / HPC — an importable library + CLI; the host owns effects and egress ("the library records what ran; the host decides what may run") |
+| compute distribution | SSH-to-HPC / Modal | a **topology over data-in-SQL** — ducknng NNG `push`/`pull`, with status flowing back into the same job ledger; workers in **R (`nanonext`/`mirai`), Python (`pynng`), or node** |
+| agent patterns | one coordinating agent + actor-critic | **every NNG topology** (push/pull, pub/sub, survey/debate, bus, pair), and it *closes over* Fugu (workflow-as-data + CAS shared memory) and RLM (SQL-REPL over context, no context rot) |
+| trust model | a model-based reviewer | **fail-closed determinism** — strict-allowlist manifests, a read-only SQL guard, grounding that abstains and never invents a CURIE |
+| openness | a closed product | **open, deterministic, inspectable** — every claim above maps to code and a test in this repo |
+
+Same destination; we own the road. A hosted product adds features on top of an opaque runtime — we own the
+substrate those features are approximations of. (And yes, a UI is just a thin client over the CLI/SDK — the
+substrate is real without one.)
+
 ## Install in Pi
 
 ```sh
