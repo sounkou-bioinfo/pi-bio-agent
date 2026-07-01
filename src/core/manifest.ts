@@ -62,6 +62,44 @@ export interface BioManifest {
   };
 }
 
+/** A structured summary of ONE manifest — its resources, operations (with the runnable ids), resolvers, and
+ *  term sets. This is the "describe THIS program" view: an agent reads it to learn what a manifest declares
+ *  (which operation ids `bio_run_operation` accepts, which resolver each resource needs) without parsing raw
+ *  JSON. Pure over an already-validated manifest; no I/O. */
+export interface ManifestDescription {
+  id: string;
+  title: string;
+  description: string;
+  schema: string;
+  version: string;
+  resources: { id: string; title: string; resolver: string }[];
+  operations: { id: string; title: string; transport: string; runnable: boolean; description: string }[];
+  resolvers: { id: string; title: string }[];
+  termSets: { id: string; title: string; ordered: boolean; members: number }[];
+}
+
+export function describeManifest(m: BioManifest): ManifestDescription {
+  const p = m.provides ?? {};
+  return {
+    id: m.id,
+    title: m.title,
+    description: m.description,
+    schema: m.schema,
+    version: m.version,
+    resources: (p.resources ?? []).map((r) => ({ id: r.id, title: r.title, resolver: r.resolver })),
+    // `runnable` = a duckdb.sql operation bio_run_operation can execute; other transports are host-gated.
+    operations: (p.operations ?? []).map((o) => ({
+      id: o.id,
+      title: o.title,
+      transport: o.transport,
+      runnable: o.transport === "duckdb.sql",
+      description: o.description,
+    })),
+    resolvers: (p.resolvers ?? []).map((r) => ({ id: r.id, title: r.title })),
+    termSets: (p.termSets ?? []).map((t) => ({ id: t.id, title: t.title, ordered: Boolean(t.ordered), members: t.members?.length ?? 0 })),
+  };
+}
+
 export interface BioRegistrySnapshot {
   schema: "pi-bio.registry_snapshot.v1";
   manifests: Array<Pick<BioManifest, "id" | "version" | "title">>;

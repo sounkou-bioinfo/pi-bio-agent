@@ -44,6 +44,7 @@ describe("Pi coding-agent extension", () => {
       "bio_run_operation",
       "bio_study_plan",
       "bio_validate_select",
+      "bio_walk_memory",
       "bio_write_study_note",
     ]);
   });

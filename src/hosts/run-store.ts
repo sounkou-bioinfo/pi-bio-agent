@@ -4,7 +4,7 @@ import { systemClock } from "../core/clock.js";
 import { RUN_REPLAY_SPEC_SCHEMA, receiptContentDigest, type RunReplaySpec, type EnvAttestationSummary } from "../core/reproducibility.js";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { DuckDBInstance } from "@duckdb/node-api";
-import { createBioRegistry, type BioRegistry, type BioManifest, type ResolutionReceipt } from "../core/manifest.js";
+import { createBioRegistry, describeManifest, validateBioManifest, type BioRegistry, type BioManifest, type ManifestDescription, type ResolutionReceipt } from "../core/manifest.js";
 import type { CasStore } from "../core/cas.js";
 import type { BioResolverImpl, ProcessRunner, SqlConn } from "../core/ports.js";
 import { OperationRunError, runOperation, runQuery, type OperationResult } from "../core/operations.js";
@@ -182,6 +182,37 @@ async function prepareRegistry(req: { cwd: string; manifestPath: string; network
     if (impl) registry.bindResolverImpl(r.id, impl);
   }
   return { registry, manifest, raw, manifestDigest };
+}
+
+/** Describe ONE manifest by path (resolved safely within cwd): parse, validate, and summarize its
+ *  resources/operations (with the runnable operation ids)/resolvers/termSets. The agent's discovery path — learn
+ *  what a manifest declares without reading raw JSON. Validation/parse failures are RETURNED, not thrown: a
+ *  describe must never crash a probe. */
+export async function describeBioManifestFromPath(req: { cwd: string; manifestPath: string; network?: { fetch: FetchLike } }): Promise<
+  { manifestPath: string; valid: false; errors: string[] } | ({ manifestPath: string; valid: true } & ManifestDescription)
+> {
+  const isUrl = /^https?:\/\//i.test(req.manifestPath);
+  let raw: BioManifest;
+  try {
+    let source: string;
+    if (isUrl) {
+      // A manifest can live remotely (a shared registry). Fetching it is the SAME host-granted network capability
+      // as any connector — so it fails closed when the host injected no network (the default entrypoint), and
+      // is available under the networked entrypoint. Never an ambient fetch.
+      if (!req.network) return { manifestPath: req.manifestPath, valid: false, errors: ["a URL manifest needs host-granted network; the default entrypoint injects none (fail closed)"] };
+      const res = await req.network.fetch(req.manifestPath, { method: "GET" });
+      if (!res.ok) return { manifestPath: req.manifestPath, valid: false, errors: [`fetch failed: HTTP ${res.status}`] };
+      source = await res.text();
+    } else {
+      source = await fs.readFile(resolveInCwd(req.cwd, req.manifestPath), "utf8");
+    }
+    raw = JSON.parse(source) as BioManifest;
+  } catch (e) {
+    return { manifestPath: req.manifestPath, valid: false, errors: [`not readable or not valid JSON: ${(e as Error).message}`] };
+  }
+  const errors = validateBioManifest(raw);
+  if (errors.length) return { manifestPath: req.manifestPath, valid: false, errors };
+  return { manifestPath: req.manifestPath, valid: true, ...describeManifest(raw) };
 }
 
 /** The RESOLVED process.compute facts for a run's resources (absolute command paths etc. — what actually ran on

@@ -263,10 +263,18 @@ running; L1 gives reproduce() a job-shaped target; C2 validates it; L2/L3 make i
 - **C2 — reproduce().** Re-execute `replay.json` + env attestation, diff result/artifact digests →
   reproduced/diverged/**not_reproducible** (honest: unknown env / missing snapshot / un-snapshotted live source →
   not_reproducible WITH reasons, never fake confidence).
-- **L2/L3 — durable job store/resume + cancellation** (process-group kill already exists in `node-process-runner`).
+- **L2/L3 — durable resume + cancellation. BUILT.** `src/hosts/job-store.ts`: `resumeBioJob` rehydrates a job's
+  status from the durable record + ledger WITHOUT the runner (park/resume across restarts); `cancelBioJob` records
+  a terminal `cancelled` phase where the DURABLE ledger wins over process memory (a mid-flight completion cannot
+  overwrite a cancel, and a later poll cannot resurrect a durable cancel to the runner's `succeeded`). Strictly-
+  monotonic status guard; terminal-is-terminal. Tests: `test/job-runner.test.ts` block "L2/L3: durable resume +
+  cancellation" (process-group kill already exists in `node-process-runner`). **The C/L lane C1→L3 is complete.**
 
-What stays the HOST's (NOT built): micromamba/conda/renv/container EXECUTION, a cluster/queue JobRunner adapter
-(SLURM/k8s — a host adapter like `nodeProcessRunner` is the local one), scheduler, semantic env compatibility.
+What stays the HOST's (a **named** consumer now exists — the AI-for-science product landscape, i.e. our
+Claude-for-Science brethren — so these are the ACTIVE roadmap, no longer "wait for a consumer"; each is host work,
+built as the coloc flagship forces it): micromamba/conda/renv/container EXECUTION, a cluster/queue JobRunner
+adapter (SLURM/k8s/Modal — a host adapter like `nodeProcessRunner` is the local one; `ledgerJobRunner` is the
+distributed primitive it slots behind), scheduler, semantic env compatibility.
 
 ### Later (a separate lane, not core): NNG host capabilities — compute distribution + `ducknng-fs`
 

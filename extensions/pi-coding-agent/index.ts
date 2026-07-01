@@ -2,10 +2,10 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { summarizeBioContext, type BioContext } from "../../src/core/context.js";
 import { validateReadOnlySelect } from "../../src/core/knowledge-graph.js";
-import { deriveStudyPlan, studyNoteIndex, type StudyArtifactKind, type StudyCorpus, type StudyNote } from "../../src/core/study.js";
+import { deriveStudyPlan, studyNoteIndex, walkMemoryGraph, type StudyArtifactKind, type StudyCorpus, type StudyNote } from "../../src/core/study.js";
 import { deleteStudyNote, listStudyNotes, makeStudyNote, readStudyNotes, runtimeSkillRoot, runtimeStudyRoot, writeProjectSkill, writeStudyNote } from "../../src/hosts/pi-project.js";
 import { defaultDuckDbExtensionCatalog, findDuckDbExtensions } from "../../src/duckdb/extensions.js";
-import { runBioOperationFromManifest, runBioQueryFromManifest } from "../../src/hosts/run-store.js";
+import { describeBioManifestFromPath, runBioOperationFromManifest, runBioQueryFromManifest } from "../../src/hosts/run-store.js";
 import type { FetchLike } from "../../src/duckdb/resolvers/http-table-scan.js";
 
 function text(payload: unknown) {
@@ -19,6 +19,35 @@ function text(payload: unknown) {
 // The default entrypoint (index.ts) injects NO network, so http.get stays unbound and every networked manifest
 // fails closed. The operator grants network by loading the explicit networked entrypoint (index-networked.ts),
 // which composes a fetch in — a visible, auditable choice the agent can never make for itself.
+// A concise, TRUE, drift-resistant primer injected into the system prompt each turn. It names the model and the
+// author→describe→run loop, and points at DISCOVERY tools (bio_describe_model, bio_list_duckdb_extensions) and the
+// examples/ dir instead of enumerating specifics that would rot — the substrate's anti-hardcoded-self-description rule.
+const BIO_ORIENTATION = [
+  "[pi-bio-agent] You are running with the pi-bio-agent extension: a SQL-first, provider-agnostic bioinformatics",
+  "substrate where MANIFESTS ARE PROGRAMS — a manifest (JSON) declares `provides.resolvers`, `provides.resources`",
+  "(virtual DuckDB tables bound to a resolver + params), and `provides.operations` (named read-only duckdb.sql",
+  "workflows). TypeScript is only the interpreter; the agent writes the SQL.",
+  "",
+  "How to work:",
+  "- DISCOVER cheaply: your MEMORY is the index — check `bio_list_study_notes` / `bio_walk_memory` FIRST. For",
+  "  manifests, list `examples/` for names, then call `bio_describe_model` with ONE `manifestPath` (a local path OR",
+  "  an http(s) URL) to learn its resources, resolvers, and RUNNABLE operation ids. Never read every example, and",
+  "  never parse raw manifest JSON. With no argument `bio_describe_model` describes the global model;",
+  "  `bio_list_duckdb_extensions` shows the readable-format surface.",
+  "- RUN: `bio_run_operation(dbPath, manifestPath, operationId)` runs a declared operation and receipts it under",
+  "  `.pi/bio-agent/runs/` (with `replay.json` recording the exact SQL). `bio_query` runs an ad-hoc read-only SELECT",
+  "  over a manifest's resolved resources. Check SQL first with `bio_validate_select`.",
+  "- AUTHOR (the pi spirit): you can WRITE a new manifest JSON yourself and run it — write the file, call",
+  "  `bio_describe_model` on it to validate + discover its operation ids, then `bio_run_operation`. `bio_run_operation`",
+  "  binds the built-in resolvers `duckdb.file_scan` and `duckhts.read_bcf`; network (`ncurl_table`) and",
+  "  out-of-process `process.compute` are HOST capabilities that fail closed unless the operator granted them.",
+  "- REMEMBER (machine studying): `bio_study_plan`, then `bio_write_study_note` (link notes with `[[slug]]` or typed",
+  "  links) / `bio_list_study_notes` (flat index) / `bio_walk_memory` (walk the memory GRAPH: nodes + link",
+  "  edges) / `bio_read_study_note`. Notes under `.pi/bio-agent/study-notes` are retained expertise, not prompt",
+  "  context — prefer walking your own memory over re-reading the corpus. Promote a stable workflow to a skill with",
+  "  `bio_create_skill`.",
+].join("\n");
+
 export interface BioExtensionOptions {
   network?: { fetch: FetchLike };
 }
@@ -30,18 +59,31 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
     skillPaths: [runtimeSkillRoot(event.cwd)],
   }));
 
+  // Give the agent a persistent, drift-resistant orientation to pi-bio-agent on every turn (the pi-coding-agent
+  // way: append to the chained system prompt in before_agent_start). It points at DISCOVERY tools + the examples
+  // dir rather than enumerating volatile specifics, so it can never lie as the corpus changes.
+  pi.on("before_agent_start", (event) => ({
+    systemPrompt: `${event.systemPrompt}\n\n${BIO_ORIENTATION}`,
+  }));
+
   pi.registerTool({
     name: "bio_describe_model",
     label: "Describe Pi Bio model",
-    description: "Describe the pi-bio-agent domain model: SQL-first bio primitives, ontology/KG modeling, provenance, resources, DuckDB extension substrate, and context contract.",
-    parameters: Type.Object({}),
-    async execute() {
-      const ctx: BioContext = {
+    description: "Describe the pi-bio-agent model. With no argument: the global domain model (SQL-first bio primitives, ontology/KG modeling, provenance, DuckDB extension substrate, context contract). With a manifestPath: THAT manifest's resources, operations (including the runnable operation ids bio_run_operation accepts), resolvers, and term sets — the discovery path, so you never parse raw manifest JSON by hand. The manifestPath may be a local path OR an http(s) URL (a remote manifest registry); a URL uses the host-granted network and fails closed when none is injected.",
+    parameters: Type.Object({
+      manifestPath: Type.Optional(Type.String({ description: "Optional path to a manifest JSON — a local path (relative to cwd or absolute) OR an http(s) URL. When set, describe that specific manifest instead of the global domain model." })),
+    }),
+    async execute(_id, params: { manifestPath?: string }, _signal, _onUpdate, ctx) {
+      if (params.manifestPath) {
+        // describe THIS program: resources/operations/resolvers/termSets. Local path or (host-granted) URL.
+        return text(await describeBioManifestFromPath({ cwd: ctx.cwd, manifestPath: params.manifestPath, network }));
+      }
+      const bioCtx: BioContext = {
         sources: [],
         duckdbExtensions: defaultDuckDbExtensionCatalog,
       };
       return text({
-        summary: summarizeBioContext(ctx),
+        summary: summarizeBioContext(bioCtx),
         principles: [
           "Do not encode every question as a bespoke skill; expose primitives the agent can compose.",
           "Ontologies are SQL graph tables: terms, edges, synonyms, xrefs, term sets, and mappings to local concepts.",
@@ -49,6 +91,7 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
           "Use scoped graph-as-SQL for counts, joins, trends, and provenance instead of serializing neighborhoods into prompt context.",
           "A manifest is the program: declare resources/operations/termSets as data; the agent writes read-only SQL over them.",
           "The agent may author project-local skills when a repeated workflow emerges; run /reload to expose them.",
+          "To learn a specific manifest, call bio_describe_model with its manifestPath rather than reading the JSON.",
         ],
       });
     },
@@ -186,6 +229,27 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
     async execute(_id, params: { query?: string; limit?: number }, _signal, _onUpdate, ctx) {
       const notes = await listStudyNotes(ctx.cwd, params);
       return text({ notes: studyNoteIndex(notes), root: runtimeStudyRoot(ctx.cwd) });
+    },
+  });
+
+  pi.registerTool({
+    name: "bio_walk_memory",
+    label: "Walk bio memory graph",
+    description: "Walk the MEMORY GRAPH: each memory note is a node (memory:<slug>); its [[slug]] and typed links are edges. With no start, returns the whole memory graph (nodes + edges) so you grasp structure at a glance INSTEAD of reading every note (or re-reading the corpus). With a start slug + depth, returns that note's neighborhood (BFS out N hops, links followed both ways). Memory is a graph, not a flat list — studying is only ONE way it gets populated.",
+    parameters: Type.Object({
+      start: Type.Optional(Type.String({ description: "Start note slug; omit for the whole graph." })),
+      depth: Type.Optional(Type.Number({ description: "Hops to walk out from start (default 1)." })),
+    }),
+    async execute(_id, params: { start?: string; depth?: number }, _signal, _onUpdate, ctx) {
+      const root = runtimeStudyRoot(ctx.cwd);
+      try {
+        const notes = await readStudyNotes(ctx.cwd);
+        const graph = walkMemoryGraph(notes, { start: params.start, depth: params.depth });
+        return text({ root, start: params.start ?? null, depth: params.start ? params.depth ?? 1 : null, nodeCount: graph.nodes.length, edgeCount: graph.edges.length, graph });
+      } catch (e) {
+        // Return the error AS DATA so the agent can correct itself (e.g. a malformed start slug) — never swallow it.
+        return text({ root, start: params.start ?? null, error: (e as Error).message });
+      }
     },
   });
 

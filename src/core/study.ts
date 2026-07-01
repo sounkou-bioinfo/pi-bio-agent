@@ -203,6 +203,36 @@ export function studyNoteGraph(notes: StudyNote[]): BioGraphSnapshot {
   };
 }
 
+/**
+ * Walk the memory graph. With no `start`, returns the whole graph (every note is a node, every link an edge) —
+ * the structure at a glance, so the agent need not read each note. With a `start` slug, BFS out `depth` hops
+ * following links in BOTH directions and return only the reached sub-snapshot. Pure; no I/O. This is the agent's
+ * "walk over memory nodes" affordance: memory is a graph, not a flat list. A non-existent start yields an empty
+ * snapshot (honest), never an error.
+ */
+export function walkMemoryGraph(notes: StudyNote[], opts: { start?: string; depth?: number } = {}): BioGraphSnapshot {
+  const full = studyNoteGraph(notes);
+  if (!opts.start) return full;
+  const startId = memoryNodeId(opts.start); // throws only on a malformed slug (a real programming error)
+  const depth = Math.max(0, Math.floor(opts.depth ?? 1));
+  const reached = new Set<string>([startId]);
+  let frontier = new Set<string>([startId]);
+  for (let d = 0; d < depth && frontier.size > 0; d++) {
+    const next = new Set<string>();
+    for (const e of full.edges) {
+      if (frontier.has(e.from) && !reached.has(e.to)) next.add(e.to);
+      if (frontier.has(e.to) && !reached.has(e.from)) next.add(e.from);
+    }
+    for (const id of next) reached.add(id);
+    frontier = next;
+  }
+  return {
+    schema: "pi-bio.graph_snapshot.v1",
+    nodes: full.nodes.filter((n) => reached.has(n.id)),
+    edges: full.edges.filter((e) => reached.has(e.from) && reached.has(e.to)),
+  };
+}
+
 export function studyNoteIndex(notes: StudyNote[]): Array<Pick<StudyNote, "slug" | "id" | "kind" | "title" | "hook" | "tags" | "updatedAt">> {
   return notes.map(({ slug, id, kind, title, hook, tags, updatedAt }) => ({ slug, id, kind, title, hook, tags, updatedAt }));
 }
