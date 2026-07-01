@@ -43,14 +43,22 @@ describe("cli: query/run over a manifest (provider-agnostic entry point)", () =>
     assert.match(s.err.join("\n"), /bindings must be a JSON object/);
   });
 
-  test("parseFlags: captures a value that starts with -- (next-token) and supports --key=value", () => {
-    // the pal's finding: a flag value can legitimately start with `--` (e.g. a SQL comment). Both forms must carry it.
-    assert.deepEqual(parseFlags(["--sql", "-- note\nSELECT 1", "--db=:memory:"]), { sql: "-- note\nSELECT 1", db: ":memory:" });
+  test("parseFlags: known-flag-aware, --key=value for flag-looking/literal values", () => {
+    // a `--`-prefixed token is ALWAYS a flag in space form (so `--sql --db` is a usage error, not sql='--db');
+    // the `--key=value` form carries any value, including one that starts with `--`.
+    assert.deepEqual(parseFlags(["--sql=-- note\nSELECT 1", "--db=:memory:"]), { sql: "-- note\nSELECT 1", db: ":memory:" });
     assert.deepEqual(parseFlags(["--sql=SELECT 1", "--run-id=abc"]), { sql: "SELECT 1", "run-id": "abc" });
+    assert.throws(() => parseFlags(["--sql", "--db"]), /requires a value/); // space-form flag-looking value is NOT swallowed
     assert.throws(() => parseFlags(["--db"]), /requires a value/);
     assert.throws(() => parseFlags(["pos"]), /unexpected argument/);
     assert.throws(() => parseFlags(["--=x"]), /empty flag name/);
     assert.throws(() => parseFlags(["--", "value"]), /empty flag name/);
+  });
+
+  test("empty flag values are usage errors (exit 2), not exit 1 / bad runs", async () => {
+    const s = sink();
+    assert.equal(await mainRun("query", [MANIFEST, "--db=", "--sql=SELECT 1"], s.deps), 2, "--db= empty");
+    assert.match(s.err.join("\n"), /empty value/);
   });
 
   test("usage errors (exit 2): malformed binding key, unknown flag", async () => {
@@ -75,7 +83,7 @@ describe("cli: query/run over a manifest (provider-agnostic entry point)", () =>
 
 describe("sdk: the package entry point re-exports the substrate surface", () => {
   test("the key host + core symbols are importable from the top-level index", () => {
-    for (const name of ["runBioQueryFromManifest", "runBioOperationFromManifest", "validateBioManifest", "createBioRegistry", "fsCasStore", "duckdbNodeConn"]) {
+    for (const name of ["runBioQueryFromManifest", "runBioOperationFromManifest", "validateBioManifest", "createBioRegistry", "fsCasStore", "duckdbNodeConn", "processComputeResolver"]) {
       assert.equal(typeof (sdk as Record<string, unknown>)[name], "function", `${name} exported from the SDK entry`);
     }
   });

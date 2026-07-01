@@ -39,8 +39,12 @@ export function parseFlags(args: string[]): Record<string, string> {
     const key = a.slice(2);
     if (!key) throw new Error(`invalid flag '${a}' (empty flag name)`); // '--' / '-- value'
     const next = args[i + 1];
-    if (next === undefined) throw new Error(`flag --${key} requires a value`);
-    flags[key] = next; // consume the next token AS the value (all flags take values), even if it looks like a flag
+    // space form stays predictable: a `--`-prefixed token is ALWAYS a flag, never a value (so `--sql --db` is a
+    // usage error, not sql="--db"). No flag value legitimately starts with `--` — sql can't (the SQL guard rejects
+    // a leading `-- comment`), db/operation/run-id/resources don't — so require the `--key=value` form for the
+    // exotic case instead of silently swallowing the next flag.
+    if (next === undefined || next.startsWith("--")) throw new Error(`flag --${key} requires a value (use --${key}=<value> for a value starting with --)`);
+    flags[key] = next;
     i++;
   }
   return flags;
@@ -75,6 +79,8 @@ export async function mainRun(sub: string, argv: string[], deps: RunCliDeps): Pr
     const KNOWN = new Set(["db", "sql", "resources", "operation", "bindings", "run-id"]);
     const unknown = Object.keys(flags).filter((k) => !KNOWN.has(k));
     if (unknown.length) throw new Error(`unknown flag(s): ${unknown.map((k) => `--${k}`).join(", ")}`); // a typo must not silently fall back
+    const empty = Object.entries(flags).filter(([, v]) => v === "").map(([k]) => k);
+    if (empty.length) throw new Error(`flag(s) with an empty value: ${empty.map((k) => `--${k}`).join(", ")}`); // `--db=` etc.
     bindings = parseBindings(flags.bindings);
   } catch (e) { deps.err(e instanceof Error ? e.message : String(e)); deps.err(USAGE); return 2; }
 
