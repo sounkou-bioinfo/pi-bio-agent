@@ -54,10 +54,12 @@ store stays attributed and consistent:
 Access stays host-gated (ducknng mTLS / peer-allowlists / exec opt-in). This is **Fugu's inter-workflow shared
 memory** (report §3.2.2) made literal — the same transport story the substrate already had, not a new invention.
 
-**Still open (the wire-up):** the agent tools (`bio_remember`, list/read/walk/delete) still use the
-file-based note store; rewiring them to `remember`/`recall`/`listMemory` over `openBioStore` (with `author` = the
-agent, an `asOf` read path, the `study`→`memory` rename, and a legible-file **materialization** of the ledger) is
-the remaining pass.
+**Tool wire-up + rename — DONE (2026-07-02).** The agent tools now use the store, not files: `bio_remember` =
+`remember(author)` + a legible file view; `bio_recall`/`bio_list_memory` = `recall`/`listMemory` with an `asOf`
+time-travel param; `bio_forget` = `forget` (retraction); `bio_walk_memory` + the always-on recall index read the
+store. Skills are temporal too (`bio_create_skill` → `skill:<name>` observations, `src/hosts/skill-store.ts`), and
+`pi-bio-agent memory list/show/history` reads the store from the CLI. **Still open:** run receipts/replay bytes →
+CAS + run-files opt-in; run-as-object-DAG; retiring the now-superseded `kg-sync`/`study-sync` SDK modules.
 
 ## Where this comes from
 
