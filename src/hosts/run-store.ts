@@ -6,6 +6,7 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { createBioRegistry, describeManifest, validateBioManifest, type BioRegistry, type BioManifest, type ManifestDescription, type ResolutionReceipt } from "../core/manifest.js";
 import { recordRunObservation, type RunObservation } from "./run-observations.js";
+import { actionCachePut, actionInputDigest } from "./action-cache.js";
 import type { CasStore } from "../core/cas.js";
 import type { BioResolverImpl, ProcessRunner, SqlConn } from "../core/ports.js";
 import { OperationRunError, runOperation, runQuery, type OperationResult } from "../core/operations.js";
@@ -328,6 +329,15 @@ async function runAndPersist(
       }
       // Datomic + CAS: record the run as a fact in the ONE store, referencing content by digest (bytes stay outside).
       await recordRun(runLog, now, { runId, identity, status: run.status, error: undefined, dir: persisted.dir, replay, enriched, resultDigest });
+      // ActionCache (LLVM CAS): map this input's CASID -> the result's CASID, so an identical future run can be
+      // memoized/deduped and reproduce() has an input->output handle. Only when both a CAS and the store are present.
+      if (resultDigest && runLog && replay) {
+        try {
+          await actionCachePut(runLog.store, actionInputDigest(replay), resultDigest, now, runLog.author);
+        } catch {
+          /* best-effort memo: never fail a run because the action-cache write failed */
+        }
+      }
       return { ok: true, runId, operationId: identity, status: run.status, rowCount: result.rows.length, artifacts: persisted.files, runDir: persisted.dir };
     } catch (error) {
       // A run that started and failed at runtime persists a failed-run receipt and returns ok:false; the
