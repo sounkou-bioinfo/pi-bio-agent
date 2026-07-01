@@ -298,11 +298,10 @@ pi-bio-agent query examples/variant-counts/manifest.json --db :memory: \
 # run a declared, tested operation
 pi-bio-agent run examples/rare-high-impact/manifest.json --db :memory: --operation rare_high_impact.report
 
-# NOTE: `notes sync/report` is the pre-temporal-store path (file notes -> a separate graph.duckdb via kg-sync).
-# Memory now lives as append-only, as-of observations in the ONE store (agent:memory: in bio_observations);
-# this command is superseded once the memory tools are rewired to that store.
-pi-bio-agent notes sync   --db graph.duckdb --write
-pi-bio-agent notes report --db graph.duckdb --json
+# memory is append-only, as-of, attributed observations in the ONE store (agent:memory: in bio_observations)
+pi-bio-agent memory list
+pi-bio-agent memory show <slug> --as-of 2026-07-01T00:00:00Z   # time-travel: what memory said then
+pi-bio-agent memory history <slug>                            # what changed, when, by whom (supersession + tombstones)
 ```
 
 ## As a library (SDK)
