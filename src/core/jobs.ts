@@ -19,6 +19,16 @@ export interface JobSubmitSpec {
   replay: RunReplaySpec;
 }
 
+/** Fail-closed validation of a job's replay spec, enforced at BOTH boundaries (store submit + runner submit): a
+ *  job must carry a well-formed RunReplaySpec whose runId matches the job's — an empty object, a wrong schema, or
+ *  a mismatched runId is rejected before anything is recorded, digested, or executed. */
+export function assertJobReplay(runId: string, replay: RunReplaySpec | undefined): asserts replay is RunReplaySpec {
+  if (!replay || typeof replay !== "object" || Array.isArray(replay)) throw new Error("job: a RunReplaySpec is required (fail closed)");
+  if (replay.schema !== "pi-bio.run_replay_spec.v1") throw new Error("job: replay.schema must be 'pi-bio.run_replay_spec.v1'");
+  if (replay.kind !== "query" && replay.kind !== "operation" && replay.kind !== "process.compute") throw new Error(`job: replay.kind '${String(replay.kind)}' is invalid`);
+  if (replay.runId !== runId) throw new Error(`job: replay.runId '${replay.runId}' must match the job runId '${runId}'`);
+}
+
 /** The job lifecycle IS the run lifecycle (queued|running|waiting|succeeded|failed|cancelled). */
 export type JobPhase = BioRunStatus;
 

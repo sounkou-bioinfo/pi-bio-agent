@@ -1,4 +1,4 @@
-import type { JobRunner, JobResult, JobStatus, JobSubmitSpec } from "../core/jobs.js";
+import { assertJobReplay, type JobRunner, type JobResult, type JobStatus, type JobSubmitSpec } from "../core/jobs.js";
 import type { RunReplaySpec } from "../core/reproducibility.js";
 
 // The in-memory JobRunner — the second impl of the port from day one (the mocking case + the reference executor).
@@ -27,11 +27,15 @@ export function inMemoryJobRunner(deps: InMemoryJobRunnerDeps): InMemoryJobRunne
 
   return {
     async submit(spec: JobSubmitSpec): Promise<void> {
+      assertJobReplay(spec.runId, spec.replay); // fail closed at the runner boundary too
       if (jobs.has(spec.runId)) throw new Error(`in-memory job runner: job '${spec.runId}' already submitted`);
-      const entry: Entry = { status: { runId: spec.runId, phase: "running", at: deps.clock() }, done: Promise.resolve() };
+      // install a DEFERRED done before starting work, so settle() can never observe a placeholder promise
+      let resolveDone: () => void = () => {};
+      const done = new Promise<void>((r) => { resolveDone = r; });
+      const entry: Entry = { status: { runId: spec.runId, phase: "running", at: deps.clock() }, done };
       jobs.set(spec.runId, entry);
       // run the work in the background; submit resolves now (job accepted), not on completion.
-      entry.done = (async () => {
+      void (async () => {
         try {
           const out = await deps.execute(spec.replay);
           entry.status = { runId: spec.runId, phase: "succeeded", at: deps.clock() };
@@ -40,6 +44,8 @@ export function inMemoryJobRunner(deps: InMemoryJobRunnerDeps): InMemoryJobRunne
           const error = e instanceof Error ? e.message : String(e);
           entry.status = { runId: spec.runId, phase: "failed", at: deps.clock() };
           entry.result = { runId: spec.runId, phase: "failed", error };
+        } finally {
+          resolveDone();
         }
       })();
     },
@@ -50,7 +56,9 @@ export function inMemoryJobRunner(deps: InMemoryJobRunnerDeps): InMemoryJobRunne
       return jobs.get(runId)?.result ?? null;
     },
     async settle(runId: string): Promise<void> {
-      await jobs.get(runId)?.done;
+      const entry = jobs.get(runId);
+      if (!entry) throw new Error(`in-memory job runner: unknown job '${runId}'`);
+      await entry.done;
     },
   };
 }

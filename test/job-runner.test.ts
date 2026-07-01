@@ -28,20 +28,20 @@ describe("L1: JobRunner + job-store over the job:<runId>:status temporal slot", 
     const { conn, cwd, clock } = await setup();
     const runner = inMemoryJobRunner({ clock, execute: async () => ({ result: { rows: [{ answer: 42 }] }, artifacts: [{ name: "out", digest: "sha256:abc" }] }) });
 
-    const queued = await submitBioJob(conn, runner, { cwd, runId: "j1", replay: replay("j1"), now: "S1" });
+    const queued = await submitBioJob(conn, runner, { cwd, runId: "j1", replay: replay("j1"), now: "2026-07-01T00:00:01Z" });
     assert.equal(queued.phase, "queued");
     // persisted snapshot exists at queued
     assert.equal((await readJobRecord(cwd, "j1"))!.phase, "queued");
     // the ledger as of S1 says queued
-    assert.equal(JSON.parse((await observationAsOfKey(conn, "job:j1:status", "S1"))!.value_json!), "queued");
+    assert.equal(JSON.parse((await observationAsOfKey(conn, "job:j1:status", "2026-07-01T00:00:01Z"))!.value_json!), "queued");
 
     await runner.settle("j1"); // background work completes (fake)
-    const done = await pollBioJob(conn, runner, { cwd, runId: "j1", now: "S9" });
+    const done = await pollBioJob(conn, runner, { cwd, runId: "j1", now: "2026-07-01T00:00:09Z" });
     assert.equal(done.phase, "succeeded");
 
     // as-of BEFORE the poll still reads queued; AFTER reads succeeded (temporal, not overwritten)
-    assert.equal(JSON.parse((await observationAsOfKey(conn, "job:j1:status", "S1"))!.value_json!), "queued", "history is preserved");
-    assert.equal(JSON.parse((await observationAsOfKey(conn, "job:j1:status", "S9"))!.value_json!), "succeeded");
+    assert.equal(JSON.parse((await observationAsOfKey(conn, "job:j1:status", "2026-07-01T00:00:01Z"))!.value_json!), "queued", "history is preserved");
+    assert.equal(JSON.parse((await observationAsOfKey(conn, "job:j1:status", "2026-07-01T00:00:09Z"))!.value_json!), "succeeded");
     assert.equal((await readJobRecord(cwd, "j1"))!.phase, "succeeded", "persisted snapshot advanced");
 
     const result = await collectBioJob(runner, "j1");
@@ -53,9 +53,9 @@ describe("L1: JobRunner + job-store over the job:<runId>:status temporal slot", 
   test("a job that throws lands failed with the error, and collect surfaces it", async () => {
     const { conn, cwd, clock } = await setup();
     const runner = inMemoryJobRunner({ clock, execute: async () => { throw new Error("boom in the worker"); } });
-    await submitBioJob(conn, runner, { cwd, runId: "j2", replay: replay("j2"), now: "S1" });
+    await submitBioJob(conn, runner, { cwd, runId: "j2", replay: replay("j2"), now: "2026-07-01T00:00:01Z" });
     await runner.settle("j2");
-    const st = await pollBioJob(conn, runner, { cwd, runId: "j2", now: "S9" });
+    const st = await pollBioJob(conn, runner, { cwd, runId: "j2", now: "2026-07-01T00:00:09Z" });
     assert.equal(st.phase, "failed");
     const res = await collectBioJob(runner, "j2");
     assert.equal(res!.phase, "failed");
@@ -66,8 +66,18 @@ describe("L1: JobRunner + job-store over the job:<runId>:status temporal slot", 
     const { conn, cwd, clock } = await setup();
     const runner = inMemoryJobRunner({ clock, execute: async () => ({}) });
     await assert.rejects(
-      () => submitBioJob(conn, runner, { cwd, runId: "j3", replay: undefined as unknown as RunReplaySpec, now: "S1" }),
-      /must carry a RunReplaySpec/,
+      () => submitBioJob(conn, runner, { cwd, runId: "j3", replay: undefined as unknown as RunReplaySpec, now: "2026-07-01T00:00:01Z" }),
+      /a RunReplaySpec is required/,
     );
+    // a replay whose runId does not match the job is also rejected (fail closed at the store boundary)
+    await assert.rejects(
+      () => submitBioJob(conn, runner, { cwd, runId: "j4", replay: replay("DIFFERENT"), now: "2026-07-01T00:00:01Z" }),
+      /replay.runId .* must match/,
+    );
+    // and a backdated/equal-timestamp transition is rejected (the monotonic-ledger guard)
+    const r2 = inMemoryJobRunner({ clock, execute: async () => ({}) });
+    await submitBioJob(conn, r2, { cwd, runId: "j5", replay: replay("j5"), now: "2026-07-01T00:00:05Z" });
+    await r2.settle("j5");
+    await assert.rejects(() => pollBioJob(conn, r2, { cwd, runId: "j5", now: "2026-07-01T00:00:05Z" }), /strictly after/);
   });
 });
