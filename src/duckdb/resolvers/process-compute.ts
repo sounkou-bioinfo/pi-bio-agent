@@ -175,14 +175,24 @@ export function processComputeResolver(runner: ProcessRunner): BioResolverImpl {
       //     missing declared output is fail-closed (a clean exit that skipped a promised file is still a failure).
       const artifacts: Array<{ name: string; path: string; kind: string; digest: string; size: number }> = [];
       const dirRoot = resolve(dir);
+      // the work dir itself may sit under a symlinked tmp (e.g. macOS /tmp -> /private/tmp), so the containment
+      // check must compare REALPATHS, not the lexical path — realpath the root once.
+      const realDirRoot = await fs.realpath(dirRoot);
       for (const o of outputs) {
-        // authoritative containment re-check: the resolved path must stay inside the work dir (a symlink the child
-        // created, or any traversal the static check missed, is caught here — belt and braces).
+        // authoritative containment re-check. Lexical resolve() catches `..` traversal but NOT a symlink the child
+        // created (`ln -s /etc/passwd out.txt` resolves to a path INSIDE dir, and readFile would follow it out).
+        // So: lstat the declared output, reject a symlink or a non-regular file outright, then confirm its realpath
+        // stays within the work dir before reading — a declared output cannot smuggle an arbitrary host file into CAS.
         const full = resolve(dir, o.path);
         if (full !== dirRoot && !full.startsWith(dirRoot + sep)) throw new Error(`process.compute: declared output '${o.name}' resolved outside the work dir`);
-        let bytes: Buffer;
-        try { bytes = await fs.readFile(full); }
+        let st;
+        try { st = await fs.lstat(full); }
         catch { throw new Error(`process.compute: '${command[0]}' exited 0 but did not write declared output '${o.name}' (${o.path})`); }
+        if (st.isSymbolicLink()) throw new Error(`process.compute: declared output '${o.name}' must not be a symlink`);
+        if (!st.isFile()) throw new Error(`process.compute: declared output '${o.name}' must be a regular file`);
+        const real = await fs.realpath(full);
+        if (real !== realDirRoot && !real.startsWith(realDirRoot + sep)) throw new Error(`process.compute: declared output '${o.name}' realpath escaped the work dir`);
+        const bytes = await fs.readFile(real);
         const digest = createHash("sha256").update(bytes).digest("hex");
         await ctx.cas!.put({ algorithm: "sha256", digest }, bytes); // immutable + idempotent
         artifacts.push({ name: o.name, path: o.path, kind: o.kind, digest: `sha256:${digest}`, size: bytes.length });

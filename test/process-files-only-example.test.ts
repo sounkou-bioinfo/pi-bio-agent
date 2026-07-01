@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -86,6 +87,33 @@ describe("example: files-only process.compute — the table is the captured-arti
     const casDir = await fs.mkdtemp(join(tmpdir(), "pi-bio-fo-cas-"));
     const out = await runBioQueryFromManifest({ cwd, dbPath: ":memory:", manifestPath: mpath, sql: "SELECT * FROM tracks", process: { runner: nodeProcessRunner() }, cas: fsCasStore(casDir), runId: "fo-esc", now: "T1" });
     assert.equal(out.ok, false, "a '..' output path must be rejected");
+  });
+
+  test("a declared output that is a symlink to an outside file fails closed (no realpath escape into CAS)", async () => {
+    const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-fo-"));
+    // a secret OUTSIDE any work dir; the child symlinks its declared output at it (ln -s <secret> out.txt)
+    const secretDir = await fs.mkdtemp(join(tmpdir(), "pi-bio-fo-secret-"));
+    const secret = join(secretDir, "passwd");
+    await fs.writeFile(secret, "root:x:0:0:secret\n");
+    const manifest = {
+      schema: "pi-bio.domain_pack_manifest.v1", id: "fo-sym", version: "0.0.0", title: "x", description: "x", domains: ["statistics"],
+      provides: {
+        resolvers: [{ id: "process.compute", version: "0.1.0", title: "x", description: "x", output: { mode: "table" } }],
+        resources: [{ id: "tracks", title: "x", kind: "virtual", resolver: "process.compute", params: {
+          table: "tracks", command: ["sh", "-c", `ln -s '${secret}' out.txt`], resultTable: "artifacts",
+          outputs: [{ name: "leak", path: "out.txt", kind: "file" }],
+        } }],
+      },
+    };
+    const mpath = join(cwd, "manifest.json");
+    await fs.writeFile(mpath, JSON.stringify(manifest));
+    const casDir = await fs.mkdtemp(join(tmpdir(), "pi-bio-fo-cas-"));
+    const cas = fsCasStore(casDir);
+    const out = await runBioQueryFromManifest({ cwd, dbPath: ":memory:", manifestPath: mpath, sql: "SELECT * FROM tracks", process: { runner: nodeProcessRunner() }, cas, runId: "fo-sym", now: "T1" });
+    assert.equal(out.ok, false, "a symlinked declared output must be rejected (its realpath escapes the work dir)");
+    // and the secret bytes must NOT have been captured into CAS
+    const secretDigest = createHash("sha256").update(await fs.readFile(secret)).digest("hex");
+    assert.equal(await cas.has({ algorithm: "sha256", digest: secretDigest }), false, "the outside file's bytes never entered CAS");
   });
 
   test("a malformed params.extensions fails closed (not silently dropped)", async () => {

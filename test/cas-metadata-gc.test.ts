@@ -143,6 +143,29 @@ describe("CAS metadata GC: ref/lease anti-join (the distributed-safe sweep)", ()
     assert.equal(await cas.has(a), false);
   });
 
+  test("a failed physical remove reverts the row to tombstoned (never stuck in `deleting`) and rethrows", async () => {
+    const { conn, cas } = await setup();
+    const a = await store(cas, conn, "remove will fail for this one", 1000);
+    await gcMark(conn, { cutoffMs: 2000, nowMs: 2000 });
+    // a store whose remove throws (permissions / transient mount / object-store outage)
+    const flaky = { ...cas, remove: async () => { throw new Error("EACCES: simulated remove failure"); } };
+    await assert.rejects(gcSweep(conn, flaky, { graceMs: 0, nowMs: 3000 }), /simulated remove failure/);
+    const st = await conn.all<{ state: string }>(`SELECT state FROM cas_object WHERE digest = ?`, [a.digest]);
+    assert.equal(st[0].state, "tombstoned", "reverted to tombstoned, NOT orphaned in `deleting`");
+    // a later sweep with the real store now succeeds (the row is reclaimable, not stuck)
+    const swept = await gcSweep(conn, cas, { graceMs: 0, nowMs: 3500 });
+    assert.deepEqual(swept.map((s) => s.digest), [a.digest], "the retry sweeps it");
+    assert.equal(await cas.has(a), false);
+  });
+
+  test("cas-metadata rejects non-sha256 addresses (aligned with the sha256-only store)", async () => {
+    const { conn } = await setup();
+    const bad: ContentAddress = { algorithm: "blake3", digest: "deadbeef" };
+    await assert.rejects(recordCasObject(conn, bad, 4, 1000), /only sha256/);
+    await assert.rejects(addCasRef(conn, { refId: "r", refType: "run", address: bad }, 1000), /only sha256/);
+    await assert.rejects(acquireCasLease(conn, "h", bad, 1000, 1000), /only sha256/);
+  });
+
   test("gcMarkSweep end-to-end with one minAgeMs knob", async () => {
     const { conn, cas } = await setup();
     const keep = await store(cas, conn, "keep", 1000);

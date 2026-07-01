@@ -34,6 +34,15 @@ import type { ContentAddress } from "../core/resources.js";
 
 const TS = "BIGINT"; // epoch-ms timestamps, passed as params for deterministic tests
 
+// The metadata authority must stay aligned with the actual store. fsCasStore is sha256-only, so recording a
+// sha512/blake3 address here would create a heap/ref/lease row that no store byte can ever back — an address the
+// GC could "sweep" against nothing and that withCasObject could never resurrect. Fail closed at every entry point
+// until a store advertises another algorithm (ContentAddressAlgorithm allows more at the TYPE level; the RUNTIME
+// contract is sha256 today).
+function assertSha256(address: ContentAddress): void {
+  if (address.algorithm !== "sha256") throw new Error(`cas-metadata: only sha256 addresses are supported today (got '${address.algorithm}')`);
+}
+
 /** Create the three CAS-metadata tables if absent. Idempotent. Run once against the authority's SqlConn. */
 export async function initCasMetadata(conn: SqlConn): Promise<void> {
   await conn.run(`CREATE TABLE IF NOT EXISTS cas_object (
@@ -64,6 +73,7 @@ export async function initCasMetadata(conn: SqlConn): Promise<void> {
 /** Record a stored object as `committed` (idempotent — content-addressed, so a re-record is a no-op). Call right
  *  after `cas.put`. A previously tombstoned/deleted address that is written again is resurrected to committed. */
 export async function recordCasObject(conn: SqlConn, address: ContentAddress, sizeBytes: number | null, nowMs: number): Promise<void> {
+  assertSha256(address);
   await conn.run(
     `INSERT INTO cas_object (algorithm, digest, size_bytes, state, committed_at, tombstoned_at)
      VALUES (?, ?, ?, 'committed', ?, NULL)
@@ -77,6 +87,7 @@ export interface CasRefSpec { refId: string; refType: string; address: ContentAd
 /** Add a durable (or TTL'd) reference — a ROOT. Idempotent on (ref_id, ref_type, algorithm, digest); a repeat
  *  refreshes expires_at. This is how a retained run / captured artifact / remote-index entry roots its bytes. */
 export async function addCasRef(conn: SqlConn, ref: CasRefSpec, nowMs: number): Promise<void> {
+  assertSha256(ref.address);
   await conn.run(
     `INSERT INTO cas_ref (ref_id, ref_type, algorithm, digest, created_at, expires_at)
      VALUES (?, ?, ?, ?, ?, ?)
@@ -96,6 +107,7 @@ export async function dropCasRefs(conn: SqlConn, refId: string): Promise<{ dropp
 /** Acquire a lease over an address for `ttlMs`. Returns the lease id (release/renew with it). A leased object is
  *  retained by GC regardless of refs — this is the primitive a writer takes BEFORE reusing existing bytes. */
 export async function acquireCasLease(conn: SqlConn, holder: string, address: ContentAddress, ttlMs: number, nowMs: number): Promise<string> {
+  assertSha256(address);
   const leaseId = randomUUID();
   await conn.run(
     `INSERT INTO cas_lease (lease_id, holder, algorithm, digest, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)`,
@@ -193,8 +205,16 @@ export async function gcSweep(conn: SqlConn, cas: CasStore, opts: { graceMs: num
   const swept: ContentAddress[] = [];
   for (const { algorithm, digest } of claimed) {
     const address: ContentAddress = { algorithm: algorithm as ContentAddress["algorithm"], digest };
-    await cas.remove(address);
-    await conn.run(`UPDATE cas_object SET state = 'deleted' WHERE algorithm = ? AND digest = ? AND state = 'deleting'`, [algorithm, digest]);
+    try {
+      await cas.remove(address);
+      await conn.run(`UPDATE cas_object SET state = 'deleted' WHERE algorithm = ? AND digest = ? AND state = 'deleting'`, [algorithm, digest]);
+    } catch (e) {
+      // the physical remove failed (permissions, a transient mount, an object-store outage). Do NOT leave the row
+      // stuck in `deleting`: a subsequent sweep only claims `tombstoned` rows, so it would be orphaned forever, and
+      // withCasObject treats `deleting` as a miss. Revert to `tombstoned` so a later sweep retries, then surface it.
+      await conn.run(`UPDATE cas_object SET state = 'tombstoned' WHERE algorithm = ? AND digest = ? AND state = 'deleting'`, [algorithm, digest]);
+      throw e;
+    }
     swept.push(address);
   }
   return swept;
