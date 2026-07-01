@@ -9,7 +9,14 @@ output: github_document
 knitr::opts_chunk$set(comment = "")
 
 # custom knitr engine: run a LIVE pi agent session and weave its reply in.
-# We control the render, so: the command is wrapped (short lines) and the agent's reply is a blockquote.
+# We control the render, so: the command wraps the prompt onto short RUNNABLE lines (adjacent shell strings
+# concatenate) and the agent's reply is a blockquote.
+wrap_prompt <- function(p, width = 56) {
+  words <- strsplit(p, " ")[[1]]; lines <- character(0); cur <- ""
+  for (w in words) { if (nzchar(cur) && nchar(cur) + nchar(w) + 1 > width) { lines <- c(lines, cur); cur <- w } else cur <- if (nzchar(cur)) paste(cur, w) else w }
+  lines <- c(lines, cur); n <- length(lines)
+  paste(vapply(seq_len(n), function(i) paste0('  "', lines[i], if (i < n) " " else "", '"', if (i < n) " \\" else ""), ""), collapse = "\n")
+}
 knitr::knit_engines$set(pi = function(options) {
   prompt <- paste(options$code, collapse = " ")
   out <- tryCatch(
@@ -18,7 +25,7 @@ knitr::knit_engines$set(pi = function(options) {
     error = function(e) "[pi unavailable]")
   reply <- paste0("> ", gsub("\n", "\n> ", paste(out, collapse = "\n")))
   knitr::asis_output(paste0(
-    "``` sh\n", "pi -e extensions/pi-coding-agent/index.ts -p \\\n", '  "', prompt, '"\n', "```\n\n",
+    "``` sh\n", "pi -e extensions/pi-coding-agent/index.ts -p \\\n", wrap_prompt(prompt), "\n", "```\n\n",
     reply, "\n"))
 })
 

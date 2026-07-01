@@ -42,6 +42,13 @@ id it returns threads through as a header on the next call. And server-*pushed* 
 are **ducknng `wss`** — streaming is ours too, not a gap — with secrets never leaving the host boundary. So "call
 an MCP tool," "hit a token-gated database," and "subscribe to a stream" are all SQL.
 
+**And the inverse holds — pi-bio-agent can *be* an MCP server, not just call one.** `ducknng` mounts an HTTP
+server (*verified* — a POST to an `http://` ducknng mount returns a framed reply), so the substrate's declared
+operations can be **served over HTTP**. Wrapping them as MCP tools — a thin `initialize` / `tools/list` /
+`tools/call` → operation facade over the same host functions — turns pi-bio-agent into an **MCP server**, the
+mirror of the [`mcp.json`](../examples/connectors/mcp.json) client. (The HTTP-serve primitive is proven; the
+JSON-RPC facade is the next build, not a claim of done.)
+
 ## Fugu — learned orchestration
 
 [Sakana Fugu](https://sakana.ai/fugu/) ([release](https://sakana.ai/fugu-release/),

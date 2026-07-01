@@ -186,7 +186,9 @@ rendered:
 
 ``` sh
 pi -e extensions/pi-coding-agent/index.ts -p \
-  "How many variants of each consequence are in examples/variant-counts/manifest.json? Answer with a short table."
+  "How many variants of each consequence are in " \
+  "examples/variant-counts/manifest.json? Answer with a " \
+  "short table."
 ```
 
 > | consequence |   n |
@@ -233,15 +235,15 @@ pi-bio-agent query examples/variant-counts/manifest.json \
 ``` json
 {
   "ok": true,
-  "runId": "query-1782935982512",
+  "runId": "query-1782936505825",
   "status": "succeeded",
   "rowCount": 3,
   "artifacts": {
-    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782935982512/run.json",
-    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782935982512/result.json",
-    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782935982512/receipts.json"
+    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782936505825/run.json",
+    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782936505825/result.json",
+    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782936505825/receipts.json"
   },
-  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782935982512",
+  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782936505825",
   "rows": [
     {
       "consequence": "missense",
@@ -279,15 +281,15 @@ pi-bio-agent query examples/connectors/uniprot.json \
 ``` json
 {
   "ok": true,
-  "runId": "query-1782935982603",
+  "runId": "query-1782936505959",
   "status": "succeeded",
   "rowCount": 1,
   "artifacts": {
-    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782935982603/run.json",
-    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782935982603/result.json",
-    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782935982603/receipts.json"
+    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782936505959/run.json",
+    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782936505959/result.json",
+    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782936505959/receipts.json"
   },
-  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782935982603",
+  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782936505959",
   "rows": [
     {
       "primaryAccession": "P04637",
