@@ -123,6 +123,20 @@ branches + the volatile-scalar `ncurl` fix → `ncurl-retry`'s SQL-native recurs
 (`process.compute` over Arrow IPC, nanoarrow + argv + errors-as-values), region-scoped `duckhts.read_bcf`, a
 `duckdbInitSql` connection-init hook, CAS-of-bytes (`src/core/cas.ts`), and **the two-pillar coloc flagship**
 (`examples/coloc`, multi-tissue post-GWAS colocalization, DATA harmonization + out-of-process R `coloc.abf`).
+
+**Temporal memory + one Datomic/CAS store — BUILT (2026-07-02).** Memory is no longer flat files: notes
+(`agent:memory:<slug>`), **skills** (`skill:<name>`), facts, and **runs** (`run:<id>`, incl. ad-hoc SQL) are all
+**append-only, as-of, attributed** observations in ONE `bio_observations` store (`openBioStore`, `src/hosts/bio-store.ts`)
+— `bio_observations` IS a Datomic-style immutable time-indexed fact log. Memory ops: `remember`/`recall(asOf)`/
+`memoryHistory`/`forget` (tombstone retraction); a re-write supersedes but keeps the prior revision; `[[links]]`
+project into `bio_edges_as_of` (one closure crosses memory→ontology→fact). The agent's tools use it
+(`bio_remember`/`bio_recall`/`bio_list_memory`/`bio_forget`/`bio_walk_memory`, `bio_create_skill` temporal), a legible
+file is a *view*, and a `pi-bio-agent memory list/show/history` CLI reads it. **CAS bytes stay OUTSIDE the DB**: result
+rows → CAS by digest, the `run:<id>` fact references them (`resultDigest`/`sourceReceiptDigests`/`manifestDigest`);
+a content-addressed **ActionCache** (LLVM-style, `src/hosts/action-cache.ts`) maps input CASID → output CASID
+(dedup/memo/reproduce basis). Sharing escalates local file → shared path → ducknng/quack server → CAS, host-gated.
+**Still open:** receipts/replay bytes → CAS + run-files opt-in (`--serialize`); run-as-object-DAG; retire the
+`kg-sync`/`study-sync` SDK modules (the CLI already moved off them).
 Docs are kept honest by **literate generation** (`npm run readme:examples` runs the manifest; `check:examples`
 fails on drift). The items below are **not partial/owed work** and sandboxing/effect-limits are
 the **host's** job, never ours. They are also where the irreducibly **human** parts cluster (judgment, approval,
