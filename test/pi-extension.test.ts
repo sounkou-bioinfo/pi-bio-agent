@@ -39,7 +39,6 @@ describe("Pi coding-agent extension", () => {
       "bio_describe_model",
       "bio_list_duckdb_extensions",
       "bio_list_study_notes",
-      "bio_list_tool_specs",
       "bio_query",
       "bio_read_study_note",
       "bio_run_operation",
@@ -52,8 +51,8 @@ describe("Pi coding-agent extension", () => {
   test("safe registry and SQL tools execute through shared core logic", async () => {
     const { tools } = loadExtension();
     const byName = new Map(tools.map((tool) => [tool.name, tool]));
-    const listed = await byName.get("bio_list_tool_specs")!.execute("id", { query: "duckdb" });
-    assert.ok(listed.details.tools.length > 0);
+    const extensions = await byName.get("bio_list_duckdb_extensions")!.execute("id", { query: "duckhts" });
+    assert.ok(extensions.details.extensions.length > 0);
     const valid = await byName.get("bio_validate_select")!.execute("id", { sql: "SELECT * FROM bio_nodes;" });
     assert.deepEqual(valid.details, { ok: true, sql: "SELECT * FROM bio_nodes" });
     await assert.rejects(() => byName.get("bio_validate_select")!.execute("id", { sql: "DROP TABLE bio_nodes" }), /SELECT/);

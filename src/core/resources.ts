@@ -1,4 +1,4 @@
-import type { JsonValue } from "./tool-spec.js";
+import type { JsonValue } from "./json.js";
 import type { Provenance } from "./types.js";
 
 export type ContentAddressAlgorithm = "sha256" | "sha512" | "blake3";

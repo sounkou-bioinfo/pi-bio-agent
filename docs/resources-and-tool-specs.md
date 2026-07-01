@@ -1,25 +1,14 @@
 ---
 type: Reference
-title: Resources and BioToolSpec
-description: "Read before defining resources, resolvers, or BioToolSpec/operation contracts."
-tags: [resources, cas, tool-spec, operation-spec]
+title: Resources and resolvers
+description: "Read before defining resources, resolvers, or operation contracts."
+tags: [resources, cas, resolvers, operation-spec]
 ---
 
-# Resources and BioToolSpec
+# Resources and resolvers
 
-## BioToolSpec
-
-`BioToolSpec` is the provider-agnostic executable contract. It describes:
-
-- name, version, title, description
-- determinism: deterministic, judgment, or hybrid
-- typed inputs and outputs
-- parameter schema
-- execution surfaces: DuckDB SQL, DuckDB extension, process, R, Python, HTTP, MCP, Pi, memory, study
-- effects: read, write, network, execute, index, persist, prompt
-- safety and provenance
-
-The core never assumes a model provider, agent harness, HTTP client, shell runner, or database binding. Adapters bind a `BioToolSpec` to the current runtime.
+The core never assumes a model provider, agent harness, HTTP client, shell runner, or database binding. A
+manifest declares resources/resolvers/operations as data; a host binds the executable adapters at runtime.
 
 ## Resource handles
 
@@ -43,7 +32,7 @@ A `BioResolverSpec` declares a capability that turns a `VirtualResourceSpec` (an
 - DuckDB query
 - shell process
 
-Many bio tools are just HTTP requests plus validation. They should be modeled as a `BioResolverSpec` + `VirtualResourceSpec`, or a BioToolSpec with an HTTP surface, not custom framework code.
+Many bio tools are just HTTP requests plus validation. They should be modeled as a `BioResolverSpec` + `VirtualResourceSpec` (or SQL-native via `ducknng_ncurl_table`), not custom framework code.
 
 ## Single-user default
 

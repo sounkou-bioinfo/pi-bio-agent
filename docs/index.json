@@ -111,12 +111,12 @@
       "slug": "resources-and-tool-specs",
       "path": "docs/resources-and-tool-specs.md",
       "type": "Reference",
-      "title": "Resources and BioToolSpec",
-      "description": "Read before defining resources, resolvers, or BioToolSpec/operation contracts.",
+      "title": "Resources and resolvers",
+      "description": "Read before defining resources, resolvers, or operation contracts.",
       "tags": [
         "resources",
         "cas",
-        "tool-spec",
+        "resolvers",
         "operation-spec"
       ]
     },

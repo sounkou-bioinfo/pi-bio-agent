@@ -17,7 +17,7 @@
 - [DuckDB substrate](duckdb-substrate.md) — Read before using DuckDB tables, extensions, or SQL surfaces over bio data. _(duckdb, sql, extensions, substrate)_
 - [Machine studying lineage](machine-studying-lineage.md) — Read to understand what 'study' means here (machine studying) and how it lands on graphs. _(machine-studying, study-notes, graph-bet, lineage)_
 - [Ontologies and knowledge graphs](ontology-and-knowledge-graphs.md) — Read before modeling ontologies, KG nodes/edges, or the graph-as-substrate bet. _(ontology, knowledge-graph, graph-bet, provenance)_
-- [Resources and BioToolSpec](resources-and-tool-specs.md) — Read before defining resources, resolvers, or BioToolSpec/operation contracts. _(resources, cas, tool-spec, operation-spec)_
+- [Resources and resolvers](resources-and-tool-specs.md) — Read before defining resources, resolvers, or operation contracts. _(resources, cas, resolvers, operation-spec)_
 - [Roadmap, success, and testing contract](roadmap.md) — Read before planning roadmap, success metrics, tests, or flagship work. _(roadmap, testing, success, flagship)_
 
 ## Worklog

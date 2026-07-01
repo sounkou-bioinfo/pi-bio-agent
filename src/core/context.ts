@@ -1,5 +1,4 @@
 import type { BioSource } from "./types.js";
-import type { BioToolRegistry } from "./tool-spec.js";
 import type { DuckDbExtensionCatalog } from "../duckdb/extensions.js";
 
 // Compact registry context: what the agent has available, not a speculative aggregate of every bio shape.
@@ -8,14 +7,12 @@ import type { DuckDbExtensionCatalog } from "../duckdb/extensions.js";
 // In-memory only — the interface IS the contract; no serialized envelope, so no schema tag.
 export interface BioContext {
   sources: BioSource[];
-  toolRegistry: BioToolRegistry;
   duckdbExtensions?: DuckDbExtensionCatalog;
 }
 
 export function summarizeBioContext(ctx: BioContext): string {
   return [
     `Sources: ${ctx.sources.length}`,
-    `Tool specs: ${ctx.toolRegistry.tools.length}`,
     `DuckDB extensions: ${ctx.duckdbExtensions?.extensions.length ?? 0}`,
   ].join("\n");
 }

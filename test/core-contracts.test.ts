@@ -4,21 +4,8 @@ import { defineBioOperationSpec, operationSpecIndex, registryFromOperations, val
 import { contentAddressUri, isContentAddressUri } from "../src/core/resources.js";
 import { appendRunEvent, defineBioRunSpec, newRunRecord, validateBioRunSpec, type BioRunSpec } from "../src/core/run-spec.js";
 import { bioProjectLayout, casPathForAddress, validateContentAddress } from "../src/core/storage.js";
-import { defineBioToolSpec, validateBioToolSpec, type BioToolSpec } from "../src/core/tool-spec.js";
 import { makeConceptNode, validateReadOnlySelect } from "../src/core/knowledge-graph.js";
 import { deriveStudyPlan, memoryNodeId, parseStudyNoteLinks, studyNoteGraph, studyNoteIndex, studyNoteLinkEdges, studyNoteNode, validateStudyNote, STUDY_DEFAULT_LINK_PREDICATE, type StudyNote } from "../src/core/study.js";
-
-const validTool: BioToolSpec = {
-  name: "test.echo",
-  version: "0.1.0",
-  title: "Echo",
-  description: "Echo a value for tests.",
-  determinism: "deterministic",
-  inputs: [{ name: "input", kind: "question", required: true }],
-  outputs: [{ name: "output", kind: "fact_bundle" }],
-  surfaces: [{ substrate: "pi", constraints: { readOnly: true } }],
-  effects: ["read"],
-};
 
 const validOperation: BioOperationSpec = {
   id: "variants.classify",
@@ -46,25 +33,6 @@ const validRun: BioRunSpec = {
   budget: { maxWallClockSeconds: 300, maxToolCalls: 20 },
   checkpointPolicy: { intervalSeconds: 60, resumable: true },
 };
-
-describe("BioToolSpec validation", () => {
-  test("accepts a valid spec and returns the same object from defineBioToolSpec", () => {
-    assert.deepEqual(validateBioToolSpec(validTool), []);
-    assert.equal(defineBioToolSpec(validTool), validTool);
-  });
-
-  test("reports malformed specs without throwing", () => {
-    const errors = validateBioToolSpec({ name: "Bad Name" } as unknown as BioToolSpec);
-    assert.ok(errors.some((e) => e.includes("name must be lowercase")));
-    assert.ok(errors.includes("at least one execution surface is required"));
-    assert.ok(errors.includes("at least one effect is required"));
-  });
-
-  test("rejects write effects on read-only surfaces", () => {
-    const errors = validateBioToolSpec({ ...validTool, effects: ["read", "write"] });
-    assert.ok(errors.includes("read-only surfaces cannot declare write effects"));
-  });
-});
 
 describe("BioOperationSpec validation", () => {
   test("accepts operation specs and builds registries", () => {

@@ -5,7 +5,7 @@ export * from "./variants.js";
 export * from "./ontology.js";
 export * from "./knowledge-graph.js";
 export * from "./operation-spec.js";
-export * from "./tool-spec.js";
+export * from "./json.js";
 export * from "./resources.js";
 export * from "./run-spec.js";
 export * from "./storage.js";

@@ -1,12 +1,10 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { summarizeBioContext, type BioContext } from "../../src/core/context.js";
-import { findToolSpecs, toolSpecIndex } from "../../src/core/tool-spec.js";
 import { validateReadOnlySelect } from "../../src/core/knowledge-graph.js";
 import { deriveStudyPlan, studyNoteIndex, type StudyArtifactKind, type StudyCorpus, type StudyNote } from "../../src/core/study.js";
 import { deleteStudyNote, listStudyNotes, makeStudyNote, readStudyNotes, runtimeSkillRoot, runtimeStudyRoot, writeProjectSkill, writeStudyNote } from "../../src/hosts/pi-project.js";
 import { defaultDuckDbExtensionCatalog, findDuckDbExtensions } from "../../src/duckdb/extensions.js";
-import { defaultBioToolRegistry } from "../../src/primitives/bio-tool-specs.js";
 import { runBioOperationFromManifest, runBioQueryFromManifest } from "../../src/hosts/run-store.js";
 import type { FetchLike } from "../../src/duckdb/resolvers/http-table-scan.js";
 
@@ -35,12 +33,11 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
   pi.registerTool({
     name: "bio_describe_model",
     label: "Describe Pi Bio model",
-    description: "Describe the pi-bio-agent domain model: SQL-first bio primitives, ontology/KG modeling, provenance, BioToolSpec contracts, resources, DuckDB extension substrate, and context contract.",
+    description: "Describe the pi-bio-agent domain model: SQL-first bio primitives, ontology/KG modeling, provenance, resources, DuckDB extension substrate, and context contract.",
     parameters: Type.Object({}),
     async execute() {
       const ctx: BioContext = {
         sources: [],
-        toolRegistry: defaultBioToolRegistry,
         duckdbExtensions: defaultDuckDbExtensionCatalog,
       };
       return text({
@@ -50,23 +47,10 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
           "Ontologies are SQL graph tables: terms, edges, synonyms, xrefs, term sets, and mappings to local concepts.",
           "Knowledge graphs are typed nodes and edges with trust/provenance blocks; summaries are expansion handles, not facts.",
           "Use scoped graph-as-SQL for counts, joins, trends, and provenance instead of serializing neighborhoods into prompt context.",
-          "BioToolSpec is the provider-agnostic contract; adapters bind it to Pi tools, DuckDB, R, shell, HTTP, MCP, or memory.",
+          "A manifest is the program: declare resources/operations/termSets as data; the agent writes read-only SQL over them.",
           "The agent may author project-local skills when a repeated workflow emerges; run /reload to expose them.",
         ],
       });
-    },
-  });
-
-  pi.registerTool({
-    name: "bio_list_tool_specs",
-    label: "List BioToolSpec contracts",
-    description: "List or search the provider-agnostic BioToolSpec registry. Use before claiming a bioinformatics tool surface is missing.",
-    parameters: Type.Object({
-      query: Type.Optional(Type.String({ description: "Optional text search over id, label, and description." })),
-    }),
-    async execute(_id, params: { query?: string }) {
-      const matches = params.query ? findToolSpecs(defaultBioToolRegistry, params.query) : toolSpecIndex(defaultBioToolRegistry);
-      return text({ schema: defaultBioToolRegistry.schema, tools: matches });
     },
   });
 

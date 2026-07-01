@@ -1,4 +1,4 @@
-import type { JsonSchema } from "./tool-spec.js";
+import type { JsonSchema } from "./json.js";
 import type { Provenance } from "./types.js";
 
 // Executable today = duckdb.sql. Non-SQL transports (http/graphql/openapi/mcp/local) were declared but had

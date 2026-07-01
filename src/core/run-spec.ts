@@ -1,6 +1,6 @@
 import type { ResourceHandle } from "./resources.js";
 import { systemClock } from "./clock.js";
-import type { JsonValue } from "./tool-spec.js";
+import type { JsonValue } from "./json.js";
 import type { BioArtifact, Provenance } from "./types.js";
 
 export type BioRunMode = "inline" | "background" | "subagent" | "service" | "batch";
