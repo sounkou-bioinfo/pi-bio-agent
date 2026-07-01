@@ -1,5 +1,7 @@
 import { promises as fs } from "node:fs";
+import { createHash } from "node:crypto";
 import { systemClock } from "../core/clock.js";
+import { RUN_REPLAY_SPEC_SCHEMA, type RunReplaySpec } from "../core/reproducibility.js";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { createBioRegistry, type BioRegistry, type DomainPackManifest, type ResolutionReceipt } from "../core/manifest.js";
@@ -161,10 +163,12 @@ function resolveInCwd(cwd: string, p: string): string {
 
 /** Load + validate + register a manifest and bind the built-in resolver impls it declares. Shared by the
  *  operation and the ad-hoc query entry points. */
-async function prepareRegistry(req: { cwd: string; manifestPath: string; network?: { fetch: FetchLike }; process?: { runner: ProcessRunner } }): Promise<{ registry: BioRegistry; manifest: DomainPackManifest }> {
+async function prepareRegistry(req: { cwd: string; manifestPath: string; network?: { fetch: FetchLike }; process?: { runner: ProcessRunner } }): Promise<{ registry: BioRegistry; manifest: DomainPackManifest; raw: DomainPackManifest; manifestDigest: string }> {
   const manifestPath = resolveInCwd(req.cwd, req.manifestPath);
-  const raw = JSON.parse(await fs.readFile(manifestPath, "utf8")) as DomainPackManifest;
-  const manifest = resolveResourcePaths(raw, dirname(manifestPath)); // relative resource paths -> manifest dir
+  const text = await fs.readFile(manifestPath, "utf8");
+  const raw = JSON.parse(text) as DomainPackManifest; // the AUTHORED manifest — portable replay intent (relative paths intact)
+  const manifestDigest = `sha256:${createHash("sha256").update(text).digest("hex")}`;
+  const manifest = resolveResourcePaths(raw, dirname(manifestPath)); // relative resource paths -> manifest dir (resolved execution facts)
   const registry = createBioRegistry();
   registry.registerManifest(manifest); // throws on an invalid manifest (fail closed)
   // Host-injected capability resolvers — present only when the host GRANTS them by composition; absent => the
@@ -177,7 +181,17 @@ async function prepareRegistry(req: { cwd: string; manifestPath: string; network
     const impl = BUILTIN_RESOLVERS[r.id] ?? injected[r.id];
     if (impl) registry.bindResolverImpl(r.id, impl);
   }
-  return { registry, manifest };
+  return { registry, manifest, raw, manifestDigest };
+}
+
+/** The RESOLVED process.compute facts for a run's resources (absolute command paths etc. — what actually ran on
+ *  this host), captured beside the authored manifest snapshot so replay has BOTH portable intent and local facts.
+ *  First process resource among `resources` (the walking-skeleton case; coloc/files-only declare one). */
+function resolvedProcessFacts(manifest: DomainPackManifest, resources: string[]): RunReplaySpec["process"] | undefined {
+  const r = (manifest.provides?.resources ?? []).find((x) => x.resolver === PROCESS_RESOLVER && resources.includes(x.id));
+  if (!r) return undefined;
+  const p = r.params as { table?: string; command?: readonly string[]; inputSql?: string; resultTable?: "arrow" | "artifacts"; outputs?: Array<{ name: string; path: string; kind?: string }> };
+  return { resourceId: r.id, table: p.table, command: p.command, inputSql: p.inputSql, resultTable: p.resultTable, outputs: p.outputs };
 }
 
 /** Acquire → use → release: own a DuckDB instance/connection for one run, persist the result (or a failed-run
@@ -188,6 +202,7 @@ async function runAndPersist(
   initSql?: string[],
   bindings?: Record<string, unknown>,
   duckdbConfig?: Record<string, string>,
+  replay?: RunReplaySpec,
 ): Promise<RunOperationResponse> {
   const instance = await DuckDBInstance.create(resolveInCwd(cwd, dbPath), duckdbConfig);
   const connection = await instance.connect();
@@ -209,12 +224,15 @@ async function runAndPersist(
     try {
       const { run, result, receipts } = await body(conn);
       const persisted = await persistRun(cwd, runId, { run, result, receipts });
+      // C1: seed the REPLAY bundle beside result/receipts — the actual inputs C2's reproduce() will re-execute.
+      if (replay) await writeRunFile(persisted.dir, "replay.json", replay);
       return { ok: true, runId, operationId: identity, status: run.status, rowCount: result.rows.length, artifacts: persisted.files, runDir: persisted.dir };
     } catch (error) {
       // A run that started and failed at runtime persists a failed-run receipt and returns ok:false; the
       // failure is auditable, not lost. Pre-flight/config errors (which never became a run) still throw.
       if (error instanceof OperationRunError) {
         const persisted = await persistFailedRun(cwd, runId, { run: error.run, receipts: error.receipts });
+        if (replay) await writeRunFile(persisted.dir, "replay.json", replay); // a failed run is replayable too (reproduce the failure)
         return { ok: false, runId, operationId: identity, status: error.run.status, error: error.message, runDir: persisted.dir };
       }
       throw error;
@@ -234,13 +252,21 @@ export async function runBioOperationFromManifest(req: RunOperationRequest): Pro
   if (req.runId !== undefined && !/^[A-Za-z0-9._-]+$/.test(req.runId)) {
     throw new Error("runId must contain only [A-Za-z0-9._-] (no path separators)"); // no run-dir traversal
   }
-  const { registry } = await prepareRegistry(req);
+  const { registry, raw, manifest, manifestDigest } = await prepareRegistry(req);
   const op = registry.getOperation(req.operationId);
   if (!op) throw new Error(`operation '${req.operationId}' is not declared in the manifest`);
   if (op.transport !== "duckdb.sql" || !op.sql) throw new Error(`operation '${req.operationId}' is not a duckdb.sql operation`);
   const now = req.now ?? systemClock();
   const runId = req.runId ?? `${req.operationId.replace(/[^a-zA-Z0-9._-]/g, "_")}-${Date.now()}`;
-  return runAndPersist(req.cwd, req.dbPath, runId, req.operationId, (conn) => runOperation(registry, conn, { operationId: req.operationId, runId, now, signal: req.signal, cas: req.cas }), req.duckdbInitSql, req.bindings, req.duckdbConfig);
+  const allResources = (manifest.provides?.resources ?? []).map((r) => r.id);
+  const replay: RunReplaySpec = {
+    schema: RUN_REPLAY_SPEC_SCHEMA, runId, kind: "operation",
+    manifest: { digest: manifestDigest, snapshot: raw, path: req.manifestPath },
+    operationId: req.operationId, sql: op.sql.sqlTemplate,
+    ...(req.bindings ? { bindings: req.bindings } : {}), ...(req.duckdbInitSql ? { duckdbInitSql: req.duckdbInitSql } : {}),
+    ...(resolvedProcessFacts(manifest, allResources) ? { process: resolvedProcessFacts(manifest, allResources) } : {}),
+  };
+  return runAndPersist(req.cwd, req.dbPath, runId, req.operationId, (conn) => runOperation(registry, conn, { operationId: req.operationId, runId, now, signal: req.signal, cas: req.cas }), req.duckdbInitSql, req.bindings, req.duckdbConfig, replay);
 }
 
 export interface RunQueryRequest {
@@ -282,9 +308,16 @@ export async function runBioQueryFromManifest(req: RunQueryRequest): Promise<Run
   if (req.runId !== undefined && !/^[A-Za-z0-9._-]+$/.test(req.runId)) {
     throw new Error("runId must contain only [A-Za-z0-9._-] (no path separators)");
   }
-  const { registry, manifest } = await prepareRegistry(req);
+  const { registry, manifest, raw, manifestDigest } = await prepareRegistry(req);
   const resources = req.resources ?? (manifest.provides?.resources ?? []).map((r) => r.id);
   const now = req.now ?? systemClock();
   const runId = req.runId ?? `query-${Date.now()}`;
-  return runAndPersist(req.cwd, req.dbPath, runId, "ad-hoc.query", (conn) => runQuery(registry, conn, { sql: req.sql, resources, runId, now, signal: req.signal, cas: req.cas }), req.duckdbInitSql, req.bindings, req.duckdbConfig);
+  const replay: RunReplaySpec = {
+    schema: RUN_REPLAY_SPEC_SCHEMA, runId, kind: "query",
+    manifest: { digest: manifestDigest, snapshot: raw, path: req.manifestPath },
+    sql: req.sql, resources,
+    ...(req.bindings ? { bindings: req.bindings } : {}), ...(req.duckdbInitSql ? { duckdbInitSql: req.duckdbInitSql } : {}),
+    ...(resolvedProcessFacts(manifest, resources) ? { process: resolvedProcessFacts(manifest, resources) } : {}),
+  };
+  return runAndPersist(req.cwd, req.dbPath, runId, "ad-hoc.query", (conn) => runQuery(registry, conn, { sql: req.sql, resources, runId, now, signal: req.signal, cas: req.cas }), req.duckdbInitSql, req.bindings, req.duckdbConfig, replay);
 }

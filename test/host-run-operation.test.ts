@@ -90,9 +90,9 @@ describe("host: bio_run_operation end-to-end", () => {
     const receiptIds = receipts.map((r: { resourceId: string }) => r.resourceId).sort();
     assert.deepEqual(receiptIds, ["annotated_variants", "so_loss_of_function"]);
 
-    // exactly three artifacts — the result IS the report; there is no report.json (deleted) and no extras
+    // the result IS the report; there is no report.json (deleted). replay.json is the C1 reproduce() seed.
     const onDisk = (await fs.readdir(dir)).sort();
-    assert.deepEqual(onDisk, ["receipts.json", "result.json", "run.json"]);
+    assert.deepEqual(onDisk, ["receipts.json", "replay.json", "result.json", "run.json"]);
   });
 
   test("a run that fails at runtime persists a failed-run receipt and returns ok:false", async () => {
@@ -119,7 +119,8 @@ describe("host: bio_run_operation end-to-end", () => {
     const dir = join(runsRoot(cwd), "fail-1");
     assert.equal(res.runDir, dir);
     // run.json + receipts.json persisted; NO result.json — there is no answer, but the failure is auditable
-    assert.deepEqual((await fs.readdir(dir)).sort(), ["receipts.json", "run.json"]);
+    // (replay.json is seeded even for a failed run — you can replay to reproduce the failure)
+    assert.deepEqual((await fs.readdir(dir)).sort(), ["receipts.json", "replay.json", "run.json"]);
     const run_ = JSON.parse(await fs.readFile(join(dir, "run.json"), "utf8"));
     assert.equal(run_.status, "failed");
     assert.match(run_.error, /no_such_column/i);
