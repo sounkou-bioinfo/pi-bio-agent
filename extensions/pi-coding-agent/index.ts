@@ -58,9 +58,9 @@ const BIO_ORIENTATION = [
 // prompt each turn, so recall is cheap and the agent reaches for existing memory before re-deriving — the trick
 // that makes a MEMORY.md-style index useful. Bounded to keep the token cost small; failures are swallowed (an
 // index is a convenience, never a hard dependency).
-async function memoryIndexBlock(cwd: string): Promise<string> {
+async function memoryIndexBlock(open: OpenStore, cwd: string): Promise<string> {
   try {
-    const mems = await withStore(cwd, (conn) => listMemory(conn, MEMORY_NOW));
+    const mems = await withStore(open, cwd, (conn) => listMemory(conn, MEMORY_NOW));
     if (mems.length === 0) return "";
     const lines = mems.slice(0, 30).map((m) => `- ${m.slug} — ${m.hook}${m.author ? ` (${m.author})` : ""}`);
     return `\n\n[memory index] Your current memory (recall with bio_recall / bio_walk_memory before re-deriving):\n${lines.join("\n")}`;
@@ -75,11 +75,11 @@ async function memoryIndexBlock(cwd: string): Promise<string> {
 //      writer), so skip logging rather than break the run;
 //   2. the store cannot be opened (locked by another process / unavailable) — logging is a convenience, not a
 //      hard dependency of the query. A genuinely broken store still surfaces on the next memory op (withStore).
-async function openRunLog(cwd: string, dbPath: string): Promise<BioStore | undefined> {
+async function openRunLog(open: OpenStore, cwd: string, dbPath: string): Promise<BioStore | undefined> {
   const runDb = dbPath === ":memory:" ? "" : isAbsolute(dbPath) ? dbPath : resolve(cwd, dbPath);
   if (runDb && runDb === bioStorePath(cwd)) return undefined; // (1) the run uses the store file itself
   try {
-    return await openBioStore(cwd);
+    return await open(cwd);
   } catch {
     return undefined; // (2) store unavailable — log is best-effort
   }
@@ -87,8 +87,8 @@ async function openRunLog(cwd: string, dbPath: string): Promise<BioStore | undef
 
 // open → use → close the ONE store for a memory operation (the store is the source of truth; a re-write here
 // supersedes, a delete tombstones, reads are as-of). Failures propagate (unlike the run-log, memory IS the point).
-async function withStore<T>(cwd: string, fn: (conn: SqlConn) => Promise<T>): Promise<T> {
-  const store = await openBioStore(cwd);
+async function withStore<T>(open: OpenStore, cwd: string, fn: (conn: SqlConn) => Promise<T>): Promise<T> {
+  const store = await open(cwd);
   try {
     return await fn(store.conn);
   } finally {
@@ -96,15 +96,24 @@ async function withStore<T>(cwd: string, fn: (conn: SqlConn) => Promise<T>): Pro
   }
 }
 
+type OpenStore = (cwd: string) => Promise<BioStore>;
+
 export interface BioExtensionOptions {
   network?: { fetch: FetchLike };
   /** The authoring agent id stamped on runs/memory this instance records (shared-store attribution). */
   author?: string;
+  /** How to open the ONE store. Default: the project-local file (`openBioStore(cwd)`), a process-exclusive writer
+   *  — fine for a single project run serially, but it LOCKS out concurrent openers. For inter-project /
+   *  inter-agent / inter-process / inter-machine memory, the host injects a SERVER-backed store here — a
+   *  connection to a ducknng `run_rpc` or a duckdb quack server — so many agents share one live store without
+   *  lock contention. This is the provider-agnostic seam: the library records; the host decides where memory lives. */
+  openStore?: OpenStore;
 }
 
 export function createBioExtension(options: BioExtensionOptions = {}): (pi: ExtensionAPI) => void {
   const network = options.network;
   const author = options.author ?? "agent:local";
+  const openStore: OpenStore = options.openStore ?? ((cwd) => openBioStore(cwd));
   return function piBioAgentExtension(pi: ExtensionAPI): void {
   pi.on("resources_discover", (event) => ({
     skillPaths: [runtimeSkillRoot(event.cwd)],
@@ -114,7 +123,7 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
   // way: append to the chained system prompt in before_agent_start). It points at DISCOVERY tools + the examples
   // dir rather than enumerating volatile specifics, so it can never lie as the corpus changes.
   pi.on("before_agent_start", async (event) => ({
-    systemPrompt: `${event.systemPrompt}\n\n${BIO_ORIENTATION}${await memoryIndexBlock(event.systemPromptOptions?.cwd ?? process.cwd())}`,
+    systemPrompt: `${event.systemPrompt}\n\n${BIO_ORIENTATION}${await memoryIndexBlock(openStore, event.systemPromptOptions?.cwd ?? process.cwd())}`,
   }));
 
   pi.registerTool({
@@ -163,7 +172,7 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
       // host-only capabilities the tool schema omits (duckdbInitSql / now / cwd) if the schema validator does
       // not strip unknown keys. network/signal are host-composed, never agent-supplied.
       const { dbPath, manifestPath, operationId, runId } = params;
-      const store = await openRunLog(ctx.cwd, dbPath);
+      const store = await openRunLog(openStore, ctx.cwd, dbPath);
       try {
         return text(await runBioOperationFromManifest({ cwd: ctx.cwd, dbPath, manifestPath, operationId, runId, network, signal, store: store?.conn, author }));
       } finally {
@@ -187,7 +196,7 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
     async execute(_id, params: { dbPath: string; manifestPath: string; sql: string; resources?: string[]; bindings?: Record<string, unknown>; runId?: string }, signal, _onUpdate, ctx) {
       // Only schema-approved fields (see bio_run_operation): never spread untrusted params into the host runner.
       const { dbPath, manifestPath, sql, resources, bindings, runId } = params;
-      const store = await openRunLog(ctx.cwd, dbPath);
+      const store = await openRunLog(openStore, ctx.cwd, dbPath);
       try {
         return text(await runBioQueryFromManifest({ cwd: ctx.cwd, dbPath, manifestPath, sql, resources, bindings, runId, network, signal, store: store?.conn, author }));
       } finally {
@@ -233,7 +242,7 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
     async execute(_id, params: { name: string; description: string; body: string }, _signal, _onUpdate, ctx) {
       // Temporal + attributed like memory (a re-create supersedes, prior revision kept); the SKILL.md file is the
       // current view pi loads.
-      await withStore(ctx.cwd, (conn) => recordSkill(conn, params, systemClock(), author));
+      await withStore(openStore, ctx.cwd, (conn) => recordSkill(conn, params, systemClock(), author));
       const path = await writeProjectSkill(ctx.cwd, params.name, params.description, params.body);
       return text({ path, stored: skillSubjectId(params.name), author, message: "Skill recorded (temporal, superseded on re-create) + written. Run /reload to load it in this Pi session." });
     },
@@ -280,7 +289,7 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
       const note = makeStudyNote(params); // normalize slug + parse [[links]] from the body
       const mem: MemoryContent = { slug: note.slug, kind: note.kind, title: note.title, hook: note.hook, body: note.body, tags: note.tags ?? [] };
       // The ledger is the source of truth (append-only, as-of, attributed); the file is a legible git-diffable view.
-      await withStore(ctx.cwd, (conn) => remember(conn, mem, systemClock(), author));
+      await withStore(openStore, ctx.cwd, (conn) => remember(conn, mem, systemClock(), author));
       const { path } = await writeStudyNote(ctx.cwd, note);
       return text({ stored: memorySubjectId(note.slug), author, materialized: path, note: { slug: note.slug, kind: note.kind, title: note.title, hook: note.hook, tags: note.tags } });
     },
@@ -296,7 +305,7 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
       asOf: Type.Optional(Type.String({ description: "ISO time — list memory AS OF then (time-travel; default now)." })),
     }),
     async execute(_id, params: { query?: string; limit?: number; asOf?: string }, _signal, _onUpdate, ctx) {
-      let mems = await withStore(ctx.cwd, (conn) => listMemory(conn, params.asOf ?? MEMORY_NOW));
+      let mems = await withStore(openStore, ctx.cwd, (conn) => listMemory(conn, params.asOf ?? MEMORY_NOW));
       if (params.query) {
         const q = params.query.toLowerCase();
         mems = mems.filter((m) => `${m.slug} ${m.title} ${m.hook} ${m.body}`.toLowerCase().includes(q));
@@ -318,7 +327,7 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
       const root = runtimeStudyRoot(ctx.cwd);
       try {
         // walkMemoryGraph reads slug/kind/title/hook/tags + parses [[links]] from body — all carried by MemoryContent.
-        const mems = await withStore(ctx.cwd, (conn) => listMemory(conn, MEMORY_NOW));
+        const mems = await withStore(openStore, ctx.cwd, (conn) => listMemory(conn, MEMORY_NOW));
         const graph = walkMemoryGraph(mems as unknown as StudyNote[], { start: params.start, depth: params.depth });
         return text({ root, start: params.start ?? null, depth: params.start ? params.depth ?? 1 : null, nodeCount: graph.nodes.length, edgeCount: graph.edges.length, graph });
       } catch (e) {
@@ -337,7 +346,7 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
       asOf: Type.Optional(Type.String({ description: "ISO time — read the revision that was current AS OF then (default now)." })),
     }),
     async execute(_id, params: { id: string; asOf?: string }, _signal, _onUpdate, ctx) {
-      const note = await withStore(ctx.cwd, (conn) => recall(conn, params.id, params.asOf ?? MEMORY_NOW));
+      const note = await withStore(openStore, ctx.cwd, (conn) => recall(conn, params.id, params.asOf ?? MEMORY_NOW));
       if (!note) throw new Error(`no memory found for slug '${params.id}'${params.asOf ? ` as of ${params.asOf}` : ""}`);
       return text(note);
     },
@@ -349,7 +358,7 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
     description: "Forget a memory note by slug — a TEMPORAL RETRACTION, not destruction: recall(now) becomes null and it drops from the current list, but recall AS OF an earlier time still sees it (memory is never erased). Prefer updating by slug via bio_remember; forget only rotten units.",
     parameters: Type.Object({ slug: Type.String({ description: "Slug of the note to forget." }) }),
     async execute(_id, params: { slug: string }, _signal, _onUpdate, ctx) {
-      await withStore(ctx.cwd, (conn) => forget(conn, params.slug, systemClock(), author));
+      await withStore(openStore, ctx.cwd, (conn) => forget(conn, params.slug, systemClock(), author));
       await deleteStudyNote(ctx.cwd, params.slug); // remove the legible file view too (the ledger keeps the history)
       return text({ forgotten: true, slug: params.slug, note: "temporal retraction — recall as-of an earlier time still sees it" });
     },
