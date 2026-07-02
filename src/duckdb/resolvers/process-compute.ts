@@ -7,6 +7,12 @@ import { validateReadOnlySelect } from "../../core/sql-guard.js";
 import type { BioResolverImpl, ProcessRunner } from "../../core/ports.js";
 import { attestEnvironment, validateEnvDescriptor, ENV_ATTESTATION_SCHEMA, type EnvDescriptor } from "../../core/reproducibility.js";
 
+// A declared process output is read whole into memory (hash -> CAS), so an unbounded artifact would OOM the Node
+// host — the same class of risk the http byte-cap addresses. Cap it fail-closed at a generous default (checked
+// against the file's stat size BEFORE reading it into a buffer). A huge legitimate output belongs in a streamed
+// sink the host owns, not a materialized artifact.
+const DEFAULT_MAX_OUTPUT_BYTES = 256 * 1024 * 1024; // 256 MiB
+
 // The COMPUTE-pillar resolver: materialize a table by running an OUT-OF-PROCESS computation (R / Python / Go /
 // shell) over a DuckDB input, exchanging Arrow IPC. The DATA contract stays in SQL/Arrow — this resolver does
 // the marshalling, the injected ProcessRunner only spawns:
@@ -25,7 +31,7 @@ import { attestEnvironment, validateEnvDescriptor, ENV_ATTESTATION_SCHEMA, type 
 //     TABLE, by convention a `status` column ("ok" / "error: <msg>") the agent branches on in SQL — the COMPUTE
 //     script's job, not the resolver's. So a partial failure (one tissue, one batch) is data, not a crash.
 //
-// params: { table, inputSql?, command, env?, timeoutMs?, extensions?, outputs?, resultTable? }
+// params: { table, inputSql?, command, env?, timeoutMs?, extensions?, outputs?, resultTable?, maxOutputBytes? }
 //   table       output table (its identity); a valid SQL identifier
 //   inputSql    OPTIONAL — a single read-only SELECT/WITH producing the input handed to the process (validated).
 //               Absent = a FILES-ONLY op with no Arrow input (the tool uses its own inputs / command args).
@@ -57,7 +63,13 @@ const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 export function processComputeResolver(runner: ProcessRunner): BioResolverImpl {
   return async (resource, ctx) => {
-    const p = resource.params as { table?: unknown; inputSql?: unknown; command?: unknown; env?: unknown; timeoutMs?: unknown; extensions?: unknown; outputs?: unknown; resultTable?: unknown; environment?: unknown };
+    const p = resource.params as { table?: unknown; inputSql?: unknown; command?: unknown; env?: unknown; timeoutMs?: unknown; extensions?: unknown; outputs?: unknown; resultTable?: unknown; environment?: unknown; maxOutputBytes?: unknown };
+    // Per-output byte cap: can only TIGHTEN the default (min), never raise it — a manifest can't opt OUT of the
+    // OOM guard, only ask for a stricter one.
+    if (p.maxOutputBytes !== undefined && (typeof p.maxOutputBytes !== "number" || !Number.isFinite(p.maxOutputBytes) || p.maxOutputBytes <= 0)) {
+      throw new Error("process.compute: params.maxOutputBytes must be a positive number of bytes");
+    }
+    const maxOutputBytes = Math.min(typeof p.maxOutputBytes === "number" ? p.maxOutputBytes : DEFAULT_MAX_OUTPUT_BYTES, DEFAULT_MAX_OUTPUT_BYTES);
     if (typeof p.table !== "string" || !IDENT.test(p.table)) throw new Error("process.compute requires params.table to be a valid SQL identifier");
     // inputSql is OPTIONAL: absent = a FILES-ONLY op (the tool reads/writes its own files; no Arrow input handed in).
     // Present = the op gets its input table as Arrow IPC (in.arrow, appended to argv).
@@ -190,6 +202,7 @@ export function processComputeResolver(runner: ProcessRunner): BioResolverImpl {
         catch { throw new Error(`process.compute: '${command[0]}' exited 0 but did not write declared output '${o.name}' (${o.path})`); }
         if (st.isSymbolicLink()) throw new Error(`process.compute: declared output '${o.name}' must not be a symlink`);
         if (!st.isFile()) throw new Error(`process.compute: declared output '${o.name}' must be a regular file`);
+        if (st.size > maxOutputBytes) throw new Error(`process.compute: declared output '${o.name}' is ${st.size} bytes, over the ${maxOutputBytes}-byte cap — refusing to read it whole into memory (fail closed)`);
         const real = await fs.realpath(full);
         if (real !== realDirRoot && !real.startsWith(realDirRoot + sep)) throw new Error(`process.compute: declared output '${o.name}' realpath escaped the work dir`);
         const bytes = await fs.readFile(real);

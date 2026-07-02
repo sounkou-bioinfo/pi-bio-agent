@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runBioQueryFromManifest } from "../src/hosts/run-store.js";
 import { nodeProcessRunner } from "../src/process/node-process-runner.js";
+import { fsCasStore } from "../src/hosts/fs-cas.js";
 
 // Param-guard tests for the process.compute resolver — these validate BEFORE any spawn or extension LOAD, so
 // they need neither R nor nanoarrow and run deterministically everywhere. They lock in the hardening from the
@@ -75,5 +76,22 @@ describe("process.compute: fail-closed param guards (no spawn, no R)", () => {
     const out = await runWith({ ...good, env: { OMP_NUM_THREADS: 4 } });
     assert.equal(out.ok, false);
     assert.match(out.error ?? "", /params\.env\.OMP_NUM_THREADS must be a string/);
+  });
+
+  test("maxOutputBytes must be a positive number (fail closed)", async () => {
+    const out = await runWith({ ...good, maxOutputBytes: -1 });
+    assert.equal(out.ok, false);
+    assert.match(out.error ?? "", /maxOutputBytes must be a positive number/);
+  });
+
+  test("SECURITY: a declared output OVER the cap is refused before it is read whole into memory (OOM guard)", async () => {
+    const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-guards-cap-"));
+    const cas = fsCasStore(await fs.mkdtemp(join(tmpdir(), "pi-bio-cas-")));
+    const params = { table: "r", resultTable: "artifacts", command: ["sh", "-c", "printf hello > out.txt"], outputs: [{ name: "o", path: "out.txt" }], maxOutputBytes: 1 };
+    const manifest = { ...BASE, provides: { ...BASE.provides, resources: [{ id: "r", title: "r", kind: "virtual", resolver: "process.compute", params }] } };
+    await fs.writeFile(join(cwd, "manifest.json"), JSON.stringify(manifest));
+    const out = await runBioQueryFromManifest({ cwd, dbPath: ":memory:", manifestPath: "manifest.json", sql: "SELECT * FROM r", process: { runner: nodeProcessRunner() }, cas, runId: "cap1", now: "T1" });
+    assert.equal(out.ok, false, "the 5-byte output exceeds the 1-byte cap");
+    assert.match(String((out as { error?: unknown }).error ?? ""), /over the 1-byte cap/);
   });
 });
