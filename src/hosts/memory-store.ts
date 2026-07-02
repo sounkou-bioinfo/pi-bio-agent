@@ -35,6 +35,15 @@ export const memorySubjectId = (slug: string): string => `${MEMORY_NS}${slug}`;
 // this is the memory slot's binding of it to the MEMORY_NOW sentinel.
 const monotonicNow = (conn: SqlConn, subject: string, now: string): Promise<string> => monotonicRecordedAt(conn, subject, now, MEMORY_NOW);
 
+/** A citation backing a memory note — where the claim came from. Carried in the TEMPORAL store (not just the
+ *  file view) so shared/as-of recall keeps its provenance: a memory without its sources is an unfalsifiable claim. */
+export interface MemorySource {
+  path?: string;
+  url?: string;
+  locator?: string;
+  quote?: string;
+}
+
 export interface MemoryContent {
   slug: string;
   kind: string;
@@ -42,6 +51,8 @@ export interface MemoryContent {
   hook: string;
   body: string;
   tags: string[];
+  /** citations backing the note; persisted into the ledger so `recall`/shared memory don't lose provenance. */
+  sources?: MemorySource[];
 }
 
 /** A recalled memory: its content plus WHO authored the current revision (`source`). In shared memory the author
@@ -68,7 +79,7 @@ export async function remember(conn: SqlConn, note: MemoryContent, wallNow: stri
     statementKey: subject,
     subjectId: subject,
     predicate: CONTENT,
-    value: { kind: note.kind, title: note.title, hook: note.hook, body: note.body, tags: note.tags },
+    value: { kind: note.kind, title: note.title, hook: note.hook, body: note.body, tags: note.tags, ...(note.sources && note.sources.length ? { sources: note.sources } : {}) },
     recordedAt: now,
     source: author,
   });
@@ -103,7 +114,7 @@ export async function remember(conn: SqlConn, note: MemoryContent, wallNow: stri
 function rowToContent(row: ObservationRow | null): RecalledMemory | null {
   if (!row || row.value_json == null) return null; // a tombstone (forgotten) carries null content
   const v = JSON.parse(row.value_json) as Omit<MemoryContent, "slug">;
-  return { slug: row.subject_id.slice(MEMORY_NS.length), kind: v.kind, title: v.title, hook: v.hook, body: v.body, tags: v.tags ?? [], author: row.source ?? null };
+  return { slug: row.subject_id.slice(MEMORY_NS.length), kind: v.kind, title: v.title, hook: v.hook, body: v.body, tags: v.tags ?? [], ...(v.sources && v.sources.length ? { sources: v.sources } : {}), author: row.source ?? null };
 }
 
 /** Recall a memory slug's content (and its author) AS OF a time (default now). null if it did not exist yet or was forgotten by then. */

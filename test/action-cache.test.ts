@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { createHash } from "node:crypto";
 import { promises as fsp } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -135,5 +136,28 @@ describe("ActionCache: input CASID -> output CASID (LLVM CAS ActionCache in the 
     const replay = JSON.parse(await fsp.readFile(join(res.runDir, "replay.json"), "utf8"));
     // the run produced a CAS resultDigest, but because a live source is blind to content it must NOT be memoized:
     assert.equal(await recallRunResult(store, cas, replay), null, "a live-source run is a recall MISS (re-run, never serve a stale cached result)");
+  });
+
+  test("CORRECTNESS: recall FAILS CLOSED when the memo DIVERGED from the run's recorded output (non-determinism)", async () => {
+    const store = await conn();
+    const cas = fsCasStore(await fsp.mkdtemp(join(tmpdir(), "cas-")));
+    // a minimal replay with a STABLE input CASID; two runs with these same inputs produced DIFFERENT outputs (a bit
+    // of non-determinism not flagged live_source, e.g. random()/now()), so the ActionCache slot has been superseded.
+    const replay = { kind: "query" as const, sql: "SELECT random() AS r", sourceReceiptDigests: [] as string[] };
+    const input = actionInputDigest(replay);
+    const bytesO2 = Buffer.from(JSON.stringify([{ r: 2 }]));
+    const o2hex = createHash("sha256").update(bytesO2).digest("hex");
+    await cas.put({ algorithm: "sha256", digest: o2hex }, bytesO2); // the CURRENT (later) output's bytes live in CAS
+    const o2 = `sha256:${o2hex}`;
+    const o1 = "sha256:" + "1".repeat(64); // an earlier, now-superseded output (no bytes needed — recall must miss first)
+    await actionCachePut(store, input, o1, "2026-01-01T00:00:01Z", "agent:A");
+    await actionCachePut(store, input, o2, "2026-01-01T00:00:02Z", "agent:B"); // diverged: the latest memo maps to O2
+    // recalling the run that RECORDED O1 must NOT silently serve O2's rows — a diverged memo is a MISS (fail closed)
+    assert.equal(await recallRunResult(store, cas, { ...replay, resultDigest: o1 }), null, "diverged memo -> recall miss, never serve a different result than the run recorded");
+    // recalling with the CURRENT output pin (or none) is a legitimate hit, serving O2's rows from CAS
+    const hit = await recallRunResult(store, cas, { ...replay, resultDigest: o2 });
+    assert.deepEqual(hit?.rows, [{ r: 2 }]);
+    assert.equal(hit?.resultDigest, o2);
+    assert.ok(await recallRunResult(store, cas, replay), "no pin -> plain memo hit (returns the current mapping)");
   });
 });

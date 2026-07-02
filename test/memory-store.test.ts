@@ -25,6 +25,17 @@ describe("temporal memory over bio_observations", () => {
     assert.equal((await recall(c, "s"))?.body, "ok");
   });
 
+  test("citations (sources) are persisted INTO the ledger, so recall/shared memory keep provenance (not just the file view)", async () => {
+    const c = await conn();
+    const sources = [{ url: "https://www.ebi.ac.uk/ols4", locator: "MONDO:0004979", quote: "asthma" }];
+    await remember(c, { ...note("cited", "asthma is MONDO:0004979"), sources }, T1, "agent:A");
+    const r = await recall(c, "cited");
+    assert.deepEqual(r?.sources, sources, "the citation survived the round-trip through the temporal store");
+    // a re-write WITHOUT sources supersedes and drops them (latest-wins), so they aren't silently sticky
+    await remember(c, note("cited", "asthma is MONDO:0004979"), T2, "agent:A");
+    assert.equal((await recall(c, "cited"))?.sources, undefined, "a later revision with no sources supersedes — sources are per-revision, not sticky");
+  });
+
   test("reconciliation only touches MEMORY's own wikilink edges — a foreign edge fact from the same subject survives", async () => {
     const c = await conn();
     await remember(c, note("foo", "hi [[bar]]"), T1); // a memory wikilink edge foo|<pred>|bar

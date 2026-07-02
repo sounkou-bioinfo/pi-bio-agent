@@ -267,9 +267,10 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
     }),
     async execute(_id, params: { name: string; description: string; body: string }, _signal, _onUpdate, ctx) {
       // Temporal + attributed like memory (a re-create supersedes, prior revision kept); the SKILL.md file is the
-      // current view pi loads.
-      await withStore(openStore, ctx.cwd, (conn) => recordSkill(conn, params, systemClock(), author));
+      // current view pi loads. WRITE (which validates the name/inputs) FIRST, then record — so invalid skill input
+      // that writeProjectSkill rejects never pollutes the append-only ledger with a skill that has no SKILL.md.
       const path = await writeProjectSkill(ctx.cwd, params.name, params.description, params.body);
+      await withStore(openStore, ctx.cwd, (conn) => recordSkill(conn, params, systemClock(), author));
       return text({ path, stored: skillSubjectId(params.name), author, message: "Skill recorded (temporal, superseded on re-create) + written. Run /reload to load it in this Pi session." });
     },
   });
@@ -313,7 +314,8 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
     }),
     async execute(_id, params: { kind: StudyArtifactKind; title: string; hook: string; body: string; slug?: string; tags?: string[]; sources?: StudyNote["sources"] }, _signal, _onUpdate, ctx) {
       const note = makeStudyNote(params); // normalize slug + parse [[links]] from the body
-      const mem: MemoryContent = { slug: note.slug, kind: note.kind, title: note.title, hook: note.hook, body: note.body, tags: note.tags ?? [] };
+      // carry `sources` INTO the temporal store too — else shared/as-of recall loses the citations the file view keeps.
+      const mem: MemoryContent = { slug: note.slug, kind: note.kind, title: note.title, hook: note.hook, body: note.body, tags: note.tags ?? [], ...(note.sources && note.sources.length ? { sources: note.sources } : {}) };
       // The ledger is the source of truth (append-only, as-of, attributed); the file is a legible git-diffable view.
       await withStore(openStore, ctx.cwd, (conn) => remember(conn, mem, systemClock(), author));
       const { path } = await writeStudyNote(ctx.cwd, note);

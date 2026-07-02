@@ -88,10 +88,17 @@ export async function recallRunResult(
   // MUST be the SAME field set actionInputDigest keys on — omitting the result-affecting execution facts
   // (duckdbInitSqlDigest/duckdbConfigDigest/process/environment) would compute a WEAKER recall key than the one the
   // run was stored under, so a caller's minimal replay could collide with a simpler run and serve its wrong rows.
-  replay: Pick<RunReplaySpec, "kind" | "manifest" | "operationId" | "sql" | "resources" | "bindings" | "sourceReceiptDigests" | "duckdbInitSqlDigest" | "duckdbConfigDigest" | "process" | "environment">,
+  // (`resultDigest` is NOT part of the input key — it's the run's RECORDED output, used below to fail closed on a
+  // memo that has since diverged.)
+  replay: Pick<RunReplaySpec, "kind" | "manifest" | "operationId" | "sql" | "resources" | "bindings" | "sourceReceiptDigests" | "duckdbInitSqlDigest" | "duckdbConfigDigest" | "process" | "environment" | "resultDigest">,
 ): Promise<{ rows: unknown[]; resultDigest: string } | null> {
   const outputDigest = await actionCacheGet(store, actionInputDigest(replay));
   if (!outputDigest) return null;
+  // DIVERGENCE guard: if this replay pins the run's RECORDED output, the memo must still agree with it. A later
+  // identical-input run whose output DIFFERED (a non-deterministic bit not caught by live_source — random()/now() in
+  // SQL) supersedes the memo, so recalling THIS run would otherwise silently serve the NEWER run's rows. Fail closed
+  // — a diverged memo is a recall MISS; reproduce() is where that non-determinism is meant to surface, not recall.
+  if (replay.resultDigest && replay.resultDigest !== outputDigest) return null;
   const address = { algorithm: "sha256" as const, digest: outputDigest.replace(/^sha256:/, "") };
   if (!(await cas.has(address))) return null; // referenced but bytes evicted (e.g. GC) — a miss, re-run instead
   const rows = JSON.parse(await fs.readFile(cas.pathFor(address), "utf8")) as unknown[];

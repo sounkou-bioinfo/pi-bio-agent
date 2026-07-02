@@ -140,8 +140,9 @@ maps input CASID → output CASID; a **run object** (Data + Refs → input/resul
 re-execution. Sharing escalates local file → shared path → a **DuckDB server** (ducknng `run_rpc`, exec opt-in; a
 host may alternatively front its own quack server — we dropped quack as *our* transport but own ducknng) → CAS,
 host-gated (the extension's `openStore` seam lets a host inject the server-backed store).
-**All the previously-deferred store items are now built** (receipts/replay→CAS, `--serialize` lean mode,
-run-as-object-DAG, safe memoized recall).
+**All the previously-deferred store items are now built** (receipts/replay→CAS, `serialize:false` lean mode (a
+host/API option on the run request, not a CLI flag — lean mode needs a CAS the host injects), run-as-object-DAG,
+safe memoized recall).
 Docs are kept honest by **literate generation** (`npm run readme:examples` runs the manifest; `check:examples`
 fails on drift). The items below are **not partial/owed work** and sandboxing/effect-limits are
 the **host's** job, never ours. They are also where the irreducibly **human** parts cluster (judgment, approval,
