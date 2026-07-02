@@ -60,8 +60,19 @@ ducknng does robust param handling — host code, not a library default. **Secur
 with mTLS / peer-allowlists ([[honest-boundary]]); reads need no extra grant.
 
 Because every row carries its **author** (`source`, part of observation identity) and an **as-of** time, a shared
-store stays attributed and consistent — two agents writing the same memory slug are two attributed revisions, not
-a clobber. That is Fugu's inter-workflow shared memory (report §3.2.2) made literal.
+store stays attributed — two agents writing the same memory slug become two attributed revisions, not a silent
+clobber. That is Fugu's inter-workflow shared memory (report §3.2.2) made literal.
+
+> **Open residue — concurrent same-slug writes are not yet linearizable over a server.** `remember`/`forget`
+> serialize same-slug writes *within one process* via `withSlotLock(statement_key)` + a monotonic `recorded_at`
+> (see [`src/hosts/memory-store.ts`](../src/hosts/memory-store.ts)). Across **separate RPC clients**, that lock does
+> not span processes: two clients can read the same latest revision, compute the same `recorded_at`, and insert
+> competing revisions — current-as-of then breaks the tie by `observation_id DESC`, which is **not** the real write
+> order, so a concurrent `remember`→`forget` can resolve either way. The fix is server-side atomicity: the
+> **server** must serialize per `statement_key` (a lock / single-writer transaction / atomic advance+insert
+> procedure), which the naive inline-SQL RPC conn above does not do. Until then, treat a server-backed store as safe
+> for **distinct** slugs or **serialized** access, not for concurrent same-slug contention. This is a named build
+> (frontier residue), not a claimed guarantee.
 
 ## This is proven, not aspirational
 

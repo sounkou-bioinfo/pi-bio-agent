@@ -503,6 +503,31 @@ htslib / direct fs reaching local files and remote URLs. The library is delibera
 sandbox; egress + fs confinement are the HOST's boundary (container/seccomp/Pi/OS). `validateReadOnlySelect`
 governs statement CLASS (single read-only SELECT), not reachability.
 
+### Frontier residues for public release (pal #13, 2026-07-02) — two named builds, not claims
+
+**(1) DuckDB-level egress defense-in-depth (network fail-open by default).** Concretely reachable: in the DEFAULT
+Pi profile (no host `network` grant), `bio_query(sql: "SELECT * FROM read_csv_auto('https://…')")` — or a
+`duckdb.sql_materialize` resource with `extensions:["httpfs"]` — reaches the network *if* httpfs autoloads or is
+pre-installed, WITHOUT the `network` capability. This is the pal #1-4 "egress is the host sandbox" doctrine, still
+sound as *a* layer, but "rely on the operator's OS sandbox" is not fail-closed-by-default for a PUBLISHED library.
+Proposed defense-in-depth, gated on the host `network` grant (so it's off exactly when http.get is also off):
+open the run's DuckDB with `autoinstall_known_extensions=false` + `autoload_known_extensions=false` +
+`disabled_filesystems='HTTPFileSystem,S3FileSystem'` (blocks network FS, KEEPS local file_scan/read_bcf), sealed
+with `lock_configuration=true` so agent SQL can't re-enable it. Must NOT break: local file resolvers, and the
+host-GRANTED ncurl-via-ducknng path (ducknng is loaded only when the host grants network — so it stays open in the
+granted profile). BUILD needs: verify each knob's exact DuckDB semantics (esp. that `lock_configuration` doesn't
+block `SET VARIABLE` bindings), thread the network-grant boolean to `runAndPersist`'s instance creation, add a test
+that agent `read_csv_auto('https://…')` fails closed in the default profile. **Touches settled doctrine — decide
+before overturning; this is defense-in-depth, not a contradicted claim.**
+
+**(2) Server-side atomic monotonic writes ([[reproducibility-and-longrunning-lane]] residue #2).** Concurrent
+same-slug `remember`/`forget` over separate RPC clients are not linearizable — `withSlotLock` serializes only
+in-process; two clients read the same latest revision, compute the same `recorded_at`, insert competing revisions,
+and current-as-of ties on `observation_id DESC` (not write order). Now documented as an open residue in
+`docs/concurrency.md`. FIX: the ducknng server serializes per `statement_key` — a server-side lock / single-writer
+transaction / atomic advance-then-insert procedure exposed as an RPC method. Needs the ducknng RPC harness stood
+up (a focused build). Until built: server-backed store is safe for distinct slugs / serialized access only.
+
 ## Network opt-in hardening — pal review #4 follow-ups
 
 The host network opt-in is wired by COMPOSITION, not ambient env: `createBioExtension({ network })` takes the

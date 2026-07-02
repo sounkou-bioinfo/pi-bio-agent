@@ -1,10 +1,13 @@
-// RUNNABLE proof: concurrent memory over a ducknng RPC server (the inter-process/agent/machine mode from
-// docs/concurrency.md). A server process owns the ONE `bio_observations` store; two SEPARATE agent processes
-// remember/recall through it over `ducknng_run_rpc` / `ducknng_query_rpc`. No agent opens the store file, so the
-// process-exclusive-writer lock that stops concurrent FILE access never applies — agent:B (a different OS process)
-// reads agent:A's memory, attributed. The memory-store functions are reused UNCHANGED: they take a `SqlConn`, and
-// here that conn routes over RPC. (Params are inlined into the RPC SQL string with escaping — the robust version
-// is host code; this is a dogfood.)  Run: `node scripts/memory-over-ducknng.mjs`
+// RUNNABLE smoke test: cross-process SHARED memory over a ducknng RPC server (the inter-process/agent/machine mode
+// from docs/concurrency.md). A server process owns the ONE `bio_observations` store; two SEPARATE agent processes
+// remember/recall through it over `ducknng_run_rpc` / `ducknng_query_rpc`, SEQUENTIALLY (A writes, then B reads).
+// No agent opens the store file, so the process-exclusive-writer lock that stops concurrent FILE access never
+// applies — agent:B (a different OS process) reads agent:A's memory, attributed. NOTE: this proves separate-process
+// RPC *sharing*, NOT concurrent same-slug writes (those need server-side per-statement_key serialization — see
+// docs/concurrency.md), nor persistent/inter-machine behavior (the server DB here is `:memory:`). The memory-store
+// functions are reused UNCHANGED: they take a `SqlConn` that here routes over RPC. (Params are inlined into the RPC
+// SQL string with escaping — the robust version is host code; this is a dogfood.)
+// Run: `npm run build && node scripts/memory-over-ducknng.mjs`  (imports ../dist)
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { DuckDBInstance } from "@duckdb/node-api";

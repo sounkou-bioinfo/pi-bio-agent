@@ -1,4 +1,6 @@
-// RUNNABLE proof: the FULL RLM shape as map-reduce across PROCESSES — not a flat GROUP BY over pre-labeled rows.
+// RUNNABLE demo: the RLM MAP-REDUCE *shape* across PROCESSES — not a flat GROUP BY over pre-labeled rows. This is
+// NOT a full RLM and does not measure one: no LM, no recursion, no unbounded context. It shows the STRUCTURE with a
+// deterministic SQL stand-in for the semantic map, so it is testable.
 // RLM (arXiv 2512.24601) recurses an LM over partitions of an unbounded context. The genuinely hard part is the
 // SEMANTIC MAP: each row arrives UNLABELED (free text), and a worker INFERS its label (a judgment-boundary — an LM
 // live; a deterministic SQL rule here). The distributional answer is only the REDUCE, after labels exist.
@@ -7,8 +9,9 @@
 //   SUPERVISOR splits the context into partitions -> fans out to WORKER PROCESSES, each with its OWN :memory:
 //   DuckDB SQL REPL that labels its partition and returns artifacts on stdout (workers NEVER touch shared state) ->
 //   the HOST is the SINGLE WRITER that merges the label artifacts -> the distributional query is a deterministic
-//   GROUP BY over the inferred labels. So the map is the recursion RLM pays for; the reduce is the count RLM gets
-//   wrong at long context and we get exact.  Run: `npm run build && node scripts/rlm-map-reduce.mjs`
+//   GROUP BY over the inferred labels. So the map is the recursion RLM pays for; the reduce is the distributional
+//   count that a flat long-context pass degrades on (the RLM paper's motivation) and a GROUP BY computes exactly.
+//   Run: `npm run build && node scripts/rlm-map-reduce.mjs`
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { DuckDBInstance } from "@duckdb/node-api";
@@ -82,7 +85,8 @@ if (process.argv[2] === "worker") {
   const expected = { description: 2, human: 3, location: 3, number: 3, entity: 1 };
   const ok = JSON.stringify(Object.fromEntries(Object.entries(counts).sort())) === JSON.stringify(Object.fromEntries(Object.entries(expected).sort()));
   if (!ok) { console.error("FAIL: aggregate mismatch", { counts, expected }); process.exit(1); }
-  console.log("\nPROVED: the semantic MAP ran per-partition in separate worker processes (each its own SQL REPL); the");
-  console.log("HOST single-writer merged the label artifacts; the distributional answer is an exact GROUP BY — the count");
-  console.log("RLM gets wrong at long context. The flat GROUP BY is only the REDUCE half; this shows the MAP it elides.");
+  console.log("\nSHOWN: the (deterministic stand-in) semantic MAP ran per-partition in separate worker processes (each");
+  console.log("its own SQL REPL); the HOST single-writer merged the label artifacts; the distributional answer is an exact");
+  console.log("GROUP BY. The flat GROUP BY is only the REDUCE half; this demo shows the MAP STRUCTURE it elides — no LM,");
+  console.log("no recursion, no unbounded context (that is the shape RLM fills, not an RLM measurement).");
 }
