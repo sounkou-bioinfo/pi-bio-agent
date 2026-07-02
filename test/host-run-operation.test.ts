@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { BioManifest } from "../src/core/manifest.js";
 import type { FetchLike } from "../src/duckdb/resolvers/http-table-scan.js";
-import { persistRun, runBioOperationFromManifest, runBioQueryFromManifest, runsRoot } from "../src/hosts/run-store.js";
+import { persistRun, persistFailedRun, runBioOperationFromManifest, runBioQueryFromManifest, runsRoot } from "../src/hosts/run-store.js";
 
 // End-to-end through the host: a manifest JSON on disk -> validated registry -> built-in resolvers -> a
 // duckdb.sql operation -> persisted run/result/receipts. Both resources use duckdb.file_scan (a
@@ -217,6 +217,17 @@ describe("host: bio_run_operation end-to-end", () => {
       () => persistRun(cwd, "../../etc/evil", { run: {} as never, result: {} as never, receipts: [] }),
       /no path separators/,
     );
+  });
+
+  test("persistFailedRun removes a stale result.json from a prior successful run at the same runId", async () => {
+    const cwd = await fs.mkdtemp(join(tmpdir(), "biorun-"));
+    const runId = "reused";
+    const exists = (name: string) => fs.access(join(runsRoot(cwd), runId, name)).then(() => true).catch(() => false);
+    await persistRun(cwd, runId, { run: { schema: "pi-bio.run_record.v1" } as never, result: { rows: [{ n: 1 }] } as never, receipts: [] });
+    assert.equal(await exists("result.json"), true, "success wrote result.json");
+    await persistFailedRun(cwd, runId, { run: { schema: "pi-bio.run_record.v1", status: "failed" } as never, receipts: [] });
+    assert.equal(await exists("result.json"), false, "a later FAILED run removed the stale success result.json");
+    assert.equal(await exists("run.json"), true, "the failed run.json is written");
   });
 
   test("fails closed when a declared resolver is not a host built-in", async () => {

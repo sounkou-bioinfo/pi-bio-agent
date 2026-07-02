@@ -11,11 +11,22 @@
 // default. (See docs/design.md: powerful by default, host-controlled effects, provenance-aware not policy-obsessed.)
 const forbiddenSql = /\b(insert|update|delete|drop|alter|create|attach|detach|copy|pragma|install|load|export|import|call|reset|begin|commit|rollback|vacuum|checkpoint|truncate|merge)\b/i;
 
+// Scan a copy with STRING LITERALS / QUOTED IDENTIFIERS / COMMENTS removed, so a keyword or ';' INSIDE a literal
+// (`SELECT 'drop' AS word`, `SELECT ';' AS c`) is not a false positive. DuckDB escapes quotes by doubling (''/"").
+function stripLiteralsAndComments(sql: string): string {
+  return sql
+    .replace(/--[^\n]*/g, " ")            // line comments
+    .replace(/\/\*[\s\S]*?\*\//g, " ")    // block comments
+    .replace(/'(?:[^']|'')*'/g, "''")     // single-quoted string literals
+    .replace(/"(?:[^"]|"")*"/g, '""');    // double-quoted identifiers
+}
+
 /** Assert `sql` is a single read-only SELECT/WITH statement; returns it trimmed (sans trailing `;`). Throws otherwise. */
 export function validateReadOnlySelect(sql: string): string {
   const trimmed = sql.trim().replace(/;\s*$/, "");
-  if (trimmed.includes(";")) throw new Error("one statement only");
+  const scan = stripLiteralsAndComments(trimmed); // check statement class on the literal-free copy
+  if (scan.includes(";")) throw new Error("one statement only");
   if (!/^(select|with)\b/i.test(trimmed)) throw new Error("query must be a SELECT or WITH ... SELECT");
-  if (forbiddenSql.test(trimmed)) throw new Error("query contains forbidden write/DDL keywords");
-  return trimmed;
+  if (forbiddenSql.test(scan)) throw new Error("query contains forbidden write/DDL keywords");
+  return trimmed; // return the ORIGINAL sql (literals intact) — only the SCAN copy was stripped
 }

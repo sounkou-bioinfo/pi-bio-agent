@@ -11,6 +11,16 @@ describe("validateReadOnlySelect: the single read-only SQL guard", () => {
     assert.equal(validateReadOnlySelect("WITH t AS (SELECT 1) SELECT * FROM t"), "WITH t AS (SELECT 1) SELECT * FROM t");
   });
 
+  test("does NOT false-positive on forbidden keywords or ';' inside string literals / comments", () => {
+    assert.equal(validateReadOnlySelect("SELECT 'drop' AS word"), "SELECT 'drop' AS word");
+    assert.equal(validateReadOnlySelect("SELECT ';' AS c, 'a; b' AS d"), "SELECT ';' AS c, 'a; b' AS d");
+    assert.equal(validateReadOnlySelect("SELECT 'it''s a delete' AS s"), "SELECT 'it''s a delete' AS s"); // '' escaped quote
+    assert.equal(validateReadOnlySelect("SELECT 1 /* delete this */ AS n"), "SELECT 1 /* delete this */ AS n");
+    // a REAL write keyword outside a literal still fails closed
+    assert.throws(() => validateReadOnlySelect("SELECT 1; DELETE FROM v"), /one statement only/);
+    assert.throws(() => validateReadOnlySelect("SELECT 'ok'; DROP TABLE v"), /one statement only/);
+  });
+
   test("fails closed on writes, side effects, and statement stacking", () => {
     for (const [sql, re] of [
       ["DELETE FROM v", /SELECT/],

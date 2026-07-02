@@ -143,6 +143,9 @@ export async function persistRun(cwd: string, runId: string, payload: RunPayload
 export async function persistFailedRun(cwd: string, runId: string, payload: { run: BioRunRecord; receipts: ResolutionReceipt[] }, opts: { serialize?: boolean } = {}): Promise<{ dir: string; files: { run: string; receipts?: string } }> {
   const dir = runDir(cwd, runId);
   await fs.mkdir(dir, { recursive: true });
+  // a FAILED run has NO result — remove a stale result.json/replay.json a PRIOR (successful) run at this runId may
+  // have left, so a reader never sees a failed run.json beside a misleading success result.
+  await Promise.all([fs.rm(join(dir, "result.json"), { force: true }), fs.rm(join(dir, "replay.json"), { force: true })]);
   const files: { run: string; receipts?: string } = { run: await writeRunFile(dir, "run.json", payload.run) };
   if (opts.serialize !== false) files.receipts = await writeRunFile(dir, "receipts.json", payload.receipts);
   return { dir, files };
