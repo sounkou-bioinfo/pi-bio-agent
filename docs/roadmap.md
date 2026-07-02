@@ -136,7 +136,7 @@ ontology-ingested-as-statements; the atemporal compiled `bio_edges` graph is a s
 (`bio_remember`/`bio_recall`/`bio_list_memory`/`bio_forget`/`bio_walk_memory`, `bio_create_skill` temporal), a legible
 file is a *view*, and a `pi-bio-agent memory list/show/history` CLI reads it. **When the host supplies a `cas`, CAS
 bytes stay OUTSIDE the DB**: result rows, the full receipts blob, and the replay bundle → CAS by digest and the
-`run:<id>` fact + a `casRefs` response reference them (`resultDigest`/`receiptsDigest`/`replayDigest`); with no `cas`
+`run:<id>` fact (`resultDigest`/`receiptsDigest`/`replayDigest`) + a `casRefs` response (`result`/`receipts`/`replay`) reference them; with no `cas`
 (the CLI/default Pi tools do not inject one) those bytes live only in the run's JSON files and the digests are
 `undefined`. **Lean mode** (`serialize:false`) *requires* a cas — it skips the JSON files, so the bytes must have
 somewhere else to go. A content-addressed **ActionCache** (LLVM-style, `src/hosts/action-cache.ts`)
