@@ -141,7 +141,8 @@ bytes stay OUTSIDE the DB**: result rows, the full receipts blob, and the replay
 `undefined`. **Lean mode** (`serialize:false`) *requires* a cas — it skips the JSON files, so the bytes must have
 somewhere else to go. A content-addressed **ActionCache** (LLVM-style, `src/hosts/action-cache.ts`)
 maps input CASID → output CASID; a **run object** (Data + Refs → input/result CASIDs) gives one root
-`runObjectDigest` per run (dedup by hash); `recallRunResult` replays a recorded run's result from CAS with no
+`runObjectDigest` per **successful, CAS-backed** run (one with a `resultDigest`; a failed run records only its
+receipts/replay digests, no run object) for dedup by hash; `recallRunResult` replays a recorded run's result from CAS with no
 re-execution. Sharing escalates local file → shared path → a **DuckDB server** (ducknng `run_rpc`, exec opt-in; a
 host may alternatively front its own quack server — we dropped quack as *our* transport but own ducknng) → CAS,
 host-gated (the extension's `openStore` seam lets a host inject the server-backed store).

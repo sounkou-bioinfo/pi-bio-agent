@@ -79,10 +79,13 @@ export function runsRoot(cwd: string): string {
 // a job/replay id accepted there MUST persist/execute/reproduce here.
 const RUN_DIR_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 
-// DuckDB ambient-source readers / remote URIs that pull data NOT captured by a resolver receipt — their presence in
-// ad-hoc SQL makes a run NON-HERMETIC, so it must not be memoized in the ActionCache (a hit could serve stale bytes).
-// Conservative denylist: a false match only over-skips memoization (re-run), a miss would over-memoize (unsafe).
-const AMBIENT_SQL_READ = /\b(read_csv(_auto)?|read_parquet|parquet_scan|read_json(_auto)?|read_ndjson|read_text|read_blob|sniff_csv|glob|iceberg_scan|delta_scan)\s*\(|'(https?|s3|gs|gcs|az|azure|r2|hf):/i;
+// DuckDB ambient-source readers / remote URIs / REPLACEMENT SCANS that pull data NOT captured by a resolver receipt —
+// their presence in ad-hoc SQL makes a run NON-HERMETIC, so it must not be memoized in the ActionCache (a hit could
+// serve stale bytes). Broad + fail-closed: a false match only over-skips memoization (re-run), a miss over-memoizes
+// (unsafe). Catches any `read_*(`/`*_scan(` table function (present or FUTURE), glob/sniff, a FROM/JOIN <string
+// literal> replacement scan (`FROM 'data.csv'` auto-reads the file), and a remote-URI literal. (An exotic ambient
+// reader not matching these is the residual denylist risk — the safe direction is to prefer NOT memoizing.)
+const AMBIENT_SQL_READ = /\bread_\w+\s*\(|\b\w*_scan\s*\(|\b(glob|sniff_csv|parquet_metadata|parquet_schema)\s*\(|\b(from|join)\s+'|'(https?|s3|gs|gcs|az|azure|r2|hf|ftp):/i;
 
 /** Resolve a run's directory, refusing a runId that could escape runsRoot. Centralized so every persistence
  *  path (and the host runner) is path-safe, including the exported persist* helpers called directly. */
@@ -421,12 +424,11 @@ async function runAndPersist(
       // bytes neither on disk nor in CAS. (In non-lean mode the bytes end up in both CAS and files — harmless.)
       const receiptsDigest = await putCas(receipts);
       const replayDigest = enriched ? await putCas(enriched) : undefined;
-      // run-as-object-DAG (LLVM CASObject: Data + Refs): a single CAS object whose refs point at the result/
-      // receipts/replay/manifest objects — its digest is the root of the whole run DAG, so two identical runs share
-      // one runObjectDigest (dedup/compare by root hash).
-      // Refs must be CONTENT-only (no runId/timestamps) or no two runs ever dedup: use the content-addressed INPUT
-      // CASID (actionInputDigest — manifest+SQL+resolved-source digests) and the result CASID. The run:<id> fact
-      // separately carries the run-specific receipts/replay blob digests.
+      // run-as-object-DAG (LLVM CASObject: Data + Refs): a single CAS object whose refs are the run's CONTENT-
+      // equivalence roots — the INPUT CASID (actionInputDigest = manifest+SQL+resolved-source digests) and the
+      // RESULT CASID. Its digest is the root by which two runs are compared/deduped: identical input+result -> one
+      // runObjectDigest. Refs are CONTENT-only (no runId/timestamps) so dedup can happen at all; the run-specific
+      // receipts/replay blob digests are carried SEPARATELY on the run:<id> fact, NOT under this root.
       const runObjectDigest = cas && enriched && resultDigest
         ? await putCas({ schema: "pi-bio.run_object.v1", data: { kind, identity, status: run.status }, refs: { input: actionInputDigest(enriched), result: resultDigest } })
         : undefined;
