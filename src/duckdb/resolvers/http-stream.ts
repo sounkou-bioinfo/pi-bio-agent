@@ -7,14 +7,19 @@
 async function* asAsyncIterable(src: AsyncIterable<Uint8Array> | ReadableStream<Uint8Array>): AsyncIterable<Uint8Array> {
   if (Symbol.asyncIterator in src) { yield* src as AsyncIterable<Uint8Array>; return; }
   const reader = (src as ReadableStream<Uint8Array>).getReader();
+  let drained = false;
   try {
     for (;;) {
       const { done, value } = await reader.read();
-      if (done) return;
+      if (done) { drained = true; return; }
       if (value) yield value;
     }
   } finally {
-    reader.releaseLock();
+    // If the consumer abandoned us EARLY (cap exceeded -> readCapped throws -> the for-await calls .return()), CANCEL
+    // the body so the underlying fetch/connection stops downloading — releaseLock alone would leave it draining in
+    // the background. cancel() also releases the lock, so only releaseLock on a fully-drained stream.
+    if (drained) reader.releaseLock();
+    else { try { await reader.cancel(); } catch { /* already errored/closed */ } }
   }
 }
 

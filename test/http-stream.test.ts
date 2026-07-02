@@ -18,6 +18,17 @@ describe("http-stream: bounded streaming read (byte cap)", () => {
   test("throws when the stream exceeds the byte cap", async () => {
     await assert.rejects(() => readCapped(chunks("12345", "67890", "X"), 8), /exceeded byte cap of 8/);
   });
+
+  test("CANCELS the underlying stream when the cap is exceeded (no background download)", async () => {
+    let cancelled = false;
+    const stream = new ReadableStream<Uint8Array>({
+      start(c) { c.enqueue(enc("12345")); c.enqueue(enc("67890")); c.enqueue(enc("X")); /* deliberately not closed */ },
+      cancel() { cancelled = true; },
+    });
+    await assert.rejects(() => readCapped(stream, 8), /exceeded byte cap/);
+    await new Promise((r) => setTimeout(r, 0)); // let the finally's async cancel settle
+    assert.equal(cancelled, true, "the body stream was cancelled, not left draining in the background");
+  });
 });
 
 describe("cappedFetchLike: the default networked adapter enforces the byte cap on text()", () => {
