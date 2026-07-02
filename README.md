@@ -162,15 +162,15 @@ pi-bio-agent query examples/connectors/clinvar-region.json \
 ``` json
 {
   "ok": true,
-  "runId": "query-1783033188008-35a6d042",
+  "runId": "query-1783034343257-9257b089",
   "status": "succeeded",
   "rowCount": 8,
   "artifacts": {
-    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783033188008-35a6d042/run.json",
-    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783033188008-35a6d042/result.json",
-    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783033188008-35a6d042/receipts.json"
+    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783034343257-9257b089/run.json",
+    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783034343257-9257b089/result.json",
+    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783034343257-9257b089/receipts.json"
   },
-  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783033188008-35a6d042",
+  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783034343257-9257b089",
   "rows": [
     {
       "sig": "Pathogenic",
@@ -227,30 +227,30 @@ pi-bio-agent query examples/run-ledger/manifest.json \
 ``` json
 {
   "ok": true,
-  "runId": "query-1783033190574-c41d3f55",
+  "runId": "query-1783034345634-0f019bad",
   "status": "succeeded",
   "rowCount": 4,
   "artifacts": {
-    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783033190574-c41d3f55/run.json",
-    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783033190574-c41d3f55/result.json",
-    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783033190574-c41d3f55/receipts.json"
+    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783034345634-0f019bad/run.json",
+    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783034345634-0f019bad/result.json",
+    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783034345634-0f019bad/receipts.json"
   },
-  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783033190574-c41d3f55",
+  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783034345634-0f019bad",
   "rows": [
     {
       "tool": "ad-hoc.query",
       "status": "succeeded",
-      "n": 3009
+      "n": 3108
     },
     {
       "tool": "ad-hoc.query",
       "status": "failed",
-      "n": 139
+      "n": 145
     },
     {
       "tool": "rare_high_impact.report",
       "status": "succeeded",
-      "n": 65
+      "n": 71
     },
     {
       "tool": "counts.by_consequence",
@@ -283,17 +283,17 @@ way in [`scripts/`](scripts/) and [`test/`](test/)):
 node scripts/nng-job-runner.mjs
 ```
 
-    === JobRunner NNG compute profile: a remote worker reports job status over ducknng RPC into the L1 slot ===
+    Distributed compute over ducknng: a separate worker reports job status into the shared ledger
 
-      [coordinator pid 2995474] shared job ledger up; wgs-annotate-chr22 recorded queued
-      [worker nng-worker-1 pid 2995553] reported running over ducknng RPC
-      [worker nng-worker-1 pid 2995553] reported succeeded over ducknng RPC
-      [coordinator] wgs-annotate-chr22 FINAL status (reported by a SEPARATE worker process over ducknng RPC): "succeeded"
+      [coordinator pid 3063923] job ledger up; 'wgs-annotate-chr22' recorded as queued
+      [worker nng-worker-1 pid 3064002] reported 'running' over ducknng RPC
+      [worker nng-worker-1 pid 3064002] reported 'succeeded' over ducknng RPC
+      [coordinator] 'wgs-annotate-chr22' final status, read back from the shared slot: "succeeded"
 
-    What it proves: a long-running job's status (running -> succeeded) was written by a SEPARATE worker
-    process into the coordinator's job:<runId>:status slot over ducknng RPC — and read back by the SAME
-    L1 observationAsOfKey. The job-store did not change; the worker is language-agnostic (node/R/python).
-    This is the native distributed-compute backend for the JobRunner over our owned NNG transport.
+    A SEPARATE worker process wrote the job's status (running, then succeeded) into the coordinator's
+    job:<id>:status slot over ducknng RPC, and the coordinator read it back with the same as-of query it
+    uses for any observation. The job-store code did not change, and the worker can be any language that
+    speaks NNG. A language-agnostic distributed backend over our owned transport, not an opaque runtime.
 
 **A database connector is a manifest, not a client.** The “60+ connected
 databases” a hosted workbench advertises are, here, one file each:
@@ -313,15 +313,15 @@ pi-bio-agent query examples/connectors/uniprot.json \
 ``` json
 {
   "ok": true,
-  "runId": "query-1783033197243-18d14610",
+  "runId": "query-1783034352378-fab879ca",
   "status": "succeeded",
   "rowCount": 1,
   "artifacts": {
-    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783033197243-18d14610/run.json",
-    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783033197243-18d14610/result.json",
-    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783033197243-18d14610/receipts.json"
+    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783034352378-fab879ca/run.json",
+    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783034352378-fab879ca/result.json",
+    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783034352378-fab879ca/receipts.json"
   },
-  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783033197243-18d14610",
+  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783034352378-fab879ca",
   "rows": [
     {
       "primaryAccession": "P04637",
