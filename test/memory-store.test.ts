@@ -38,24 +38,46 @@ describe("temporal memory over bio_observations", () => {
     assert.ok(latest, "a deterministic latest exists");
   });
 
-  test("ATOMIC revision: a mid-write insert failure ROLLS BACK the whole remember — no partial content/edges", async () => {
+  test("the NOTE is the atomic linearization point: a derived-edge write failure keeps the committed note, edge reconciled next", async () => {
     const c = await conn();
-    await remember(c, note("base", "seed"), T1, "agent:A"); // an existing revision to prove it survives the failed write
-    // wrap the conn so the 2nd INSERT (the link edge, after the content insert) throws — simulating a mid-txn failure
-    let inserts = 0;
+    await remember(c, note("base", "seed"), T1, "agent:A"); // an existing revision
+    // Fail the first edge INSERT (recordObservation, via `run`). The note is written via the compare-and-set
+    // primitive (INSERT ... RETURNING, via `all`) BEFORE the edges, so it has already committed when the edge fails.
+    let edgeInserts = 0;
     const faulty: SqlConn = {
       all: (sql, params) => c.all(sql, params),
       run: (sql, params) => {
-        if (/INSERT INTO bio_observations/i.test(sql) && ++inserts === 2) throw new Error("injected mid-write failure");
+        if (/INSERT INTO bio_observations/i.test(sql) && ++edgeInserts === 1) throw new Error("injected edge-write failure");
         return c.run(sql, params);
       },
     };
-    await assert.rejects(() => remember(faulty, { ...note("base", "NEW body [[other]]"), slug: "base" }, T2, "agent:B"), /injected mid-write failure/);
-    // the transaction rolled back: the base note still reads its ORIGINAL content, and the failed revision's edge is absent
+    // Full-revision rollback is impossible while keeping the note linearizable over a shared server (a wrapping
+    // transaction's snapshot would defeat the CAS). So the contract is: the note (the user's content) commits
+    // atomically and is NEVER lost to a derived-edge error; the failed edge is simply absent, reconciled by the
+    // next remember. This is strictly safer for the primary content than the old all-or-nothing rollback.
+    await assert.rejects(() => remember(faulty, { ...note("base", "NEW body [[other]]"), slug: "base" }, T2, "agent:B"), /injected edge-write failure/);
     const still = await recall(c, "base");
-    assert.equal(still?.body, "seed", "the failed remember rolled back — original content intact, no partial revision");
+    assert.equal(still?.body, "NEW body [[other]]", "the note content committed atomically; a derived-edge error did not lose it");
     const edges = await liveOutEdgesAsOf(c, memorySubjectId("base"), MEMORY_NOW);
-    assert.deepEqual(edges, [], "no partial link edge from the rolled-back revision");
+    assert.deepEqual(edges, [], "the failed edge is absent (append-only, not half-written)");
+    // a subsequent successful remember reconciles the [[other]] edge
+    await remember(c, { ...note("base", "again [[other]]"), slug: "base" }, "2026-01-03T00:00:00.000Z", "agent:A");
+    assert.equal((await liveOutEdgesAsOf(c, memorySubjectId("base"), MEMORY_NOW)).length, 1, "the next remember reconciles the edge");
+  });
+
+  test("concurrent same-slug remembers get distinct, strictly-ordered revisions — no tie (residue #2)", async () => {
+    const c = await conn();
+    const N = 20;
+    // SAME wall clock for all: without the monotonic advance + compare-and-set they would collide on recorded_at
+    // and 'current' would be a hash-arbitrary tiebreak. The CAS makes each revision take a strictly-later instant.
+    const wall = "2026-01-01T00:00:00.000Z";
+    await Promise.all(Array.from({ length: N }, (_, i) => remember(c, note("hot", `body ${i}`), wall, `agent:${i}`)));
+    const hist = await memoryHistory(c, "hot"); // oldest-first
+    assert.equal(hist.length, N, "all N concurrent remembers landed as distinct revisions (none lost, none tied)");
+    const times = hist.map((h) => h.recordedAt);
+    assert.equal(new Set(times).size, N, "every revision got a DISTINCT recorded_at — the CAS prevented same-timestamp ties");
+    for (let i = 1; i < times.length; i++) assert.ok(Date.parse(times[i]!) > Date.parse(times[i - 1]!), "recorded_at is strictly increasing");
+    assert.equal((await listMemory(c)).filter((m) => m.slug === "hot").length, 1, "exactly one current revision — deterministic latest, no ambiguous tie");
   });
 
   test("reads on a FRESH store (no schema) return empty/null, not a missing-table throw", async () => {

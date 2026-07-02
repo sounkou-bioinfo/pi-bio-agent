@@ -7,11 +7,15 @@ import {
   observationsAsOf,
   liveOutEdgesAsOf,
   recordObservation,
+  insertObservationIfSlotMax,
   monotonicRecordedAt,
-  inTransaction,
   withSlotLock,
   type ObservationRow,
 } from "../duckdb/observations.js";
+
+// Retry ceiling for the monotonic compare-and-set under cross-process contention (each attempt re-reads the slot's
+// latest and picks a strictly-later timestamp); bounded so pathological contention fails loudly, not forever.
+const MEMORY_MAX_ATTEMPTS = 16;
 
 // Memory unified INTO the temporal store: a memory note is observation(s) under the `agent:memory:` namespace, so
 // it gets modification history + as-of + cross-agent sharing for free — the same store as facts/compute, the
@@ -100,53 +104,59 @@ export async function ensureMemorySchema(conn: SqlConn): Promise<void> {
 export async function remember(conn: SqlConn, note: MemoryContent, wallNow: string, author?: string): Promise<void> {
   await ensureMemorySchema(conn);
   const subject = memorySubjectId(note.slug);
-  // ATOMIC + serialized. withSlotLock(subject) serializes same-slug writes across ALL in-process connections (keyed by
-  // statement_key, NOT by connection) — this is what makes the monotonic read-then-write deterministic even when two
-  // `openBioStore` handles to one file coexist in a process (a per-CONNECTION lock alone would NOT, since they are
-  // distinct connections). inTransaction then makes the whole revision (content + link edges + dropped-link
-  // tombstones) ALL-OR-NOTHING (a mid-way insert failure rolls it all back) and per-connection atomic. Inside we call
-  // recordObservation directly at the once-computed monotonic `now` — NOT recordMonotonicObservation (it would
-  // re-acquire this same-slot lock and deadlock).
-  await withSlotLock(subject, () => inTransaction(conn, async () => {
-    const now = await monotonicNow(conn, subject, wallNow); // strictly after the slug's current revision (deterministic latest-wins)
-    // `source` = the authoring agent. It is part of observation IDENTITY, so two agents remembering the same slug
-    // are two attributed rows (both retained); the latest by recorded_at is "current". This is what makes shared
-    // cross-agent memory trustworthy — you always know WHO said it.
-    await recordObservation(conn, {
-      statementKey: subject,
-      subjectId: subject,
-      predicate: CONTENT,
-      value: { kind: note.kind, title: note.title, hook: note.hook, body: note.body, tags: note.tags, ...(note.sources && note.sources.length ? { sources: note.sources } : {}) },
-      recordedAt: now,
-      source: author,
-    });
-    const newKeys = new Set<string>();
-    for (const link of parseStudyNoteLinks({ body: note.body, links: [] })) {
-      const to = memorySubjectId(link.to);
-      const key = `${subject}|${link.predicate}|${to}`;
-      newKeys.add(key);
-      await recordObservation(conn, {
-        statementKey: key,
+  // LINEARIZABLE + serialized. withSlotLock(subject) serializes same-slug writes across ALL in-process connections
+  // (keyed by statement_key, not by connection). Across PROCESSES (a shared ducknng server) that lock can't reach,
+  // so the NOTE is written with the compare-and-set primitive: insertObservationIfSlotMax commits `now` only if it
+  // is still the slot's strict max — one atomic statement, so on the server's serialized lane it can't tie with a
+  // concurrent client; a concurrent advance fails the precondition and we re-read + retry with a later timestamp.
+  // The note CAS is AUTO-COMMIT (not wrapped in a transaction): a surrounding transaction's snapshot would hide a
+  // concurrent commit and defeat the guard. Edges/tombstones then write at the note's confirmed-unique `now`, so
+  // they inherit a distinct timestamp and never tie either (they may briefly lag under cross-process contention, but
+  // the latest note's revision always wins — the note is the linearization point).
+  await withSlotLock(subject, async () => {
+    for (let attempt = 0; attempt < MEMORY_MAX_ATTEMPTS; attempt++) {
+      const now = await monotonicNow(conn, subject, wallNow); // strictly after the slug's current revision
+      // `source` = the authoring agent. It is part of observation IDENTITY, so two agents remembering the same slug
+      // are two attributed rows (both retained); the latest by recorded_at is "current" — you always know WHO said it.
+      const { inserted } = await insertObservationIfSlotMax(conn, {
+        statementKey: subject,
         subjectId: subject,
-        predicate: link.predicate,
-        objectId: to, // edge-like -> projects into bio_edges_as_of for a walkable memory graph
+        predicate: CONTENT,
+        value: { kind: note.kind, title: note.title, hook: note.hook, body: note.body, tags: note.tags, ...(note.sources && note.sources.length ? { sources: note.sources } : {}) },
         recordedAt: now,
         source: author,
       });
-    }
-    // RETRACT links that this revision dropped: without a tombstone, a removed [[link]]'s edge observation is never
-    // superseded, so it lingers in bio_edges_as_of forever (a phantom edge). Tombstone (no objectId) every
-    // currently-live edge OUT of this subject that the new revision no longer declares (indexed, no full-table scan).
-    // ONLY reconcile MEMORY's own wikilink edges (statement_key `${subject}|<pred>|<to>`, see the newKeys above) —
-    // NOT every live edge out of the subject. Another subsystem may have recorded an unrelated edge fact from the same
-    // `agent:memory:<slug>` subject (a different statement_key); tombstoning that here would be silent data loss.
-    const memoryEdgePrefix = `${subject}|`;
-    for (const edge of await liveOutEdgesAsOf(conn, subject, MEMORY_NOW)) {
-      if (edge.statement_key.startsWith(memoryEdgePrefix) && !newKeys.has(edge.statement_key)) {
-        await recordObservation(conn, { statementKey: edge.statement_key, subjectId: subject, predicate: edge.predicate, recordedAt: now, source: author });
+      if (!inserted) continue; // a concurrent client advanced the slot since we read it — re-read + retry
+      const newKeys = new Set<string>();
+      for (const link of parseStudyNoteLinks({ body: note.body, links: [] })) {
+        const to = memorySubjectId(link.to);
+        const key = `${subject}|${link.predicate}|${to}`;
+        newKeys.add(key);
+        await recordObservation(conn, {
+          statementKey: key,
+          subjectId: subject,
+          predicate: link.predicate,
+          objectId: to, // edge-like -> projects into bio_edges_as_of for a walkable memory graph
+          recordedAt: now,
+          source: author,
+        });
       }
+      // RETRACT links that this revision dropped: without a tombstone, a removed [[link]]'s edge observation is never
+      // superseded, so it lingers in bio_edges_as_of forever (a phantom edge). Tombstone (no objectId) every
+      // currently-live edge OUT of this subject that the new revision no longer declares (indexed, no full-table scan).
+      // ONLY reconcile MEMORY's own wikilink edges (statement_key `${subject}|<pred>|<to>`) — NOT every live edge out
+      // of the subject: another subsystem may have recorded an unrelated edge fact from the same subject, and
+      // tombstoning that here would be silent data loss.
+      const memoryEdgePrefix = `${subject}|`;
+      for (const edge of await liveOutEdgesAsOf(conn, subject, MEMORY_NOW)) {
+        if (edge.statement_key.startsWith(memoryEdgePrefix) && !newKeys.has(edge.statement_key)) {
+          await recordObservation(conn, { statementKey: edge.statement_key, subjectId: subject, predicate: edge.predicate, recordedAt: now, source: author });
+        }
+      }
+      return;
     }
-  }));
+    throw new Error(`remember: too many concurrent write conflicts on '${subject}' (${MEMORY_MAX_ATTEMPTS} attempts)`);
+  });
 }
 
 function rowToContent(row: ObservationRow | null): RecalledMemory | null {
@@ -186,20 +196,25 @@ export async function listMemory(conn: SqlConn, asOf: string = MEMORY_NOW): Prom
 export async function forget(conn: SqlConn, slug: string, wallNow: string, author?: string): Promise<void> {
   await ensureMemorySchema(conn);
   const subject = memorySubjectId(slug);
-  // ATOMIC + serialized (same reasoning as remember): withSlotLock(subject) serializes same-slug writes across all
-  // in-process connections (deterministic monotonic latest-wins), and inTransaction makes the tombstone + edge
-  // retractions one all-or-nothing unit, so a failed edge retraction can't leave a forgotten node with live phantom edges.
-  await withSlotLock(subject, () => inTransaction(conn, async () => {
-    const now = await monotonicNow(conn, subject, wallNow); // strictly after the current content so a same-ms remember→forget deterministically forgets
-    await recordObservation(conn, { statementKey: subject, subjectId: subject, predicate: CONTENT, recordedAt: now, source: author });
-    // Also retract the note's OWN link edges (statement_key `${subject}|…`) — otherwise they linger in bio_edges_as_of
-    // as phantom edges out of a forgotten node. Only memory's wikilink edges, NOT an unrelated subsystem's edge fact
-    // from the same subject (that would be silent data loss); same scoping as remember()'s reconciliation.
-    const memoryEdgePrefix = `${subject}|`;
-    for (const edge of await liveOutEdgesAsOf(conn, subject, MEMORY_NOW)) {
-      if (edge.statement_key.startsWith(memoryEdgePrefix)) {
-        await recordObservation(conn, { statementKey: edge.statement_key, subjectId: subject, predicate: edge.predicate, recordedAt: now, source: author });
+  // LINEARIZABLE + serialized (same reasoning as remember): withSlotLock serializes in-process; the TOMBSTONE is
+  // written with the compare-and-set primitive so a concurrent client can't tie on recorded_at, and edge retractions
+  // follow at the tombstone's confirmed-unique `now`.
+  await withSlotLock(subject, async () => {
+    for (let attempt = 0; attempt < MEMORY_MAX_ATTEMPTS; attempt++) {
+      const now = await monotonicNow(conn, subject, wallNow); // strictly after the current content so a same-ms remember→forget deterministically forgets
+      const { inserted } = await insertObservationIfSlotMax(conn, { statementKey: subject, subjectId: subject, predicate: CONTENT, recordedAt: now, source: author });
+      if (!inserted) continue; // a concurrent client advanced the slot — re-read + retry
+      // Also retract the note's OWN link edges (statement_key `${subject}|…`), otherwise they linger in
+      // bio_edges_as_of as phantom edges out of a forgotten node. Only memory's wikilink edges, NOT an unrelated
+      // subsystem's edge fact from the same subject (that would be silent data loss); same scoping as remember().
+      const memoryEdgePrefix = `${subject}|`;
+      for (const edge of await liveOutEdgesAsOf(conn, subject, MEMORY_NOW)) {
+        if (edge.statement_key.startsWith(memoryEdgePrefix)) {
+          await recordObservation(conn, { statementKey: edge.statement_key, subjectId: subject, predicate: edge.predicate, recordedAt: now, source: author });
+        }
       }
+      return;
     }
-  }));
+    throw new Error(`forget: too many concurrent write conflicts on '${subject}' (${MEMORY_MAX_ATTEMPTS} attempts)`);
+  });
 }

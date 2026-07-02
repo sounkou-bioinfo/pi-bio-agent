@@ -62,16 +62,19 @@ Because every row carries its **author** (`source`, part of observation identity
 store stays attributed: two agents writing the same memory slug become two attributed revisions, not a silent
 clobber. That is Fugu's inter-workflow shared memory (report §3.2.2) made literal.
 
-> **Open residue: concurrent same-slug writes are not yet linearizable over a server.** `remember`/`forget`
-> serialize same-slug writes *within one process* via `withSlotLock(statement_key)` + a monotonic `recorded_at`
-> (see [`src/hosts/memory-store.ts`](../src/hosts/memory-store.ts)). Across **separate RPC clients**, that lock does
-> not span processes: two clients can read the same latest revision, compute the same `recorded_at`, and insert
-> competing revisions: current-as-of then breaks the tie by `observation_id DESC`, which is **not** the real write
-> order, so a concurrent `remember`→`forget` can resolve either way. The fix is server-side atomicity: the
-> **server** must serialize per `statement_key` (a lock / single-writer transaction / atomic advance+insert
-> procedure), which the naive inline-SQL RPC conn above does not do. Until then, treat a server-backed store as safe
-> for **distinct** slugs or **serialized** access, not for concurrent same-slug contention. This is a named build
-> (frontier residue), not a claimed guarantee.
+> **Concurrent same-slug writes are linearized by a compare-and-set (was the open residue).** `remember`/`forget`
+> write the note/tombstone with `insertObservationIfSlotMax` (`src/duckdb/observations.ts`): a single
+> `INSERT … SELECT … WHERE NOT EXISTS(a row for the slot at recorded_at ≥ the computed instant) … RETURNING`. Because
+> it is **one atomic statement**, on the server's serialized execution lane (ducknng's default
+> `shared_serialized_connection`) it commits only if the slot's max has not moved since we read it; a concurrent
+> client that advanced the slot fails the precondition, so we re-read and retry with a strictly-later instant. No two
+> revisions can share a `recorded_at`, so "current" is never an `observation_id DESC` tiebreak. `withSlotLock` stays
+> as an in-process optimization (it makes the CAS succeed first try); linked edges then write at the note's
+> confirmed-unique instant, so the note is the linearization point. Verified live: 8 and 32 concurrent same-slot
+> writers over a ducknng server each produced that many distinct, ordered revisions, no ties, no lost writes.
+> **Caveat:** this relies on the serialized execution model (the default). Under a concurrent connection pool
+> (`request_connection`) the precondition could read a stale snapshot, so keep the server on the serialized model
+> for shared same-slug writes.
 
 ## This is proven, not aspirational
 

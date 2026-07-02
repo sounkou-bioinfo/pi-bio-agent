@@ -45,9 +45,10 @@ plan of record and [`docs/refinments.md`](docs/refinments.md) tracks open items.
   retiring a leaky regex denylist.
 - Networked-adapter response byte cap enforced on both the streaming and
   non-streaming paths.
-
-### Known residues
-- Concurrent **same-slug** writes to a **server-backed** store are not yet
-  linearizable in the library write path (in-process writes are). The mechanism
-  is proven — one atomic SQL unit on ducknng's serialized execution lane — and
-  the implementation is in progress. See [`docs/concurrency.md`](docs/concurrency.md).
+- Concurrent same-slug writes to a server-backed store are now **linearized** by
+  a compare-and-set (`insertObservationIfSlotMax`): one atomic `INSERT … WHERE
+  NOT EXISTS(row ≥ instant) … RETURNING` that, on ducknng's serialized lane,
+  commits only if the slot has not advanced, else re-reads and retries. Verified
+  live at 8 and 32 concurrent writers with no ties or lost writes. `remember` /
+  `forget` route through it. (Requires the serialized execution model; see
+  [`docs/concurrency.md`](docs/concurrency.md).)
