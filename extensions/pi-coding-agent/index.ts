@@ -9,7 +9,7 @@ import { describeBioManifestFromPath, isRunDbOpenError, runBioOperationFromManif
 import { bioStorePath, isBioStoreLocked, openBioStore, type BioStore } from "../../src/hosts/bio-store.js";
 import { isAbsolute, resolve } from "node:path";
 import { stat } from "node:fs/promises";
-import { forget, listMemory, recall, remember, memorySubjectId, MEMORY_NOW, type MemoryContent } from "../../src/hosts/memory-store.js";
+import { forget, listMemory, recall, remember, memorySubjectId, normalizeAsOf, MEMORY_NOW, type MemoryContent } from "../../src/hosts/memory-store.js";
 import { recordSkill, skillSubjectId } from "../../src/hosts/skill-store.js";
 import { systemClock } from "../../src/core/clock.js";
 import type { SqlConn, ProcessRunner } from "../../src/core/ports.js";
@@ -379,7 +379,7 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
       if (params.limit !== undefined && (!Number.isInteger(params.limit) || params.limit < 0)) {
         throw new Error(`bio_list_memory: limit must be a non-negative integer (got ${params.limit})`);
       }
-      let mems = await withStore(openStore, ctx.cwd, (conn) => listMemory(conn, params.asOf ?? MEMORY_NOW));
+      let mems = await withStore(openStore, ctx.cwd, (conn) => listMemory(conn, normalizeAsOf(params.asOf)));
       if (params.query) {
         const q = params.query.toLowerCase();
         mems = mems.filter((m) => `${m.slug} ${m.title} ${m.hook} ${m.body}`.toLowerCase().includes(q));
@@ -423,7 +423,7 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
       asOf: Type.Optional(Type.String({ description: "ISO time — read the revision that was current AS OF then (default now)." })),
     }),
     async execute(_id, params: { id: string; asOf?: string }, _signal, _onUpdate, ctx) {
-      const note = await withStore(openStore, ctx.cwd, (conn) => recall(conn, normalizeStudySlug(params.id), params.asOf ?? MEMORY_NOW));
+      const note = await withStore(openStore, ctx.cwd, (conn) => recall(conn, normalizeStudySlug(params.id), normalizeAsOf(params.asOf)));
       if (!note) throw new Error(`no memory found for slug '${params.id}'${params.asOf ? ` as of ${params.asOf}` : ""}`);
       return text(note);
     },

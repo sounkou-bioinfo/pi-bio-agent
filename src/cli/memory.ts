@@ -1,16 +1,9 @@
 import { parseArgs } from "node:util";
 import { openBioStore } from "../hosts/bio-store.js";
-import { listMemory, memoryHistory, recall, MEMORY_NOW } from "../hosts/memory-store.js";
+import { listMemory, memoryHistory, recall, normalizeAsOf, MEMORY_NOW } from "../hosts/memory-store.js";
 
 // The `memory` CLI: read the ONE temporal store (memory is append-only observations under agent:memory:<slug>).
 // list/show/history are all AS-OF (time-travel); history shows supersession + authorship. Provider-agnostic — no Pi needed.
-
-// Strict ISO-8601 / RFC3339: a date, optionally with time (T or space) + up to MILLISECOND fraction, and a REQUIRED
-// timezone (Z or ±hh:mm) WHEN a time is present. Rejects lenient forms (e.g. "March 1 2026") AND a timezone-less
-// datetime — a tz-less time is interpreted as LOCAL by JS Date.parse but by the SESSION zone by DuckDB TIMESTAMPTZ,
-// so time-travel would silently differ. ms cap: the history filter is JS ms while list/show are DuckDB micro — cap
-// input to ms (our recorded_at precision) so they agree. A date-only value is treated as UTC midnight (below).
-const ISO_INSTANT_RE = /^\d{4}-\d{2}-\d{2}(?:[Tt ]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:[Zz]|[+-]\d{2}:?\d{2}))?$/;
 export interface MemoryCliDeps {
   cwd: string;
   out: (line: string) => void;
@@ -57,17 +50,15 @@ export async function mainMemory(argv: string[], deps: MemoryCliDeps): Promise<n
     deps.err(`memory ${command} <slug> — a slug is required.\n\n${MEMORY_USAGE}`);
     return 2;
   }
-  // Validate --as-of as a STRICT ISO-8601/RFC3339 instant (NOT lenient Date.parse, which accepts "March 1 2026" and
-  // other forms DuckDB's TIMESTAMPTZ cast may parse differently — that mismatch could defer failure to the DB or give
-  // implementation-dependent time-travel). A strict form is parsed identically by both Date.parse and DuckDB.
-  if (asOf !== MEMORY_NOW && (!ISO_INSTANT_RE.test(asOf) || Number.isNaN(Date.parse(asOf)))) {
-    deps.err(`memory ${command}: --as-of '${asOf}' is not a valid ISO-8601 timestamp with a timezone when a time is given (e.g. 2026-01-01 or 2026-01-01T12:00:00Z)\n\n${MEMORY_USAGE}`);
+  // Validate + normalize --as-of to a canonical UTC instant via the SHARED normalizer (identical to the Pi tools),
+  // used EVERYWHERE (DuckDB reads AND the JS history filter). A usage error is exit 2, not a crash.
+  let asOfInstant: string;
+  try {
+    asOfInstant = normalizeAsOf(asOf === MEMORY_NOW ? undefined : asOf);
+  } catch (e) {
+    deps.err(`memory ${command}: ${e instanceof Error ? e.message : String(e)}\n\n${MEMORY_USAGE}`);
     return 2;
   }
-  // Normalize to a canonical UTC instant used EVERYWHERE (the DuckDB TIMESTAMPTZ reads AND the JS history filter), so
-  // there is exactly one interpretation of the time. A date-only value becomes UTC midnight; a tz-bearing time is
-  // converted to UTC. (Validated above, so new Date() is unambiguous here.)
-  const asOfInstant = asOf === MEMORY_NOW ? MEMORY_NOW : new Date(asOf).toISOString();
 
   const store = await openBioStore(deps.cwd);
   try {

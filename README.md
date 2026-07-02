@@ -358,7 +358,8 @@ pi-bio-agent query examples/variant-counts/manifest.json \
 
 **Where is all of this stored? The run graph is itself a table.** Every
 run above persisted a record under `.pi/bio-agent/runs/<runId>/run.json`
-— its spec, status, timestamps, event log, and resolution receipts.
+— its spec, status, timestamps, and event log — alongside a separate
+`receipts.json` (the resolution receipts) and `result.json` (the rows).
 [`run-ledger`](examples/run-ledger/manifest.json) reads those records
 back with DuckDB `read_json`, so the substrate’s **own provenance is
 queryable with the same SQL it uses for data** — no opaque runtime to

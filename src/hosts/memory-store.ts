@@ -24,6 +24,22 @@ const CONTENT = "has_content";
 /** A sentinel far-future instant = "now / latest" for as-of reads (lexicographically sorts after any real ISO). */
 export const MEMORY_NOW = "9999-12-31T23:59:59.999Z";
 
+// Strict ISO-8601 / RFC3339 for an as-of instant: a date, optionally with time (T or space) + up to MILLISECOND
+// fraction and a REQUIRED timezone (Z or ±hh:mm) WHEN a time is present. Rejects lenient forms ("March 1 2026") AND
+// a tz-less datetime (JS Date.parse reads it as LOCAL, DuckDB TIMESTAMPTZ as the SESSION zone — divergent time-travel).
+const ISO_INSTANT_RE = /^\d{4}-\d{2}-\d{2}(?:[Tt ]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:[Zz]|[+-]\d{2}:?\d{2}))?$/;
+
+/** Validate + normalize an as-of value to a CANONICAL UTC instant (used identically by the CLI and the Pi tools, so
+ *  time-travel is host-independent). `undefined` → MEMORY_NOW (now/latest). A date-only value becomes UTC midnight; a
+ *  tz-bearing time is converted to UTC. THROWS on an invalid/lenient/tz-less form so callers fail closed. */
+export function normalizeAsOf(asOf: string | undefined): string {
+  if (asOf === undefined || asOf === MEMORY_NOW) return MEMORY_NOW;
+  if (!ISO_INSTANT_RE.test(asOf) || Number.isNaN(Date.parse(asOf))) {
+    throw new Error(`--as-of '${asOf}' is not a valid ISO-8601 timestamp with a timezone when a time is given (e.g. 2026-01-01 or 2026-01-01T12:00:00Z)`);
+  }
+  return new Date(asOf).toISOString();
+}
+
 export const memorySubjectId = (slug: string): string => `${MEMORY_NS}${slug}`;
 
 // The memory store is a STATE MACHINE over a slug's CURRENT content (remember/forget change which revision is

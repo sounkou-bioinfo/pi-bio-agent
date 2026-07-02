@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { duckdbNodeConn } from "../src/duckdb/node-api.js";
 import type { SqlConn } from "../src/core/ports.js";
-import { forget, listMemory, memoryHistory, memorySubjectId, recall, remember, MEMORY_NOW } from "../src/hosts/memory-store.js";
+import { forget, listMemory, memoryHistory, memorySubjectId, normalizeAsOf, recall, remember, MEMORY_NOW } from "../src/hosts/memory-store.js";
 import { materializeBioEdgesAsOf, liveOutEdgesAsOf, recordObservation } from "../src/duckdb/observations.js";
 
 const conn = async (): Promise<SqlConn> => duckdbNodeConn(await (await DuckDBInstance.create(":memory:")).connect());
@@ -63,6 +63,16 @@ describe("temporal memory over bio_observations", () => {
     assert.equal(await recall(c, "nope"), null, "recall of an unprovisioned store is null");
     assert.deepEqual(await listMemory(c), [], "listMemory of an unprovisioned store is empty");
     assert.deepEqual(await memoryHistory(c, "nope"), [], "memoryHistory of an unprovisioned store is empty");
+  });
+
+  test("normalizeAsOf canonicalizes to UTC and rejects tz-less/lenient forms — shared by the CLI AND the Pi tools", () => {
+    assert.equal(normalizeAsOf(undefined), MEMORY_NOW, "undefined -> now/latest");
+    assert.equal(normalizeAsOf("2026-01-01"), "2026-01-01T00:00:00.000Z", "date-only -> UTC midnight");
+    assert.equal(normalizeAsOf("2026-01-01T12:00:00Z"), "2026-01-01T12:00:00.000Z");
+    assert.equal(normalizeAsOf("2026-01-01T12:00:00+02:00"), "2026-01-01T10:00:00.000Z", "offset normalized to UTC");
+    assert.throws(() => normalizeAsOf("2026-01-01T12:00:00"), /timezone/, "a tz-less time is rejected (host-dependent otherwise)");
+    assert.throws(() => normalizeAsOf("March 1 2026"), /ISO-8601/);
+    assert.throws(() => normalizeAsOf("2026/01/01"), /ISO-8601/);
   });
 
   test("citations (sources) are persisted INTO the ledger, so recall/shared memory keep provenance (not just the file view)", async () => {
