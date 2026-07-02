@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { systemClock } from "../../core/clock.js";
-import { validateReadOnlySelect } from "../../core/sql-guard.js";
+import { validateReadOnlySelect, sqlCallsDynamicSqlAst } from "../../core/sql-guard.js";
 import type { BioResolverImpl } from "../../core/ports.js";
 
 // The general resolver: materialization is DECLARED SQL, not bespoke TypeScript. This is the anti-sprawl
@@ -25,6 +25,9 @@ export const duckdbSqlMaterializeResolver: BioResolverImpl = async (resource, ct
   if (typeof p.table !== "string" || !IDENT.test(p.table)) throw new Error("duckdb.sql_materialize requires params.table to be a valid SQL identifier");
   if (typeof p.sql !== "string" || !p.sql.trim()) throw new Error("duckdb.sql_materialize requires params.sql (a single read-only SELECT/WITH)");
   const inner = validateReadOnlySelect(p.sql); // single read-only query; remote/httpfs reads are allowed (host controls egress)
+  // Parser-based re-check (json_serialize_sql) of the dynamic-SQL executors, robust to quoted/qualified spellings —
+  // this inner SQL is about to run as `CREATE OR REPLACE TABLE … AS <inner>`, so a `"query"('DROP …')` must not slip past.
+  if (await sqlCallsDynamicSqlAst(ctx.conn, inner)) throw new Error("duckdb.sql_materialize: params.sql uses a dynamic-SQL table function (query()/query_table()) — forbidden");
   // Fail closed, not silently drop: a non-string entry would otherwise lose LOAD intent / provenance.
   const stringArray = (v: unknown, label: string): string[] => {
     if (v === undefined) return [];

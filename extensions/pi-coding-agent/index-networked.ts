@@ -27,7 +27,15 @@ export function cappedFetchLike(fetchImpl: typeof globalThis.fetch = globalThis.
     return {
       ok: res.ok,
       status: res.status,
-      text: () => (res.body ? readCapped(res.body, maxBytes) : res.text()),
+      // Cap the body BOTH ways: stream via readCapped when a body stream is exposed, else the text() fallback
+      // (a mock/older runtime) must ALSO be bounded — a naked res.text() would return an unbounded body, defeating
+      // the cap. Measure UTF-8 bytes and fail closed past the limit.
+      text: async () => {
+        if (res.body) return readCapped(res.body, maxBytes);
+        const s = await res.text();
+        if (Buffer.byteLength(s, "utf8") > maxBytes) throw new Error(`response body exceeds the ${maxBytes}-byte cap`);
+        return s;
+      },
       headers: { get: (n) => res.headers.get(n) },
     };
   };

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { BioArtifact } from "./types.js";
 import { appendRunEvent, newRunRecord, type BioRunRecord, type BioRunSpec } from "./run-spec.js";
-import { validateReadOnlySelect } from "./sql-guard.js";
+import { validateReadOnlySelect, sqlCallsDynamicSqlAst } from "./sql-guard.js";
 import { materializeScaleMembers } from "./scales.js";
 import type { BioRegistry, ResolutionReceipt, SourceSnapshot } from "./manifest.js";
 import type { CasStore } from "./cas.js";
@@ -69,6 +69,10 @@ export async function runQuery(
   const id = opts.id ?? "ad-hoc.query";
   const isNamed = opts.id !== undefined;
   const safeSql = validateReadOnlySelect(opts.sql); // enforced before we touch the conn; run the validated text
+  // Defense-in-depth over the string guard: re-check the dynamic-SQL executors (query()/query_table()) via DuckDB's
+  // OWN parser (json_serialize_sql), which normalizes quoted/qualified spellings a string scan can miss. Pre-flight
+  // (a config error, not a failed run) — a pure parse with no side effects on the fresh run conn.
+  if (await sqlCallsDynamicSqlAst(conn, safeSql)) throw new Error("query contains a dynamic-SQL table function (query()/query_table()) — forbidden");
 
   // Pre-flight: the request must be RUNNABLE before it becomes a run — every named resource is registered and
   // its resolver has a bound impl. These are config errors (thrown plainly, NOT failed runs). Runtime failures

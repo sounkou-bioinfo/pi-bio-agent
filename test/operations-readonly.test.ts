@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { validateReadOnlySelect } from "../src/core/sql-guard.js";
+import { DuckDBInstance } from "@duckdb/node-api";
+import { duckdbNodeConn } from "../src/duckdb/node-api.js";
+import { validateReadOnlySelect, sqlCallsDynamicSqlAst } from "../src/core/sql-guard.js";
 
 // runOperation enforces the operation's declared sql.readOnly at execution time via this shared guard
 // (the same one knowledge-graph queries use — one definition of "safe", no divergence).
@@ -39,11 +41,34 @@ describe("validateReadOnlySelect: the single read-only SQL guard", () => {
       // DuckDB dynamic-SQL table functions EXECUTE their string arg — a write hidden in the (stripped) literal must not slip past
       ["SELECT * FROM query('CREATE TABLE pwn AS SELECT 1')", /dynamic-SQL table function/],
       ["SELECT * FROM query_table('pwn', true)", /dynamic-SQL table function/],
+      // BYPASS via a QUOTED identifier — `"query"` resolves to the same function, but was blanked with string literals
+      ["SELECT * FROM \"query\"('CREATE TABLE pwn AS SELECT 1')", /dynamic-SQL table function/],
+      ["SELECT * FROM \"query_table\"('pwn', true)", /dynamic-SQL table function/],
+      // …and catalog-qualified quoted form
+      ["SELECT * FROM main.\"query\"('CREATE TABLE pwn AS SELECT 1')", /dynamic-SQL table function/],
     ] as const) {
       assert.throws(() => validateReadOnlySelect(sql), re, sql);
     }
     // but a plain column/identifier literally named 'query' is fine (only the CALL form query( is rejected)
     assert.equal(validateReadOnlySelect("SELECT query FROM searches"), "SELECT query FROM searches");
+    // and a keyword as a QUOTED column alias is NOT a false positive (quoted idents are blanked for the keyword check)
+    assert.equal(validateReadOnlySelect('SELECT 1 AS "drop", 2 AS "query"'), 'SELECT 1 AS "drop", 2 AS "query"');
+  });
+
+  test("sqlCallsDynamicSqlAst: DuckDB's parser (json_serialize_sql) catches query()/query_table() in every spelling", async () => {
+    const conn = duckdbNodeConn(await (await DuckDBInstance.create(":memory:")).connect());
+    for (const sql of [
+      "SELECT * FROM query('CREATE TABLE pwn AS SELECT 1')",
+      'SELECT * FROM "query"(\'CREATE TABLE pwn AS SELECT 1\')', // quoted → normalized to the function name
+      'SELECT * FROM main."query"(\'x\')',                        // catalog-qualified quoted
+      "SELECT * FROM query_table('pwn', true)",
+    ]) assert.equal(await sqlCallsDynamicSqlAst(conn, sql), true, `AST should flag: ${sql}`);
+    // benign SQL, incl. a QUOTED alias literally named "query", is NOT flagged (no function node)
+    for (const sql of [
+      "SELECT upper(c), count(*) FROM t GROUP BY 1",
+      'SELECT 1 AS "drop", 2 AS "query"',
+      "SELECT query FROM searches",
+    ]) assert.equal(await sqlCallsDynamicSqlAst(conn, sql), false, `AST should allow: ${sql}`);
   });
 
   // The guard is statement-class only — NOT a network/filesystem firewall. DuckDB replacement scans and
