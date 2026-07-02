@@ -1,4 +1,5 @@
 import { promises as fs } from "node:fs";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { RUN_REPLAY_SPEC_SCHEMA, receiptContentDigest, canonicalDigest, type RunReplaySpec } from "../core/reproducibility.js";
 import type { CasStore } from "../core/cas.js";
@@ -75,6 +76,15 @@ export async function reproduceRun(req: ReproduceRequest): Promise<ReproduceResu
   if (replay.duckdbConfigDigest) {
     if (!req.duckdbConfig) throw new Error("reproduce: this run pinned a duckdbConfigDigest — re-supply the same duckdbConfig to reproduce it faithfully (fail closed)");
     if (canonicalDigest(req.duckdbConfig) !== replay.duckdbConfigDigest) throw new Error("reproduce: the supplied duckdbConfig does not match the pinned duckdbConfigDigest (would not be a faithful reproduction)");
+  }
+  // VERIFY the manifest hasn't changed: reproduce re-runs from replay.manifest.path (by operationId or sql), so a
+  // manifest edited since the original run would execute DIFFERENT logic yet could still 'match' if receipts happen
+  // to align. Compare the CURRENT file's digest to the pinned one and fail closed on drift. (manifestDigest =
+  // sha256 of the file text, matching prepareRegistry.)
+  if (replay.manifest!.digest) {
+    const currentText = await fs.readFile(replay.manifest!.path!, "utf8");
+    const currentDigest = `sha256:${createHash("sha256").update(currentText).digest("hex")}`;
+    if (currentDigest !== replay.manifest!.digest) throw new Error(`reproduce: manifest at ${replay.manifest!.path} has CHANGED since the run (${currentDigest} != pinned ${replay.manifest!.digest}) — reproduction would run different logic (fail closed)`);
   }
   const base = {
     cwd: req.cwd, dbPath: req.dbPath ?? ":memory:", manifestPath: replay.manifest!.path!,

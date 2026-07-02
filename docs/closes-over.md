@@ -25,7 +25,7 @@ coordination pattern:
 | `pub` / `sub` | a **blackboard** — broadcast state to subscribers | `scripts/blackboard-shared.mjs` |
 | `surveyor` / `respondent` | **survey / debate / quorum** — 1:N with replies | `scripts/nng-survey.mjs` (a multi-provider jury: quorum + abstention) |
 | `pair` | a **1:1 channel** — proposer↔verifier | `scripts/nng-pair.mjs` (adversarial propose→refute→converge) |
-| `bus` | a **peer mesh** — decentralized consult | verified reachable (a bus round-trip probes clean); mesh demo pending |
+| `bus` | a **peer mesh** — decentralized consult | reachability TESTED (`test/ducknng-socket-reachability.test.ts` — a bus round-trip); mesh demo pending |
 
 Multi-agent coordination is therefore transport, not a framework — and status/results flow back into the shared
 SQL ledger, so the coordination is *inspectable data*, not opaque runtime state. Each demo spawns real separate OS

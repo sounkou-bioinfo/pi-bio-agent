@@ -77,6 +77,19 @@ describe("C2: reproduce() compares deterministic receipt content, not wall-clock
     assert.equal(rep.matched, true);
   });
 
+  test("fail closed: reproduce rejects when the manifest FILE changed since the run (would run different logic)", async () => {
+    const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-repro-drift-"));
+    const cas = fsCasStore(await fs.mkdtemp(join(tmpdir(), "pi-bio-cas-")));
+    const mpath = join(cwd, "manifest.json");
+    await fs.writeFile(mpath, JSON.stringify({ schema: "pi-bio.manifest.v1", id: "m", version: "0.1.0", title: "m", description: "m", provides: {} }));
+    const out = await runBioQueryFromManifest({ cwd, dbPath: ":memory:", manifestPath: mpath, sql: "SELECT 1 AS x", cas, runId: "drift1", now: "2026-07-01T00:00:00Z" });
+    assert.equal(out.ok, true);
+    const replay = JSON.parse(await fs.readFile(join((out as { runDir: string }).runDir, "replay.json"), "utf8")) as RunReplaySpec;
+    // an EDIT to the manifest after the run — reproduce must refuse (its digest no longer matches the pin)
+    await fs.writeFile(mpath, JSON.stringify({ schema: "pi-bio.manifest.v1", id: "m", version: "0.1.0", title: "CHANGED", description: "m", provides: {} }));
+    await assert.rejects(() => reproduceRun({ cwd, replay, cas }), /manifest .* has CHANGED/);
+  });
+
   test("fail closed: a replay with no pinned digests, or no manifest path, refuses (no hollow match)", async () => {
     const { cwd, replay } = await runOnce();
     await assert.rejects(() => reproduceRun({ cwd, replay: { ...replay, sourceReceiptDigests: [], resultDigest: undefined } }), /pins neither sourceReceiptDigests nor a resultDigest/);
