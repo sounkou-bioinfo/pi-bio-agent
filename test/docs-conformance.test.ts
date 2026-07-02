@@ -14,6 +14,7 @@ const docFiles = [
   "README.Rmd", // the SOURCE (README.md is rendered from it) — forbid tokens here so a re-render can't reintroduce them
   "README.md",
   ...readdirSync(join(ROOT, "docs")).filter((f) => f.endsWith(".md")).map((f) => join("docs", f)),
+  ...readdirSync(join(ROOT, "scripts")).filter((f) => f.endsWith(".md")).map((f) => join("scripts", f)), // shipped example/evidence docs
 ];
 
 // each entry: a token that must NOT appear in the public docs + the current truth that makes it forbidden.

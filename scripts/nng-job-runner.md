@@ -11,4 +11,4 @@ coordinator reads the job's status straight out of the **same `job:<runId>:statu
 
 Why it matters: a long-running bio job (a whole-VCF VEP annotation, an alignment, a cohort regression) can run on
 a worker pool over NNG push/pull, and its status flows back into the temporal ledger as SQL — the same substrate
-Phase 4 governance and C2 reproduce() use. Compute distribution is a topology (`push`/`pull`), not a new system.
+Phase 4 governance and C2 reproduceRun() use. Compute distribution is a topology (`push`/`pull`), not a new system.

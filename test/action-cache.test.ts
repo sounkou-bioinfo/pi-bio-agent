@@ -65,6 +65,13 @@ describe("ActionCache: input CASID -> output CASID (LLVM CAS ActionCache in the 
     assert.notEqual(actionInputDigest(base), actionInputDigest({ ...base, sourceReceiptDigests: ["sha256:s2"] }));
   });
 
+  test("the key is sensitive to RESULT-AFFECTING execution facts (init SQL, config, process, env) — no wrong-result serving", () => {
+    assert.notEqual(actionInputDigest(base), actionInputDigest({ ...base, duckdbInitSql: ["SET threads=1"] }), "init SQL changes the key");
+    assert.notEqual(actionInputDigest(base), actionInputDigest({ ...base, duckdbConfigDigest: "sha256:cfg" }), "config changes the key");
+    assert.notEqual(actionInputDigest(base), actionInputDigest({ ...base, process: { command: ["Rscript", "fit.R"] } }), "process changes the key");
+    assert.notEqual(actionInputDigest(base), actionInputDigest({ ...base, environment: { status: "matched", observedDigest: "sha256:e" } }), "environment changes the key");
+  });
+
   test("put/get round-trips input -> output; a miss is null", async () => {
     const c = await conn();
     await actionCachePut(c, "sha256:in", "sha256:out", "2026-01-01T00:00:01Z", "agent:A");

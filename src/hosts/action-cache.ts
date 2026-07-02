@@ -31,7 +31,7 @@ function canonicalize(v: unknown): unknown {
   return v;
 }
 
-export function actionInputDigest(replay: Pick<RunReplaySpec, "kind" | "manifest" | "operationId" | "sql" | "resources" | "bindings" | "sourceReceiptDigests">): string {
+export function actionInputDigest(replay: Pick<RunReplaySpec, "kind" | "manifest" | "operationId" | "sql" | "resources" | "bindings" | "sourceReceiptDigests" | "duckdbInitSql" | "duckdbConfigDigest" | "process" | "environment">): string {
   const canonical = JSON.stringify(canonicalize([
     replay.kind,
     replay.manifest?.digest ?? null,
@@ -40,6 +40,12 @@ export function actionInputDigest(replay: Pick<RunReplaySpec, "kind" | "manifest
     [...(replay.resources ?? [])].sort(),
     replay.bindings ?? null, // canonicalize() sorts its keys so binding order doesn't change the CASID
     [...(replay.sourceReceiptDigests ?? [])].sort(), // resolved-content refs -> key captures the input DAG, not just the declaration
+    // RESULT-AFFECTING execution facts — omitting these would collide runs that produce DIFFERENT results and let
+    // the ActionCache/recallRunResult serve the WRONG cached result:
+    replay.duckdbInitSql ?? null,        // SET/LOAD/ATTACH change the result — ORDER matters, so not sorted
+    replay.duckdbConfigDigest ?? null,   // DuckDB config (extensions/secrets/dirs) can change the result
+    replay.process ?? null,              // process.compute command/inputSql/outputs are the computation itself
+    replay.environment ?? null,          // a different attested environment can yield a different result
   ]));
   return `sha256:${createHash("sha256").update(canonical).digest("hex")}`;
 }
