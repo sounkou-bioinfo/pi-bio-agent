@@ -93,8 +93,9 @@ export interface ProcessRunSpec {
   /** [executable, ...args] — an argv array, NEVER a shell string (so there is no shell to inject into). */
   command: readonly string[];
   cwd?: string;
-  /** Extra environment for the child (merged over the host's) — tool knobs only; the Arrow in/out paths are passed
-   *  as the last two ARGV entries (see process.compute), never via env. */
+  /** Extra environment for the child — tool knobs only; the Arrow in/out paths are passed as the last two ARGV
+   *  entries (see process.compute), never via env. The child does NOT inherit the host's full `process.env` (that
+   *  carries secrets); the runner gives it a minimal non-secret base (PATH/HOME/locale) plus exactly this. */
   env?: Record<string, string>;
   timeoutMs?: number;
   signal?: AbortSignal;

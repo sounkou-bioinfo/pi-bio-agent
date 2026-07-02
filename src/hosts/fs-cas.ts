@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs";
 import { join } from "node:path";
 import type { CasStore } from "../core/cas.js";
 import type { ContentAddress } from "../core/resources.js";
+import { validateContentAddress } from "../core/storage.js";
 
 // Filesystem CAS rooted at a host-chosen POSIX-like directory (e.g. .pi/bio-agent/cas, or a shared cross-project
 // filesystem mount). Layout: <root>/<algorithm>/<digest>. The host owns WHERE the store lives — the library only
@@ -20,7 +21,13 @@ import type { ContentAddress } from "../core/resources.js";
 // input), rather than store an unverified blob the GC then can't root (the real footgun). Widen when a second algorithm has a
 // real producer + GC support, not before.
 export function fsCasStore(root: string): CasStore {
-  const pathFor = (a: ContentAddress): string => join(root, a.algorithm, a.digest);
+  // VALIDATE before deriving a path: algorithm ∈ {sha256} and digest is 64 hex, so a hostile/legacy address with
+  // path segments (`../…`) can never escape the CAS root — this guards has/put/remove/pathFor at one chokepoint.
+  const pathFor = (a: ContentAddress): string => {
+    const errs = validateContentAddress(a);
+    if (errs.length) throw new Error(`fsCasStore: refusing an invalid content address (${errs.join("; ")})`);
+    return join(root, a.algorithm, a.digest);
+  };
   return {
     pathFor,
     async has(a) {

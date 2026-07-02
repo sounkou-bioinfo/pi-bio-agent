@@ -10,6 +10,20 @@ import { nodeProcessRunner } from "../src/process/node-process-runner.js";
 // they need neither R nor nanoarrow and run deterministically everywhere. They lock in the hardening from the
 // pal review: a non-positive timeoutMs must NOT silently disable the timeout, and params.env must be strings.
 
+describe("SECURITY: spawned children do not inherit host secrets, and CAS/run paths can't escape their root", () => {
+  test("a spawned child does NOT see host process.env secrets, but DOES get explicit spec.env + a resolvable PATH", async () => {
+    process.env.PI_BIO_FAKE_SECRET = "topsecret-do-not-leak";
+    try {
+      const res = await nodeProcessRunner().run({
+        command: [process.execPath, "-e", "process.stdout.write(`secret=${process.env.PI_BIO_FAKE_SECRET ?? 'ABSENT'} knob=${process.env.TOOL_KNOB ?? 'unset'}`)"],
+        env: { TOOL_KNOB: "on" },
+      });
+      assert.match(res.stdout, /secret=ABSENT/, "the host secret must NOT reach an agent-declared child (injected-effect boundary)");
+      assert.match(res.stdout, /knob=on/, "explicit spec.env IS passed through");
+    } finally { delete process.env.PI_BIO_FAKE_SECRET; }
+  });
+});
+
 const BASE = {
   schema: "pi-bio.manifest.v1", id: "compute-guards", version: "0.1.0",
   title: "process.compute param guards", description: "fail-closed param validation for process.compute",

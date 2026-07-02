@@ -56,6 +56,13 @@ describe("CAS-of-bytes: a content-addressed byte store", () => {
     assert.equal(await cas.has(addr), false, "nothing was stored");
   });
 
+  test("SECURITY: pathFor/remove refuse an address whose digest could escape the CAS root", async () => {
+    const cas = fsCasStore(await fs.mkdtemp(join(tmpdir(), "pi-bio-cas-")));
+    const hostile = { algorithm: "sha256", digest: "../../../../etc/passwd" } as unknown as ContentAddress;
+    assert.throws(() => cas.pathFor(hostile), /invalid content address/, "a path-segment digest is refused, not joined");
+    await assert.rejects(() => cas.remove(hostile), /invalid content address/, "remove() can't rm outside the CAS root");
+  });
+
   test("distinct content lands in distinct entries (dedup is by hash)", async () => {
     const root = await fs.mkdtemp(join(tmpdir(), "pi-bio-cas-"));
     const cas = fsCasStore(root);

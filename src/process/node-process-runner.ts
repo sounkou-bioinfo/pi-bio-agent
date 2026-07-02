@@ -3,6 +3,16 @@ import { StringDecoder } from "node:string_decoder";
 import type { ProcessRunner, ProcessRunResult, ProcessRunSpec } from "../core/ports.js";
 import { ENV_DESCRIPTOR_SCHEMA, unknownEnvDescriptor, type EnvDescriptor } from "../core/reproducibility.js";
 
+// A minimal, NON-SECRET base environment for a spawned child: just enough to resolve binaries and locale, never
+// the host's arbitrary vars (that's where secrets — *_API_KEY, *_TOKEN, AWS_*, … — live). An allowlist, not a
+// denylist, so a newly-invented secret var name can't slip through. The host adds anything else via spec.env.
+const SAFE_ENV_KEYS = ["PATH", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "TMPDIR", "TEMP", "TMP", "SHELL", "USER", "LOGNAME", "SystemRoot", "PATHEXT", "COMSPEC", "WINDIR"];
+function safeBaseEnv(): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const k of SAFE_ENV_KEYS) { const v = process.env[k]; if (typeof v === "string") out[k] = v; }
+  return out;
+}
+
 // The host adapter for the ProcessRunner port — spawn an out-of-process child via node:child_process, capture
 // stdout/stderr (capped), honor a timeout and an AbortSignal. It is a THIN exec boundary: it never inspects or
 // transforms the data (the Arrow-IPC files are the data contract, owned by the resolver). `spawn` with an argv
@@ -39,7 +49,12 @@ export function nodeProcessRunner(): ProcessRunner {
         const posix = process.platform !== "win32";
         const child = spawn(exe, args, {
           cwd: spec.cwd,
-          env: spec.env ? { ...process.env, ...spec.env } : process.env,
+          // SECURITY: do NOT inherit the full host `process.env` — it carries secrets (API keys, tokens, cloud
+          // creds), and an agent-declared command would otherwise read/exfiltrate them, breaking the injected-
+          // effect boundary (secrets are host-owned, never agent-reachable). Pass only a minimal, non-secret base
+          // so binaries resolve, plus the explicit `spec.env` the host/manifest declared. A host that needs a
+          // richer env passes it via spec.env — deliberately, not by ambient inheritance.
+          env: { ...safeBaseEnv(), ...spec.env },
           stdio: ["ignore", "pipe", "pipe"], // no stdin; the data contract is the Arrow files, not the pipe
           detached: posix,
         });

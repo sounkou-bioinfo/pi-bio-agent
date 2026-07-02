@@ -66,7 +66,7 @@ export function runsRoot(cwd: string): string {
   return join(cwd, ".pi", "bio-agent", "runs");
 }
 
-const RUN_DIR_ID_RE = /^[A-Za-z0-9._-]+$/;
+const RUN_DIR_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/; // leading alnum required — rejects '.', '..', '.hidden' (no path traversal)
 
 /** Resolve a run's directory, refusing a runId that could escape runsRoot. Centralized so every persistence
  *  path (and the host runner) is path-safe, including the exported persist* helpers called directly. */
