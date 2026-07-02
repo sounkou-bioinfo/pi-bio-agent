@@ -1,5 +1,5 @@
 import type { SqlConn } from "../core/ports.js";
-import { recordMonotonicObservation } from "../duckdb/observations.js";
+import { createBioObservationSchema, recordMonotonicObservation } from "../duckdb/observations.js";
 
 const RUN_SLOT_FUTURE = "9999-12-31T23:59:59.999Z"; // sentinel for "the LATEST run:<id> fact regardless of clock"
 
@@ -29,15 +29,21 @@ export interface RunObservation {
    *  fetchable from CAS by digest and become optional serialize/exports too (bytes stay OUTSIDE the DB). */
   receiptsDigest?: string;
   replayDigest?: string;
-  /** The RUN OBJECT's content address — a CAS object (LLVM CASObject: Data + Refs) whose refs point at the
-   *  result/receipts/replay/manifest CAS objects. It is the single root digest of the whole run DAG, so two runs
-   *  are identical iff their runObjectDigest matches (dedup/compare by root hash). */
+  /** The RUN OBJECT's content address — a CAS object (LLVM CASObject: Data + Refs) whose refs are the run's
+   *  CONTENT-equivalence roots: the INPUT CASID (actionInputDigest — manifest+SQL+resolved-source digests) and the
+   *  RESULT CASID. Refs are content-only (no runId/timestamps) so two runs with identical inputs+output share ONE
+   *  runObjectDigest (dedup/compare by root hash). The run-specific receipts/replay blob digests are carried
+   *  SEPARATELY on the run:<id> fact (receiptsDigest/replayDigest), not under this root. */
   runObjectDigest?: string;
 }
 
 /** Record a run as a `run:<runId>` observation in the shared store, attributed to `author`. Best-effort at the
  *  call site (logging to the ledger must never fail the run itself). */
 export async function recordRunObservation(conn: SqlConn, run: RunObservation, now: string, author?: string): Promise<void> {
+  // Ensure the ledger table exists FIRST: a fresh custom/server-backed store (a host-injected openStore) may not have
+  // it yet, and recordRun logs best-effort (swallows failures) — so without this the FIRST run's fact would be
+  // silently dropped. Idempotent (IF NOT EXISTS), like memory-store/skill-store's ensure-schema.
+  await createBioObservationSchema(conn, { ifNotExists: true });
   // strictly-monotonic recordedAt per run:<id> slot, SERIALIZED per slot: a REUSED runId re-run overwrites its files,
   // so its ledger fact must SUPERSEDE the prior one (be current) — a backdated `now` (< the existing latest), or a
   // concurrent re-run racing the +1ms advance, would otherwise leave the authoritative run:<id> fact pointing at the

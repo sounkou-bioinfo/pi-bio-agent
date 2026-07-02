@@ -58,8 +58,9 @@ memory** (report §3.2.2) made literal — the same transport story the substrat
 `remember(author)` + a legible file view; `bio_recall`/`bio_list_memory` = `recall`/`listMemory` with an `asOf`
 time-travel param; `bio_forget` = `forget` (retraction); `bio_walk_memory` + the always-on recall index read the
 store. Skills are temporal too (`bio_create_skill` → `skill:<name>` observations, `src/hosts/skill-store.ts`), and
-`pi-bio-agent memory list/show/history` reads the store from the CLI. Run receipts/replay bytes and result
-rows live in CAS (referenced by digest), runs fold in as run-object DAGs, and recall is memoized by input digest.
+`pi-bio-agent memory list/show/history` reads the store from the CLI. When the host supplies a `cas` (CAS mode),
+run receipts/replay bytes and result rows live in CAS (referenced by digest) and runs fold in as run-object DAGs and
+recall is memoized by input digest; with no `cas` those bytes stay in the run's JSON files instead.
 
 ## Where this comes from
 
@@ -170,11 +171,13 @@ The first sketch of this proposal carried a wide `KnowledgeUnit` with `role`, `t
 universal type where half the fields are null for any given row. The enemy here is bloat,
 so these are settled before any type is introduced:
 
-1. **A slug is a *mutable* identity, not a version key.** Re-writing a slug **overwrites**
-   in place (upsert); the original `createdAt` and `id` are preserved and `updatedAt` bumps
-   (owned by the write layer, not the caller). History
-   is **git**, not a chain of files. Therefore notes carry **no `supersedes` and no
-   `knownAt`** — those belong on KG evidence (see lesson 5), not on a cheatsheet.
+1. **A slug is a stable identity; a re-write is an append-only supersession.** (This reverses
+   an earlier draft that treated a slug as a plain-mutable, in-place overwrite with git as its
+   only history.) Re-writing a slug appends a new `bio_observations` revision that SUPERSEDES
+   the slot; every prior revision is retained, `recall(slug, asOf)` reads any point in time,
+   and `memoryHistory` returns the trail — the note's own history lives in the ledger,
+   attributed to the author, not in a per-workstation git log. The file view is a legible
+   export of the current revision.
 2. **No `trust`/`TrustBlock` on notes.** The existing `sources[]` (`path`/`url`/`locator`/
    `quote`) is the right grain for "where this note came from." `TrustBlock` is for *facts
    in the graph*. On model-authored procedural memory, `provenanceClass`/`confidence`
@@ -187,11 +190,13 @@ so these are settled before any type is introduced:
 5. **`role` × `form` are orthogonal and are *never* cross-validated.** If a validator ever
    rejected a combination, they would not be orthogonal and should be one enum. They are
    independent, so no combination check is written, ever.
-6. **`INDEX.md` is a generated cache, not a source of truth.** Truth is the `.json` files;
-   the index is regenerated on every write/delete and is safe to delete. (Unlike a coding
-   agent's hand-maintained `MEMORY.md` — our notes are structured, so the index is derived,
-   not edited.) **One** index surface for now; a DuckDB FTS table is added only when linear
-   scan over notes is actually slow (Stage 2), not preemptively.
+6. **`INDEX.md` and the `.json` files are BOTH derived views — the store is the source of
+   truth.** The authoritative record is the append-only `bio_observations` ledger
+   (`store.duckdb`); the note `.json` files are a legible export of the current revision, and
+   `INDEX.md` is regenerated from them on every write/delete (safe to delete). (Unlike a
+   coding agent's hand-maintained `MEMORY.md` — our notes are structured, so the index is
+   derived, not edited.) **One** index surface for now; a DuckDB FTS table is added only when
+   linear scan over notes is actually slow (Stage 2), not preemptively.
 
 The net effect is a *subtraction*: the unified core is smaller than the three things it
 replaces. If the line count goes up, the unification was done wrong.

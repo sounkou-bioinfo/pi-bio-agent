@@ -176,8 +176,8 @@ export async function observationAsOfKey(conn: SqlConn, statementKey: string, t:
  *  serializes them. The gap is IN-PROCESS: DuckDB does NOT exclude same-process opens (two `openBioStore` handles to
  *  one file coexist), so two concurrent callers could each read the slot's latest, both compute the same +1ms, and
  *  collide on the hash-arbitrary observation_id tiebreak. Callers that may issue concurrent same-slot writes in one
- *  process must serialize per statement_key (an in-process per-slot lock — the planned `recordMonotonicObservation`
- *  wrapper); the +1ms advance alone only disambiguates SEQUENTIAL writes a coarse clock stamped at the same ms. */
+ *  process must serialize per statement_key — use `recordMonotonicObservation` (below), which advances + writes under
+ *  an in-process per-slot lock; the +1ms advance alone only disambiguates SEQUENTIAL writes stamped at the same ms. */
 export async function monotonicRecordedAt(conn: SqlConn, statementKey: string, now: string, sentinel: string): Promise<string> {
   const latest = await observationAsOfKey(conn, statementKey, sentinel);
   const latestMs = latest ? Date.parse(latest.recorded_at) : NaN;

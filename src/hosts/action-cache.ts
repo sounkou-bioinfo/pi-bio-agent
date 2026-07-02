@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import type { SqlConn } from "../core/ports.js";
 import type { CasStore } from "../core/cas.js";
-import { observationAsOfKey, recordMonotonicObservation } from "../duckdb/observations.js";
+import { createBioObservationSchema, observationAsOfKey, recordMonotonicObservation } from "../duckdb/observations.js";
 import type { RunReplaySpec } from "../core/reproducibility.js";
 
 // LLVM CAS ActionCache, in the ONE store: a key/value map from an INPUT CASID (the digest of a computation's
@@ -52,6 +52,9 @@ export function actionInputDigest(replay: Pick<RunReplaySpec, "kind" | "manifest
 
 /** Look up the output (result) CASID an earlier identical run produced — the memo/dedup hit. null on a miss. */
 export async function actionCacheGet(conn: SqlConn, inputDigest: string, asOf: string = FUTURE): Promise<string | null> {
+  // A fresh store may not have the ledger table yet; recall on it is a MISS, not a throw. Ensure it (idempotent) so
+  // the SELECT below can't fail on a missing table — a not-yet-populated cache legitimately returns null.
+  await createBioObservationSchema(conn, { ifNotExists: true });
   const row = await observationAsOfKey(conn, actionKey(inputDigest), asOf);
   if (!row || row.value_json == null) return null;
   return (JSON.parse(row.value_json) as { output?: string }).output ?? null;
@@ -63,6 +66,7 @@ export async function actionCacheGet(conn: SqlConn, inputDigest: string, asOf: s
  * reproduce() surfaces (a computation that stopped being deterministic).
  */
 export async function actionCachePut(conn: SqlConn, inputDigest: string, outputDigest: string, now: string, author?: string): Promise<void> {
+  await createBioObservationSchema(conn, { ifNotExists: true }); // a fresh store may lack the table; put must not be swallowed by run-store's best-effort memoization
   const key = actionKey(inputDigest);
   // strictly-monotonic recordedAt per action slot (state machine), SERIALIZED per key: two puts for one inputDigest
   // with DIFFERENT outputs — even concurrent, same-ms — must not be tie-broken by hash-arbitrary observation_id (that

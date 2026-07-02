@@ -322,12 +322,13 @@ function enrichReplay(replay: RunReplaySpec, receipts: ResolutionReceipt[]): Run
 async function recordRun(
   runLog: { store: SqlConn; author?: string } | undefined,
   now: string,
-  args: { runId: string; identity: string; status: string; error: string | undefined; dir: string; replay?: RunReplaySpec; enriched?: RunReplaySpec; resultDigest?: string; receiptsDigest?: string; replayDigest?: string; runObjectDigest?: string },
+  args: { runId: string; identity: string; kind: "query" | "operation"; status: string; error: string | undefined; dir: string; replay?: RunReplaySpec; enriched?: RunReplaySpec; resultDigest?: string; receiptsDigest?: string; replayDigest?: string; runObjectDigest?: string },
 ): Promise<void> {
   if (!runLog) return;
   const obs: RunObservation = {
     runId: args.runId,
-    kind: args.identity === "ad-hoc.query" ? "query" : "operation",
+    kind: args.kind, // explicit from the caller (query vs operation) — NOT inferred from the identity string, since
+                     // "ad-hoc.query" is a legal operation id and an identity sentinel would mislabel it.
     identity: args.identity,
     status: args.status,
     sql: args.replay?.sql,
@@ -349,7 +350,7 @@ async function recordRun(
 }
 
 async function runAndPersist(
-  cwd: string, dbPath: string, runId: string, identity: string,
+  cwd: string, dbPath: string, runId: string, identity: string, kind: "query" | "operation",
   body: (conn: SqlConn) => Promise<{ run: BioRunRecord; result: OperationResult; receipts: ResolutionReceipt[] }>,
   now: string,
   initSql?: string[],
@@ -420,7 +421,7 @@ async function runAndPersist(
       // CASID (actionInputDigest — manifest+SQL+resolved-source digests) and the result CASID. The run:<id> fact
       // separately carries the run-specific receipts/replay blob digests.
       const runObjectDigest = cas && enriched && resultDigest
-        ? await putCas({ schema: "pi-bio.run_object.v1", data: { kind: identity === "ad-hoc.query" ? "query" : "operation", identity, status: run.status }, refs: { input: actionInputDigest(enriched), result: resultDigest } })
+        ? await putCas({ schema: "pi-bio.run_object.v1", data: { kind, identity, status: run.status }, refs: { input: actionInputDigest(enriched), result: resultDigest } })
         : undefined;
       // GC ROOT for lean mode: the node-local collectGarbage roots CAS by scanning surviving run files, but a lean
       // run writes NO receipts.json — so write a tiny cas-refs.json listing THIS run's CAS digests (always, when a
@@ -430,7 +431,7 @@ async function runAndPersist(
         await writeRunFile(persisted.dir, "cas-refs.json", { schema: "pi-bio.cas_refs.v1", result: resultDigest, receipts: receiptsDigest, replay: replayDigest, runObject: runObjectDigest });
       }
       // Datomic + CAS: record the run as a fact in the ONE store, referencing content by digest (bytes stay outside).
-      await recordRun(runLog, now, { runId, identity, status: run.status, error: undefined, dir: persisted.dir, replay, enriched, resultDigest, receiptsDigest, replayDigest, runObjectDigest });
+      await recordRun(runLog, now, { runId, identity, kind, status: run.status, error: undefined, dir: persisted.dir, replay, enriched, resultDigest, receiptsDigest, replayDigest, runObjectDigest });
       // ActionCache (LLVM CAS): map this input's CASID -> the result's CASID, so an identical future run can be
       // memoized/deduped and reproduce() has an input->output handle. Only when both a CAS and the store are present.
       // SKIP a run with a LIVE SOURCE: its sourceReceiptDigests are blind to the source's CONTENT (sql_materialize /
@@ -464,7 +465,7 @@ async function runAndPersist(
         if (cas && (receiptsDigest || replayDigest)) {
           await writeRunFile(persisted.dir, "cas-refs.json", { schema: "pi-bio.cas_refs.v1", receipts: receiptsDigest, replay: replayDigest });
         }
-        await recordRun(runLog, now, { runId, identity, status: error.run.status, error: error.message, dir: persisted.dir, replay, enriched, receiptsDigest, replayDigest });
+        await recordRun(runLog, now, { runId, identity, kind, status: error.run.status, error: error.message, dir: persisted.dir, replay, enriched, receiptsDigest, replayDigest });
         const casRefs = cas ? { receipts: receiptsDigest, replay: replayDigest } : undefined;
         return { ok: false, runId, operationId: identity, status: error.run.status, error: error.message, casRefs, runDir: persisted.dir };
       }
@@ -506,7 +507,7 @@ export async function runBioOperationFromManifest(req: RunOperationRequest): Pro
     ...(req.duckdbConfig ? { duckdbConfigDigest: canonicalDigest(req.duckdbConfig) } : {}), // pin WHICH config (digest, not the secret-bearing config itself)
     ...(proc ? { process: proc } : {}),
   };
-  return runAndPersist(req.cwd, req.dbPath, runId, req.operationId, (conn) => runOperation(registry, conn, { operationId: req.operationId, runId, now, signal: req.signal, cas: req.cas }), now, req.duckdbInitSql, req.bindings, req.duckdbConfig, replay, req.store ? { store: req.store, author: req.author } : undefined, req.cas, req.serialize);
+  return runAndPersist(req.cwd, req.dbPath, runId, req.operationId, "operation", (conn) => runOperation(registry, conn, { operationId: req.operationId, runId, now, signal: req.signal, cas: req.cas }), now, req.duckdbInitSql, req.bindings, req.duckdbConfig, replay, req.store ? { store: req.store, author: req.author } : undefined, req.cas, req.serialize);
 }
 
 export interface RunQueryRequest {
@@ -566,5 +567,5 @@ export async function runBioQueryFromManifest(req: RunQueryRequest): Promise<Run
     ...(req.duckdbConfig ? { duckdbConfigDigest: canonicalDigest(req.duckdbConfig) } : {}), // pin WHICH config (digest, not the secret-bearing config itself)
     ...(proc ? { process: proc } : {}),
   };
-  return runAndPersist(req.cwd, req.dbPath, runId, "ad-hoc.query", (conn) => runQuery(registry, conn, { sql: req.sql, resources, runId, now, signal: req.signal, cas: req.cas }), now, req.duckdbInitSql, req.bindings, req.duckdbConfig, replay, req.store ? { store: req.store, author: req.author } : undefined, req.cas, req.serialize);
+  return runAndPersist(req.cwd, req.dbPath, runId, "ad-hoc.query", "query", (conn) => runQuery(registry, conn, { sql: req.sql, resources, runId, now, signal: req.signal, cas: req.cas }), now, req.duckdbInitSql, req.bindings, req.duckdbConfig, replay, req.store ? { store: req.store, author: req.author } : undefined, req.cas, req.serialize);
 }

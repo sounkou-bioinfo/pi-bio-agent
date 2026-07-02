@@ -157,11 +157,13 @@ export function makeStudyNote(params: {
   return note;
 }
 
-/** Generated-cache index. Source of truth is the .json files; this file is regenerated on every write/delete and is safe to delete. */
+/** Generated-cache index for the FILE VIEW. The source of truth is the append-only bio_observations store
+ *  (store.duckdb); the .json note files are a legible export of the current revision, and this index is derived
+ *  from them — regenerated on every write/delete and safe to delete. */
 export function renderStudyIndex(notes: StudyNote[]): string {
   const lines = notes.map((note) => `- [${note.title}](${note.slug}.json) — ${note.hook} _(${note.kind})_`);
   return [
-    "<!-- generated cache; source of truth is the .json files; safe to delete and regenerate -->",
+    "<!-- generated cache derived from the .json file view; the source of truth is the bio_observations store (store.duckdb); safe to delete and regenerate -->",
     "# Study notes index",
     "",
     lines.join("\n") || "_(no notes yet)_",

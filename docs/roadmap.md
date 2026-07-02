@@ -131,10 +131,12 @@ branches + the volatile-scalar `ncurl` fix → `ncurl-retry`'s SQL-native recurs
 `memoryHistory`/`forget` (tombstone retraction); a re-write supersedes but keeps the prior revision; `[[links]]`
 project into `bio_edges_as_of` (one closure crosses memory→ontology→fact). The agent's tools use it
 (`bio_remember`/`bio_recall`/`bio_list_memory`/`bio_forget`/`bio_walk_memory`, `bio_create_skill` temporal), a legible
-file is a *view*, and a `pi-bio-agent memory list/show/history` CLI reads it. **CAS bytes stay OUTSIDE the DB**: result
-rows, the full receipts blob, and the replay bundle all → CAS by digest, the `run:<id>` fact + a `casRefs` response
-reference them (`resultDigest`/`receiptsDigest`/`replayDigest`), and **lean mode** (`serialize:false`, requires a
-cas) skips the JSON files entirely. A content-addressed **ActionCache** (LLVM-style, `src/hosts/action-cache.ts`)
+file is a *view*, and a `pi-bio-agent memory list/show/history` CLI reads it. **When the host supplies a `cas`, CAS
+bytes stay OUTSIDE the DB**: result rows, the full receipts blob, and the replay bundle → CAS by digest and the
+`run:<id>` fact + a `casRefs` response reference them (`resultDigest`/`receiptsDigest`/`replayDigest`); with no `cas`
+(the CLI/default Pi tools do not inject one) those bytes live only in the run's JSON files and the digests are
+`undefined`. **Lean mode** (`serialize:false`) *requires* a cas — it skips the JSON files, so the bytes must have
+somewhere else to go. A content-addressed **ActionCache** (LLVM-style, `src/hosts/action-cache.ts`)
 maps input CASID → output CASID; a **run object** (Data + Refs → input/result CASIDs) gives one root
 `runObjectDigest` per run (dedup by hash); `recallRunResult` replays a recorded run's result from CAS with no
 re-execution. Sharing escalates local file → shared path → a **DuckDB server** (ducknng `run_rpc`, exec opt-in; a

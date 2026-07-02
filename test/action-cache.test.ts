@@ -138,6 +138,16 @@ describe("ActionCache: input CASID -> output CASID (LLVM CAS ActionCache in the 
     assert.equal(await recallRunResult(store, cas, replay), null, "a live-source run is a recall MISS (re-run, never serve a stale cached result)");
   });
 
+  test("a FRESH store (no schema) is a clean recall MISS; put provisions the schema and persists (no swallowed drop)", async () => {
+    // a store the host injected but never provisioned: actionCacheGet must MISS (not throw on a missing table), and
+    // actionCachePut must create the table so run-store's best-effort memoization isn't silently lost on first use.
+    const c = duckdbNodeConn(await (await DuckDBInstance.create(":memory:")).connect()); // deliberately NO createBioObservationSchema
+    const input = "sha256:" + "a".repeat(64);
+    assert.equal(await actionCacheGet(c, input), null, "recall on a fresh store is a miss, not a throw");
+    await actionCachePut(c, input, "sha256:" + "b".repeat(64), "2026-01-01T00:00:00Z", "agent:A");
+    assert.equal(await actionCacheGet(c, input), "sha256:" + "b".repeat(64), "put created the schema and the mapping persisted");
+  });
+
   test("CORRECTNESS: recall FAILS CLOSED when the memo DIVERGED from the run's recorded output (non-determinism)", async () => {
     const store = await conn();
     const cas = fsCasStore(await fsp.mkdtemp(join(tmpdir(), "cas-")));

@@ -8,7 +8,7 @@ import { promises as fsp } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { recordRunObservation } from "../src/hosts/run-observations.js";
-import { runBioQueryFromManifest } from "../src/hosts/run-store.js";
+import { runBioQueryFromManifest, runBioOperationFromManifest } from "../src/hosts/run-store.js";
 import { fsCasStore } from "../src/hosts/fs-cas.js";
 import { collectGarbage } from "../src/hosts/gc.js";
 import { MEMORY_NOW } from "../src/hosts/memory-store.js";
@@ -31,6 +31,23 @@ describe("run-observations: ad-hoc SQL folds into the ONE store as an as-of, att
     assert.equal(v.sql, "SELECT count(*) FROM variants"); // the exact ad-hoc SQL is queryable, not just in a file
     assert.deepEqual(v.sourceReceiptDigests, ["sha256:abc"]); // the fact REFERENCES the immutable content (bytes stay outside)
     assert.equal(v.manifestDigest, "sha256:def");
+  });
+
+  test("recordRunObservation ensures the ledger schema on a FRESH store — the first run's fact is not silently dropped", async () => {
+    // a host-injected/custom store that was NOT pre-provisioned (no createBioObservationSchema). recordRun logs
+    // best-effort (swallows failures), so without an internal ensure-schema the FIRST run's fact would vanish.
+    const c = duckdbNodeConn(await (await DuckDBInstance.create(":memory:")).connect());
+    await recordRunObservation(c, { runId: "fresh1", kind: "query", identity: "ad-hoc.query", status: "succeeded" }, "2026-01-01T00:00:00Z", "agent:A");
+    assert.ok(await observationAsOfKey(c, "run:fresh1", MEMORY_NOW), "the first run recorded even though the store started with no schema");
+  });
+
+  test("an OPERATION run records kind 'operation' (from the explicit kind, not an identity sentinel)", async () => {
+    const store = await conn();
+    const res = await runBioOperationFromManifest({ cwd: process.cwd(), dbPath: ":memory:", manifestPath: "examples/rare-high-impact/manifest.json", operationId: "rare_high_impact.report", store, author: "agent:test" });
+    assert.ok(res.ok, res.ok ? "" : `run failed: ${(res as { error?: unknown }).error}`);
+    const v = JSON.parse((await observationAsOfKey(store, `run:${res.runId}`, MEMORY_NOW))!.value_json!);
+    assert.equal(v.kind, "operation", "a declared operation is logged as an operation, not inferred as a query");
+    assert.equal(v.identity, "rare_high_impact.report");
   });
 
   test("a BACKDATED re-run of the same runId still SUPERSEDES in the ledger (monotonic) — no stale-digest current fact", async () => {
