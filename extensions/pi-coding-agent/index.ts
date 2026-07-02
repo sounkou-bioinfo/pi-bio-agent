@@ -6,7 +6,8 @@ import { deriveStudyPlan, walkMemoryGraph, type StudyArtifactKind, type StudyCor
 import { deleteStudyNote, makeStudyNote, runtimeSkillRoot, runtimeStudyRoot, writeProjectSkill, writeStudyNote } from "../../src/hosts/pi-project.js";
 import { defaultDuckDbExtensionCatalog, findDuckDbExtensions } from "../../src/duckdb/extensions.js";
 import { describeBioManifestFromPath, runBioOperationFromManifest, runBioQueryFromManifest } from "../../src/hosts/run-store.js";
-import { openBioStore, type BioStore } from "../../src/hosts/bio-store.js";
+import { bioStorePath, openBioStore, type BioStore } from "../../src/hosts/bio-store.js";
+import { isAbsolute, resolve } from "node:path";
 import { forget, listMemory, recall, remember, memorySubjectId, MEMORY_NOW, type MemoryContent } from "../../src/hosts/memory-store.js";
 import { recordSkill, skillSubjectId } from "../../src/hosts/skill-store.js";
 import { systemClock } from "../../src/core/clock.js";
@@ -68,13 +69,19 @@ async function memoryIndexBlock(cwd: string): Promise<string> {
   }
 }
 
-// Open the ONE store best-effort so a run can record its `run:<id>` fact directly (no run.json read-back). The
-// store being unavailable must never fail the run, so a failed open just runs without shared-ledger logging.
-async function openStoreBestEffort(cwd: string): Promise<BioStore | undefined> {
+// Open the ONE store to record a run's `run:<id>` fact — but ONLY when it is safe to. Returns undefined (run
+// proceeds without shared-ledger logging) in exactly two cases, never swallowing anything broader:
+//   1. the run's own db IS the store file — a second open would lock-conflict (DuckDB is a process-exclusive
+//      writer), so skip logging rather than break the run;
+//   2. the store cannot be opened (locked by another process / unavailable) — logging is a convenience, not a
+//      hard dependency of the query. A genuinely broken store still surfaces on the next memory op (withStore).
+async function openRunLog(cwd: string, dbPath: string): Promise<BioStore | undefined> {
+  const runDb = dbPath === ":memory:" ? "" : isAbsolute(dbPath) ? dbPath : resolve(cwd, dbPath);
+  if (runDb && runDb === bioStorePath(cwd)) return undefined; // (1) the run uses the store file itself
   try {
     return await openBioStore(cwd);
   } catch {
-    return undefined;
+    return undefined; // (2) store unavailable — log is best-effort
   }
 }
 
@@ -156,7 +163,7 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
       // host-only capabilities the tool schema omits (duckdbInitSql / now / cwd) if the schema validator does
       // not strip unknown keys. network/signal are host-composed, never agent-supplied.
       const { dbPath, manifestPath, operationId, runId } = params;
-      const store = await openStoreBestEffort(ctx.cwd);
+      const store = await openRunLog(ctx.cwd, dbPath);
       try {
         return text(await runBioOperationFromManifest({ cwd: ctx.cwd, dbPath, manifestPath, operationId, runId, network, signal, store: store?.conn, author }));
       } finally {
@@ -180,7 +187,7 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
     async execute(_id, params: { dbPath: string; manifestPath: string; sql: string; resources?: string[]; bindings?: Record<string, unknown>; runId?: string }, signal, _onUpdate, ctx) {
       // Only schema-approved fields (see bio_run_operation): never spread untrusted params into the host runner.
       const { dbPath, manifestPath, sql, resources, bindings, runId } = params;
-      const store = await openStoreBestEffort(ctx.cwd);
+      const store = await openRunLog(ctx.cwd, dbPath);
       try {
         return text(await runBioQueryFromManifest({ cwd: ctx.cwd, dbPath, manifestPath, sql, resources, bindings, runId, network, signal, store: store?.conn, author }));
       } finally {
