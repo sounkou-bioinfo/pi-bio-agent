@@ -144,9 +144,9 @@ spec.validateBioManifest
 spec.validateBioOperationSpec
 sql.validateReadOnlySelect
 study.plan
-study.writeNote
-study.listNotes
-study.readNote
+memory.remember   (bio_remember — append a temporal memory note)
+memory.list       (bio_list_memory)
+memory.recall     (bio_recall — read a note as-of a time)
 skill.draft
 resource.resolveMetadata
 operation.describe

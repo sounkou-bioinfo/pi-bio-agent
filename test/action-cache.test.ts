@@ -72,6 +72,9 @@ describe("ActionCache: input CASID -> output CASID (LLVM CAS ActionCache in the 
     assert.equal(d1, actionInputDigest({ ...base, bindings: { n: 10n } }), "same bigint -> stable key");
     assert.notEqual(d1, actionInputDigest({ ...base, bindings: { n: 11n } }), "different bigint -> different key");
     assert.notEqual(d1, actionInputDigest({ ...base, bindings: { n: 10 } }), "bigint 10n and number 10 are tagged apart (no collision)");
+    assert.notEqual(d1, actionInputDigest({ ...base, bindings: { n: "10" } }), "bigint 10n and the string '10' don't collide (injective typing)");
+    // a string that mimics an old naive tag must NOT collide with any bigint (the injective-typing regression guard)
+    assert.notEqual(actionInputDigest({ ...base, bindings: { n: "__bigint__:5" } }), actionInputDigest({ ...base, bindings: { n: 5n } }), "a string that looks like a bigint tag is still keyed apart");
     assert.throws(() => actionInputDigest({ ...base, bindings: { d: new Date() } }), /non-plain object/, "a Date (or other non-plain object) fails closed rather than mis-keying");
   });
 

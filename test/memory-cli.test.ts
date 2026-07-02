@@ -49,5 +49,14 @@ describe("memory CLI over the ONE temporal store (replaces the stale notes CLI)"
     assert.equal(await mainMemory(["list", "junk"], deps), 2);
     assert.equal(await mainMemory(["show", "acmg", "typo"], deps), 2);
     assert.equal(await mainMemory(["history", "a", "b"], deps), 2);
+    // a malformed --as-of is a usage error for any command (validated before the store is opened)
+    assert.equal(await mainMemory(["list", "--as-of", "not-a-time"], deps), 2);
+  });
+
+  test("a usage error (missing slug) is exit 2 and does NOT create/lock the store file (validated before open)", async () => {
+    const cwd = await fs.mkdtemp(join(tmpdir(), "mem-cli-usage-"));
+    const deps = { cwd, out: sink().write, err: sink().write };
+    assert.equal(await mainMemory(["show"], deps), 2, "show with no slug is a usage error");
+    await assert.rejects(() => fs.stat(join(cwd, ".pi", "bio-agent", "store.duckdb")), "no store file was created by the pure usage error");
   });
 });

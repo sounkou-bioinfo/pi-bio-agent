@@ -292,7 +292,11 @@ function resolvedProcessFacts(manifest: BioManifest, resources: string[]): RunRe
 }
 
 /** The env attestation SUMMARY lifted from the receipts' `environment` provenance entry (process.compute records
- *  it as notes). First process receipt that carries one (walking-skeleton: one process resource). Exported so
+ *  it as notes). Returns the FIRST process receipt that carries one — a deliberate walking-skeleton limit: today a
+ *  run has at most ONE process.compute resource. LIMITATION (owed when multi-process runs ship): with two+ process
+ *  resources this captures only the first, so reproduce()'s env-drift check would miss drift in a LATER resource's
+ *  environment. The fix is a per-receipt env summary (keyed by resourceId) compared per resource; not built now
+ *  because there is no multi-process consumer yet (building it would be speculative). Exported so
  *  reproduce() can recompute the RE-RUN's env summary and compare it to the pinned one (env lives in provenance
  *  NOTES, which receiptContentDigest drops — so without this check an env-drifted re-run would falsely 'match'). */
 export function envSummaryFromReceipts(receipts: ReadonlyArray<{ provenance: ReadonlyArray<{ source: string; notes?: string[] }> }>): EnvAttestationSummary | undefined {

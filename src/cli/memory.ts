@@ -44,6 +44,16 @@ export async function mainMemory(argv: string[], deps: MemoryCliDeps): Promise<n
     deps.err(`memory ${command}: unexpected extra argument(s) '${positionals.slice(maxPositionals).join(" ")}'\n\n${MEMORY_USAGE}`);
     return 2;
   }
+  // Validate USAGE (required slug for show/history; a parseable --as-of) BEFORE opening the store — a usage error must
+  // not create/lock the store file as a side effect.
+  if (command !== "list" && !positionals[0]) {
+    deps.err(`memory ${command} <slug> — a slug is required.\n\n${MEMORY_USAGE}`);
+    return 2;
+  }
+  if (asOf !== MEMORY_NOW && Number.isNaN(Date.parse(asOf))) {
+    deps.err(`memory ${command}: --as-of '${asOf}' is not a valid ISO timestamp\n\n${MEMORY_USAGE}`);
+    return 2;
+  }
 
   const store = await openBioStore(deps.cwd);
   try {
@@ -70,12 +80,8 @@ export async function mainMemory(argv: string[], deps: MemoryCliDeps): Promise<n
     // future ones. Default (MEMORY_NOW) shows the whole trail. A provided-but-unparseable time is a usage error
     // (exit 2), matching how list/show fail on a bad TIMESTAMPTZ rather than silently returning nothing.
     const revisions = await memoryHistory(store.conn, slug);
-    let visible = revisions;
-    if (asOf !== MEMORY_NOW) {
-      const cutoff = Date.parse(asOf);
-      if (Number.isNaN(cutoff)) { deps.err(`memory history: --as-of '${asOf}' is not a valid ISO timestamp\n\n${MEMORY_USAGE}`); return 2; }
-      visible = revisions.filter((r) => Date.parse(r.recordedAt) <= cutoff);
-    }
+    // asOf is already validated as parseable (or MEMORY_NOW) above, so filter directly.
+    const visible = asOf === MEMORY_NOW ? revisions : revisions.filter((r) => Date.parse(r.recordedAt) <= Date.parse(asOf));
     deps.out(JSON.stringify({ slug, asOf: asOfLabel, revisions: visible.map((r) => ({ recordedAt: r.recordedAt, author: r.author, forgotten: r.content === null, title: r.content?.title })) }, null, 2));
     return 0;
   } finally {

@@ -482,8 +482,11 @@ agent surface (query/run a manifest, list DuckDB format extensions,
 validate SQL, and remember/recall/walk a temporal memory graph) over
 host-injected effects. Compute (`process.compute`) and *distributed*
 jobs (a `JobDispatch` over an NNG pool / SLURM / Modal) are wired by the
-host through the SDK/CLI — **fail-closed by default**, so those powerful
-effects are granted deliberately, never ambiently. So reproducible
+host in its own code (the SDK / an extension like this one, which injects
+a `ProcessRunner`/`JobDispatch` into the run request) — the bundled
+`pi-bio-agent` CLI is deliberately minimal and injects neither, so a
+compute/networked manifest **fails closed** there. Those powerful effects
+are granted deliberately, never ambiently. So reproducible
 artifacts, connected databases, on-demand compute, and grounded review
 run on **your** infra, provider-agnostic. Each [example](examples/)
 carries a recorded, verified run; see [what the substrate closes

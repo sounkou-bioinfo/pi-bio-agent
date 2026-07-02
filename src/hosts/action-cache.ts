@@ -24,10 +24,15 @@ const actionKey = (inputDigest: string): string => `action:${inputDigest}`;
 // Recursively sort object keys so semantically identical values hash identically regardless of insertion order
 // (agent bindings are an object whose key order is not meaningful — different order must not miss the cache).
 function canonicalize(v: unknown): unknown {
-  // bigint: JSON.stringify THROWS on it, so a binding carrying a DuckDB BIGINT would crash the whole digest (and the
-  // run-object CAS write). Tag it losslessly + injectively — `__bigint__:5` can't collide with the real string "5"
-  // or the number 5 — so a bigint binding is keyed, not a crash.
-  if (typeof v === "bigint") return `__bigint__:${v.toString()}`;
+  // INJECTIVE typed encoding so distinct types can never collide in the digest. JSON already separates
+  // number/boolean/null/array/object, but (a) bigint isn't JSON-serializable (JSON.stringify THROWS on it — a DuckDB
+  // BIGINT binding would crash the digest + the run-object CAS write) and (b) a naive string tag for bigint could
+  // collide with a real string of that exact text. So tag BOTH strings and bigints: a bigint becomes
+  // {__t:"bigint",v} with RAW inner strings, while every real string becomes {__t:"string",v}. A user value can
+  // therefore never reproduce the bigint form — its own inner strings would themselves be tagged. Objects/arrays
+  // recurse; number/boolean/null stay native (already JSON-distinct).
+  if (typeof v === "bigint") return { __t: "bigint", v: v.toString() };
+  if (typeof v === "string") return { __t: "string", v };
   if (Array.isArray(v)) return v.map(canonicalize);
   if (v && typeof v === "object") {
     // Plain objects only. A non-plain object (Date, Map, class instance) has no meaningful own-key projection here —
