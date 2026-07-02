@@ -27,9 +27,18 @@ pi-bio-agent query examples/connectors/uniprot.json --db :memory: \
 
 The `ncurl_table` connectors are pure SQL, so the host provisions ducknng + a TLS config with `--init-sql` (the
 DuckDB-native path). **Network is the host's capability, never the agent's**: the default CLI/extension entrypoint
-binds no egress, so a connector fails closed until the host allows it. The `http.get` form (e.g.
+injects no `fetch`, so the `http.get` path fails closed until the host binds one. The `http.get` form (e.g.
 [`uniprot-http.json`](uniprot-http.json)) needs no `--init-sql` — the host-supplied `fetch` resolves it, so the
 **agent** can drive it directly and compose the SQL itself.
+
+> **DuckDB-level egress is a host-sandbox residue, not a library gate.** The SQL path reaches the network only
+> through a DuckDB extension (`httpfs`, community `ducknng`). The resolver does `LOAD` (never `INSTALL`), so a
+> clean environment fails closed — but a DuckDB `INSTALL` persists in the extension directory, so once a host has
+> installed a network-capable extension there, an agent-authored manifest can `LOAD` it (via `params.extensions`)
+> and egress through SQL in a later run, even one that injected no `fetch`. A denylist of "network extensions" can
+> never be complete, so the library stays permissive and records what ran; a host that wants strict no-egress must
+> not install network extensions into a shared DuckDB home (or must isolate that home per trust boundary) — the
+> same egress residue as an `httpfs` replacement scan (see `src/core/sql-guard.ts`).
 
 ## Auth, MCP, and streaming (the reach)
 
