@@ -272,15 +272,15 @@ pi-bio-agent query examples/connectors/clinvar-region.json \
 ``` json
 {
   "ok": true,
-  "runId": "query-1782966055194-7d49b2d0",
+  "runId": "query-1782967131692-aedca597",
   "status": "succeeded",
   "rowCount": 8,
   "artifacts": {
-    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782966055194-7d49b2d0/run.json",
-    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782966055194-7d49b2d0/result.json",
-    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782966055194-7d49b2d0/receipts.json"
+    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782967131692-aedca597/run.json",
+    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782967131692-aedca597/result.json",
+    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782967131692-aedca597/receipts.json"
   },
-  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782966055194-7d49b2d0",
+  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782967131692-aedca597",
   "rows": [
     {
       "clinical_significance": "Pathogenic",
@@ -330,15 +330,15 @@ pi-bio-agent query examples/variant-counts/manifest.json \
 ``` json
 {
   "ok": true,
-  "runId": "query-1782966057594-ff6af13a",
+  "runId": "query-1782967134061-d7d1eedf",
   "status": "succeeded",
   "rowCount": 3,
   "artifacts": {
-    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782966057594-ff6af13a/run.json",
-    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782966057594-ff6af13a/result.json",
-    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782966057594-ff6af13a/receipts.json"
+    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782967134061-d7d1eedf/run.json",
+    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782967134061-d7d1eedf/result.json",
+    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782967134061-d7d1eedf/receipts.json"
   },
-  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782966057594-ff6af13a",
+  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782967134061-d7d1eedf",
   "rows": [
     {
       "consequence": "missense",
@@ -373,20 +373,20 @@ pi-bio-agent query examples/run-ledger/manifest.json \
 ``` json
 {
   "ok": true,
-  "runId": "query-1782966057686-1d56c4a9",
+  "runId": "query-1782967134151-02abe7a5",
   "status": "succeeded",
   "rowCount": 4,
   "artifacts": {
-    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782966057686-1d56c4a9/run.json",
-    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782966057686-1d56c4a9/result.json",
-    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782966057686-1d56c4a9/receipts.json"
+    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782967134151-02abe7a5/run.json",
+    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782967134151-02abe7a5/result.json",
+    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782967134151-02abe7a5/receipts.json"
   },
-  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782966057686-1d56c4a9",
+  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782967134151-02abe7a5",
   "rows": [
     {
       "tool": "ad-hoc.query",
       "status": "succeeded",
-      "runs": 634,
+      "runs": 671,
       "first_run": {
         "micros": 1782757322953000
       }
@@ -400,19 +400,19 @@ pi-bio-agent query examples/run-ledger/manifest.json \
       }
     },
     {
-      "tool": "rare_high_impact.report",
-      "status": "succeeded",
-      "runs": 1,
-      "first_run": {
-        "micros": 1782758451301000
-      }
-    },
-    {
       "tool": "counts.by_consequence",
       "status": "succeeded",
       "runs": 1,
       "first_run": {
         "micros": 1782756761953000
+      }
+    },
+    {
+      "tool": "rare_high_impact.report",
+      "status": "succeeded",
+      "runs": 1,
+      "first_run": {
+        "micros": 1782758451301000
       }
     }
   ]
@@ -447,15 +447,15 @@ pi-bio-agent query examples/connectors/uniprot.json \
 ``` json
 {
   "ok": true,
-  "runId": "query-1782966057858-e23f1eb0",
+  "runId": "query-1782967134308-f005a864",
   "status": "succeeded",
   "rowCount": 1,
   "artifacts": {
-    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782966057858-e23f1eb0/run.json",
-    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782966057858-e23f1eb0/result.json",
-    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782966057858-e23f1eb0/receipts.json"
+    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782967134308-f005a864/run.json",
+    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782967134308-f005a864/result.json",
+    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782967134308-f005a864/receipts.json"
   },
-  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782966057858-e23f1eb0",
+  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782967134308-f005a864",
   "rows": [
     {
       "primaryAccession": "P04637",
@@ -476,15 +476,18 @@ and writes the extraction. (`http.get` = the fetch the host binds;
 `ncurl_table` = pure SQL the host provisions — same connector, two
 levers.)
 
-**We port the whole “AI for science” stack as one Pi extension — not a
-hosted product.** The `pi-coding-agent` extension exposes the entire
-surface over this substrate (query/run a manifest, list DuckDB format
-extensions, validate SQL, and remember/recall/walk a temporal memory
-graph), so reproducible artifacts, connected databases, on-demand and
-*distributed* compute, and grounded review are a Pi extension **you**
-run, on **your** infra. Each [example](examples/) carries a recorded,
-verified run; see [what the substrate closes over](docs/closes-over.md)
-for the topology / Fugu / RLM argument.
+**We port the whole “AI for science” stack as an open substrate you run
+— not a hosted product.** The `pi-coding-agent` extension exposes the
+agent surface (query/run a manifest, list DuckDB format extensions,
+validate SQL, and remember/recall/walk a temporal memory graph) over
+host-injected effects. Compute (`process.compute`) and *distributed*
+jobs (a `JobDispatch` over an NNG pool / SLURM / Modal) are wired by the
+host through the SDK/CLI — **fail-closed by default**, so those powerful
+effects are granted deliberately, never ambiently. So reproducible
+artifacts, connected databases, on-demand compute, and grounded review
+run on **your** infra, provider-agnostic. Each [example](examples/)
+carries a recorded, verified run; see [what the substrate closes
+over](docs/closes-over.md) for the topology / Fugu / RLM argument.
 
 **And the agent doesn’t just *run* these — it *reads and writes* them.**
 The package ships its `examples/`, `docs/`, and every manifest, so a Pi

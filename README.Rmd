@@ -242,12 +242,14 @@ egress. For the agent to resolve a connector *itself* and compose the SQL with n
 the agent fetches the JSON, discovers the schema, and writes the extraction. (`http.get` = the fetch the host
 binds; `ncurl_table` = pure SQL the host provisions — same connector, two levers.)
 
-**We port the whole "AI for science" stack as one Pi extension — not a hosted product.** The `pi-coding-agent`
-extension exposes the entire surface over this substrate (query/run a manifest, list DuckDB format extensions,
-validate SQL, and remember/recall/walk a temporal memory graph), so reproducible artifacts, connected databases, on-demand and
-*distributed* compute, and grounded review are a Pi extension **you** run, on **your** infra. Each
-[example](examples/) carries a recorded, verified run; see [what the substrate closes over](docs/closes-over.md)
-for the topology / Fugu / RLM argument.
+**We port the whole "AI for science" stack as an open substrate you run — not a hosted product.** The
+`pi-coding-agent` extension exposes the agent surface (query/run a manifest, list DuckDB format extensions,
+validate SQL, and remember/recall/walk a temporal memory graph) over host-injected effects. Compute
+(`process.compute`) and *distributed* jobs (a `JobDispatch` over an NNG pool / SLURM / Modal) are wired by the
+host through the SDK/CLI — **fail-closed by default**, so those powerful effects are granted deliberately, never
+ambiently. So reproducible artifacts, connected databases, on-demand compute, and grounded review run on **your**
+infra, provider-agnostic. Each [example](examples/) carries a recorded, verified run; see [what the substrate
+closes over](docs/closes-over.md) for the topology / Fugu / RLM argument.
 
 **And the agent doesn't just *run* these — it *reads and writes* them.** The package ships its `examples/`,
 `docs/`, and every manifest, so a Pi coding-agent that installs it has the whole corpus on disk: it reads a
