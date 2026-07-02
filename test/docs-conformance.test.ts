@@ -15,6 +15,7 @@ const docFiles = [
   "README.md",
   ...readdirSync(join(ROOT, "docs")).filter((f) => f.endsWith(".md")).map((f) => join("docs", f)),
   ...readdirSync(join(ROOT, "scripts")).filter((f) => f.endsWith(".md")).map((f) => join("scripts", f)), // shipped example/evidence docs
+  ...readdirSync(join(ROOT, "examples"), { recursive: true }).filter((f) => typeof f === "string" && f.endsWith(".md")).map((f) => join("examples", f as string)), // shipped example READMEs
 ];
 
 // each entry: a token that must NOT appear in the public docs + the current truth that makes it forbidden.

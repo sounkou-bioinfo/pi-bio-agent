@@ -69,7 +69,11 @@ export function runsRoot(cwd: string): string {
   return join(cwd, ".pi", "bio-agent", "runs");
 }
 
-const RUN_DIR_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/; // leading alnum required — rejects '.', '..', '.hidden' (no path traversal)
+// ONE canonical run-id grammar, shared with core (run-spec) and job-store: leading alnum + [A-Za-z0-9._:-], max
+// 128. Leading-alnum + no '/' means no path traversal; ':' is allowed for namespaced ids ('study:opentargets:001')
+// and is filename-safe on the Linux/macOS targets. Keeping this in sync with run-spec/job-store is the invariant —
+// a job/replay id accepted there MUST persist/execute/reproduce here.
+const RUN_DIR_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 
 /** Resolve a run's directory, refusing a runId that could escape runsRoot. Centralized so every persistence
  *  path (and the host runner) is path-safe, including the exported persist* helpers called directly. */

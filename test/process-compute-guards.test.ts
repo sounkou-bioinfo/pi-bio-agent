@@ -17,6 +17,9 @@ describe("SECURITY: spawned children do not inherit host secrets, and CAS/run pa
     for (const bad of [".", "..", "-x", ".hidden"]) {
       await assert.rejects(() => runBioQueryFromManifest({ cwd, dbPath: ":memory:", manifestPath: "manifest.json", sql: "SELECT 1", runId: bad }), /runId must start with|path traversal/);
     }
+    // grammar AGREES with core/job-store: a ':'-namespaced id (accepted there) also persists/executes here
+    const ok = await runBioQueryFromManifest({ cwd, dbPath: ":memory:", manifestPath: "manifest.json", sql: "SELECT 1", runId: "study:opentargets:001" });
+    assert.equal(ok.ok, true, "a namespaced runId with ':' runs and persists through run-store");
   });
 
   test("a spawned child does NOT see host process.env secrets, but DOES get explicit spec.env + a resolvable PATH", async () => {

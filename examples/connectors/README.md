@@ -37,7 +37,7 @@ These REST manifests hardcode a plain `Accept: application/json` header, but the
 `ducknng_ncurl_table` is a SQL value — so it *can be composed from a host-owned variable*. That opens the same
 pattern to:
 - **token-gated APIs** — the host sets an `Authorization` header from a `duckdbConfig`/bound variable, never an agent param;
-- **MCP servers** — an MCP `initialize` / `tools/list` / `tools/call` (JSON-RPC 2.0 over HTTP) **is an `ncurl` POST** — see [`mcp.json`](mcp.json), verified live against a public MCP server; the session id `initialize` returns threads through as a header, and only server-*pushed* notifications need `wss`;
+- **MCP servers** — an MCP `initialize` / `tools/list` / `tools/call` (JSON-RPC 2.0 over HTTP) **is an `ncurl` POST** — see [`mcp.json`](mcp.json); this example is **structurally validated** here (the manifest is a valid PROGRAM, no network — `test/connectors-example.test.ts`), and live execution is host-gated (needs ducknng + egress). The session id `initialize` returns threads through as a header, and only server-*pushed* notifications need `wss`;
 - **streaming** — SSE / websockets via ducknng `wss`.
 
 Two connectors go beyond REST: [`mcp.json`](mcp.json) (MCP over SQL) and
