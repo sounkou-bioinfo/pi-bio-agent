@@ -74,7 +74,7 @@ export function validateBioOperationSpec(spec: BioOperationSpec): string[] {
 
   if (spec.sql) {
     if (spec.sql.readOnly !== true) errors.push("sql.readOnly must be true");
-    if (!spec.sql.sqlTemplate.trim()) errors.push("sql.sqlTemplate is required");
+    if (typeof spec.sql.sqlTemplate !== "string" || !spec.sql.sqlTemplate.trim()) errors.push("sql.sqlTemplate is required"); // typeof guard: a non-string must fail closed, not TypeError on .trim()
   }
   if (spec.cache?.ttlSeconds !== undefined && spec.cache.ttlSeconds < 0) errors.push("cache.ttlSeconds cannot be negative");
   return errors;

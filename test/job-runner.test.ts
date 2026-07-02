@@ -239,6 +239,18 @@ describe("job durability: rich status is not lost + the ledger timestamp wins + 
     }
   });
 
+  test("fail closed: a corrupt job SNAPSHOT (bad phase) throws on read, not an invalid typed record", async () => {
+    const { conn, cwd, clock } = await setup();
+    const local = inMemoryJobRunner({ clock, execute: async () => ({}) });
+    await submitBioJob(conn, local, { cwd, runId: "z2", replay: replay("z2"), now: "2026-07-01T00:00:01Z" });
+    // corrupt the persisted snapshot's phase (e.g. disk rot / hand-edit)
+    const { promises: fsp } = await import("node:fs");
+    const p = join(cwd, ".pi", "bio-agent", "jobs", "z2.json");
+    const rec = JSON.parse(await fsp.readFile(p, "utf8"));
+    await fsp.writeFile(p, JSON.stringify({ ...rec, phase: "banana" }));
+    await assert.rejects(() => readJobRecord(cwd, "z2"), /malformed job record/);
+  });
+
   test("fail closed: a corrupt status phase in the ledger throws, not a bogus typed phase", async () => {
     const { conn, cwd, clock } = await setup();
     const local = inMemoryJobRunner({ clock, execute: async () => ({}) });

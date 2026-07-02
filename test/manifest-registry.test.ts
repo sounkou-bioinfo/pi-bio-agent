@@ -28,6 +28,13 @@ async function memoryConn(): Promise<SqlConn> {
 }
 
 describe("validateBioManifest: fail closed", () => {
+  test("a null/non-object array element is a clean error, not a TypeError", () => {
+    for (const key of ["resources", "resolvers", "termSets", "operations"] as const) {
+      const errs = validateBioManifest(baseManifest({ [key]: [null] } as never));
+      assert.ok(errs.some((e) => /must contain only objects/.test(e)), `[null] ${key} fails closed`);
+    }
+  });
+
   test("accepts a well-formed manifest", () => {
     assert.deepEqual(validateBioManifest(baseManifest()), []);
   });

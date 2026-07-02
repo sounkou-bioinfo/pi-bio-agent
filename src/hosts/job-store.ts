@@ -1,4 +1,5 @@
 import { promises as fs } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import type { SqlConn } from "../core/ports.js";
 import { assertJobReplay, type JobRunner, type JobResult, type JobStatus, type JobPhase } from "../core/jobs.js";
@@ -44,7 +45,7 @@ export interface JobRecord {
 async function persistJob(cwd: string, rec: JobRecord): Promise<void> {
   await fs.mkdir(jobsDir(cwd), { recursive: true });
   const path = jobFile(cwd, rec.runId);
-  const tmp = `${path}.${process.pid}.tmp`;
+  const tmp = `${path}.${process.pid}.${randomUUID()}.tmp`; // unique per write — concurrent same-process writes for one job never share a temp
   await fs.writeFile(tmp, `${JSON.stringify(rec, null, 2)}\n`, "utf8");
   await fs.rename(tmp, path); // atomic replace — a concurrent reader never sees a partial file
 }
@@ -56,8 +57,9 @@ export async function readJobRecord(cwd: string, runId: string): Promise<JobReco
   try { text = await fs.readFile(jobFile(cwd, runId), "utf8"); }
   catch (e) { if ((e as NodeJS.ErrnoException).code === "ENOENT") return null; throw e; }
   const rec = JSON.parse(text) as JobRecord;
-  if (rec.schema !== "pi-bio.job_record.v1" || rec.runId !== runId || typeof rec.replayDigest !== "string") {
-    throw new Error(`job-store: malformed job record for '${runId}'`);
+  if (rec.schema !== "pi-bio.job_record.v1" || rec.runId !== runId || typeof rec.replayDigest !== "string"
+      || !PHASES.has(rec.phase) || typeof rec.submittedAt !== "string" || typeof rec.updatedAt !== "string") {
+    throw new Error(`job-store: malformed job record for '${runId}'`); // fail closed on a corrupt phase/timestamp, not just schema/id
   }
   return rec;
 }

@@ -178,7 +178,10 @@ export function validateBioManifest(manifest: BioManifest): string[] {
   const asArray = (v: unknown, label: string): unknown[] => {
     if (v === undefined) return [];
     if (!Array.isArray(v)) { errors.push(`manifest.provides.${label} must be an array`); return []; }
-    return v;
+    // reject non-object elements (null / string / number) with a clean error, and drop them so the id/shape
+    // checks below never dereference a non-object (fail closed, not a TypeError on `r.id`).
+    if (v.some((e) => e === null || typeof e !== "object" || Array.isArray(e))) errors.push(`manifest.provides.${label} must contain only objects`);
+    return v.filter((e) => e !== null && typeof e === "object" && !Array.isArray(e));
   };
   const resources = asArray(provides.resources, "resources") as VirtualResourceSpec[];
   const resolvers = asArray(provides.resolvers, "resolvers") as BioResolverSpec[];

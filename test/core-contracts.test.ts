@@ -86,6 +86,11 @@ describe("BioRunSpec and storage helpers", () => {
     assert.ok(errors.includes("inputs array is required"));
   });
 
+  test("fail closed: a non-string sql.sqlTemplate is a validation error, not a TypeError on .trim()", () => {
+    const errs = validateBioOperationSpec({ ...validOperation, sql: { sqlTemplate: 1 as unknown as string, readOnly: true, requiredResources: [] } });
+    assert.ok(errs.includes("sql.sqlTemplate is required"), "a non-string template fails closed cleanly");
+  });
+
   test("open type labels: BioRunMode accepts any host/backend vocabulary; the run STATUS stays a closed machine", () => {
     // mode is an OPEN host label — a public user's backend vocabulary must validate, not be gatekept to 5 words
     for (const mode of ["slurm", "k8s", "aws-batch", "modal", "nng-worker", "local-daemon"]) {
