@@ -146,8 +146,9 @@ approval gate): the substrate provides the rails, the sign-off is hosted, not co
   `bio_edges_as_of(t)` with `entailed_edge` closure.
 - **4.1. Record a real judgment. MAPPING BUILT + TESTED; production wiring owed.** The coloc→judgment
   mapping is proven in test. The recorder is GENERIC (`recordObservation`): coloc is one producer, not
-  a shape the substrate bends toward. **Owed (residue #2):** wiring the recorder into the production
-  `examples/coloc` run itself, sequenced behind the coloc flagship.
+  a shape the substrate bends toward. **Owed (the Phase-1 recorder leftover):** wiring the recorder into
+  the production `examples/coloc` run itself, sequenced behind the coloc flagship. (This is distinct from
+  the shared-store concurrency residue, which is now closed — see `docs/concurrency.md`.)
 - **4.2. Activate/rollback state machine. BUILT.** Current active version is latest-as-of; rollback
   appends the prior version (never mutates).
 - **4.3: declare → validate → test → record → activate happy path. BUILT.** Validate → run the
