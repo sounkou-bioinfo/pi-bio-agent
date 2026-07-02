@@ -265,20 +265,20 @@ export function createBioRegistry(): BioRegistry {
       // Preflight ALL collisions before mutating any map, so a failed manifest leaves the registry untouched.
       if (manifestIds.has(manifest.id)) throw new Error(`manifest id '${manifest.id}' is already registered`);
       const collisions: Array<[Map<string, { id: string }>, string]> = [
-        ...(manifest.provides.resolvers ?? []).map((r) => [resolverSpecs, r.id] as [Map<string, { id: string }>, string]),
-        ...(manifest.provides.resources ?? []).map((r) => [resources, r.id] as [Map<string, { id: string }>, string]),
-        ...(manifest.provides.termSets ?? []).map((t) => [termSets, t.id] as [Map<string, { id: string }>, string]),
-        ...(manifest.provides.operations ?? []).map((o) => [operations, o.id] as [Map<string, { id: string }>, string]),
+        ...(manifest.provides?.resolvers ?? []).map((r) => [resolverSpecs, r.id] as [Map<string, { id: string }>, string]),
+        ...(manifest.provides?.resources ?? []).map((r) => [resources, r.id] as [Map<string, { id: string }>, string]),
+        ...(manifest.provides?.termSets ?? []).map((t) => [termSets, t.id] as [Map<string, { id: string }>, string]),
+        ...(manifest.provides?.operations ?? []).map((o) => [operations, o.id] as [Map<string, { id: string }>, string]),
       ];
       for (const [map, id] of collisions) {
         if (map.has(id)) throw new Error(`cannot register manifest '${manifest.id}': id '${id}' is already registered`);
       }
       // Clone + freeze so a caller cannot mutate the registry's view of a spec after the fact.
       const frozen = deepFreeze(JSON.parse(JSON.stringify(manifest)) as BioManifest);
-      for (const r of frozen.provides.resolvers ?? []) resolverSpecs.set(r.id, r);
-      for (const r of frozen.provides.resources ?? []) resources.set(r.id, r);
-      for (const t of frozen.provides.termSets ?? []) termSets.set(t.id, t);
-      for (const o of frozen.provides.operations ?? []) operations.set(o.id, o);
+      for (const r of frozen.provides?.resolvers ?? []) resolverSpecs.set(r.id, r);
+      for (const r of frozen.provides?.resources ?? []) resources.set(r.id, r);
+      for (const t of frozen.provides?.termSets ?? []) termSets.set(t.id, t);
+      for (const o of frozen.provides?.operations ?? []) operations.set(o.id, o);
       manifestIds.add(frozen.id);
       manifests.push(frozen);
     },

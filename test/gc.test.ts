@@ -13,6 +13,12 @@ describe("gc: mark-and-sweep over CAS + run retention", () => {
     assert.deepEqual([...liveDigests([json])].sort(), [D(1), D(2)].sort());
   });
 
+  test("liveDigests roots an UPPERCASE-hex receipt digest to the lowercase CAS file (no live-byte deletion)", () => {
+    const upper = "A".repeat(64);
+    const json = JSON.stringify({ provenance: [{ digest: `sha256:${upper}` }] });
+    assert.deepEqual([...liveDigests([json])], ["a".repeat(64)], "uppercase digest is rooted as lowercase — matches the stored file, GC won't delete it");
+  });
+
   test("gcCas sweeps unreferenced CAS entries, retains the live roots", async () => {
     const casRoot = await fs.mkdtemp(join(tmpdir(), "pi-bio-cas-"));
     await fs.mkdir(join(casRoot, "sha256"), { recursive: true });

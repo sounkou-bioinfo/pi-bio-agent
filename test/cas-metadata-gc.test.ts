@@ -164,6 +164,10 @@ describe("CAS metadata GC: ref/lease anti-join (the distributed-safe sweep)", ()
     await assert.rejects(recordCasObject(conn, bad, 4, 1000), /only sha256/);
     await assert.rejects(addCasRef(conn, { refId: "r", refType: "run", address: bad }, 1000), /only sha256/);
     await assert.rejects(acquireCasLease(conn, "h", bad, 1000, 1000), /only sha256/);
+    // a sha256 address with a MALFORMED digest is also refused (fail closed at the entry, not later during sweep)
+    const badHex = { algorithm: "sha256", digest: "deadbeef" } as ContentAddress; // too short / not 64 hex
+    await assert.rejects(recordCasObject(conn, badHex, 4, 1000), /invalid sha256 digest/);
+    await assert.rejects(acquireCasLease(conn, "h", badHex, 1000, 1000), /invalid sha256 digest/);
   });
 
   test("gcMarkSweep end-to-end with one minAgeMs knob", async () => {

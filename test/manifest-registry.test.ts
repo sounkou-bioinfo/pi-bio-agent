@@ -28,6 +28,13 @@ async function memoryConn(): Promise<SqlConn> {
 }
 
 describe("validateBioManifest: fail closed", () => {
+  test("a manifest with no `provides` registers cleanly (empty program), not a TypeError", () => {
+    const bare = { schema: "pi-bio.manifest.v1", id: "empty", version: "0.1.0", title: "Empty", description: "no provides" } as unknown as BioManifest;
+    assert.deepEqual(validateBioManifest(bare), [], "an empty manifest is valid");
+    const reg = createBioRegistry();
+    assert.doesNotThrow(() => reg.registerManifest(bare), "registering a provides-less manifest does not crash");
+  });
+
   test("a null/non-object array element is a clean error, not a TypeError", () => {
     for (const key of ["resources", "resolvers", "termSets", "operations"] as const) {
       const errs = validateBioManifest(baseManifest({ [key]: [null] } as never));

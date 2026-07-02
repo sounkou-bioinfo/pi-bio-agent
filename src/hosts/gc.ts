@@ -28,7 +28,10 @@ import { runsRoot } from "./run-store.js";
  *  structured address fields (algorithm+digest) instead — a bare-hex scan can't root a 128-hex sha512 digest. */
 export function liveDigests(receiptJsons: string[]): Set<string> {
   const set = new Set<string>();
-  for (const j of receiptJsons) for (const m of j.matchAll(/[0-9a-f]{64}/g)) set.add(m[0]);
+  // match hex case-INSENSITIVELY and lowercase into the live set: CAS files are stored lowercase, but a receipt/
+  // address may carry an uppercase digest — matching only [0-9a-f] would fail to root it and the GC would delete
+  // live bytes (data loss). Lowercasing here makes rooting case-agnostic, consistent with fsCasStore.pathFor.
+  for (const j of receiptJsons) for (const m of j.matchAll(/[0-9a-fA-F]{64}/g)) set.add(m[0].toLowerCase());
   return set;
 }
 

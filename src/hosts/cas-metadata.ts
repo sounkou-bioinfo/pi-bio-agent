@@ -41,6 +41,9 @@ const TS = "BIGINT"; // epoch-ms timestamps, passed as params for deterministic 
 // contract is sha256 today).
 function assertSha256(address: ContentAddress): void {
   if (address.algorithm !== "sha256") throw new Error(`cas-metadata: only sha256 addresses are supported today (got '${address.algorithm}')`);
+  // ALSO validate the digest shape: a malformed digest admitted here would create a heap/ref/lease row the store
+  // later rejects during sweep/reuse — fail closed at the entry point instead (consistency with fsCasStore).
+  if (typeof address.digest !== "string" || !/^[a-fA-F0-9]{64}$/.test(address.digest)) throw new Error(`cas-metadata: invalid sha256 digest '${address.digest}' (must be 64 hex chars)`);
 }
 
 /** Create the three CAS-metadata tables if absent. Idempotent. Run once against the authority's SqlConn. */
