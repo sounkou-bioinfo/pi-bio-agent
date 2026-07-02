@@ -194,8 +194,10 @@ Phase 3 (DONE: table + file artifacts) Out-of-process COMPUTE: process.compute r
 Phase 4 (ACTIVE — the main lane) Safe harness-adaptation surface: extension/spec/skill scaffold
                  implementing declare -> validate -> test -> record -> activate -> rollback. CONSUMES
                  Phase 1's leftover: `record` = judgments as KG facts; `activate`/`rollback` = as-of
-                 temporality. DONE: 4.0a (bio_observations temporal store + as-of), 4.1 (coloc records
-                 judgments), 4.2 (activate/rollback), 4.3 (declare->validate->test->record->activate, GENERIC),
+                 temporality. DONE: 4.0a (bio_observations temporal store + as-of), 4.1 (coloc→judgment
+                 recording MAPPING proven in test/coloc-record.test.ts — wiring the recorder into the production
+                 examples/coloc run is the owed leftover, sequenced here), 4.2 (activate/rollback), 4.3
+                 (declare->validate->test->record->activate, GENERIC),
                  4.4 (DURABLE approval: submit parks a validated+tested candidate as `approval="pending"`, decide
                  resumes it later — across a restart/human delay — approving+activating or rejecting; a decision
                  is terminal; park+resume is a temporal observation, "candidates awaiting approval as-of t" an
