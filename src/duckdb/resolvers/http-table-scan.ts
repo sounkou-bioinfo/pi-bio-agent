@@ -16,6 +16,13 @@ import { validateReadOnlySelect } from "../../core/sql-guard.js";
 // Fail-closed: only http(s) URLs, non-2xx throws, no retry/fallback. The receipt stamps the URL + a sha256 of
 // the exact bytes fetched, so the run records precisely what came back.
 
+// The per-db memo's freshness token for http.get is SCOPE\0ETag: the memo layer treats freshness as opaque, so
+// packing the auth scope into it makes the memo scope-aware without a schema change. '\0' occurs in neither a
+// scope string nor an ETag, so the split is unambiguous.
+const packFreshness = (scope: string, etag: string): string => `${scope}\0${etag}`;
+const unpackScope = (freshness: string): string => freshness.slice(0, freshness.indexOf("\0"));
+const unpackEtag = (freshness: string): string => freshness.slice(freshness.indexOf("\0") + 1);
+
 export type FetchResponse = { ok: boolean; status: number; text(): Promise<string>; headers?: { get(name: string): string | null } };
 export type FetchLike = (url: string, init?: { method?: string; headers?: Record<string, string>; body?: string; signal?: AbortSignal }) => Promise<FetchResponse>;
 
@@ -85,11 +92,17 @@ export function httpTableResolver(fetchImpl: FetchLike): BioResolverImpl {
     // The cross-db shared remote index is FAIL-CLOSED: only consulted/populated when the host supplies a
     // remoteCacheScope (auth is injected by a fetch policy AFTER this point and is invisible here, so a scopeless
     // shared index could leak one caller's authenticated bytes to another — see ResolutionContext.remoteCacheScope).
+    // The per-db memo is scoped TOO (not just the cross-db index): a REUSED persistent dbPath can be run under
+    // different auth principals, and the memo replays a materialized table on 304 — so principal B must not inherit
+    // principal A's ETag/table. Fail-closed: consult it only WITH a scope, and reject a memo row whose stored scope
+    // differs (a miss re-fetches under B's own auth — never a cross-scope leak). Scope is packed into the opaque
+    // freshness token (SCOPE\0ETag), so no memo-schema change is needed.
     const scope = ctx.remoteCacheScope;
-    const memo = memoable ? await memoGet(ctx.conn, table) : undefined;
+    const memoRaw = memoable && scope !== undefined ? await memoGet(ctx.conn, table) : undefined;
+    const memo = memoRaw && unpackScope(memoRaw.freshness) === scope ? memoRaw : undefined;
     const sameUrl = memo?.receipt.sourceSnapshots[0]?.source === url;
     const casRemote = !memo && memoable && cas && scope !== undefined ? await cas.getRemote(url, scope) : undefined;
-    const validator = memo && sameUrl ? memo.freshness : casRemote?.etag;
+    const validator = memo && sameUrl ? unpackEtag(memo.freshness) : casRemote?.etag;
     const conditional = validator !== undefined ? { ...headers, "If-None-Match": validator } : headers;
     const res = await fetchImpl(url, { method, headers: conditional, body: requestBody, signal: ctx.signal });
 
@@ -135,10 +148,11 @@ export function httpTableResolver(fetchImpl: FetchLike): BioResolverImpl {
     }
 
     const output = outputFor(digest);
-    // Store the ETag if the server gave one; if a fresh 200 has NO validator, CLEAR any prior memo so a stale
-    // validator can never be replayed on a later 304.
-    if (memoable) {
-      if (etag !== undefined) await memoStore(ctx.conn, table, etag, output);
+    // Store the ETag (packed with the scope) if the server gave one; if a fresh 200 has NO validator, CLEAR any
+    // prior memo so a stale validator can never be replayed on a later 304. Only WITH a scope (fail-closed): a
+    // scopeless per-db ETag memo could be replayed to a different principal on a reused persistent db.
+    if (memoable && scope !== undefined) {
+      if (etag !== undefined) await memoStore(ctx.conn, table, packFreshness(scope, etag), output);
       else await memoClear(ctx.conn, table);
     }
     return output;

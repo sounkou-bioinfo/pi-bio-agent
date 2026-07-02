@@ -84,12 +84,20 @@ describe("http.get: one generic HTTP resolver (injected fetch, no ambient networ
     const conn = await memoryConn();
     const fetchImpl = etagFetch("etag-v1", [{ obo_id: "MONDO:0004979" }]);
     const res = resource({ url: "https://www.ebi.ac.uk/ols4/api/search?q=asthma", table: "candidates", format: "json" });
-    const first = await httpTableResolver(fetchImpl)(res, { conn, now: "T1" });
+    // the per-db ETag memo is fail-closed: it needs a host remoteCacheScope (else re-fetch, no cross-run replay)
+    const first = await httpTableResolver(fetchImpl)(res, { conn, now: "T1", remoteCacheScope: "public" });
     assert.equal(first.sourceSnapshots[0]!.retrievedAt, "T1"); // first GET: 200, stores the ETag
 
-    // second resolve sends If-None-Match: etag-v1 -> server 304 -> the cached receipt is replayed (resolvedAt T1)
-    const second = await httpTableResolver(fetchImpl)(res, { conn, now: "T2" });
+    // second resolve (SAME scope) sends If-None-Match: etag-v1 -> server 304 -> the cached receipt is replayed (resolvedAt T1)
+    const second = await httpTableResolver(fetchImpl)(res, { conn, now: "T2", remoteCacheScope: "public" });
     assert.equal(second.sourceSnapshots[0]!.retrievedAt, "T1", "a 304 must replay the cached resolution");
+
+    // SECURITY: a DIFFERENT scope on the SAME db must NOT replay the first scope's cached table — it re-fetches
+    const other = await httpTableResolver(fetchImpl)(res, { conn, now: "T3", remoteCacheScope: "tenant:B" });
+    assert.equal(other.sourceSnapshots[0]!.retrievedAt, "T3", "a different auth scope does not inherit another principal's per-db memo");
+    // and with NO scope, the per-db memo is skipped entirely (fail-closed) — a fresh 200
+    const noScope = await httpTableResolver(fetchImpl)(res, { conn, now: "T4" });
+    assert.equal(noScope.sourceSnapshots[0]!.retrievedAt, "T4", "no scope -> no per-db memo reuse");
   });
 
   test("forwards the cancellation signal to the injected fetch (cooperative abort)", async () => {
