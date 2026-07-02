@@ -80,9 +80,14 @@ export function fsCasStore(root: string): CasStore {
     async putRemote(url, etag, address, scope) {
       await fs.mkdir(join(root, "remote"), { recursive: true });
       const p = join(root, "remote", `${remoteKey(scope, url)}.json`);
-      const tmp = `${p}.tmp-${process.pid}-${Date.now()}`;
+      const tmp = `${p}.tmp-${process.pid}-${randomUUID()}`; // GENUINELY unique (not pid+Date.now(), which two same-ms writes for one (scope,url) could SHARE)
       await fs.writeFile(tmp, JSON.stringify({ url, scope, etag, address }));
-      await fs.rename(tmp, p); // the validator is mutable (last-seen) — overwrite is correct
+      try {
+        await fs.rename(tmp, p); // the validator is mutable (last-seen) — overwrite is correct
+      } catch (err) {
+        await fs.rm(tmp, { force: true }); // clean up our temp on a failed rename, don't leak it
+        throw err;
+      }
     },
   };
 }

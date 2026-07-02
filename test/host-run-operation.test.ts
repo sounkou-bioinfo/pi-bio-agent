@@ -182,6 +182,13 @@ describe("host: bio_run_operation end-to-end", () => {
     await assert.rejects(() => run(cwd), /invalid manifest/);
   });
 
+  test("a non-array provides.resources fails CLOSED with a validation error, not a TypeError from path-rewriting", async () => {
+    // resolveResourcePaths runs before validation; a `{}` resources must not TypeError on .map() (bio_describe_model
+    // reports it cleanly, and the run path must too).
+    const cwd = await tmpProject({ ...manifest, provides: { ...manifest.provides, resources: {} as never } });
+    await assert.rejects(() => run(cwd), /invalid manifest|resources must be an array/);
+  });
+
   test("bio_query: resolve declared resources and run the AGENT's SQL — no declared operation needed", async () => {
     // a resource-only manifest: it declares WHERE the data is, not HOW to count it. The agent writes the SQL.
     const resourceOnly: BioManifest = {

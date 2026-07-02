@@ -46,7 +46,11 @@ const FILE_PATH_RESOLVERS = new Set(["duckdb.file_scan", "duckhts.read_bcf"]);
  * resolver params. Done before registration so the registry (and the receipt's paramsDigest) see the real path.
  */
 function resolveResourcePaths(manifest: BioManifest, manifestDir: string): BioManifest {
-  const resources = (manifest.provides?.resources ?? []).map((res) => {
+  // A non-ARRAY `resources` (e.g. `{}`) must NOT TypeError here on `.map()` — this runs BEFORE registerManifest's
+  // validation, so leave a malformed shape untouched and let validateBioManifest report it as a clean fail-closed
+  // error (`provides.resources must be an array`), the same way bio_describe_model does.
+  if (!Array.isArray(manifest.provides?.resources)) return manifest;
+  const resources = manifest.provides.resources.map((res) => {
     if (!res || typeof res !== "object") return res; // non-object element — leave it for validateBioManifest to reject cleanly (don't TypeError here)
     if (!res.params || typeof res.params !== "object") return res; // missing/malformed params — validation rejects it; don't TypeError on res.params.command/.path
     // process.compute: a script SHIPS WITH the manifest, referenced "./compute.R" — resolve such relative
