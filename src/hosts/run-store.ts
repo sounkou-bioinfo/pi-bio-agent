@@ -451,8 +451,11 @@ export async function runBioOperationFromManifest(req: RunOperationRequest): Pro
   // A HIGH-ENTROPY suffix, not just Date.now(): `run:<runId>` is the ledger statement_key, and in a SHARED store
   // (across projects/agents) a bare timestamp collides -> two unrelated runs would conflate into one as-of slot.
   const runId = req.runId ?? `${req.operationId.replace(/[^a-zA-Z0-9._-]/g, "_")}-${Date.now()}-${randomUUID().slice(0, 8)}`;
-  const allResources = (manifest.provides?.resources ?? []).map((r) => r.id);
-  const proc = resolvedProcessFacts(manifest, allResources);
+  // Scope process facts to the resources the operation ACTUALLY resolves (its declared requiredResources) — NOT
+  // every resource the manifest happens to declare. Otherwise replay.json would record an unrelated process.compute
+  // resource's command as "what ran" even though runOperation never resolved it (a provenance lie).
+  const requiredResources = op.sql.requiredResources ?? [];
+  const proc = resolvedProcessFacts(manifest, requiredResources);
   const replay: RunReplaySpec = {
     schema: RUN_REPLAY_SPEC_SCHEMA, runId, kind: "operation",
     manifest: { digest: manifestDigest, snapshot: raw, path: req.manifestPath },

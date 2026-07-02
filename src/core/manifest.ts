@@ -219,6 +219,10 @@ export function validateBioManifest(manifest: BioManifest): string[] {
   for (const ts of termSets) {
     if (!ts.title?.trim()) errors.push(`termSet '${ts.id}' requires a title`);
     rejectUnknownKeys(ts, ["id", "title", "ordered", "members"], `termSet '${ts.id}'`, errors);
+    // Fail closed, not with a TypeError: `?? []` guards null/undefined but NOT a present-but-non-array `members`
+    // (e.g. `members: {}`), which would make `for…of` throw and crash bio_describe_model instead of returning
+    // { valid:false, errors:[…] }. Report the shape error and skip member iteration.
+    if (ts.members !== undefined && !Array.isArray(ts.members)) { errors.push(`termSet '${ts.id}' members must be an array`); continue; }
     const seenMembers = new Set<string>();
     for (const m of ts.members ?? []) {
       if (typeof m.id !== "string" || !m.id.trim()) errors.push(`termSet '${ts.id}' has a member with an empty id`);

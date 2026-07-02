@@ -107,6 +107,9 @@ describe("validateBioManifest: fail closed", () => {
     assert.ok(validateBioManifest(ts([{ id: "" }])).some((e) => e.includes("empty id")));
     assert.ok(validateBioManifest(ts([{ id: "A:1" }, { id: "A:1" }])).some((e) => e.includes("duplicate member id 'A:1'")));
     assert.deepEqual(validateBioManifest(ts([{ id: "A:1" }, { id: "A:2" }])), []);
+    // a present-but-non-array `members` (e.g. {}) returns a shape error, NOT a TypeError from for…of (fail closed)
+    assert.doesNotThrow(() => validateBioManifest(baseManifest({ termSets: [{ id: "ts1", title: "T", members: {} }] } as never)));
+    assert.ok(validateBioManifest(baseManifest({ termSets: [{ id: "ts1", title: "T", members: {} }] } as never)).some((e) => /members must be an array/.test(e)));
   });
 
   test("ordered termSets require a unique integer rank per member (ordinal scale = data)", () => {

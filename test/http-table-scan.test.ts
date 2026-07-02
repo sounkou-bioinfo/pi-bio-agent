@@ -51,6 +51,25 @@ describe("http.get: one generic HTTP resolver (injected fetch, no ambient networ
     await assert.rejects(() => httpTableResolver(okJson([]))(resource({ url: "https://x/y", table: "t", format: "xml" }), { conn, now: "t" }), /unknown format/);
   });
 
+  test("SECURITY: a url EXPRESSION that stacks a statement is rejected by the read-only guard, not executed", async () => {
+    const conn = await memoryConn();
+    // the url is interpolated into `SELECT (<expr>) AS u`. A crafted expr must not smuggle DDL/DML through it.
+    await conn.run("CREATE TABLE victim(x INT)");
+    let fetched = false;
+    const spyFetch: FetchLike = async () => { fetched = true; return { ok: true, status: 200, text: async () => "[]" }; };
+    await assert.rejects(
+      () => httpTableResolver(spyFetch)(resource({ url: "'https://x/'); DROP TABLE victim; --", table: "t" }), { conn, now: "t" }),
+      /one statement only|forbidden/,
+      "a ;-stacked DROP in the url expression is rejected before composition runs",
+    );
+    assert.equal(fetched, false, "fetch never ran");
+    const n = Number((await conn.all<{ n: bigint }>("SELECT count(*) AS n FROM information_schema.tables WHERE table_name='victim'"))[0]!.n);
+    assert.equal(n, 1, "victim table still exists — no DDL executed");
+    // a LEGITIMATE composition (a SQL literal) still works untouched
+    const out = await httpTableResolver(okJson([{ a: 1 }]))(resource({ url: "'https://ok/'||'data'", table: "t2", format: "json" }), { conn, now: "t" });
+    assert.equal(out.sourceSnapshots[0]!.source, "https://ok/data");
+  });
+
   test("SECURITY: only allowlisted non-secret headers pass; any other (incl. non-obvious auth) is refused", async () => {
     const conn = await memoryConn();
     // the small-denylist gaps the allowlist closes: Private-Token / Ocp-Apim-* / a custom X-*-Auth all refused

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { BioResolverImpl, ResolverOutput } from "../../core/ports.js";
 import { memoClear, memoGet, memoStore } from "../resolution-memo.js";
+import { validateReadOnlySelect } from "../../core/sql-guard.js";
 
 // ONE generic HTTP resolver — not a per-API client. It GETs a declared URL and materializes the response into
 // a DuckDB table via a native reader (json/csv), so any HTTP/JSON source (OLS4 search, OpenTargets, gnomAD,
@@ -42,7 +43,12 @@ export function httpTableResolver(fetchImpl: FetchLike): BioResolverImpl {
     // subqueries / string_agg over upstream tables for upstream data. DuckDB does the composition.
     let composedUrl: string = p.url;
     if (!/^https?:\/\//i.test(composedUrl)) {
-      const rows = await ctx.conn.all<{ u: unknown }>(`SELECT (${composedUrl}) AS u`);
+      // The url expression is agent-authored (a manifest param) but interpolated into SQL — guard it with the SAME
+      // read-only single-statement check as every other query, so a crafted `url` like `1); CREATE TABLE x …; --`
+      // can't stack unguarded DDL/DML into the composition query. A legitimate composition (getvariable/subquery/
+      // string_agg) is a single SELECT with no write keyword and passes untouched.
+      const compose = validateReadOnlySelect(`SELECT (${composedUrl}) AS u`);
+      const rows = await ctx.conn.all<{ u: unknown }>(compose);
       composedUrl = String(rows[0]?.u ?? "");
       if (!/^https?:\/\//i.test(composedUrl)) throw new Error(`http resolver: the url expression composed '${composedUrl}', which is not an http(s) URL`);
     }
