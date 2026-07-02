@@ -14,17 +14,19 @@ import { buildNcurlRetrySql, ncurlRetry, ncurlRowAvailable } from "../src/duckdb
 
 // --- pure: the SQL builder (no DB, no network) ---
 describe("ncurl-retry: the recursive-CTE SQL builder", () => {
-  test("emits an attempt-dependent call in both the base and recursive arms (the KEY RULE)", () => {
+  test("passes the URL UNCHANGED — row-correlation for the CTE re-fire rides on the TIMEOUT, not the URL", () => {
     const sql = buildNcurlRetrySql({ url: "http://x/y", maxAttempts: 4 });
     assert.match(sql, /WITH RECURSIVE attempts/);
-    assert.match(sql, /attempt=' \|\| '1'/, "base call pins attempt=1");
-    assert.match(sql, /attempt=' \|\| \(a\.attempt \+ 1\)::VARCHAR/, "recursive call depends on the row");
-    assert.match(sql, /attempt < 4/, "honors maxAttempts");
+    assert.doesNotMatch(sql, /attempt=/, "the URL must NOT be mutated with an attempt param (would break signed/strict URLs)");
+    assert.match(sql, /ducknng_ncurl\('http:\/\/x\/y', 'GET'/, "the exact requested URL is passed to both arms");
+    assert.match(sql, /\+ \(a\.attempt \+ 1\)/, "the recursive arm is row-correlated (forces per-iteration re-fire) via the timeout");
+    assert.match(sql, /attempt < 4/, "honors maxAttempts (the recursion bound)");
     assert.match(sql, /status IS NULL OR status = 429 OR status >= 500/, "default transient predicate");
   });
-  test("appends attempt with & when the url already has a query string; escapes quotes", () => {
+  test("preserves an existing query string verbatim and escapes quotes (no appended param)", () => {
     const sql = buildNcurlRetrySql({ url: "http://x/y?q=1'2" });
-    assert.match(sql, /q=1''2&attempt=/, "uses & and escapes the single quote");
+    assert.match(sql, /'http:\/\/x\/y\?q=1''2'/, "the query string is preserved and the single quote is escaped; nothing appended");
+    assert.doesNotMatch(sql, /attempt=/, "no attempt param appended to the URL");
   });
 });
 

@@ -70,14 +70,19 @@ function validated(opts: NcurlRetryOptions): {
 export function buildNcurlRetrySql(opts: NcurlRetryOptions): string {
   const v = validated(opts);
   const retryWhile = opts.retryWhileSql ?? DEFAULT_TRANSIENT_SQL;
+  // The URL is passed UNCHANGED — do NOT append `?attempt=N` (it would break signed/presigned URLs, strict REST
+  // endpoints, cache-key-sensitive APIs). The recursive CTE still needs each iteration's ncurl call to be a NEW
+  // request, which requires a ROW-CORRELATED argument (referencing the recursive `attempt` column) so DuckDB
+  // re-evaluates it per row rather than hoisting it once. Carry that correlation in the TIMEOUT (`timeout + attempt`
+  // ms) — a negligible, harmless bump that never touches the URL/method/headers/body the caller requested.
   const call = (attemptSql: string): string =>
-    `ducknng_ncurl('${esc(v.url)}${v.sep}attempt=' || ${attemptSql}, '${v.method}', ${v.headers}, ${v.body}, ${v.timeout}, ${v.tls}::UBIGINT)`;
+    `ducknng_ncurl('${esc(v.url)}', '${v.method}', ${v.headers}, ${v.body}, ${v.timeout} + ${attemptSql}, ${v.tls}::UBIGINT)`;
   return `WITH RECURSIVE attempts(attempt, status, body_text) AS (
-  SELECT 1, status, body_text FROM ${call("'1'")}
+  SELECT 1, status, body_text FROM ${call("1")}
   UNION ALL
   SELECT a.attempt + 1, r.status, r.body_text
   FROM (SELECT * FROM attempts WHERE ${retryWhile} AND attempt < ${v.maxAttempts}) a,
-       ${call("(a.attempt + 1)::VARCHAR")} r
+       ${call("(a.attempt + 1)")} r
 )
 SELECT attempt, status, body_text FROM attempts ORDER BY attempt`;
 }
@@ -95,14 +100,14 @@ export async function ncurlRetry(conn: SqlConn, opts: NcurlRetryOptions): Promis
     return { attempts: Number(last.attempt), status: last.status, bodyText: last.body_text, via: "recursive-cte" };
   }
   // fallback: the loaded ncurl constant-folds inside a recursive CTE, so loop in host code — each call is its own
-  // statement (no fold). The KEY-RULE attempt param is included for parity with the SQL path.
+  // statement (no fold), so the URL is passed UNCHANGED (no `?attempt=N` — that would break signed/strict URLs).
   const isTransient = opts.isTransient ?? defaultTransient;
   let attempt = 0, status: number | null = null, bodyText: string | null = null;
   while (attempt < v.maxAttempts) {
     attempt++;
     const rows = await conn.all<{ status: number | null; body_text: string | null }>(
       "SELECT status, body_text FROM ducknng_ncurl(?, ?, ?, ?::BLOB, ?, ?::UBIGINT)",
-      [`${v.url}${v.sep}attempt=${attempt}`, v.method, opts.headersJson ?? null, opts.body ?? null, v.timeout, v.tls],
+      [v.url, v.method, opts.headersJson ?? null, opts.body ?? null, v.timeout, v.tls],
     );
     status = rows[0]?.status ?? null;
     bodyText = rows[0]?.body_text ?? null;
