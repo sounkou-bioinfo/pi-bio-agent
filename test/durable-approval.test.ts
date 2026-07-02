@@ -52,6 +52,19 @@ describe("Phase 4.4: durable submit -> (park) -> decide approval", () => {
     assert.equal((await activeOperationAsOf(conn, "double.report", T2))?.version, "1.0.0");
   });
 
+  test("SECURITY: a decision cannot activate a DIFFERENT id/version than the one tested behind the specDigest", async () => {
+    const conn = await obsConn();
+    const sub = await submitCandidateForApproval(conn, good, { sandbox: await sandbox(), recordedAt: T1, source: "ci" });
+    // caller reuses the GOOD specDigest but claims a different (untested) id/version — must fail closed, not activate it
+    await assert.rejects(
+      () => decideCandidateApproval(conn, { id: "evil.report", version: "9.9.9", specDigest: sub.specDigest, approved: true, decidedAt: T2, source: "attacker" }),
+      /does not match the validated\+tested candidate/,
+    );
+    // the real, matching identity still decides fine
+    const ok = await decideCandidateApproval(conn, { id: "double.report", version: "1.0.0", specDigest: sub.specDigest, approved: true, decidedAt: T2, source: "alice" });
+    assert.equal(ok.activated, true);
+  });
+
   test("a SUB-SECOND-later decision is accepted (epoch compare, not lexicographic '…00Z' > '…001Z')", async () => {
     const conn = await obsConn();
     const sub = await submitCandidateForApproval(conn, good, { sandbox: await sandbox(), recordedAt: "2026-06-30T00:00:00Z", source: "ci" });

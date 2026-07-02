@@ -81,7 +81,10 @@ export async function actionCachePut(conn: SqlConn, inputDigest: string, outputD
 export async function recallRunResult(
   store: SqlConn,
   cas: CasStore,
-  replay: Pick<RunReplaySpec, "kind" | "manifest" | "operationId" | "sql" | "resources" | "bindings" | "sourceReceiptDigests">,
+  // MUST be the SAME field set actionInputDigest keys on — omitting the result-affecting execution facts
+  // (duckdbInitSqlDigest/duckdbConfigDigest/process/environment) would compute a WEAKER recall key than the one the
+  // run was stored under, so a caller's minimal replay could collide with a simpler run and serve its wrong rows.
+  replay: Pick<RunReplaySpec, "kind" | "manifest" | "operationId" | "sql" | "resources" | "bindings" | "sourceReceiptDigests" | "duckdbInitSqlDigest" | "duckdbConfigDigest" | "process" | "environment">,
 ): Promise<{ rows: unknown[]; resultDigest: string } | null> {
   const outputDigest = await actionCacheGet(store, actionInputDigest(replay));
   if (!outputDigest) return null;

@@ -80,6 +80,10 @@ function recStatus(conn: SqlConn, specDigest: string, recordedAt: string, source
 async function validateAndTest(conn: SqlConn, candidate: OperationCandidate, deps: { sandbox: SqlConn; recordedAt: string; source: string }): Promise<{ specDigest: string; validation: "passed" | "failed"; test: "passed" | "failed" | "skipped" }> {
   assertIds(candidate.id, candidate.version);
   const specDigest = specDigestOf(candidate);
+  // Record the tested IDENTITY under the specDigest. specDigest already binds [id, version, …] cryptographically,
+  // but the decision path takes a caller-supplied id/version — pin the real one here so activation can verify it and
+  // can never activate a DIFFERENT operation than the one validated+tested (see recordApprovalDecision).
+  await recStatus(conn, specDigest, deps.recordedAt, deps.source, "identity", "harness:candidate_identity", `${candidate.id}@${candidate.version}`);
 
   // 1. VALIDATE — the candidate operation must be a single read-only SELECT/WITH (the existing statement guard)
   let validation: "passed" | "failed" = "passed";
@@ -122,6 +126,10 @@ async function recordApprovalDecision(conn: SqlConn, d: ApprovalDecision): Promi
   const validation = parseStatus(await observationAsOfKey(conn, `${candKey}:validation`, d.decidedAt));
   const test = parseStatus(await observationAsOfKey(conn, `${candKey}:fixture-test`, d.decidedAt));
   if (validation !== "passed" || test !== "passed") throw new Error(`approval decision: candidate ${d.specDigest} did not pass validation+test as of ${d.decidedAt} (or was never submitted) — cannot decide`);
+  // BIND the activation to the TESTED identity: the specDigest commits to a specific id/version, so a decision that
+  // supplies a DIFFERENT id/version (with a valid specDigest) must NOT activate that un-tested operation. Fail closed.
+  const identity = parseStatus(await observationAsOfKey(conn, `${candKey}:identity`, d.decidedAt));
+  if (identity !== `${d.id}@${d.version}`) throw new Error(`approval decision: id/version '${d.id}@${d.version}' does not match the validated+tested candidate behind specDigest ${d.specDigest} ('${identity ?? "none"}') — cannot activate an operation that was never tested`);
   const current = parseStatus(await observationAsOfKey(conn, `${candKey}:approval`, d.decidedAt));
   if (current === "approved" || current === "rejected") throw new Error(`approval decision: candidate ${d.specDigest} already ${current} — a decision is terminal`);
 
