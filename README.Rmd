@@ -24,20 +24,21 @@ knitr::knit_engines$set(pi = function(options) {
   model <- if (!is.null(options$model)) options$model else "gpt-5.3-codex-spark"
   provider <- if (!is.null(options$provider)) options$provider else "openai-codex"
   tmo <- if (!is.null(options$timeout)) options$timeout else 300
+  ep <- if (!is.null(options$entrypoint)) options$entrypoint else "extensions/pi-coding-agent/index.ts"
   out <- tryCatch(
     # HERMETIC RENDER: the render agent gets READ-ONLY tools only — read/grep/find/ls + the read-only bio tools
     # (query/run-operation/describe over an explicit db). NO write/edit/bash, so a documentation render can never
     # mutate the repo (a live agent once wandered off-prompt and edited a doc mid-render). bio_query/
     # bio_run_operation persist run records under the gitignored .pi/ only — not the tracked tree.
     system2("pi", c("--provider", provider, "--model", model,
-                    "-e", "extensions/pi-coding-agent/index.ts",
+                    "-e", ep,
                     "-t", "read,grep,find,ls,bio_describe_model,bio_query,bio_run_operation,bio_list_duckdb_extensions",
                     "-p", "--no-session", shQuote(prompt)),
             stdout = TRUE, stderr = TRUE, timeout = tmo),
     error = function(e) "[pi unavailable]")
   reply <- paste0("> ", gsub("\n", "\n> ", paste(out, collapse = "\n")))
   knitr::asis_output(paste0(
-    "``` sh\n", "pi --model ", model, " -e extensions/pi-coding-agent/index.ts -p \\\n", wrap_prompt(prompt), "\n", "```\n\n",
+    "``` sh\n", "pi --model ", model, " -e ", ep, " -p \\\n", wrap_prompt(prompt), "\n", "```\n\n",
     reply, "\n"))
 })
 
@@ -183,6 +184,21 @@ fetches the exact bytes. A shared CAS covers the common HPC case; otherwise the 
 
 ```{nng}
 scripts/nng-file-handoff.mjs
+```
+
+**Now with real agents, not a script.** The handoff above is scripted plumbing. Here two *live* Pi agents do it over
+the substrate. A producer agent, granted the compute and CAS ports by its entrypoint, runs an out-of-process R
+compute and captures the file outputs:
+
+```{pi, entrypoint="extensions/pi-coding-agent/index-compute.ts", timeout=300}
+Using examples/process-artifacts/manifest.json, run bio_query with SQL 'SELECT * FROM summary' (resolving the 'summary' resource runs the R compute and captures its file outputs). Report each output artifact the run produced: its name and byte size.
+```
+
+Then a *separate*, read-only reader agent discovers those artifacts through the run graph, follows the content
+address into CAS, and reads the bytes back:
+
+```{pi, timeout=300}
+A previous run wrote output artifacts under .pi/bio-agent/runs/. Find the most recent run's run.json, list the artifacts it produced (name and byte size), then read the bytes of the 'report' artifact by following its content address, and tell me exactly what the report says.
 ```
 
 **A database connector is a manifest, not a client.** The "60+ connected databases" a hosted workbench advertises

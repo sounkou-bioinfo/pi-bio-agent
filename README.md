@@ -162,15 +162,15 @@ pi-bio-agent query examples/connectors/clinvar-region.json \
 ``` json
 {
   "ok": true,
-  "runId": "query-1783035599597-10ea5274",
+  "runId": "query-1783036619502-c9bb9958",
   "status": "succeeded",
   "rowCount": 8,
   "artifacts": {
-    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783035599597-10ea5274/run.json",
-    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783035599597-10ea5274/result.json",
-    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783035599597-10ea5274/receipts.json"
+    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783036619502-c9bb9958/run.json",
+    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783036619502-c9bb9958/result.json",
+    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783036619502-c9bb9958/receipts.json"
   },
-  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783035599597-10ea5274",
+  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783036619502-c9bb9958",
   "rows": [
     {
       "sig": "Pathogenic",
@@ -227,33 +227,18 @@ pi-bio-agent query examples/run-ledger/manifest.json \
 ``` json
 {
   "ok": true,
-  "runId": "query-1783035602017-e2c5a760",
+  "runId": "query-1783036621974-7dd169d2",
   "status": "succeeded",
-  "rowCount": 4,
+  "rowCount": 1,
   "artifacts": {
-    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783035602017-e2c5a760/run.json",
-    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783035602017-e2c5a760/result.json",
-    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783035602017-e2c5a760/receipts.json"
+    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783036621974-7dd169d2/run.json",
+    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783036621974-7dd169d2/result.json",
+    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783036621974-7dd169d2/receipts.json"
   },
-  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783035602017-e2c5a760",
+  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783036621974-7dd169d2",
   "rows": [
     {
       "tool": "ad-hoc.query",
-      "status": "succeeded",
-      "n": 3175
-    },
-    {
-      "tool": "ad-hoc.query",
-      "status": "failed",
-      "n": 149
-    },
-    {
-      "tool": "rare_high_impact.report",
-      "status": "succeeded",
-      "n": 75
-    },
-    {
-      "tool": "counts.by_consequence",
       "status": "succeeded",
       "n": 1
     }
@@ -285,9 +270,9 @@ node scripts/nng-job-runner.mjs
 
     Distributed compute over ducknng: a separate worker reports job status into the shared ledger
 
-      [coordinator pid 3126300] job ledger up; 'wgs-annotate-chr22' recorded as queued
-      [worker nng-worker-1 pid 3126406] reported 'running' over ducknng RPC
-      [worker nng-worker-1 pid 3126406] reported 'succeeded' over ducknng RPC
+      [coordinator pid 3172922] job ledger up; 'wgs-annotate-chr22' recorded as queued
+      [worker nng-worker-1 pid 3172992] reported 'running' over ducknng RPC
+      [worker nng-worker-1 pid 3172992] reported 'succeeded' over ducknng RPC
       [coordinator] 'wgs-annotate-chr22' final status, read back from the shared slot: "succeeded"
 
     A SEPARATE worker process wrote the job's status (running, then succeeded) into the coordinator's
@@ -309,14 +294,73 @@ node scripts/nng-file-handoff.mjs
 
     Distributed file I/O over ducknng: one agent plots a file, another reads it back by digest
 
-      [coordinator pid 3126548] job ledger + ducknng server up; shared CAS at /tmp/pi-bio-handoff-cas-3126537
-      [agent:producer pid 3126641] plotted coverage.png (8354 B) -> CAS sha256:80c6dd525767…; recorded the digest in the ledger
-      [agent:reader pid 3126739] read the ledger, fetched 'coverage.png' from CAS by digest: 8354 B, PNG=true, sha256:80c6dd525767…
+      [coordinator pid 3173106] job ledger + ducknng server up; shared CAS at /tmp/pi-bio-handoff-cas-3173095
+      [agent:producer pid 3173191] plotted coverage.png (8354 B) -> CAS sha256:80c6dd525767…; recorded the digest in the ledger
+      [agent:reader pid 3173289] read the ledger, fetched 'coverage.png' from CAS by digest: 8354 B, PNG=true, sha256:80c6dd525767…
 
     The producer wrote a real PNG into a content-addressed store and recorded only its DIGEST in the
     shared ledger over ducknng RPC. A SEPARATE reader process read that digest and fetched the exact bytes
     from CAS. Files move by content address; the ledger moves the reference. No ducknng-fs needed: a shared
     CAS covers the HPC case, and a no-shared-FS deployment ships the CAS bytes over the same transport.
+
+**Now with real agents, not a script.** The handoff above is scripted
+plumbing. Here two *live* Pi agents do it over the substrate. A producer
+agent, granted the compute and CAS ports by its entrypoint, runs an
+out-of-process R compute and captures the file outputs:
+
+``` sh
+pi --model gpt-5.3-codex-spark -e extensions/pi-coding-agent/index-compute.ts -p \
+  "Using examples/process-artifacts/manifest.json, run " \
+  "bio_query with SQL 'SELECT * FROM summary' (resolving " \
+  "the 'summary' resource runs the R compute and captures " \
+  "its file outputs). Report each output artifact the run " \
+  "produced: its name and byte size."
+```
+
+> Done. I ran `bio_query` with:
+>
+> - `manifestPath`: `examples/process-artifacts/manifest.json`
+> - `sql`: `SELECT * FROM summary`
+> - resolved resources: `values`, `summary` (so `summary` could execute)
+>
+> From the run receipt, the captured output artifacts were:
+>
+> - `rows_csv`: **14 bytes**
+> - `report`: **37 bytes**
+
+Then a *separate*, read-only reader agent discovers those artifacts
+through the run graph, follows the content address into CAS, and reads
+the bytes back:
+
+``` sh
+pi --model gpt-5.3-codex-spark -e extensions/pi-coding-agent/index.ts -p \
+  "A previous run wrote output artifacts under " \
+  ".pi/bio-agent/runs/. Find the most recent run's " \
+  "run.json, list the artifacts it produced (name and byte " \
+  "size), then read the bytes of the 'report' artifact by " \
+  "following its content address, and tell me exactly what " \
+  "the report says."
+```
+
+> Latest run: `query-1783036643571-c8af3cee`  
+> (run file: `.pi/bio-agent/runs/query-1783036643571-c8af3cee/run.json`)
+>
+> Artifacts produced (with byte sizes):
+>
+> - `result.json` (run output artifact at
+>   `runs/query-1783036643571-c8af3cee/result.json`) — size not recorded
+>   in `run.json` (content at CAS hash `sha256:bd3897...` is 34 bytes)
+> - `rows_csv` — **14 bytes** (`sha256:ce1d...`)
+> - `report` — **37 bytes** (`sha256:d352...`)
+>
+> I followed the report’s content address and read:
+> `.pi/bio-agent/cas/sha256/d352a4705f21c9cb6939f924a60041c6e9c9da59897e220e353a88841752911a`
+>
+> Exact report text:
+>
+>     # summarize report
+>     rows: 5
+>     mean_x: 3
 
 **A database connector is a manifest, not a client.** The “60+ connected
 databases” a hosted workbench advertises are, here, one file each:
@@ -336,15 +380,15 @@ pi-bio-agent query examples/connectors/uniprot.json \
 ``` json
 {
   "ok": true,
-  "runId": "query-1783035616931-09fd4556",
+  "runId": "query-1783036685473-a437b77c",
   "status": "succeeded",
   "rowCount": 1,
   "artifacts": {
-    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783035616931-09fd4556/run.json",
-    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783035616931-09fd4556/result.json",
-    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783035616931-09fd4556/receipts.json"
+    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783036685473-a437b77c/run.json",
+    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783036685473-a437b77c/result.json",
+    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783036685473-a437b77c/receipts.json"
   },
-  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783035616931-09fd4556",
+  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783036685473-a437b77c",
   "rows": [
     {
       "primaryAccession": "P04637",
