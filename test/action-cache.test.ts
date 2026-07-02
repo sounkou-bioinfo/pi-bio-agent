@@ -189,6 +189,18 @@ describe("ActionCache: input CASID -> output CASID (LLVM CAS ActionCache in the 
     assert.equal(await recallRunResult(store, cas, replay), null, "inline read_csv_auto is non-hermetic -> not memoized -> recall MISS");
   });
 
+  test("HERMETICITY: an ATTACH (or ambient read) in the host INIT SQL makes the run non-hermetic — NOT memoized", async () => {
+    const store = await conn();
+    const cas = fsCasStore(await fsp.mkdtemp(join(tmpdir(), "cas-")));
+    // ATTACH in init SQL brings in external/ambient tables the input CASID can't pin (its digest is pinned, but the
+    // same init over CHANGED data reuses the key) — so the run must not be memoized even on :memory: with a clean SQL.
+    const res = await runBioQueryFromManifest({ cwd: process.cwd(), dbPath: ":memory:", manifestPath: "examples/variant-counts/manifest.json", sql: "SELECT count(*) AS n FROM variants", duckdbInitSql: ["ATTACH ':memory:' AS aux"], store, author: "agent:A", cas });
+    assert.ok(res.ok, res.ok ? "" : `run failed: ${(res as { error?: unknown }).error}`);
+    if (!res.ok) return;
+    const replay = JSON.parse(await fsp.readFile(join(res.runDir, "replay.json"), "utf8"));
+    assert.equal(await recallRunResult(store, cas, replay), null, "init-SQL ATTACH -> non-hermetic -> not memoized");
+  });
+
   test("HERMETICITY: ANY table function in FROM position is NOT memoized (generalizes past named readers — e.g. spatial ST_Read)", async () => {
     const store = await conn();
     const cas = fsCasStore(await fsp.mkdtemp(join(tmpdir(), "cas-")));

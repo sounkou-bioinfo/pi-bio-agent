@@ -35,6 +35,17 @@ describe("run-observations: ad-hoc SQL folds into the ONE store as an as-of, att
     assert.equal(v.manifestDigest, "sha256:def");
   });
 
+  test("bindings must be JSON-serializable — a bigint/NaN/undefined binding is rejected before the run (won't round-trip replay.json)", async () => {
+    const base = { cwd: process.cwd(), dbPath: ":memory:", manifestPath: "examples/variant-counts/manifest.json", sql: "SELECT 1 AS x" } as const;
+    await assert.rejects(() => runBioQueryFromManifest({ ...base, bindings: { n: 10n } }), /bigint/);
+    await assert.rejects(() => runBioQueryFromManifest({ ...base, bindings: { n: NaN } }), /non-finite/);
+    await assert.rejects(() => runBioQueryFromManifest({ ...base, bindings: { n: undefined } }), /undefined/);
+    await assert.rejects(() => runBioQueryFromManifest({ ...base, bindings: { d: new Date() } }), /non-plain object/);
+    // a plain JSON binding is fine
+    const ok = await runBioQueryFromManifest({ ...base, bindings: { q: "asthma", k: 3 } });
+    assert.equal(ok.ok, true, ok.ok ? "" : `run failed: ${(ok as { error?: unknown }).error}`);
+  });
+
   test("persistRun/persistFailedRun refuse serialize:false without casBacked — lean mode can't delete provenance with no CAS", async () => {
     const cwd = await fsp.mkdtemp(join(tmpdir(), "persist-guard-"));
     // the guard throws BEFORE touching the payload, so a stub payload is fine

@@ -5,12 +5,12 @@ import { listMemory, memoryHistory, recall, MEMORY_NOW } from "../hosts/memory-s
 // The `memory` CLI: read the ONE temporal store (memory is append-only observations under agent:memory:<slug>).
 // list/show/history are all AS-OF (time-travel); history shows supersession + authorship. Provider-agnostic — no Pi needed.
 
-// Strict ISO-8601 / RFC3339: a date, optionally with time (T or space), optional seconds and up to MILLISECOND
-// fractional (1-3 digits), optional Z/±hh:mm offset. Rejects the lenient forms Date.parse accepts (e.g. "March 1
-// 2026"). Capping the fraction at ms is deliberate: the history filter compares with JS Date.parse (ms resolution)
-// while list/show cast to DuckDB TIMESTAMPTZ (microsecond) — a sub-ms --as-of would be truncated differently by the
-// two, so restrict input to ms (which is also the precision our recorded_at values carry) to keep them consistent.
-const ISO_INSTANT_RE = /^\d{4}-\d{2}-\d{2}(?:[Tt ]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:[Zz]|[+-]\d{2}:?\d{2})?)?$/;
+// Strict ISO-8601 / RFC3339: a date, optionally with time (T or space) + up to MILLISECOND fraction, and a REQUIRED
+// timezone (Z or ±hh:mm) WHEN a time is present. Rejects lenient forms (e.g. "March 1 2026") AND a timezone-less
+// datetime — a tz-less time is interpreted as LOCAL by JS Date.parse but by the SESSION zone by DuckDB TIMESTAMPTZ,
+// so time-travel would silently differ. ms cap: the history filter is JS ms while list/show are DuckDB micro — cap
+// input to ms (our recorded_at precision) so they agree. A date-only value is treated as UTC midnight (below).
+const ISO_INSTANT_RE = /^\d{4}-\d{2}-\d{2}(?:[Tt ]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:[Zz]|[+-]\d{2}:?\d{2}))?$/;
 export interface MemoryCliDeps {
   cwd: string;
   out: (line: string) => void;
@@ -61,14 +61,18 @@ export async function mainMemory(argv: string[], deps: MemoryCliDeps): Promise<n
   // other forms DuckDB's TIMESTAMPTZ cast may parse differently — that mismatch could defer failure to the DB or give
   // implementation-dependent time-travel). A strict form is parsed identically by both Date.parse and DuckDB.
   if (asOf !== MEMORY_NOW && (!ISO_INSTANT_RE.test(asOf) || Number.isNaN(Date.parse(asOf)))) {
-    deps.err(`memory ${command}: --as-of '${asOf}' is not a valid ISO-8601 timestamp (e.g. 2026-01-01 or 2026-01-01T12:00:00Z)\n\n${MEMORY_USAGE}`);
+    deps.err(`memory ${command}: --as-of '${asOf}' is not a valid ISO-8601 timestamp with a timezone when a time is given (e.g. 2026-01-01 or 2026-01-01T12:00:00Z)\n\n${MEMORY_USAGE}`);
     return 2;
   }
+  // Normalize to a canonical UTC instant used EVERYWHERE (the DuckDB TIMESTAMPTZ reads AND the JS history filter), so
+  // there is exactly one interpretation of the time. A date-only value becomes UTC midnight; a tz-bearing time is
+  // converted to UTC. (Validated above, so new Date() is unambiguous here.)
+  const asOfInstant = asOf === MEMORY_NOW ? MEMORY_NOW : new Date(asOf).toISOString();
 
   const store = await openBioStore(deps.cwd);
   try {
     if (command === "list") {
-      const mems = await listMemory(store.conn, asOf);
+      const mems = await listMemory(store.conn, asOfInstant);
       deps.out(JSON.stringify({ asOf: asOfLabel, count: mems.length, notes: mems.map((m) => ({ slug: m.slug, kind: m.kind, title: m.title, hook: m.hook, author: m.author })) }, null, 2));
       return 0;
     }
@@ -78,7 +82,7 @@ export async function mainMemory(argv: string[], deps: MemoryCliDeps): Promise<n
       return 2;
     }
     if (command === "show") {
-      const note = await recall(store.conn, slug, asOf);
+      const note = await recall(store.conn, slug, asOfInstant);
       if (!note) {
         deps.err(`no memory for '${slug}'${asOf === MEMORY_NOW ? "" : ` as of ${asOf}`}`);
         return 1;
@@ -91,7 +95,7 @@ export async function mainMemory(argv: string[], deps: MemoryCliDeps): Promise<n
     // (exit 2), matching how list/show fail on a bad TIMESTAMPTZ rather than silently returning nothing.
     const revisions = await memoryHistory(store.conn, slug);
     // asOf is already validated as parseable (or MEMORY_NOW) above, so filter directly.
-    const visible = asOf === MEMORY_NOW ? revisions : revisions.filter((r) => Date.parse(r.recordedAt) <= Date.parse(asOf));
+    const visible = asOfInstant === MEMORY_NOW ? revisions : revisions.filter((r) => Date.parse(r.recordedAt) <= Date.parse(asOfInstant));
     // Emit the FULL content per revision (not just title) so "what changed" is actually visible — a title-only trail
     // hides body/hook/tags/kind edits. A tombstone (forgotten) carries null content.
     deps.out(JSON.stringify({ slug, asOf: asOfLabel, revisions: visible.map((r) => ({

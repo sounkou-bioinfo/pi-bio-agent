@@ -61,6 +61,9 @@ describe("memory CLI over the ONE temporal store (replaces the stale notes CLI)"
     // sub-millisecond precision is rejected (Date.parse and DuckDB would truncate it differently)
     assert.equal(await mainMemory(["list", "--as-of", "2026-01-01T00:00:00.123456Z"], deps), 2, "microsecond --as-of rejected");
     assert.equal(await mainMemory(["list", "--as-of", "2026-01-01T00:00:00.123Z"], deps), 0, "millisecond --as-of accepted");
+    // a TIME without a timezone is rejected (JS local vs DuckDB session-zone would time-travel differently)
+    assert.equal(await mainMemory(["list", "--as-of", "2026-01-01T12:00:00"], deps), 2, "tz-less datetime rejected");
+    assert.equal(await mainMemory(["list", "--as-of", "2026-01-01T12:00:00+02:00"], deps), 0, "offset tz accepted");
     assert.equal(await mainMemory(["show", "acmg", "--as-of", "2026-01-01T00:00:02Z"], deps), 0, "a strict ISO instant is accepted");
   });
 

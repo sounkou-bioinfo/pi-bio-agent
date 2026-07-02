@@ -101,6 +101,28 @@ export function isRunDbOpenError(err: unknown): boolean {
   return !!(err && typeof err === "object" && (err as { __runDbOpen?: boolean }).__runDbOpen === true);
 }
 
+// Bindings are persisted in replay.json (JSON) and re-read by reproduce()/recallRunResult to recompute the input
+// CASID. A value that does NOT round-trip through JSON — a bigint (becomes number/string), NaN/Infinity (become
+// null), undefined (dropped), a function/symbol, a non-plain object (Date etc.) — would make the re-read replay key
+// DIFFER from the original run's, so recall misses or (worse) collides two distinct runs. Reject such bindings at the
+// entry, before the run, so bindings are always JSON-round-trippable and the input key is stable across serialization.
+function assertJsonSafeBindings(bindings: Record<string, unknown> | undefined): void {
+  if (bindings === undefined) return;
+  const check = (v: unknown, path: string): void => {
+    if (v === null) return;
+    const t = typeof v;
+    if (t === "string" || t === "boolean") return;
+    if (t === "number") { if (!Number.isFinite(v as number)) throw new Error(`binding '${path}' is a non-finite number (NaN/Infinity) — bindings must be JSON-serializable so they round-trip through replay.json`); return; }
+    if (t === "bigint") throw new Error(`binding '${path}' is a bigint — bindings must be JSON-serializable (a bigint does not round-trip through replay.json, breaking reproduce/recall keys); pass it as a string`);
+    if (t === "function" || t === "symbol" || t === "undefined") throw new Error(`binding '${path}' is a ${t} — bindings must be JSON-serializable values`);
+    if (Array.isArray(v)) { v.forEach((e, i) => check(e, `${path}[${i}]`)); return; }
+    const proto = Object.getPrototypeOf(v);
+    if (proto !== Object.prototype && proto !== null) throw new Error(`binding '${path}' is a non-plain object (${proto?.constructor?.name ?? "unknown"}) — bindings must be JSON-serializable`);
+    for (const [k, val] of Object.entries(v as Record<string, unknown>)) check(val, `${path}.${k}`);
+  };
+  for (const [k, v] of Object.entries(bindings)) check(v, k);
+}
+
 /** Resolve a run's directory, refusing a runId that could escape runsRoot. Centralized so every persistence
  *  path (and the host runner) is path-safe, including the exported persist* helpers called directly. */
 function runDir(cwd: string, runId: string): string {
@@ -490,14 +512,15 @@ async function runAndPersist(
       // a STALE result when the live source changed underneath (the same class as reproduce's not_reproducible). Only
       // content-pinned runs get an input->output mapping that "a hit can never serve stale" actually holds for.
       const hasLiveSource = receipts.some((r) => r.provenance.some((p) => p.notes?.includes("live_source")));
-      // HERMETICITY: the memo is safe only when the input CASID FULLY determines the output. Two escape hatches bypass
-      // receipts: (a) a FILE-backed dbPath carries ambient tables (from prior runs / setup) that no receipt pins, and
-      // (b) ad-hoc SQL can read undeclared sources INLINE (read_csv_auto/read_parquet/remote URIs) that leave no
-      // receipt. Either makes the CASID blind to real inputs, so a future hit could serve a stale result. Require
-      // :memory: AND — for the ad-hoc SQL path — no ambient-reader construct in the SQL; else skip the memo (fail
-      // safe: a skipped memo just re-runs, a wrong memo serves stale). (An operation's manifest-authored SQL is not
-      // scanned here — a lower-risk residue than agent-written ad-hoc SQL; declared resolvers already mark live_source.)
-      const hermetic = dbPath === ":memory:" && !AMBIENT_SQL_READ.test(enriched?.sql ?? "");
+      // HERMETICITY: the memo is safe only when the input CASID FULLY determines the output. Escape hatches that
+      // bypass receipts: (a) a FILE-backed dbPath carries ambient tables (prior runs / setup) no receipt pins; (b) the
+      // executed SQL (queries AND operations — both set enriched.sql) can read undeclared sources (a FROM-position
+      // table function / replacement scan / remote URI); (c) the host INIT SQL runs before resolution and can ATTACH
+      // a file DB or read a file — its DIGEST is pinned, but the same init SQL over CHANGED external data would reuse
+      // the key. Require :memory: AND no ambient read in the run SQL AND none in the init SQL (nor an ATTACH); else
+      // skip the memo (fail safe: a skipped memo re-runs, a wrong memo serves stale).
+      const initAmbient = (initSql ?? []).some((s) => AMBIENT_SQL_READ.test(s) || /\battach\b/i.test(s));
+      const hermetic = dbPath === ":memory:" && !AMBIENT_SQL_READ.test(enriched?.sql ?? "") && !initAmbient;
       if (resultDigest && runLog && enriched && !hasLiveSource && hermetic) {
         try {
           // key on the ENRICHED replay so the action key is CONTENT-addressed (includes sourceReceiptDigests) —
@@ -550,6 +573,7 @@ export async function runBioOperationFromManifest(req: RunOperationRequest): Pro
   if (req.runId !== undefined && !RUN_DIR_ID_RE.test(req.runId)) {
     throw new Error("runId must start with a letter/number and contain only [A-Za-z0-9._:-] (no path traversal)"); // SAME regex as persistRun -> fail BEFORE effects, not after
   }
+  assertJsonSafeBindings(req.bindings); // bindings must round-trip through replay.json (see the helper) — fail before any effect
   const { registry, raw, manifest, manifestDigest } = await prepareRegistry(req);
   const op = registry.getOperation(req.operationId);
   if (!op) throw new Error(`operation '${req.operationId}' is not declared in the manifest`);
@@ -618,6 +642,7 @@ export async function runBioQueryFromManifest(req: RunQueryRequest): Promise<Run
   if (req.runId !== undefined && !RUN_DIR_ID_RE.test(req.runId)) {
     throw new Error("runId must start with a letter/number and contain only [A-Za-z0-9._:-] (no path traversal)"); // SAME regex as persistRun -> fail BEFORE effects, not after
   }
+  assertJsonSafeBindings(req.bindings); // bindings must round-trip through replay.json (see the helper) — fail before any effect
   const { registry, manifest, raw, manifestDigest } = await prepareRegistry(req);
   const resources = req.resources ?? (manifest.provides?.resources ?? []).map((r) => r.id);
   const now = req.now ?? systemClock();
