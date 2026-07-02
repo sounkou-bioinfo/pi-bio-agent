@@ -71,8 +71,10 @@ export async function actionCachePut(conn: SqlConn, inputDigest: string, outputD
  * The memoized SKIP made safe + useful: recall a run's RESULT by its recorded inputs, WITHOUT re-executing. Given
  * a prior run's (enriched) replay — which already carries `sourceReceiptDigests`, so the input CASID is computable
  * with NO re-resolution — look up the ActionCache and, on a hit, fetch the result rows straight from CAS by the
- * output digest. Returns null on a miss. This is why the ActionCache key had to be content-addressed: an identical
- * input maps to the identical result, so a hit can NEVER serve a stale answer. (An auto-skip inside the run path is
+ * output digest. Returns null on a miss. This is why the ActionCache key had to be content-addressed AND why a run
+ * with a LIVE SOURCE (whose sourceReceiptDigests are blind to the source content) is NOT memoized at put time
+ * (run-store): so for anything that IS in the cache, an identical input maps to the identical result and a hit can
+ * NEVER serve a stale answer. (An auto-skip inside the run path is
  * deliberately NOT baked in: computing the input CASID needs resolution, which is already memoized, so the only
  * saving there is the — usually cheap — SQL. This recall is where the skip actually pays: replaying a recorded run.)
  */

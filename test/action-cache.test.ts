@@ -108,4 +108,24 @@ describe("ActionCache: input CASID -> output CASID (LLVM CAS ActionCache in the 
     // a different input (different SQL) -> a miss, so the caller re-runs instead of serving something stale
     assert.equal(await recallRunResult(store, cas, { ...replay, sql: "SELECT 1" }), null);
   });
+
+  test("CORRECTNESS: a LIVE-SOURCE run is NOT memoized — recall misses, so a changed source can't serve a stale cached result", async () => {
+    const store = await conn();
+    const cas = fsCasStore(await fsp.mkdtemp(join(tmpdir(), "cas-")));
+    const cwd = await fsp.mkdtemp(join(tmpdir(), "pi-bio-live-"));
+    const dataPath = join(cwd, "data.csv").replace(/\\/g, "/");
+    await fsp.writeFile(dataPath, "x\n1\n2\n");
+    const manifest = { schema: "pi-bio.manifest.v1", id: "live", version: "0.1.0", title: "live", description: "live", provides: {
+      resolvers: [{ id: "duckdb.sql_materialize", version: "0.1.0", title: "m", description: "m", output: { mode: "table" } }],
+      resources: [{ id: "live", title: "live", kind: "virtual", resolver: "duckdb.sql_materialize", params: { table: "live", sql: `SELECT * FROM read_csv_auto('${dataPath}')` } }],
+    } };
+    const mpath = join(cwd, "manifest.json");
+    await fsp.writeFile(mpath, JSON.stringify(manifest));
+    const res = await runBioQueryFromManifest({ cwd, dbPath: ":memory:", manifestPath: mpath, sql: "SELECT count(*) AS n FROM live", resources: ["live"], store, author: "agent:A", cas });
+    assert.ok(res.ok, res.ok ? "" : `run failed: ${(res as { error?: unknown }).error}`);
+    if (!res.ok) return;
+    const replay = JSON.parse(await fsp.readFile(join(res.runDir, "replay.json"), "utf8"));
+    // the run produced a CAS resultDigest, but because a live source is blind to content it must NOT be memoized:
+    assert.equal(await recallRunResult(store, cas, replay), null, "a live-source run is a recall MISS (re-run, never serve a stale cached result)");
+  });
 });

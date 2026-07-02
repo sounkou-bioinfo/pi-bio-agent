@@ -411,7 +411,12 @@ async function runAndPersist(
       await recordRun(runLog, now, { runId, identity, status: run.status, error: undefined, dir: persisted.dir, replay, enriched, resultDigest, receiptsDigest, replayDigest, runObjectDigest });
       // ActionCache (LLVM CAS): map this input's CASID -> the result's CASID, so an identical future run can be
       // memoized/deduped and reproduce() has an input->output handle. Only when both a CAS and the store are present.
-      if (resultDigest && runLog && enriched) {
+      // SKIP a run with a LIVE SOURCE: its sourceReceiptDigests are blind to the source's CONTENT (sql_materialize /
+      // remote read), so its input CASID does NOT determine the output — memoizing it would let recallRunResult serve
+      // a STALE result when the live source changed underneath (the same class as reproduce's not_reproducible). Only
+      // content-pinned runs get an input->output mapping that "a hit can never serve stale" actually holds for.
+      const hasLiveSource = receipts.some((r) => r.provenance.some((p) => p.notes?.includes("live_source")));
+      if (resultDigest && runLog && enriched && !hasLiveSource) {
         try {
           // key on the ENRICHED replay so the action key is CONTENT-addressed (includes sourceReceiptDigests) —
           // a changed source yields a different key, so a future memoized hit can never serve a stale result.
