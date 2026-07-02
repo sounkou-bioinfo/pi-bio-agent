@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
+import { promises as fs } from "node:fs";
 import type { SqlConn } from "../core/ports.js";
+import type { CasStore } from "../core/cas.js";
 import { observationAsOfKey, recordObservation } from "../duckdb/observations.js";
 import type { RunReplaySpec } from "../core/reproducibility.js";
 
@@ -47,4 +49,26 @@ export async function actionCacheGet(conn: SqlConn, inputDigest: string, asOf: s
 export async function actionCachePut(conn: SqlConn, inputDigest: string, outputDigest: string, now: string, author?: string): Promise<void> {
   const key = actionKey(inputDigest);
   await recordObservation(conn, { statementKey: key, subjectId: key, predicate: "action_output", value: { output: outputDigest }, recordedAt: now, source: author, digest: inputDigest });
+}
+
+/**
+ * The memoized SKIP made safe + useful: recall a run's RESULT by its recorded inputs, WITHOUT re-executing. Given
+ * a prior run's (enriched) replay — which already carries `sourceReceiptDigests`, so the input CASID is computable
+ * with NO re-resolution — look up the ActionCache and, on a hit, fetch the result rows straight from CAS by the
+ * output digest. Returns null on a miss. This is why the ActionCache key had to be content-addressed: an identical
+ * input maps to the identical result, so a hit can NEVER serve a stale answer. (An auto-skip inside the run path is
+ * deliberately NOT baked in: computing the input CASID needs resolution, which is already memoized, so the only
+ * saving there is the — usually cheap — SQL. This recall is where the skip actually pays: replaying a recorded run.)
+ */
+export async function recallRunResult(
+  store: SqlConn,
+  cas: CasStore,
+  replay: Pick<RunReplaySpec, "kind" | "manifest" | "operationId" | "sql" | "resources" | "bindings" | "sourceReceiptDigests">,
+): Promise<{ rows: unknown[]; resultDigest: string } | null> {
+  const outputDigest = await actionCacheGet(store, actionInputDigest(replay));
+  if (!outputDigest) return null;
+  const address = { algorithm: "sha256" as const, digest: outputDigest.replace(/^sha256:/, "") };
+  if (!(await cas.has(address))) return null; // referenced but bytes evicted (e.g. GC) — a miss, re-run instead
+  const rows = JSON.parse(await fs.readFile(cas.pathFor(address), "utf8")) as unknown[];
+  return { rows, resultDigest: outputDigest };
 }

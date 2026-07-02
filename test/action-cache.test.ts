@@ -7,7 +7,7 @@ import { DuckDBInstance } from "@duckdb/node-api";
 import { duckdbNodeConn } from "../src/duckdb/node-api.js";
 import type { SqlConn } from "../src/core/ports.js";
 import { createBioObservationSchema, observationAsOfKey, observationsAsOf } from "../src/duckdb/observations.js";
-import { actionCacheGet, actionCachePut, actionInputDigest } from "../src/hosts/action-cache.js";
+import { actionCacheGet, actionCachePut, actionInputDigest, recallRunResult } from "../src/hosts/action-cache.js";
 import { runBioQueryFromManifest } from "../src/hosts/run-store.js";
 import { fsCasStore } from "../src/hosts/fs-cas.js";
 import { MEMORY_NOW } from "../src/hosts/memory-store.js";
@@ -49,5 +49,22 @@ describe("ActionCache: input CASID -> output CASID (LLVM CAS ActionCache in the 
     assert.equal(ra, await digestOf(b.runId)); // identical inputs -> identical result CASID (dedup)
     const cached = (await observationsAsOf(store, MEMORY_NOW)).filter((r) => r.predicate === "action_output");
     assert.ok(cached.some((r) => JSON.parse(r.value_json!).output === ra), "the ActionCache maps this input's CASID to the result CASID");
+  });
+
+  test("recallRunResult replays a recorded run's result FROM CAS by its recorded inputs — no re-execution; miss is null", async () => {
+    const store = await conn();
+    const cas = fsCasStore(await fsp.mkdtemp(join(tmpdir(), "cas-")));
+    const req = { cwd: process.cwd(), dbPath: ":memory:", manifestPath: "examples/variant-counts/manifest.json", sql: "SELECT consequence, count(*) AS n FROM variants GROUP BY consequence ORDER BY consequence", store, author: "agent:A", cas } as const;
+    const res = await runBioQueryFromManifest({ ...req });
+    assert.ok(res.ok);
+    if (!res.ok) return;
+    // the enriched replay (with sourceReceiptDigests) is what a caller has recorded; recall needs no re-resolution
+    const replay = JSON.parse(await fsp.readFile(join(res.runDir, "replay.json"), "utf8"));
+    const recalled = await recallRunResult(store, cas, replay);
+    assert.ok(recalled, "hit: the prior run's result is recalled");
+    assert.equal(recalled!.resultDigest, res.casRefs!.result);
+    assert.equal(recalled!.rows.length, res.rowCount); // the actual result rows, fetched from CAS
+    // a different input (different SQL) -> a miss, so the caller re-runs instead of serving something stale
+    assert.equal(await recallRunResult(store, cas, { ...replay, sql: "SELECT 1" }), null);
   });
 });
