@@ -139,13 +139,20 @@ async function writeRunFile(dir: string, name: string, data: unknown): Promise<s
 export async function persistRun(cwd: string, runId: string, payload: RunPayload, opts: { serialize?: boolean } = {}): Promise<PersistedRun> {
   const dir = runDir(cwd, runId);
   await fs.mkdir(dir, { recursive: true });
-  // lean mode writes ONLY run.json (bytes live in CAS) — remove stale result/receipts/replay a prior SERIALIZED
-  // run at this same runId left, so a reader never sees a lean run beside stale files from a different run.
-  if (opts.serialize === false) await Promise.all([fs.rm(join(dir, "result.json"), { force: true }), fs.rm(join(dir, "receipts.json"), { force: true }), fs.rm(join(dir, "replay.json"), { force: true })]);
+  // Each file write is atomic (temp+rename). On a runId REUSE the DIRECTORY isn't transactionally atomic — a crash
+  // mid-persist can leave a mixed FILE view (new run.json beside a prior run's result), which is a VIEW issue: the
+  // authoritative record is the run:<id> LEDGER fact (it references the actual result/receipts/replay by digest),
+  // so a consumer reconciles from the ledger, not the files. WRITE-BEFORE-DELETE: write the new run's files first,
+  // THEN clear stale files a prior run at this runId left — so a crash never DELETES the old evidence with nothing
+  // new in its place (only overwrites, atomically).
   const files: PersistedRun["files"] = { run: await writeRunFile(dir, "run.json", payload.run) };
   if (opts.serialize !== false) {
     files.result = await writeRunFile(dir, "result.json", payload.result);
     files.receipts = await writeRunFile(dir, "receipts.json", payload.receipts);
+  } else {
+    // lean mode writes ONLY run.json (bytes live in CAS) — clear stale result/receipts/replay a prior SERIALIZED run
+    // at this runId left, so a reader never sees a lean run beside stale files from a different run.
+    await Promise.all([fs.rm(join(dir, "result.json"), { force: true }), fs.rm(join(dir, "receipts.json"), { force: true }), fs.rm(join(dir, "replay.json"), { force: true })]);
   }
   return { dir, files };
 }
@@ -155,12 +162,16 @@ export async function persistRun(cwd: string, runId: string, payload: RunPayload
 export async function persistFailedRun(cwd: string, runId: string, payload: { run: BioRunRecord; receipts: ResolutionReceipt[] }, opts: { serialize?: boolean } = {}): Promise<{ dir: string; files: { run: string; receipts?: string } }> {
   const dir = runDir(cwd, runId);
   await fs.mkdir(dir, { recursive: true });
-  // a FAILED run has NO result — remove a stale result.json/replay.json a PRIOR (successful) run at this runId may
-  // have left, so a reader never sees a failed run.json beside a misleading success result.
-  await Promise.all([fs.rm(join(dir, "result.json"), { force: true }), fs.rm(join(dir, "replay.json"), { force: true })]);
+  // WRITE-BEFORE-DELETE (see persistRun): write the failed run's files FIRST, then clear a stale result.json/
+  // replay.json a PRIOR (successful) run at this runId left — so a reader never sees a failed run.json beside a
+  // misleading success result, and a crash never destroys the prior evidence before the new record exists.
   const files: { run: string; receipts?: string } = { run: await writeRunFile(dir, "run.json", payload.run) };
   if (opts.serialize !== false) files.receipts = await writeRunFile(dir, "receipts.json", payload.receipts);
-  else await fs.rm(join(dir, "receipts.json"), { force: true }); // lean mode writes none — clear a stale one from a prior run
+  await Promise.all([
+    fs.rm(join(dir, "result.json"), { force: true }), // a FAILED run has NO result
+    fs.rm(join(dir, "replay.json"), { force: true }),
+    ...(opts.serialize === false ? [fs.rm(join(dir, "receipts.json"), { force: true })] : []), // lean writes none — clear a stale one
+  ]);
   return { dir, files };
 }
 

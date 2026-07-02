@@ -67,6 +67,10 @@ describe("Phase 4.2: activate / rollback as temporal observations", () => {
     await recordActivation(c, { kind: "operation", id: "op", version: "a", specDigest: d("a"), recordedAt: T1, source: "r1" });
     // a DIFFERENT version/digest at the SAME recordedAt -> competing state change -> rejected
     await assert.rejects(() => recordActivation(c, { kind: "operation", id: "op", version: "b", specDigest: d("b"), recordedAt: T1, source: "r2" }), /COMPETING activation/);
+    // a competing activation at the SAME INSTANT but a DIFFERENT ISO spelling ('…00Z' vs '…00.000Z') must ALSO be
+    // rejected — the guard compares recorded_at as TIMESTAMPTZ, not raw TEXT (a TEXT '=' would miss it and admit
+    // two active versions for one instant with an arbitrary tiebreak winner).
+    await assert.rejects(() => recordActivation(c, { kind: "operation", id: "op", version: "c", specDigest: d("c"), recordedAt: "2026-01-01T00:00:00.000Z", source: "r3" }), /COMPETING activation/);
     // the EXACT same event again -> idempotent (no new row, no throw)
     await recordActivation(c, { kind: "operation", id: "op", version: "a", specDigest: d("a"), recordedAt: T1, source: "r1" });
     const [{ n }] = await c.all<{ n: number }>("SELECT count(*) AS n FROM bio_observations WHERE statement_key='activation:operation:op'");

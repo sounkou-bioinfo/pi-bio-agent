@@ -3,6 +3,15 @@ import { systemClock } from "../core/clock.js";
 import { promises as fs } from "node:fs";
 import { join } from "node:path";
 import { bioProjectLayout } from "../core/storage.js";
+
+/** Atomic file write (temp + rename): overwriting the current SKILL.md / note JSON in place with fs.writeFile
+ *  truncates first, so a crash/ENOSPC mid-write leaves a PARTIAL/corrupt file — and readStudyNotes silently drops
+ *  a corrupt note, making the memory view vanish. Write a unique temp then rename over the target instead. */
+async function atomicWriteFile(path: string, content: string): Promise<void> {
+  const tmp = `${path}.tmp-${process.pid}-${randomUUID()}`;
+  await fs.writeFile(tmp, content, "utf8");
+  try { await fs.rename(tmp, path); } catch (err) { await fs.rm(tmp, { force: true }); throw err; }
+}
 import { normalizeStudySlug, validateStudyNote, type StudyArtifactKind, type StudyNote, type StudyNoteLink } from "../core/study.js";
 
 export const SKILL_NAME_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
@@ -35,7 +44,7 @@ export async function writeProjectSkill(cwd: string, name: string, description: 
   // Quote the description: agent-authored text routinely contains ':' (e.g. "Use before X: do Y"), which
   // breaks unquoted YAML frontmatter and stops the skill from loading.
   const content = `---\nname: ${name}\ndescription: ${yamlQuoted(description.replace(/\s+/g, " ").trim())}\n---\n\n${body.trim()}\n`;
-  await fs.writeFile(path, content, "utf8");
+  await atomicWriteFile(path, content);
   return path;
 }
 
@@ -96,7 +105,7 @@ export async function writeStudyNote(cwd: string, note: StudyNote, now = systemC
     // No prior note for this slug (or it was unreadable); this is a fresh create.
   }
   const persisted: StudyNote = { ...note, id, createdAt, updatedAt: now };
-  await fs.writeFile(path, `${JSON.stringify(persisted, null, 2)}\n`, "utf8");
+  await atomicWriteFile(path, `${JSON.stringify(persisted, null, 2)}\n`);
   await writeStudyIndex(cwd);
   return { path, note: persisted, created };
 }

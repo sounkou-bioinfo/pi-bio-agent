@@ -35,8 +35,12 @@ export async function recordActivation(conn: SqlConn, e: ActivationEventInput): 
   if (!SHA256.test(e.specDigest ?? "")) throw new Error("recordActivation: specDigest must be 'sha256:<64 hex>'");
   if (!e.recordedAt || !e.source) throw new Error("recordActivation: recordedAt and source are required");
   const obj = objectId(e.id, e.version);
+  // compare the instant as TIMESTAMPTZ, not raw TEXT: '…00Z' and '…00.000Z' are the SAME instant but differ as
+  // strings, so a TEXT '=' would MISS a competing activation at that instant — two different active versions could
+  // then be admitted for one time, and activeOperationAsOf's equal-timestamp tiebreak (observation_id) picks one
+  // arbitrarily. The cast makes the monotonicity guard see the real collision.
   const sameTime = await conn.all<{ object_id: string | null; digest: string | null }>(
-    "SELECT object_id, digest FROM bio_observations WHERE statement_key = ? AND recorded_at = ?", [statementKey(e.id), e.recordedAt],
+    "SELECT object_id, digest FROM bio_observations WHERE statement_key = ? AND recorded_at::TIMESTAMPTZ = ?::TIMESTAMPTZ", [statementKey(e.id), e.recordedAt],
   );
   if (sameTime.some((r) => r.object_id !== obj || r.digest !== e.specDigest)) {
     throw new Error(`recordActivation: a COMPETING activation for '${e.id}' already exists at ${e.recordedAt} — state changes must be monotonic in time`);
