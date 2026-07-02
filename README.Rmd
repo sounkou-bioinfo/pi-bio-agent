@@ -177,11 +177,9 @@ scripts/nng-job-runner.mjs
 ```
 
 **And files, not just status — because this is bioinformatics.** A job produces a *file* (a plot, a VCF), and
-another agent has to read it. Here one process plots a real PNG, stores the bytes in a content-addressed store
-(CAS), and records only the **digest** in the shared ledger over ducknng RPC; a *separate* reader process reads
-that digest and fetches the exact bytes from CAS. Files move by content address, the ledger moves the reference.
-(A shared CAS covers the common HPC shared-storage case; a no-shared-filesystem deployment ships the CAS bytes over
-the same transport. No separate distributed-filesystem layer is needed.)
+another agent has to read it. Here one process plots a real PNG into a content-addressed store (CAS) and records
+only the **digest** in the shared ledger over ducknng RPC; a *separate* reader process reads that digest and
+fetches the exact bytes. A shared CAS covers the common HPC case; otherwise the bytes ship over the same transport.
 
 ```{nng}
 scripts/nng-file-handoff.mjs

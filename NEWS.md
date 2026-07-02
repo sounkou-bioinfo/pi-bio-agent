@@ -22,10 +22,9 @@ is the plan of record; [`docs/refinments.md`](docs/refinments.md) tracks open it
 
 ## Documentation
 
-- Added a live **distributed file-I/O** demo (`scripts/nng-file-handoff.mjs`, in the README): one process plots a
-  real PNG into CAS and records only the digest in the shared ledger over ducknng RPC; a separate reader process
-  reads the digest and fetches the exact bytes. Files move by content address, the ledger moves the reference (no
-  distributed-filesystem layer needed).
+- Added a live **distributed file-I/O** demo (`scripts/nng-file-handoff.mjs`): one process plots a PNG into CAS and
+  records only the digest in the shared ledger over ducknng RPC; a separate reader process reads the digest and
+  fetches the bytes.
 - README redesigned demo-first, with a live NNG-topology demo (a worker reporting job
   status over ducknng RPC into the ledger) and re-rendered with real output. The render
   is now hermetic (the render agent is read-only, so a render cannot mutate the repo).
