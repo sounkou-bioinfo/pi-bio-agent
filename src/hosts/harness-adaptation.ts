@@ -146,7 +146,9 @@ export async function decideCandidateApproval(conn: SqlConn, d: ApprovalDecision
   const current = parseStatus(pending);
   if (current === "approved" || current === "rejected") throw new Error(`decideCandidateApproval: candidate ${d.specDigest} already ${current} — a decision is terminal`);
   if (current !== "pending") throw new Error(`decideCandidateApproval: candidate ${d.specDigest} is not awaiting approval (never submitted / not parked) — call submitCandidateForApproval first`);
-  if (pending && pending.recorded_at >= d.decidedAt) throw new Error(`decideCandidateApproval: decidedAt (${d.decidedAt}) must be strictly after the pending submit (${pending.recorded_at})`);
+  // compare as EPOCH, not raw strings: lexicographically '…00Z' > '…00.001Z' ('Z' > '.') though it is chronologically
+  // BEFORE it, which would wrongly reject a valid sub-second-later decision.
+  if (pending && Date.parse(pending.recorded_at) >= Date.parse(d.decidedAt)) throw new Error(`decideCandidateApproval: decidedAt (${d.decidedAt}) must be strictly after the pending submit (${pending.recorded_at})`);
   return recordApprovalDecision(conn, d);
 }
 

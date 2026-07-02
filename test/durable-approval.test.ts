@@ -52,6 +52,14 @@ describe("Phase 4.4: durable submit -> (park) -> decide approval", () => {
     assert.equal((await activeOperationAsOf(conn, "double.report", T2))?.version, "1.0.0");
   });
 
+  test("a SUB-SECOND-later decision is accepted (epoch compare, not lexicographic '…00Z' > '…001Z')", async () => {
+    const conn = await obsConn();
+    const sub = await submitCandidateForApproval(conn, good, { sandbox: await sandbox(), recordedAt: "2026-06-30T00:00:00Z", source: "ci" });
+    // decidedAt is 1ms later — chronologically after, but lexicographically '…00Z' > '…00.001Z' would reject it
+    const dec = await decideCandidateApproval(conn, { id: "double.report", version: "1.0.0", specDigest: sub.specDigest, approved: true, decidedAt: "2026-06-30T00:00:00.001Z", source: "approver:alice" });
+    assert.equal(dec.activated, true, "a sub-second-later decision is chronologically valid and must be accepted");
+  });
+
   test("decide(rejected) records rejected and never activates", async () => {
     const conn = await obsConn();
     const sub = await submitCandidateForApproval(conn, good, { sandbox: await sandbox(), recordedAt: T1, source: "ci" });

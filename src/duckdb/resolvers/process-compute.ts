@@ -243,7 +243,10 @@ export function processComputeResolver(runner: ProcessRunner): BioResolverImpl {
         result: { mode: "reference", name: p.table, pointer: { uri: `table:${p.table}`, format: "table" } },
         sourceSnapshots: [{ source: `process:${command[0]}`, version: cmdDigest, retrievedAt: now }],
         provenance: [
-          { source: "process.compute", retrievedAt: now, digest: sqlDigest, notes: ["process.compute", `cmd:${command.join(" ")}`, resultTable === "arrow" ? "arrow-ipc" : "files-only"] },
+          // live_source: the receipt pins the command/input/env but NOT the output table's CONTENT, and a script
+          // can be non-deterministic — so without a CAS resultDigest pinning the output, a re-run is not verifiable
+          // (reproduce returns not_reproducible rather than a hollow match; roadmap C2 — never fake confidence).
+          { source: "process.compute", retrievedAt: now, digest: sqlDigest, notes: ["process.compute", "live_source", `cmd:${command.join(" ")}`, resultTable === "arrow" ? "arrow-ipc" : "files-only"] },
           { source: "environment", retrievedAt: now, digest: envAttestation.declared?.digest ?? envAttestation.observed?.digest,
             notes: ["process.compute", `env_status:${envAttestation.status}`, `env_schema:${ENV_ATTESTATION_SCHEMA}`,
               ...(envAttestation.declared ? [`env_declared:${envAttestation.declared.digest}`] : []),
