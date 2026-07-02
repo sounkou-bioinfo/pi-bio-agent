@@ -104,4 +104,29 @@ describe("CAS-of-bytes: cross-db remote reuse (http.get)", () => {
     assert.equal(out.provenance[0]!.notes?.includes("cas"), false);
     assert.deepEqual(await conn.all("SELECT a FROM t"), [{ a: 1n }]); // DuckDB returns integers as BigInt
   });
+
+  test("a STALE remote-index entry (CAS bytes swept, entry left) is a clean MISS + re-download, not a failed materialize", async () => {
+    const cas = fsCasStore(await fs.mkdtemp(join(tmpdir(), "pi-bio-cas-")));
+    const url = "https://x/stale";
+    const params = { url, table: "t", format: "json" };
+    let downloads = 0;
+    const fetchImpl: FetchLike = async (_u, init) => {
+      const h = { get: (n: string) => (n.toLowerCase() === "etag" ? "etag-1" : null) };
+      if (init?.headers?.["If-None-Match"] === "etag-1") return { ok: false, status: 304, text: async () => "", headers: h };
+      downloads++;
+      return { ok: true, status: 200, text: async () => JSON.stringify([{ a: 1 }]), headers: h };
+    };
+    // db1: cold fetch -> 200, seeds CAS bytes + remote index
+    const db1 = await memoryConn();
+    const out1 = await httpTableResolver(fetchImpl)(resource(params), { conn: db1, now: "T1", cas, remoteCacheScope: "public" });
+    assert.equal(downloads, 1);
+    const digest = out1.sourceSnapshots[0]!.version!.slice("sha256:".length);
+    // simulate GC sweeping the CAS object but leaving the stale remote-index entry
+    await cas.remove({ algorithm: "sha256", digest });
+    // db2: getRemote returns the stale entry, but cas.has is false -> ignore -> no If-None-Match -> 200 re-download
+    const db2 = await memoryConn();
+    await httpTableResolver(fetchImpl)(resource(params), { conn: db2, now: "T2", cas, remoteCacheScope: "public" });
+    assert.equal(downloads, 2, "stale remote index -> clean miss + re-download, never a 304 that materializes missing bytes");
+    assert.deepEqual(await db2.all("SELECT a FROM t"), [{ a: 1n }]);
+  });
 });

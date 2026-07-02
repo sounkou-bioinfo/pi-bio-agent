@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import type { SqlConn } from "../core/ports.js";
 import type { CasStore } from "../core/cas.js";
-import { observationAsOfKey, recordObservation } from "../duckdb/observations.js";
+import { observationAsOfKey, recordObservation, monotonicRecordedAt } from "../duckdb/observations.js";
 import type { RunReplaySpec } from "../core/reproducibility.js";
 
 // LLVM CAS ActionCache, in the ONE store: a key/value map from an INPUT CASID (the digest of a computation's
@@ -64,7 +64,11 @@ export async function actionCacheGet(conn: SqlConn, inputDigest: string, asOf: s
  */
 export async function actionCachePut(conn: SqlConn, inputDigest: string, outputDigest: string, now: string, author?: string): Promise<void> {
   const key = actionKey(inputDigest);
-  await recordObservation(conn, { statementKey: key, subjectId: key, predicate: "action_output", value: { output: outputDigest }, recordedAt: now, source: author, digest: inputDigest });
+  // strictly-monotonic recordedAt per action slot (state machine): two same-ms puts for one inputDigest with
+  // DIFFERENT outputs would otherwise be tie-broken by hash-arbitrary observation_id, so actionCacheGet/recallRunResult
+  // could serve the OLDER output. Advance so the later write deterministically wins (it IS the current mapping).
+  const at = await monotonicRecordedAt(conn, key, now, FUTURE);
+  await recordObservation(conn, { statementKey: key, subjectId: key, predicate: "action_output", value: { output: outputDigest }, recordedAt: at, source: author, digest: inputDigest });
 }
 
 /**

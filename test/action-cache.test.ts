@@ -79,6 +79,14 @@ describe("ActionCache: input CASID -> output CASID (LLVM CAS ActionCache in the 
     assert.equal(await actionCacheGet(c, "sha256:missing"), null);
   });
 
+  test("two SAME-millisecond puts for one input resolve deterministically to the LATER output (monotonic slot)", async () => {
+    const c = await conn();
+    const SAME = "2026-01-01T00:00:01Z";
+    await actionCachePut(c, "sha256:in", "sha256:out-old", SAME, "agent:A");
+    await actionCachePut(c, "sha256:in", "sha256:out-new", SAME, "agent:B"); // same ms — must still win
+    assert.equal(await actionCacheGet(c, "sha256:in"), "sha256:out-new", "the later put wins, not a hash-arbitrary tiebreak");
+  });
+
   test("two identical runs dedup to the same result CASID, and the ActionCache records input -> that output", async () => {
     const store = await conn();
     const cas = fsCasStore(await fsp.mkdtemp(join(tmpdir(), "cas-")));

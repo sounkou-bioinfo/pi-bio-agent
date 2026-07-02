@@ -112,7 +112,12 @@ export function httpTableResolver(fetchImpl: FetchLike): BioResolverImpl {
     // (no \0, e.g. a raw etag left by an older bug, or a server-crafted value) is a MISS, never a cross-scope hit.
     const memo = memoRaw && memoRaw.freshness.includes("\0") && unpackScope(memoRaw.freshness) === scope ? memoRaw : undefined;
     const sameUrl = memo?.receipt.sourceSnapshots[0]?.source === url;
-    const casRemote = !memo && memoable && cas && scope !== undefined ? await cas.getRemote(url, scope) : undefined;
+    const casRemoteRaw = !memo && memoable && cas && scope !== undefined ? await cas.getRemote(url, scope) : undefined;
+    // Only trust the shared remote index if its CAS bytes are STILL present: GC can sweep the CAS object while leaving
+    // a stale remote-index entry (the metadata GC doesn't always prune it in lockstep), and a 304-then-materialize
+    // would then fail on missing bytes. If gone, ignore the entry -> no If-None-Match -> fetch fresh (a clean MISS +
+    // re-download), never a failed run.
+    const casRemote = casRemoteRaw && cas && (await cas.has(casRemoteRaw.address)) ? casRemoteRaw : undefined;
     const validator = memo && sameUrl ? unpackEtag(memo.freshness) : casRemote?.etag;
     const conditional = validator !== undefined ? { ...headers, "If-None-Match": validator } : headers;
     const res = await fetchImpl(url, { method, headers: conditional, body: requestBody, signal: ctx.signal });
