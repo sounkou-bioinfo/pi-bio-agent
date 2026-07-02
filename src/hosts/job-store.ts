@@ -105,9 +105,13 @@ export async function submitBioJob(conn: SqlConn, runner: JobRunner, req: Submit
   if (await readJobRecord(req.cwd, req.runId)) throw new Error(`job-store: job '${req.runId}' already submitted`);
   const digest = replaySpecDigest(req.replay); // compute BEFORE acceptance — a digest failure must not leave a phantom job in the runner
   await runner.submit({ runId: req.runId, replay: req.replay }); // acceptance — throws if the runner rejects
-  await recordPhase(conn, req.runId, { phase: "queued" }, req.now, req.source ?? "job-store", digest);
-  await persistJob(req.cwd, { schema: "pi-bio.job_record.v1", runId: req.runId, phase: "queued", replayDigest: digest, submittedAt: req.now, updatedAt: req.now });
-  return { runId: req.runId, phase: "queued", at: req.now };
+  // A dispatched worker (ledgerJobRunner) may ALREADY have reported running/succeeded into the slot before we get
+  // here. Record the initial `queued` ONLY if the slot is still empty — otherwise `queued` at req.now could become
+  // the latest row and REGRESS the worker's phase back to queued.
+  const already = await latestSlotRow(conn, req.runId);
+  if (!already) await recordPhase(conn, req.runId, { phase: "queued" }, req.now, req.source ?? "job-store", digest);
+  await persistJob(req.cwd, { schema: "pi-bio.job_record.v1", runId: req.runId, phase: already?.phase ?? "queued", replayDigest: digest, submittedAt: req.now, updatedAt: req.now });
+  return { runId: req.runId, phase: already?.phase ?? "queued", at: already?.at ?? req.now };
 }
 
 /** Poll a job: read the runner's current status and record it as a new observation IFF the phase actually changed

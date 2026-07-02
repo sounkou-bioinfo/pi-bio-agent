@@ -56,6 +56,20 @@ describe("ledgerJobRunner: distributed JobRunner whose status is data in the sha
     assert.equal(Number(after), Number(before), "poll did not double-record — the worker already owns the slot");
   });
 
+  test("submit does NOT regress a fast worker: if dispatch already reported running, no queued row is written", async () => {
+    const conn = await setup();
+    // a worker that reports 'running' synchronously during dispatch (before submit records queued)
+    const dispatch: JobDispatch = async (spec) => {
+      await recordObservation(conn, { statementKey: `job:${spec.runId}:status`, subjectId: `job:${spec.runId}`, predicate: "job_status", value: "running", recordedAt: "2026-07-01T00:00:02Z", source: "fast-worker" });
+    };
+    const runner = ledgerJobRunner(conn, dispatch);
+    const cwd = await (await import("node:fs")).promises.mkdtemp((await import("node:path")).join((await import("node:os")).tmpdir(), "pi-bio-ledger-"));
+    const st = await submitBioJob(conn, runner, { cwd, runId: "f1", replay: replay("f1"), now: "2026-07-01T00:00:09Z" });
+    assert.equal(st.phase, "running", "submit returns the worker's already-reported phase, not queued");
+    const rows = (await conn.all<{ v: string }>(`SELECT value_json v FROM bio_observations WHERE statement_key='job:f1:status'`)).map((r) => JSON.parse(r.v));
+    assert.deepEqual(rows, ["running"], "only the worker's 'running' row exists — no queued regression at the later submit time");
+  });
+
   test("fail closed: submit rejects a replay whose runId does not match", async () => {
     const conn = await setup();
     const runner = ledgerJobRunner(conn, async () => {});
