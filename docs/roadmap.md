@@ -155,8 +155,8 @@ They split by whether the consumer is named yet:
   results/judgments as KG facts** are exactly what Phase 4's `record → activate → rollback` consumes (record =
   judgments as KG facts; activate/rollback = as-of temporality). Phase 1 and Phase 4 are linked — this leftover
   has a concrete consumer, it is just correctly sequenced behind it.
-- **Consumer not yet real** (deferred by discipline): wiring process-op FILE artifacts into CAS waits on the
-  `process` artifact transport (Phase 3's remainder), which waits on a real pipeline.
+- **Process-op FILE artifacts → CAS is DONE** (Phase 3): a process op's declared `outputs` are captured into
+  CAS, content-addressed, and recorded in the receipt (process-artifacts + process-files-only examples).
 
 **These are ONE thing — the coloc flagship unifies them.** The "real pipeline" the artifact transport waits on
 **is** post-GWAS colocalization ([`examples/coloc/`](../examples/coloc/README.md)). Its WALKING SKELETON is
@@ -171,8 +171,8 @@ Phase 0 (done)   Flagship walking skeleton: manifest #1, runOperation -> run/res
                  persistence. Three contracts became real producers.
 Phase 1 (DONE)   Run/provenance substrate: run+receipt persistence DONE; CAS-of-bytes DONE
                  (src/core/cas.ts + fs-cas.ts, http.get byte-reuse across DBs). Leftover: temporal
-                 anchoring + KG-fact recording are CONSUMED BY PHASE 4 (built with it, not speculative);
-                 process-op FILE artifacts -> CAS waits on the Phase 3 artifact transport.
+                 anchoring + KG-fact recording are CONSUMED BY PHASE 4 (built with it, not speculative).
+                 (Process-op FILE artifacts -> CAS is now DONE — see Phase 3.)
 Phase 2 (DONE)   Network is SQL-native: ducknng_ncurl_table inside duckdb.sql_materialize composes the
                  URL/headers/body in SQL and parses JSON -> table with NO TS resolver (ols4-grounding GET +
                  variant-annotation POST both ship). http.get (src/duckdb/resolvers/http-table-scan.ts) is

@@ -11,6 +11,7 @@ import { createBioObservationSchema, observationAsOfKey, observationsAsOf } from
 import { actionCacheGet, actionCachePut, actionInputDigest, recallRunResult } from "../src/hosts/action-cache.js";
 import { runBioQueryFromManifest } from "../src/hosts/run-store.js";
 import { fsCasStore } from "../src/hosts/fs-cas.js";
+import type { CasStore } from "../src/core/cas.js";
 import { MEMORY_NOW } from "../src/hosts/memory-store.js";
 
 const conn = async (): Promise<SqlConn> => {
@@ -136,6 +137,16 @@ describe("ActionCache: input CASID -> output CASID (LLVM CAS ActionCache in the 
     const replay = JSON.parse(await fsp.readFile(join(res.runDir, "replay.json"), "utf8"));
     // the run produced a CAS resultDigest, but because a live source is blind to content it must NOT be memoized:
     assert.equal(await recallRunResult(store, cas, replay), null, "a live-source run is a recall MISS (re-run, never serve a stale cached result)");
+  });
+
+  test("TOCTOU: bytes deleted BETWEEN cas.has() and the read are a recall MISS (ENOENT), not a thrown error", async () => {
+    const store = await conn();
+    const replay = { kind: "query" as const, sql: "SELECT 1", sourceReceiptDigests: [] as string[] };
+    const out = "sha256:" + "c".repeat(64);
+    await actionCachePut(store, actionInputDigest(replay), out, "2026-01-01T00:00:00Z", "agent:A");
+    // a cas whose has() reports present but whose file is gone at read time (the GC-between-check-and-read race)
+    const racyCas = { has: async () => true, pathFor: () => join(tmpdir(), `gone-${Math.random()}`) } as unknown as CasStore;
+    assert.equal(await recallRunResult(store, racyCas, replay), null, "an ENOENT during the read is a miss, not a throw");
   });
 
   test("a FRESH store (no schema) is a clean recall MISS; put provisions the schema and persists (no swallowed drop)", async () => {

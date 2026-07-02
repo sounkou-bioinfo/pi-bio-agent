@@ -105,6 +105,15 @@ export async function recallRunResult(
   if (replay.resultDigest && replay.resultDigest !== outputDigest) return null;
   const address = { algorithm: "sha256" as const, digest: outputDigest.replace(/^sha256:/, "") };
   if (!(await cas.has(address))) return null; // referenced but bytes evicted (e.g. GC) — a miss, re-run instead
-  const rows = JSON.parse(await fs.readFile(cas.pathFor(address), "utf8")) as unknown[];
+  // TOCTOU: GC can delete the bytes BETWEEN has() and the read. An ENOENT here is the same "evicted" case, so it is a
+  // MISS (re-run), not a thrown error — fail closed to the miss. Other read errors (permissions, I/O) still propagate.
+  let text: string;
+  try {
+    text = await fs.readFile(cas.pathFor(address), "utf8");
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw e;
+  }
+  const rows = JSON.parse(text) as unknown[];
   return { rows, resultDigest: outputDigest };
 }

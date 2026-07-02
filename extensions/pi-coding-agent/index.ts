@@ -3,7 +3,7 @@ import { Type } from "typebox";
 import { summarizeBioContext, type BioContext } from "../../src/core/context.js";
 import { validateReadOnlySelect } from "../../src/core/knowledge-graph.js";
 import { deriveStudyPlan, normalizeStudySlug, walkMemoryGraph, type StudyArtifactKind, type StudyCorpus, type StudyNote } from "../../src/core/study.js";
-import { deleteStudyNote, makeStudyNote, runtimeSkillRoot, runtimeStudyRoot, writeProjectSkill, writeStudyNote } from "../../src/hosts/pi-project.js";
+import { deleteStudyNote, makeStudyNote, runtimeSkillRoot, runtimeStudyRoot, validateSkillInput, writeProjectSkill, writeStudyNote } from "../../src/hosts/pi-project.js";
 import { defaultDuckDbExtensionCatalog, findDuckDbExtensions } from "../../src/duckdb/extensions.js";
 import { describeBioManifestFromPath, runBioOperationFromManifest, runBioQueryFromManifest } from "../../src/hosts/run-store.js";
 import { bioStorePath, isBioStoreLocked, openBioStore, type BioStore } from "../../src/hosts/bio-store.js";
@@ -267,10 +267,12 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
     }),
     async execute(_id, params: { name: string; description: string; body: string }, _signal, _onUpdate, ctx) {
       // Temporal + attributed like memory (a re-create supersedes, prior revision kept); the SKILL.md file is the
-      // current view pi loads. WRITE (which validates the name/inputs) FIRST, then record — so invalid skill input
-      // that writeProjectSkill rejects never pollutes the append-only ledger with a skill that has no SKILL.md.
-      const path = await writeProjectSkill(ctx.cwd, params.name, params.description, params.body);
+      // current VIEW pi loads. Order: VALIDATE (pure, no effects) → RECORD to the ledger (source of truth) →
+      // MATERIALIZE the file. So invalid input reaches NEITHER; a ledger-write failure leaves NO orphan SKILL.md; and
+      // a file-write failure still leaves the ledger correct (the view is re-materializable). Truth before view.
+      validateSkillInput(params.name, params.description, params.body);
       await withStore(openStore, ctx.cwd, (conn) => recordSkill(conn, params, systemClock(), author));
+      const path = await writeProjectSkill(ctx.cwd, params.name, params.description, params.body);
       return text({ path, stored: skillSubjectId(params.name), author, message: "Skill recorded (temporal, superseded on re-create) + written. Run /reload to load it in this Pi session." });
     },
   });

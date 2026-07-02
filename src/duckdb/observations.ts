@@ -171,13 +171,15 @@ export async function observationAsOfKey(conn: SqlConn, statementKey: string, t:
  *  year on the +1ms advance). Append-only history is preserved — the advance only nudges a colliding write 1ms.
  *
  *  ATOMICITY / CONCURRENCY: this is a read-then-write, so it is deterministic only when writes to a given slot are
- *  SERIALIZED. Cross-PROCESS writers already are — DuckDB's file lock is a cross-process exclusive writer (a second
- *  process can't open the store for write). Cross-HOST writes go through ducknng RPC, where the native-DuckDB server
- *  serializes them. The gap is IN-PROCESS: DuckDB does NOT exclude same-process opens (two `openBioStore` handles to
- *  one file coexist), so two concurrent callers could each read the slot's latest, both compute the same +1ms, and
- *  collide on the hash-arbitrary observation_id tiebreak. Callers that may issue concurrent same-slot writes in one
- *  process must serialize per statement_key — use `recordMonotonicObservation` (below), which advances + writes under
- *  an in-process per-slot lock; the +1ms advance alone only disambiguates SEQUENTIAL writes stamped at the same ms. */
+ *  SERIALIZED. Separate PROCESSES on a local file store already are — DuckDB's file lock is a cross-process exclusive
+ *  writer (only one process writes at a time). Two gaps remain: (a) IN-PROCESS, DuckDB does NOT exclude same-process
+ *  opens (two `openBioStore` handles to one file coexist), so two concurrent callers could each read the slot's
+ *  latest, both compute the same +1ms, and collide on the hash-arbitrary observation_id tiebreak — closed by
+ *  `recordMonotonicObservation` (below), which advances + writes under an in-process per-slot lock. (b) Concurrent
+ *  CLIENTS of a SHARED server-backed store (ducknng RPC) are NOT closed by (a): the server runs each statement
+ *  atomically but not the read-then-write PAIR, so two clients can still read the same latest and collide. That needs
+ *  a server-side atomic advance+insert (one upsert) or a SERIALIZABLE txn — a real distributed-consistency piece, not
+ *  yet built; the +1ms advance alone only disambiguates SEQUENTIAL writes a coarse clock stamped at the same ms. */
 export async function monotonicRecordedAt(conn: SqlConn, statementKey: string, now: string, sentinel: string): Promise<string> {
   const latest = await observationAsOfKey(conn, statementKey, sentinel);
   const latestMs = latest ? Date.parse(latest.recorded_at) : NaN;
@@ -194,8 +196,11 @@ export async function monotonicRecordedAt(conn: SqlConn, statementKey: string, n
 // this two concurrent callers could each read a slot's latest, both compute the same +1ms, and collide on the
 // hash-arbitrary observation_id tiebreak. Keyed by statement_key: same-slot writes chain (serialize); different slots
 // run in parallel. A rejected write does NOT poison the chain (the tail is normalized to a settled promise), and the
-// map entry is GC'd when the slot goes idle so it can't grow unbounded. Cross-process/host writers are already
-// serialized elsewhere (the file lock / ducknng RPC), so an in-process chain is the whole fix.
+// map entry is GC'd when the slot goes idle so it can't grow unbounded. SCOPE: this covers same-process writers and
+// separate PROCESSES on a local file store (DuckDB's cross-process exclusive-writer lock means only one writes at a
+// time). It does NOT cover concurrent CLIENTS of a SHARED server-backed store (ducknng RPC): the server executes each
+// statement atomically but NOT the read-then-write PAIR, so two clients can still read the same latest and collide —
+// closing that needs a server-side atomic advance+insert (a single upsert) or a SERIALIZABLE txn (see the note above).
 const slotWriteChains = new Map<string, Promise<void>>();
 /** Serialize `fn` against other calls with the SAME `statementKey` in this process (different keys run in parallel).
  *  For a MULTI-write state transition (e.g. memory remember/forget writes content + link edges + tombstones as one

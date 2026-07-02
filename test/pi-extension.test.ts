@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, test } from "node:test";
 import piBioAgentExtension from "../extensions/pi-coding-agent/index.js";
+import { openBioStore } from "../src/hosts/bio-store.js";
+import { recallSkill } from "../src/hosts/skill-store.js";
 
 interface RegisteredTool {
   name: string;
@@ -71,6 +73,14 @@ describe("Pi coding-agent extension", () => {
       body: "# HPO grounding\n\nNormalize terms before evidence collection.",
     }, undefined, undefined, ctx);
     assert.match(await readFile(skill.details.path, "utf8"), /name: hpo-grounding/);
+
+    // #4 ORDER: validate → record → materialize. Invalid input must reach NEITHER the ledger nor a SKILL.md, so a
+    // ledger-write failure can never leave an orphan behavior-changing file (and a bad input never pollutes the ledger).
+    await assert.rejects(() => byName.get("bio_create_skill")!.execute("id", { name: "NOT-kebab", description: "d", body: "b" }, undefined, undefined, ctx), /kebab/);
+    const badStore = await openBioStore(cwd);
+    try {
+      assert.equal(await recallSkill(badStore.conn, "NOT-kebab"), null, "invalid skill never reached the append-only ledger (validated before recordSkill)");
+    } finally { badStore.close(); }
 
     const wrote = await byName.get("bio_remember")!.execute("id", {
       kind: "cheatsheet",
