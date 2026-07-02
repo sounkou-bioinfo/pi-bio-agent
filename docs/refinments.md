@@ -503,22 +503,19 @@ htslib / direct fs reaching local files and remote URLs. The library is delibera
 sandbox; egress + fs confinement are the HOST's boundary (container/seccomp/Pi/OS). `validateReadOnlySelect`
 governs statement CLASS (single read-only SELECT), not reachability.
 
-### Frontier residues for public release (pal #13, 2026-07-02) — two named builds, not claims
+### Frontier residues for public release (pal #13, 2026-07-02)
 
-**(1) DuckDB-level egress defense-in-depth (network fail-open by default).** Concretely reachable: in the DEFAULT
-Pi profile (no host `network` grant), `bio_query(sql: "SELECT * FROM read_csv_auto('https://…')")` — or a
-`duckdb.sql_materialize` resource with `extensions:["httpfs"]` — reaches the network *if* httpfs autoloads or is
-pre-installed, WITHOUT the `network` capability. This is the pal #1-4 "egress is the host sandbox" doctrine, still
-sound as *a* layer, but "rely on the operator's OS sandbox" is not fail-closed-by-default for a PUBLISHED library.
-Proposed defense-in-depth, gated on the host `network` grant (so it's off exactly when http.get is also off):
-open the run's DuckDB with `autoinstall_known_extensions=false` + `autoload_known_extensions=false` +
-`disabled_filesystems='HTTPFileSystem,S3FileSystem'` (blocks network FS, KEEPS local file_scan/read_bcf), sealed
-with `lock_configuration=true` so agent SQL can't re-enable it. Must NOT break: local file resolvers, and the
-host-GRANTED ncurl-via-ducknng path (ducknng is loaded only when the host grants network — so it stays open in the
-granted profile). BUILD needs: verify each knob's exact DuckDB semantics (esp. that `lock_configuration` doesn't
-block `SET VARIABLE` bindings), thread the network-grant boolean to `runAndPersist`'s instance creation, add a test
-that agent `read_csv_auto('https://…')` fails closed in the default profile. **Touches settled doctrine — decide
-before overturning; this is defense-in-depth, not a contradicted claim.**
+**(1) DuckDB ambient egress — NOT a library build (doctrine reaffirmed).** pal #13 re-flagged that in the default
+profile `bio_query(sql: "SELECT * FROM read_csv_auto('https://…')")` can reach the network if httpfs autoloads.
+This is the SAME doctrine as pal #1-4 above and stays settled: **the library is deliberately not the network/
+filesystem sandbox** — egress confinement is the HOST's boundary (container / seccomp / Pi / OS). The fail-closed
+facility we DO own is the injected `fetch` PORT (http.get injects none by default → fails closed); DuckDB's own
+reachability (httpfs / replacement scans / htslib) is a host-provisioned capability, and we never claim SQL can't
+reach out. So we do NOT thread a network-grant lockdown into the runner, and we do NOT police egress. If a host
+WANTS defense-in-depth it can pass this via its own `duckdbConfig` at DB open (host code, host choice, not a library
+default): `autoinstall_known_extensions=false` + `autoload_known_extensions=false` +
+`disabled_filesystems='HTTPFileSystem,S3FileSystem'` (+ `lock_configuration=true` to seal). Documenting the recipe
+is fine; building/defaulting it into the library is not — that would re-open a closed doctrine.
 
 **(2) Server-side atomic monotonic writes ([[reproducibility-and-longrunning-lane]] residue #2).** Concurrent
 same-slug `remember`/`forget` over separate RPC clients are not linearizable — `withSlotLock` serializes only
