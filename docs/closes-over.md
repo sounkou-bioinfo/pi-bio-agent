@@ -19,17 +19,18 @@ protocols (the lineage of R's [`nanonext`](https://github.com/r-lib/nanonext) + 
 and Python's [`pynng`](https://github.com/codypiersall/pynng)) as first-class SQL. Each protocol *is* an agent
 coordination pattern:
 
-| NNG protocol | agent pattern |
-|---|---|
-| `push` / `pull` | a bounded **worker pool** — task distribution (the distributed `JobRunner`, `scripts/nng-job-runner.mjs`) |
-| `pub` / `sub` | a **blackboard** — broadcast state to subscribers |
-| `surveyor` / `respondent` | **survey / debate / quorum** — 1:N with replies |
-| `bus` | a peer mesh |
-| `pair` | a 1:1 channel |
+| NNG protocol | agent pattern | runnable demo (separate processes, over the ducknng socket layer) |
+|---|---|---|
+| `push` / `pull` | a bounded **worker pool** — task distribution | `scripts/pipeline-fanout.mjs`; the distributed `JobRunner` `scripts/nng-job-runner.mjs` |
+| `pub` / `sub` | a **blackboard** — broadcast state to subscribers | `scripts/blackboard-shared.mjs` |
+| `surveyor` / `respondent` | **survey / debate / quorum** — 1:N with replies | `scripts/nng-survey.mjs` (a multi-provider jury: quorum + abstention) |
+| `pair` | a **1:1 channel** — proposer↔verifier | `scripts/nng-pair.mjs` (adversarial propose→refute→converge) |
+| `bus` | a **peer mesh** — decentralized consult | verified reachable (a bus round-trip probes clean); mesh demo pending |
 
 Multi-agent coordination is therefore transport, not a framework — and status/results flow back into the shared
-SQL ledger, so the coordination is *inspectable data*, not opaque runtime state. See
-the [design notes](./design.md) and `scripts/live-multi-agent.ts`, `scripts/pipeline-fanout.mjs`.
+SQL ledger, so the coordination is *inspectable data*, not opaque runtime state. Each demo spawns real separate OS
+processes and carries a recorded run in its sibling `.md`. Every NNG protocol is reachable the same way
+(`open_socket(<proto>)` → `listen`/`dial` → `send`/`recv_aio` + `aio_collect`); see the [design notes](./design.md).
 
 **Reach: authenticated HTTP, MCP, and streaming.** ducknng's HTTP side (`ncurl_table` / `ncurl_aio`) takes
 **host-provided headers**, so the network leg reaches anything HTTP-shaped *as SQL* while auth stays host-owned:
