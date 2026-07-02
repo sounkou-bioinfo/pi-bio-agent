@@ -130,6 +130,9 @@ async function writeRunFile(dir: string, name: string, data: unknown): Promise<s
 export async function persistRun(cwd: string, runId: string, payload: RunPayload, opts: { serialize?: boolean } = {}): Promise<PersistedRun> {
   const dir = runDir(cwd, runId);
   await fs.mkdir(dir, { recursive: true });
+  // lean mode writes ONLY run.json (bytes live in CAS) — remove stale result/receipts/replay a prior SERIALIZED
+  // run at this same runId left, so a reader never sees a lean run beside stale files from a different run.
+  if (opts.serialize === false) await Promise.all([fs.rm(join(dir, "result.json"), { force: true }), fs.rm(join(dir, "receipts.json"), { force: true }), fs.rm(join(dir, "replay.json"), { force: true })]);
   const files: PersistedRun["files"] = { run: await writeRunFile(dir, "run.json", payload.run) };
   if (opts.serialize !== false) {
     files.result = await writeRunFile(dir, "result.json", payload.result);

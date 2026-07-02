@@ -230,6 +230,17 @@ describe("host: bio_run_operation end-to-end", () => {
     assert.equal(await exists("run.json"), true, "the failed run.json is written");
   });
 
+  test("a lean (serialize:false) run removes stale result/receipts/replay from a prior serialized success at the same runId", async () => {
+    const cwd = await fs.mkdtemp(join(tmpdir(), "biorun-"));
+    const runId = "reused-lean";
+    const exists = (name: string) => fs.access(join(runsRoot(cwd), runId, name)).then(() => true).catch(() => false);
+    await persistRun(cwd, runId, { run: { schema: "pi-bio.run_record.v1" } as never, result: { rows: [{ n: 1 }] } as never, receipts: [{ x: 1 }] as never });
+    assert.equal(await exists("result.json"), true);
+    await persistRun(cwd, runId, { run: { schema: "pi-bio.run_record.v1" } as never, result: { rows: [] } as never, receipts: [] }, { serialize: false });
+    assert.equal(await exists("result.json"), false, "lean re-run cleared the stale result.json (bytes are in CAS)");
+    assert.equal(await exists("receipts.json"), false, "and the stale receipts.json");
+  });
+
   test("fails closed when a declared resolver is not a host built-in", async () => {
     const m: BioManifest = {
       ...manifest,

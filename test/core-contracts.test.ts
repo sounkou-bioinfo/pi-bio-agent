@@ -99,6 +99,12 @@ describe("BioRunSpec and storage helpers", () => {
     assert.ok(errs.includes("sql.sqlTemplate is required"), "a non-string template fails closed cleanly");
   });
 
+  test("fail closed: non-numeric budget fields are rejected, not silently accepted by a <=0 compare", () => {
+    assert.ok(validateBioRunSpec({ ...validRun, budget: { maxWallClockSeconds: "forever" } } as unknown as BioRunSpec).some((e) => /maxWallClockSeconds must be a positive number/.test(e)));
+    assert.ok(validateBioRunSpec({ ...validRun, budget: { maxToolCalls: "2" } } as unknown as BioRunSpec).some((e) => /maxToolCalls must be a positive number/.test(e)), "a numeric STRING is not a number");
+    assert.deepEqual(validateBioRunSpec({ ...validRun, budget: { maxTokens: 1000 } }), [], "a real number passes");
+  });
+
   test("open type labels: BioRunMode accepts any host/backend vocabulary; the run STATUS stays a closed machine", () => {
     // mode is an OPEN host label — a public user's backend vocabulary must validate, not be gatekept to 5 words
     for (const mode of ["slurm", "k8s", "aws-batch", "modal", "nng-worker", "local-daemon"]) {

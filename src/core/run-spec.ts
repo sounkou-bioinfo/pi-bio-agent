@@ -89,9 +89,9 @@ export function validateBioRunSpec(spec: BioRunSpec): string[] {
   if (!spec.tool || typeof spec.tool.name !== "string" || !spec.tool.name.trim()) errors.push("tool.name is required");
   if (typeof spec.mode !== "string" || !spec.mode.trim()) errors.push("mode is invalid"); // open label: require a non-empty string, not membership
   if (!inputs) errors.push("inputs array is required");
-  if (spec.budget?.maxWallClockSeconds !== undefined && spec.budget.maxWallClockSeconds <= 0) errors.push("budget.maxWallClockSeconds must be positive");
-  if (spec.budget?.maxToolCalls !== undefined && spec.budget.maxToolCalls <= 0) errors.push("budget.maxToolCalls must be positive");
-  if (spec.budget?.maxTokens !== undefined && spec.budget.maxTokens <= 0) errors.push("budget.maxTokens must be positive");
+  if (spec.budget?.maxWallClockSeconds !== undefined && (typeof spec.budget.maxWallClockSeconds !== "number" || !(spec.budget.maxWallClockSeconds > 0))) errors.push("budget.maxWallClockSeconds must be a positive number");
+  if (spec.budget?.maxToolCalls !== undefined && (typeof spec.budget.maxToolCalls !== "number" || !(spec.budget.maxToolCalls > 0))) errors.push("budget.maxToolCalls must be a positive number");
+  if (spec.budget?.maxTokens !== undefined && (typeof spec.budget.maxTokens !== "number" || !(spec.budget.maxTokens > 0))) errors.push("budget.maxTokens must be a positive number");
   if (spec.checkpointPolicy?.intervalSeconds !== undefined && spec.checkpointPolicy.intervalSeconds <= 0) errors.push("checkpointPolicy.intervalSeconds must be positive");
   return errors;
 }
@@ -107,8 +107,8 @@ export function validateBioRunEvent(event: BioRunEvent): string[] {
   if (typeof event.runId !== "string" || !event.runId.trim()) errors.push("runId is required");
   if (typeof event.at !== "string" || !event.at.trim()) errors.push("at is required");
   if (!EVENT_TYPES.includes(event.type)) errors.push("type is invalid");
-  if (event.progress?.current !== undefined && event.progress.current < 0) errors.push("progress.current cannot be negative");
-  if (event.progress?.total !== undefined && event.progress.total < 0) errors.push("progress.total cannot be negative");
+  if (event.progress?.current !== undefined && (typeof event.progress.current !== "number" || event.progress.current < 0)) errors.push("progress.current must be a non-negative number");
+  if (event.progress?.total !== undefined && (typeof event.progress.total !== "number" || event.progress.total < 0)) errors.push("progress.total must be a non-negative number");
   return errors;
 }
 
