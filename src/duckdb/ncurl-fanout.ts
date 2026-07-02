@@ -116,39 +116,46 @@ export async function ncurlFanout(conn: SqlConn, opts: NcurlFanoutOptions): Prom
     await conn.run(`CREATE OR REPLACE TABLE ${collected} (aio_id UBIGINT, ok BOOLEAN, status INTEGER, body_text VARCHAR)`);
     const [{ need }] = await conn.all<{ need: bigint }>(`SELECT count(*) need FROM ${launched}`);
 
-    // drain until every launched handle of THIS wave is terminal (loop the any-ready collector)
-    let got = 0;
-    for (let spin = 0; got < Number(need) && spin < drainSpins; spin += 1) {
-      await conn.run(
-        `INSERT INTO ${collected}
-         SELECT aio_id, ok, status, body_text
-         FROM ducknng_ncurl_aio_collect((SELECT list(h) FROM ${launched} WHERE h NOT IN (SELECT aio_id FROM ${collected})), ?)`,
-        [drainWaitMs],
-      );
-      const [{ n }] = await conn.all<{ n: bigint }>(`SELECT count(*) n FROM ${collected}`);
-      got = Number(n);
-    }
+    // outcomes per batch for this wave. The drain/insert/query below can throw (a transient ducknng/DB error), and
+    // the launched AIO handles MUST still be released — so the release runs in a `finally`, or in-flight HTTP
+    // handles would leak and race the relaunch (the comment promised every handle is cancelled/dropped).
+    let outcomes: Array<{ batch_id: bigint; ok: boolean | null; status: number | null; attempts_left: number }>;
+    try {
+      // drain until every launched handle of THIS wave is terminal (loop the any-ready collector)
+      let got = 0;
+      for (let spin = 0; got < Number(need) && spin < drainSpins; spin += 1) {
+        await conn.run(
+          `INSERT INTO ${collected}
+           SELECT aio_id, ok, status, body_text
+           FROM ducknng_ncurl_aio_collect((SELECT list(h) FROM ${launched} WHERE h NOT IN (SELECT aio_id FROM ${collected})), ?)`,
+          [drainWaitMs],
+        );
+        const [{ n }] = await conn.all<{ n: bigint }>(`SELECT count(*) n FROM ${collected}`);
+        got = Number(n);
+      }
 
-    // 2xx successes -> results
-    await conn.run(
-      `INSERT INTO ${resultsTable}
-       SELECT l.batch_id, c.status, c.body_text
-       FROM ${launched} l JOIN ${collected} c ON c.aio_id = l.h
-       WHERE c.ok AND c.status BETWEEN 200 AND 299`,
-    );
-    // outcomes per batch for this wave: collected non-2xx (with ok/status) + any UNcollected (drain-cap) = transport-fail
-    const outcomes = await conn.all<{ batch_id: bigint; ok: boolean | null; status: number | null; attempts_left: number }>(
-      `SELECT w.batch_id, c.ok, c.status, w.attempts_left
-       FROM ${wave} w
-       LEFT JOIN ${launched} l ON l.batch_id = w.batch_id
-       LEFT JOIN ${collected} c ON c.aio_id = l.h
-       WHERE NOT (c.ok AND c.status BETWEEN 200 AND 299) OR c.aio_id IS NULL`,
-    );
-    // release EVERY launched handle: collected ones drop cleanly; uncollected (still in-flight at the cap) are
-    // cancelled then dropped so they never leak NOR race the relaunch.
-    await conn.run(`SELECT ducknng_aio_drop(aio_id) FROM ${collected}`);
-    await conn.run(`SELECT ducknng_aio_cancel(h) FROM ${launched} WHERE h NOT IN (SELECT aio_id FROM ${collected})`);
-    await conn.run(`SELECT ducknng_aio_drop(h) FROM ${launched} WHERE h NOT IN (SELECT aio_id FROM ${collected})`);
+      // 2xx successes -> results
+      await conn.run(
+        `INSERT INTO ${resultsTable}
+         SELECT l.batch_id, c.status, c.body_text
+         FROM ${launched} l JOIN ${collected} c ON c.aio_id = l.h
+         WHERE c.ok AND c.status BETWEEN 200 AND 299`,
+      );
+      // outcomes per batch for this wave: collected non-2xx (with ok/status) + any UNcollected (drain-cap) = transport-fail
+      outcomes = await conn.all<{ batch_id: bigint; ok: boolean | null; status: number | null; attempts_left: number }>(
+        `SELECT w.batch_id, c.ok, c.status, w.attempts_left
+         FROM ${wave} w
+         LEFT JOIN ${launched} l ON l.batch_id = w.batch_id
+         LEFT JOIN ${collected} c ON c.aio_id = l.h
+         WHERE NOT (c.ok AND c.status BETWEEN 200 AND 299) OR c.aio_id IS NULL`,
+      );
+    } finally {
+      // release EVERY launched handle: collected ones drop cleanly; uncollected (still in-flight at the cap) are
+      // cancelled then dropped so they never leak NOR race the relaunch. ALWAYS runs, even if the drain threw.
+      await conn.run(`SELECT ducknng_aio_drop(aio_id) FROM ${collected}`);
+      await conn.run(`SELECT ducknng_aio_cancel(h) FROM ${launched} WHERE h NOT IN (SELECT aio_id FROM ${collected})`);
+      await conn.run(`SELECT ducknng_aio_drop(h) FROM ${launched} WHERE h NOT IN (SELECT aio_id FROM ${collected})`);
+    }
 
     // classify: permanent -> terminal failure; transient with attempts left -> requeue (attempts-1); exhausted -> failure
     const requeue: number[] = [];

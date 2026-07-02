@@ -30,4 +30,13 @@ describe("walkMemoryGraph: study-note memory is a walkable graph", () => {
     const g = walkMemoryGraph(notes, { start: "island", depth: 3 });
     assert.deepEqual(g.nodes.map((n) => n.id), ["memory:island"]);
   });
+
+  test("a NON-EXISTENT start yields an empty snapshot — even when a live note links to that dangling slug (no phantom edge)", () => {
+    // 'a' links to 'ghost', but there is no note 'ghost'. Walking from 'ghost' must be empty (documented), NOT pull
+    // in 'a' via reverse traversal and emit an edge to a node absent from `nodes`.
+    const withDangling = [note("a", ["ghost"]), note("b")];
+    const g = walkMemoryGraph(withDangling, { start: "ghost", depth: 2 });
+    assert.deepEqual(g.nodes, [], "no such start node -> empty snapshot");
+    assert.deepEqual(g.edges, [], "no phantom edge to the dangling start");
+  });
 });

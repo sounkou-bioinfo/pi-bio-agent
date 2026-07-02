@@ -214,6 +214,10 @@ export function walkMemoryGraph(notes: StudyNote[], opts: { start?: string; dept
   const full = studyNoteGraph(notes);
   if (!opts.start) return full;
   const startId = memoryNodeId(opts.start); // throws only on a malformed slug (a real programming error)
+  // A non-existent start yields an EMPTY snapshot (as documented). Without this, a dangling start that some live
+  // note LINKS to would be pulled in by the reverse-direction BFS, and the result could carry an edge to a node
+  // that isn't in `nodes` (a phantom edge). The start must be a real node to walk from.
+  if (!full.nodes.some((n) => n.id === startId)) return { schema: "pi-bio.graph_snapshot.v1", nodes: [], edges: [] };
   const depth = Math.max(0, Math.floor(opts.depth ?? 1));
   const reached = new Set<string>([startId]);
   let frontier = new Set<string>([startId]);
