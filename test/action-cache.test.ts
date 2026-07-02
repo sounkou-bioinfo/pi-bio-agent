@@ -18,6 +18,23 @@ const conn = async (): Promise<SqlConn> => {
   return c;
 };
 
+describe("run-store BigInt serialization: lossless, no silent >2^53 corruption", () => {
+  test("a BIGINT beyond 2^53 persists as a lossless decimal string; a small one stays a number", async () => {
+    const store = await conn();
+    const cas = fsCasStore(await fsp.mkdtemp(join(tmpdir(), "cas-")));
+    const cwd = await fsp.mkdtemp(join(tmpdir(), "bigint-run-"));
+    const res = await runBioQueryFromManifest({
+      cwd, dbPath: ":memory:", manifestPath: join(process.cwd(), "examples/variant-counts/manifest.json"),
+      sql: "SELECT 9223372036854775807::BIGINT AS big, 42::BIGINT AS small", store, author: "agent:A", cas,
+    });
+    assert.equal(res.ok, true);
+    const parsed = JSON.parse(await fsp.readFile(join(res.runDir, "result.json"), "utf8"));
+    const row = parsed.rows[0];
+    assert.equal(row.big, "9223372036854775807", "a >2^53 value is a lossless string, not a rounded Number");
+    assert.equal(row.small, 42, "a small value stays a natural JSON number");
+  });
+});
+
 describe("ActionCache: input CASID -> output CASID (LLVM CAS ActionCache in the ONE store)", () => {
   const base = { kind: "query" as const, manifest: { digest: "sha256:m", snapshot: {} as never, path: "x" }, sql: "SELECT 1", resources: ["a", "b"], bindings: undefined, sourceReceiptDigests: ["sha256:s1"] };
 

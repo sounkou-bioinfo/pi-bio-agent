@@ -87,15 +87,18 @@ export interface PersistedRun {
   files: { run: string; result?: string; receipts?: string };
 }
 
-// DuckDB returns BIGINT/HUGEINT (e.g. a bare `count(*)`) as a JS BigInt, which JSON.stringify cannot
-// serialize. The result IS the report and must be JSON, so a naive `count(*) AS n` must persist without the
-// user knowing to `CAST(... AS INTEGER)`. Coerce BigInt → Number on the way to disk (bio counts/positions/
-// frequencies are well within 2^53; a value needing exact larger-integer precision should be cast to text).
-const bigintToNumber = (_key: string, value: unknown): unknown => (typeof value === "bigint" ? Number(value) : value);
+// DuckDB returns BIGINT/HUGEINT (e.g. a bare `count(*)`) as a JS BigInt, which JSON.stringify cannot serialize.
+// The result IS the report and must be JSON, so a naive `count(*) AS n` must persist without the user casting.
+// LOSSLESS: a value within ±2^53 becomes a Number (bio counts/positions/frequencies live here — natural JSON);
+// anything beyond becomes a decimal STRING rather than a silently-rounded Number, so a >2^53 id/HUGEINT is never
+// corrupted (and the receipt digest stays faithful). Consumers read a number normally; a string flags "too big".
+const MAX_SAFE = 9007199254740991n;
+const bigintToJson = (_key: string, value: unknown): unknown =>
+  typeof value !== "bigint" ? value : value >= -MAX_SAFE && value <= MAX_SAFE ? Number(value) : value.toString();
 
 async function writeRunFile(dir: string, name: string, data: unknown): Promise<string> {
   const path = join(dir, name);
-  await fs.writeFile(path, `${JSON.stringify(data, bigintToNumber, 2)}\n`, "utf8");
+  await fs.writeFile(path, `${JSON.stringify(data, bigintToJson, 2)}\n`, "utf8");
   return path;
 }
 
@@ -316,7 +319,7 @@ async function runAndPersist(
   // Put a JSON blob in CAS (bytes OUTSIDE the DB) and return its content address, or undefined when no CAS.
   const putCas = async (obj: unknown): Promise<string | undefined> => {
     if (!cas) return undefined;
-    const bytes = Buffer.from(JSON.stringify(obj, bigintToNumber), "utf8");
+    const bytes = Buffer.from(JSON.stringify(obj, bigintToJson), "utf8");
     const digest = createHash("sha256").update(bytes).digest("hex");
     await cas.put({ algorithm: "sha256", digest }, bytes); // immutable + idempotent
     return `sha256:${digest}`;
