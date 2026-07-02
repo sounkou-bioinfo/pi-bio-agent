@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import type { SqlConn } from "../core/ports.js";
 
 // Chunked HTTP fanout over ducknng's ASYNC client — host code for the MANY-endpoints / chunk case. The dynamic-
@@ -86,11 +87,14 @@ export async function ncurlFanout(conn: SqlConn, opts: NcurlFanoutOptions): Prom
   const maxBackoffMs = opts.maxBackoffMs ?? 8000;
   const isTransient = opts.isTransient ?? defaultTransient;
 
-  // queue carries each batch's remaining attempts; wave/launched/collected are per-wave scratch
-  const queue = `${resultsTable}__queue`;
-  const wave = `${resultsTable}__wave`;
-  const launched = `${resultsTable}__launched`;
-  const collected = `${resultsTable}__collected`;
+  // queue carries each batch's remaining attempts; wave/launched/collected are per-wave scratch. A per-call random
+  // token keeps these INTERNAL names from clobbering a caller's own table (e.g. an existing `out__queue`) — they are
+  // created, used, and dropped entirely within this call and never referenced by the caller.
+  const tok = randomBytes(4).toString("hex");
+  const queue = `${resultsTable}__queue_${tok}`;
+  const wave = `${resultsTable}__wave_${tok}`;
+  const launched = `${resultsTable}__launched_${tok}`;
+  const collected = `${resultsTable}__collected_${tok}`;
   await conn.run(`CREATE OR REPLACE TABLE ${resultsTable} (batch_id BIGINT, status INTEGER, body_text VARCHAR)`);
   await conn.run(`CREATE OR REPLACE TABLE ${queue} AS SELECT batch_id, body, ${maxRounds}::INTEGER AS attempts_left FROM ${batchesTable}`);
 

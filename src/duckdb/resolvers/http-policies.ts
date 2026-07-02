@@ -18,16 +18,33 @@ export function withAuth(fetchImpl: FetchLike, getAuthHeaders: () => Promise<Rec
 export interface RetryOpts {
   maxRetries?: number;
   baseDelayMs?: number;
+  /** Hard cap on any single backoff wait, incl. a server-supplied `Retry-After` (default 60s). Without it a hostile
+   *  or misconfigured `Retry-After: 31536000` would park a tool call for a YEAR. */
+  maxDelayMs?: number;
   /** Injectable for deterministic tests (default real setTimeout). */
   sleep?: (ms: number) => Promise<void>;
 }
 
+/** Sleep that also resolves the instant `signal` aborts — so an aborted tool call stops waiting out the backoff
+ *  instead of hanging for the full (possibly huge) delay. The underlying timer is harmless if it fires later. */
+function abortableSleep(ms: number, sleep: (ms: number) => Promise<void>, signal?: AbortSignal): Promise<void> {
+  if (!signal) return sleep(ms);
+  if (signal.aborted) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    const onAbort = () => resolve();
+    signal.addEventListener("abort", onAbort, { once: true });
+    void sleep(ms).then(() => { signal.removeEventListener("abort", onAbort); resolve(); });
+  });
+}
+
 /** RATE-LIMIT handling: retry on 429 / 503 with exponential backoff, honoring `Retry-After` (seconds or an
- *  HTTP-date) when present. Bounded by maxRetries; other statuses pass straight through. Cancellable via the
- *  request's AbortSignal (a pre-aborted signal stops further retries). */
+ *  HTTP-date) when present but CAPPED at maxDelayMs. Bounded by maxRetries; other statuses pass straight through.
+ *  Cancellable via the request's AbortSignal — a pre-aborted signal stops further retries, and an abort DURING a
+ *  backoff wait ends the wait immediately (no year-long hang). */
 export function withRetry(fetchImpl: FetchLike, opts: RetryOpts = {}): FetchLike {
   const maxRetries = opts.maxRetries ?? 4;
   const baseDelayMs = opts.baseDelayMs ?? 500;
+  const maxDelayMs = opts.maxDelayMs ?? 60_000;
   const sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
   return async (url, init) => {
     let attempt = 0;
@@ -35,9 +52,10 @@ export function withRetry(fetchImpl: FetchLike, opts: RetryOpts = {}): FetchLike
       const res = await fetchImpl(url, init);
       const retryable = res.status === 429 || res.status === 503;
       if (!retryable || attempt >= maxRetries || init?.signal?.aborted) return res;
-      const delay = retryAfterMs(res.headers?.get("retry-after")) ?? baseDelayMs * 2 ** attempt;
+      const delay = Math.min(retryAfterMs(res.headers?.get("retry-after")) ?? baseDelayMs * 2 ** attempt, maxDelayMs);
       attempt++;
-      await sleep(delay);
+      await abortableSleep(delay, sleep, init?.signal);
+      if (init?.signal?.aborted) return res; // aborted during backoff -> stop retrying, surface the last response
     }
   };
 }

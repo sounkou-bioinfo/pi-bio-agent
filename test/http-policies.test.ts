@@ -59,4 +59,24 @@ describe("http policies: rate-limit backoff", () => {
     await withRetry(limited, { sleep: async () => {} })("https://x/y", { signal: ac.signal });
     assert.equal(n, 1, "an already-aborted request is not retried");
   });
+
+  test("SECURITY: a huge Retry-After is CAPPED at maxDelayMs (no year-long hang)", async () => {
+    const delays: number[] = [];
+    const base: FetchLike = async () => ({ ok: false, status: 503, text: async () => "", headers: { get: (h) => (h.toLowerCase() === "retry-after" ? "31536000" : null) } }); // 1 year (seconds)
+    await withRetry(base, { maxRetries: 1, maxDelayMs: 1000, sleep: async (ms) => { delays.push(ms); } })("https://x/y", {});
+    assert.deepEqual(delays, [1000], "a year-long Retry-After is clamped to maxDelayMs");
+  });
+
+  test("an abort DURING backoff ends the wait immediately and stops retrying", async () => {
+    const ac = new AbortController();
+    let calls = 0;
+    const base: FetchLike = async () => { calls++; return { ok: false, status: 429, text: async () => "" }; };
+    // a 'sleep' that never resolves on its own — only the abort race can end the wait
+    const neverSleep = () => new Promise<void>(() => {});
+    const p = withRetry(base, { maxRetries: 5, sleep: neverSleep })("https://x/y", { signal: ac.signal });
+    queueMicrotask(() => ac.abort()); // abort while parked in backoff
+    const res = await p;
+    assert.equal(res.status, 429, "surfaced the last response after the abort");
+    assert.equal(calls, 1, "did not fire further retries after the abort during backoff");
+  });
 });
