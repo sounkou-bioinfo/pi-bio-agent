@@ -6,10 +6,11 @@ import type { SqlConn } from "../src/core/ports.js";
 import { createBioObservationSchema, observationAsOfKey } from "../src/duckdb/observations.js";
 import { promises as fsp } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { recordRunObservation } from "../src/hosts/run-observations.js";
 import { runBioQueryFromManifest } from "../src/hosts/run-store.js";
 import { fsCasStore } from "../src/hosts/fs-cas.js";
+import { collectGarbage } from "../src/hosts/gc.js";
 import { MEMORY_NOW } from "../src/hosts/memory-store.js";
 
 const conn = async (): Promise<SqlConn> => {
@@ -78,8 +79,16 @@ describe("run-observations: ad-hoc SQL folds into the ONE store as an as-of, att
     const res = await runBioQueryFromManifest({ cwd: process.cwd(), dbPath: ":memory:", manifestPath: "examples/variant-counts/manifest.json", sql: "SELECT count(*) AS n FROM variants", store, author: "agent:A", cas, serialize: false });
     assert.equal(res.ok, true);
     if (!res.ok) return;
-    // only run.json on disk — no result.json / receipts.json / replay.json
-    assert.deepEqual((await fsp.readdir(res.runDir)).sort(), ["run.json"]);
+    // run.json + cas-refs.json (the GC root list) on disk — no result.json / receipts.json / replay.json (bytes in CAS)
+    assert.deepEqual((await fsp.readdir(res.runDir)).sort(), ["cas-refs.json", "run.json"]);
+
+    // DATA-LOSS GUARD: node-local GC must NOT sweep the lean run's CAS bytes — cas-refs.json roots them (there is
+    // no receipts.json to root from). Point the GC at THIS run's dir + cas root.
+    const cwdOfRun = res.runDir.slice(0, res.runDir.indexOf("/.pi/"));
+    const casRoot = (cas as unknown as { pathFor: (a: { algorithm: string; digest: string }) => string }).pathFor({ algorithm: "sha256", digest: "a".repeat(64) }).replace(/\/sha256\/.*$/, "");
+    await collectGarbage(cwdOfRun, { casRoot, minAgeMs: 0 });
+    const rd = res.casRefs!.result!.slice("sha256:".length);
+    assert.equal(await cas.has({ algorithm: "sha256", digest: rd }), true, "lean run's result CAS bytes survived GC (cas-refs.json rooted them)");
     assert.ok(res.casRefs && res.casRefs.result && res.casRefs.receipts && res.casRefs.replay);
     for (const ref of [res.casRefs.result, res.casRefs.receipts, res.casRefs.replay]) {
       assert.match(ref!, /^sha256:[a-f0-9]{64}$/);

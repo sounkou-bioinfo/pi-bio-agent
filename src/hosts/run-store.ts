@@ -390,6 +390,13 @@ async function runAndPersist(
       const runObjectDigest = cas && enriched && resultDigest
         ? await putCas({ schema: "pi-bio.run_object.v1", data: { kind: identity === "ad-hoc.query" ? "query" : "operation", identity, status: run.status }, refs: { input: actionInputDigest(enriched), result: resultDigest } })
         : undefined;
+      // GC ROOT for lean mode: the node-local collectGarbage roots CAS by scanning surviving run files, but a lean
+      // run writes NO receipts.json — so write a tiny cas-refs.json listing THIS run's CAS digests (always, when a
+      // cas is present; harmless when the JSON files also exist), or the sweep would delete a lean run's live
+      // result/receipts/replay/runObject bytes.
+      if (cas && (resultDigest || receiptsDigest || replayDigest || runObjectDigest)) {
+        await writeRunFile(persisted.dir, "cas-refs.json", { schema: "pi-bio.cas_refs.v1", result: resultDigest, receipts: receiptsDigest, replay: replayDigest, runObject: runObjectDigest });
+      }
       // Datomic + CAS: record the run as a fact in the ONE store, referencing content by digest (bytes stay outside).
       await recordRun(runLog, now, { runId, identity, status: run.status, error: undefined, dir: persisted.dir, replay, enriched, resultDigest, receiptsDigest, replayDigest, runObjectDigest });
       // ActionCache (LLVM CAS): map this input's CASID -> the result's CASID, so an identical future run can be

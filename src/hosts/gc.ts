@@ -181,10 +181,14 @@ export async function collectGarbage(cwd: string, opts: CollectGarbageOpts = {})
     }
   }
   const { pruned, kept } = await pruneRuns(runsDir, opts.runs ?? {});
-  const receiptJsons = await Promise.all(kept.map(async (name) => {
-    try { return await fs.readFile(join(runsDir, name, "receipts.json"), "utf8"); } catch { return ""; }
-  }));
-  const live = liveDigests(receiptJsons);
+  // Root from BOTH receipts.json AND cas-refs.json per surviving run: a lean (serialize:false) run writes no
+  // receipts.json, only cas-refs.json (its CAS digest list), so scanning only receipts.json would leave a lean
+  // run's live result/receipts/replay/runObject bytes unrooted and let the sweep delete them.
+  const rootJsons = (await Promise.all(kept.flatMap((name) => [
+    fs.readFile(join(runsDir, name, "receipts.json"), "utf8").catch(() => ""),
+    fs.readFile(join(runsDir, name, "cas-refs.json"), "utf8").catch(() => ""),
+  ])));
+  const live = liveDigests(rootJsons);
   // cross-writer roots: the union of all writers' live digests — lowercased so an uppercase-hex root still matches
   // the lowercase CAS files (else it would fail to protect live bytes and the sweep would delete them).
   for (const r of opts.extraRoots ?? []) live.add(r.toLowerCase());
