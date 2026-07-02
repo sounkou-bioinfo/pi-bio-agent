@@ -131,7 +131,7 @@ and gated** — a candidate can be *parked* (`approval = pending`) and
 decided later across a restart, the decision is terminal and
 fail-closed, and the **approval itself, the one irreducible
 human-or-model judgment, is *recorded and gated* by the substrate, never
-computed by it**. Reproducibility (`reproduce()`), long-running jobs,
+computed by it**. Reproducibility (`reproduceRun()`), long-running jobs,
 and this governance loop all ride the same temporal graph — the DB *is*
 the audit trail.
 
