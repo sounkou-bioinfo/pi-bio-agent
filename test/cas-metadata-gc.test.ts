@@ -158,6 +158,16 @@ describe("CAS metadata GC: ref/lease anti-join (the distributed-safe sweep)", ()
     assert.equal(await cas.has(a), false);
   });
 
+  test("an UPPERCASE-digest ref roots the lowercase-stored object (case-consistent metadata, no live-byte deletion)", async () => {
+    const { conn, cas } = await setup();
+    const a = await store(cas, conn, "protected bytes", 1000); // object recorded with a lowercase digest
+    // root it via the SAME digest UPPER-cased — the ref must still protect the object
+    await addCasRef(conn, { refId: "run-up", refType: "run", address: { algorithm: "sha256", digest: a.digest.toUpperCase() } }, 1000);
+    const res = await gcMarkSweep(conn, cas, { minAgeMs: 1000, nowMs: 7000 });
+    assert.deepEqual(res.marked, [], "the uppercase ref rooted the object — it is NOT marked for GC");
+    assert.equal(await cas.has(a), true, "the bytes are retained");
+  });
+
   test("cas-metadata rejects non-sha256 addresses (aligned with the sha256-only store)", async () => {
     const { conn } = await setup();
     const bad = { algorithm: "blake3", digest: "deadbeef" } as unknown as ContentAddress; // non-sha256: type-narrowed away, still refused at runtime

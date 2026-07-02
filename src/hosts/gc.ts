@@ -185,8 +185,10 @@ export async function collectGarbage(cwd: string, opts: CollectGarbageOpts = {})
     try { return await fs.readFile(join(runsDir, name, "receipts.json"), "utf8"); } catch { return ""; }
   }));
   const live = liveDigests(receiptJsons);
-  for (const r of opts.extraRoots ?? []) live.add(r); // cross-writer roots: the union of all writers' live digests
-  if (opts.rootsProvider) for (const r of await opts.rootsProvider()) live.add(r);
+  // cross-writer roots: the union of all writers' live digests — lowercased so an uppercase-hex root still matches
+  // the lowercase CAS files (else it would fail to protect live bytes and the sweep would delete them).
+  for (const r of opts.extraRoots ?? []) live.add(r.toLowerCase());
+  if (opts.rootsProvider) for (const r of await opts.rootsProvider()) live.add(r.toLowerCase());
   const casRoot = opts.casRoot ?? join(cwd, ".pi", "bio-agent", "cas");
   const { swept } = await gcCas(casRoot, live, { minAgeMs: opts.minAgeMs });
   const { dropped } = await gcRemoteIndex(casRoot, live);

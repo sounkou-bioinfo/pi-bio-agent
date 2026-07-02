@@ -256,6 +256,14 @@ describe("job durability: rich status is not lost + the ledger timestamp wins + 
     assert.equal((await ledger.collect("x9"))!.result, undefined, "no success result recorded for a cancelled job");
   });
 
+  test("fail closed: a runId with an existing LEDGER row (no local snapshot) is refused — no stale-state adoption", async () => {
+    const { conn, cwd, clock } = await setup();
+    const runner = inMemoryJobRunner({ clock, execute: async () => ({}) });
+    // a PRIOR job left a ledger row for this runId, but the local snapshot is gone
+    await recordObservation(conn, { statementKey: "job:reuse:status", subjectId: "job:reuse", predicate: "job_status", value: "succeeded", recordedAt: "2026-07-01T00:00:01Z", source: "prior" });
+    await assert.rejects(() => submitBioJob(conn, runner, { cwd, runId: "reuse", replay: replay("reuse"), now: "2026-07-01T00:00:09Z" }), /already exists in the shared ledger/);
+  });
+
   test("fail closed: an unsafe runId (path traversal) is rejected", async () => {
     const { conn, cwd, clock } = await setup();
     const local = inMemoryJobRunner({ clock, execute: async () => ({}) });

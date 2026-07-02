@@ -103,6 +103,9 @@ export interface SubmitBioJobRequest {
 export async function submitBioJob(conn: SqlConn, runner: JobRunner, req: SubmitBioJobRequest): Promise<JobStatus> {
   assertJobReplay(req.runId, req.replay);
   if (await readJobRecord(req.cwd, req.runId)) throw new Error(`job-store: job '${req.runId}' already submitted`);
+  // Also refuse a runId that already has a LEDGER row (a prior job in the shared store, even if the local snapshot
+  // is gone) — otherwise we'd dispatch new work and then adopt the STALE ledger phase/result as this job's state.
+  if (await latestSlotRow(conn, req.runId)) throw new Error(`job-store: job '${req.runId}' already exists in the shared ledger (reused runId) — pick a fresh runId`);
   const digest = replaySpecDigest(req.replay); // compute BEFORE acceptance — a digest failure must not leave a phantom job in the runner
   await runner.submit({ runId: req.runId, replay: req.replay }); // acceptance — throws if the runner rejects
   // A dispatched worker (ledgerJobRunner) may ALREADY have reported running/succeeded into the slot before we get

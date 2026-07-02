@@ -81,7 +81,7 @@ export async function recordCasObject(conn: SqlConn, address: ContentAddress, si
     `INSERT INTO cas_object (algorithm, digest, size_bytes, state, committed_at, tombstoned_at)
      VALUES (?, ?, ?, 'committed', ?, NULL)
      ON CONFLICT (algorithm, digest) DO UPDATE SET size_bytes = excluded.size_bytes, state = 'committed', committed_at = excluded.committed_at, tombstoned_at = NULL`,
-    [address.algorithm, address.digest, sizeBytes, nowMs],
+    [address.algorithm, address.digest.toLowerCase(), sizeBytes, nowMs], // lowercase: CAS files/paths are lowercase, so refs/leases/objects must compare case-consistently
   ); // resurrect refreshes committed_at too, else the revived object is immediately mark-eligible again
 }
 
@@ -95,7 +95,7 @@ export async function addCasRef(conn: SqlConn, ref: CasRefSpec, nowMs: number): 
     `INSERT INTO cas_ref (ref_id, ref_type, algorithm, digest, created_at, expires_at)
      VALUES (?, ?, ?, ?, ?, ?)
      ON CONFLICT (ref_id, ref_type, algorithm, digest) DO UPDATE SET expires_at = excluded.expires_at`,
-    [ref.refId, ref.refType, ref.address.algorithm, ref.address.digest, nowMs, ref.expiresAt ?? null],
+    [ref.refId, ref.refType, ref.address.algorithm, ref.address.digest.toLowerCase(), nowMs, ref.expiresAt ?? null], // lowercase: match the lowercase CAS files so a ref actually protects its bytes
   );
 }
 
@@ -114,7 +114,7 @@ export async function acquireCasLease(conn: SqlConn, holder: string, address: Co
   const leaseId = randomUUID();
   await conn.run(
     `INSERT INTO cas_lease (lease_id, holder, algorithm, digest, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)`,
-    [leaseId, holder, address.algorithm, address.digest, nowMs, nowMs + ttlMs],
+    [leaseId, holder, address.algorithm, address.digest.toLowerCase(), nowMs, nowMs + ttlMs], // lowercase: consistent with the stored objects/refs
   );
   return leaseId;
 }
@@ -147,7 +147,7 @@ export async function withCasObject<R>(
   try {
     const rows = await conn.all<{ state: string }>(
       `SELECT state FROM cas_object WHERE algorithm = ? AND digest = ?`,
-      [address.algorithm, address.digest],
+      [address.algorithm, address.digest.toLowerCase()],
     );
     const state = rows[0]?.state;
     // `deleting` = the sweeper has atomically CLAIMED this object for byte removal (it saw no live lease at claim
@@ -156,7 +156,7 @@ export async function withCasObject<R>(
     if (state === "deleted" || state === "deleting" || state === undefined) return { hit: false };
     if (state === "tombstoned") {
       // bytes still present (not swept yet) and we hold a lease -> revive rather than re-fetch
-      await conn.run(`UPDATE cas_object SET state = 'committed', tombstoned_at = NULL WHERE algorithm = ? AND digest = ?`, [address.algorithm, address.digest]);
+      await conn.run(`UPDATE cas_object SET state = 'committed', tombstoned_at = NULL WHERE algorithm = ? AND digest = ?`, [address.algorithm, address.digest.toLowerCase()]);
     }
     return { hit: true, result: await onHit() };
   } finally {
