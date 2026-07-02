@@ -37,6 +37,18 @@ describe("CAS-of-bytes: a content-addressed byte store", () => {
     assert.equal((await fs.stat(cas.pathFor(addr))).mtimeMs, firstMtime, "no rewrite on re-put");
   });
 
+  test("concurrent puts of the SAME digest don't corrupt the file (unique temp per put, atomic rename)", async () => {
+    const root = await fs.mkdtemp(join(tmpdir(), "pi-bio-cas-"));
+    const cas = fsCasStore(root);
+    const bytes = "x".repeat(200000) + "END"; // large enough that a shared temp could interleave/truncate
+    const addr = addressOf(bytes);
+    await Promise.all(Array.from({ length: 16 }, () => cas.put(addr, bytes))); // many parallel puts, same ms
+    assert.equal(await fs.readFile(cas.pathFor(addr), "utf8"), bytes, "the final file is the exact bytes, not a partial/interleaved temp");
+    // and no leftover temp files
+    const leftovers = (await fs.readdir(join(root, "sha256"))).filter((f) => f.includes(".tmp-"));
+    assert.deepEqual(leftovers, [], "no orphaned temp files after concurrent puts");
+  });
+
   test("put REFUSES content that does not hash to its address (provenance integrity)", async () => {
     const root = await fs.mkdtemp(join(tmpdir(), "pi-bio-cas-"));
     const cas = fsCasStore(root);

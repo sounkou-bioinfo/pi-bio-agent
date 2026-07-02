@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { join } from "node:path";
 import type { CasStore } from "../core/cas.js";
@@ -47,8 +47,10 @@ export function fsCasStore(root: string): CasStore {
       const dest = pathFor(a);
       try { await fs.access(dest); return; } catch { /* not present — write it */ }
       await fs.mkdir(join(root, a.algorithm), { recursive: true });
-      // write to a unique temp then atomically rename, so a concurrent reader never sees a partial file
-      const tmp = `${dest}.tmp-${process.pid}-${Date.now()}`;
+      // write to a GENUINELY unique temp then atomically rename, so a concurrent reader never sees a partial file.
+      // randomUUID (not pid+Date.now(), which two same-process puts in the same ms could SHARE, letting one rename a
+      // temp the other is still writing) — even though same-digest content is identical, a unique temp is the clean guarantee.
+      const tmp = `${dest}.tmp-${process.pid}-${randomUUID()}`;
       await fs.writeFile(tmp, bytes);
       try {
         await fs.rename(tmp, dest);

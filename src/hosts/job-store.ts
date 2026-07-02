@@ -13,10 +13,12 @@ import { recordObservation, observationAsOfKey } from "../duckdb/observations.js
 // survives the process. A job MUST carry a well-formed RunReplaySpec whose runId matches (fail closed): a run you
 // cannot reproduce is not a job.
 //
-// Correctness invariants (all fail-closed): submit records NOTHING until the runner ACCEPTS (no phantom jobs);
-// a transition is recorded only with a strictly-greater `now` than the slot's last row (equal/backdated is
-// rejected, so "current status" is never ambiguous); every recorded transition carries the job's replay digest
-// (reproducible provenance); the snapshot is written atomically (temp+rename) and read back ENOENT-tolerant only.
+// Correctness invariants (all fail-closed): submit is WRITE-AHEAD — the `queued` snapshot is persisted BEFORE the
+// runner is dispatched (compensated by removeJobRecord if the runner rejects), while the LEDGER observation row is
+// written only AFTER acceptance (so the shared as-of ledger never carries a phantom job); a transition is recorded
+// only with a strictly-greater `now` than the slot's last row (equal/backdated is rejected, so "current status" is
+// never ambiguous); every recorded transition carries the job's replay digest (reproducible provenance); the
+// snapshot is written atomically (temp+rename) and read back ENOENT-tolerant only.
 
 const FUTURE = "9999-12-31T23:59:59.999Z"; // sentinel for "the absolute latest row of a slot, regardless of now"
 const PHASES = new Set<JobPhase>(["queued", "running", "waiting", "succeeded", "failed", "cancelled"]);

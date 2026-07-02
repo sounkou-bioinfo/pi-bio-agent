@@ -119,7 +119,12 @@ function retargetResultArtifactToCas(run: BioRunRecord, runId: string, casUri: s
 
 async function writeRunFile(dir: string, name: string, data: unknown): Promise<string> {
   const path = join(dir, name);
-  await fs.writeFile(path, `${JSON.stringify(data, bigintToJson, 2)}\n`, "utf8");
+  // ATOMIC write (temp + rename): a reader (or a reproduce that reads replay.json) never sees a PARTIAL JSON file,
+  // and on a crash/ENOSPC mid-write the previous file is left intact rather than truncated — so a reused runId dir
+  // can't end up with a fresh run.json paired with a half-written result.json.
+  const tmp = `${path}.tmp-${process.pid}-${randomUUID()}`;
+  await fs.writeFile(tmp, `${JSON.stringify(data, bigintToJson, 2)}\n`, "utf8");
+  await fs.rename(tmp, path);
   return path;
 }
 

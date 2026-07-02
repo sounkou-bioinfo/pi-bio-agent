@@ -20,6 +20,18 @@ describe("http policies: host-injected auth", () => {
     await fetchImpl("https://x/y", {});
     assert.equal(seen[1]!.Authorization, "Bearer tok-2", "getAuthHeaders is called per request (refresh)");
   });
+
+  test("SECURITY: host auth wins over a CASE-INSENSITIVELY colliding request header (no duplicate sent)", async () => {
+    const seen: Array<Record<string, string> | undefined> = [];
+    const base: FetchLike = async (_u, init) => { seen.push(init?.headers); return { ok: true, status: 200, text: async () => "[]" }; };
+    const fetchImpl = withAuth(base, () => ({ Authorization: "Bearer host" }));
+    // the caller supplies a LOWERCASE 'authorization' — a plain spread would send BOTH; host auth must win, alone
+    await fetchImpl("https://x/y", { headers: { authorization: "Bearer attacker", Accept: "application/json" } });
+    const h = seen[0]!;
+    assert.equal(h.Authorization, "Bearer host", "the host's Authorization is sent");
+    assert.equal(h.authorization, undefined, "the case-colliding attacker header is DROPPED, not also sent");
+    assert.equal(h.Accept, "application/json", "unrelated headers are preserved");
+  });
 });
 
 describe("http policies: rate-limit backoff", () => {

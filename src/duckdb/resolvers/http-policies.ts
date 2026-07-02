@@ -11,7 +11,12 @@ import type { FetchLike } from "./http-table-scan.js";
 export function withAuth(fetchImpl: FetchLike, getAuthHeaders: () => Promise<Record<string, string>> | Record<string, string>): FetchLike {
   return async (url, init) => {
     const auth = await getAuthHeaders();
-    return fetchImpl(url, { ...init, headers: { ...(init?.headers ?? {}), ...auth } });
+    // HTTP header names are CASE-INSENSITIVE, but a plain object spread is not: `{...{authorization:x}, Authorization:y}`
+    // would send BOTH, and a server may prefer the caller's. So drop any request header that case-insensitively
+    // collides with an auth header, THEN apply auth — host auth authoritatively wins (secrets never overridden).
+    const authLower = new Set(Object.keys(auth).map((k) => k.toLowerCase()));
+    const base = Object.fromEntries(Object.entries(init?.headers ?? {}).filter(([k]) => !authLower.has(k.toLowerCase())));
+    return fetchImpl(url, { ...init, headers: { ...base, ...auth } });
   };
 }
 
