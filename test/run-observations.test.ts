@@ -97,6 +97,12 @@ describe("run-observations: ad-hoc SQL folds into the ONE store as an as-of, att
     const v = JSON.parse((await observationAsOfKey(store, `run:${res.runId}`, MEMORY_NOW))!.value_json!);
     assert.equal(v.receiptsDigest, res.casRefs.receipts); // the run fact references receipts + replay by digest
     assert.equal(v.replayDigest, res.casRefs.replay);
+
+    // CRASH-SAFETY: run.json is written BEFORE cas-refs.json — simulate a crash in that gap by DELETING cas-refs.json.
+    // GC must STILL keep the result bytes alive by rooting from run.json's `cas:<digest>` artifact (not just cas-refs).
+    await fsp.rm(join(res.runDir, "cas-refs.json"), { force: true });
+    await collectGarbage(cwdOfRun, { casRoot, minAgeMs: 0 });
+    assert.equal(await cas.has({ algorithm: "sha256", digest: rd }), true, "result bytes survive GC even with cas-refs.json missing — run.json roots them");
   });
 
   test("DATA-LOSS: a FAILED lean+CAS run also writes cas-refs.json so GC doesn't sweep its receipts/replay bytes", async () => {

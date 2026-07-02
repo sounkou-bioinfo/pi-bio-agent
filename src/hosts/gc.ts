@@ -181,12 +181,15 @@ export async function collectGarbage(cwd: string, opts: CollectGarbageOpts = {})
     }
   }
   const { pruned, kept } = await pruneRuns(runsDir, opts.runs ?? {});
-  // Root from BOTH receipts.json AND cas-refs.json per surviving run: a lean (serialize:false) run writes no
-  // receipts.json, only cas-refs.json (its CAS digest list), so scanning only receipts.json would leave a lean
-  // run's live result/receipts/replay/runObject bytes unrooted and let the sweep delete them.
+  // Root from receipts.json, cas-refs.json AND run.json per surviving run. cas-refs.json is a lean run's CAS digest
+  // list (no receipts.json is written in lean mode). run.json is ALSO scanned because it is written BEFORE cas-refs.json
+  // and, in lean mode, its output artifact references the result by `cas:<digest>`: a crash between those two writes
+  // would otherwise leave a surviving run.json pointing at result bytes with no root, and the sweep would delete them.
+  // Over-rooting from run.json (it also carries provenance digests) is conservative — it never deletes wrongly.
   const rootJsons = (await Promise.all(kept.flatMap((name) => [
     fs.readFile(join(runsDir, name, "receipts.json"), "utf8").catch(() => ""),
     fs.readFile(join(runsDir, name, "cas-refs.json"), "utf8").catch(() => ""),
+    fs.readFile(join(runsDir, name, "run.json"), "utf8").catch(() => ""),
   ])));
   const live = liveDigests(rootJsons);
   // cross-writer roots: the union of all writers' live digests — lowercased so an uppercase-hex root still matches
