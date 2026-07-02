@@ -34,6 +34,13 @@ describe("cli: query/run over a manifest (provider-agnostic entry point)", () =>
     assert.match(s2.err.join("\n"), /requires --operation/);
     const s3 = sink();
     assert.equal(await mainRun("bogus", [MANIFEST], s3.deps), 2, "unknown subcommand");
+    // a flag belonging to the OTHER subcommand is a usage error (exit 2), not silently ignored
+    const s4 = sink();
+    assert.equal(await mainRun("run", [MANIFEST, "--db", ":memory:", "--operation", "op", "--resources", "a,b"], s4.deps), 2, "run does not accept --resources");
+    assert.match(s4.err.join("\n"), /unknown flag\(s\) for 'run'.*--resources/);
+    const s5 = sink();
+    assert.equal(await mainRun("query", [MANIFEST, "--db", ":memory:", "--sql", "SELECT 1", "--operation", "foo"], s5.deps), 2, "query does not accept --operation");
+    assert.match(s5.err.join("\n"), /unknown flag\(s\) for 'query'.*--operation/);
   });
 
   test("a malformed --bindings JSON is a usage error (exit 2), not a crash", async () => {

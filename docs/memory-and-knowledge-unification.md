@@ -262,8 +262,12 @@ compiled via `src/cli/bin.ts` to the `pi-bio-agent` bin.
 
 ## Non-goals
 
-- Not a new storage engine: this rides the existing filesystem + DuckDB split in
-  `design.md`. Files stay the source of truth; DuckDB indexes them.
+- Not a new storage engine: this rides the existing DuckDB store in `design.md`. The
+  append-only `bio_observations` ledger (the `agent:memory:` namespace) is the SOURCE OF
+  TRUTH — `bio_remember`/`recall`/`bio-agent memory list` read it, not files. Any note JSON
+  files are an optional legible EXPORT/view, not authoritative: deleting `store.duckdb` and
+  keeping only files loses the memory (there is no re-index-from-files path); editing a file
+  does not change what the store returns.
 - Not making memory model-authoritative: a unit is procedural guidance, never a measured
   fact — facts stay tool-derived, with provenance; a note is never itself evidence.
 - Not blurring the activation boundary: a skill changes agent behavior on `/reload`; a note

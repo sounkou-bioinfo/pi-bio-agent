@@ -70,10 +70,13 @@ export async function recordObservation(conn: SqlConn, obs: BioObservationInput)
     throw new Error("recordObservation: statementKey, subjectId, predicate, recordedAt are all required");
   }
   // FAIL CLOSED on an unparseable time: every as-of/history query casts recorded_at/valid_from/valid_to to
-  // TIMESTAMPTZ, so ONE row with a bad string (e.g. "not-a-time") would make those whole-table scans throw and
-  // break UNRELATED reads. Reject at write instead of poisoning the store.
-  for (const [field, val] of [["recordedAt", obs.recordedAt], ["validFrom", obs.validFrom], ["validTo", obs.validTo]] as const) {
-    if (val != null && Number.isNaN(Date.parse(val))) throw new Error(`recordObservation: ${field} '${val}' is not a valid timestamp (it would poison as-of/history TIMESTAMPTZ casts)`);
+  // TIMESTAMPTZ, so ONE bad row would make those whole-table scans throw and break UNRELATED reads. Validate with
+  // DuckDB's OWN parser — the exact cast the reads use — not JS Date.parse (V8 accepts strings DuckDB rejects). A
+  // NULL casts cleanly; anything that survives this cast is safe to read back.
+  try {
+    await conn.all(`SELECT ?::TIMESTAMPTZ, ?::TIMESTAMPTZ, ?::TIMESTAMPTZ`, [obs.recordedAt, obs.validFrom ?? null, obs.validTo ?? null]);
+  } catch {
+    throw new Error(`recordObservation: recordedAt='${obs.recordedAt}', validFrom='${obs.validFrom ?? ""}', validTo='${obs.validTo ?? ""}' — each must be a DuckDB-castable TIMESTAMPTZ (else it poisons as-of/history reads)`);
   }
   const id = obs.observationId ?? observationId(obs);
   await conn.run(

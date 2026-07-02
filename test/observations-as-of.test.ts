@@ -31,8 +31,8 @@ describe("bio_observations: temporal provenance statements, as-of latest-per-sta
 
   test("FAIL CLOSED: an unparseable recordedAt/validFrom/validTo is rejected at write, so it can't poison as-of casts", async () => {
     const c = await newConn();
-    await assert.rejects(() => recordObservation(c, { statementKey: "k", subjectId: "x", predicate: "p", value: 1, recordedAt: "not-a-time" }), /not a valid timestamp/);
-    await assert.rejects(() => recordObservation(c, { statementKey: "k", subjectId: "x", predicate: "p", value: 1, recordedAt: "2026-01-01T00:00:00Z", validTo: "garbage" }), /not a valid timestamp/);
+    await assert.rejects(() => recordObservation(c, { statementKey: "k", subjectId: "x", predicate: "p", value: 1, recordedAt: "not-a-time" }), /DuckDB-castable TIMESTAMPTZ/);
+    await assert.rejects(() => recordObservation(c, { statementKey: "k", subjectId: "x", predicate: "p", value: 1, recordedAt: "2026-01-01T00:00:00Z", validTo: "garbage" }), /DuckDB-castable TIMESTAMPTZ/);
     // and a whole-table as-of scan still works (nothing bad got in)
     await recordObservation(c, { statementKey: "k", subjectId: "x", predicate: "p", value: "ok", recordedAt: "2026-01-01T00:00:00Z" });
     assert.equal((await observationsAsOf(c, "2026-06-01T00:00:00Z")).length, 1);

@@ -95,9 +95,13 @@ export async function mainRun(sub: string, argv: string[], deps: RunCliDeps): Pr
   let bindings: Record<string, unknown> | undefined;
   try {
     flags = parseFlags(rest);
-    const KNOWN = new Set(["db", "sql", "resources", "operation", "bindings", "run-id", "init-sql"]);
+    // PER-SUBCOMMAND flags, not a shared set: `run --resources` / `query --operation` would otherwise be accepted
+    // and SILENTLY IGNORED (a `run` still resolves the operation's own requiredResources — the caller's --resources
+    // exclusion is a no-op), which is exactly the surprising fall-through the unknown-flag hardening exists to stop.
+    const COMMON = ["db", "bindings", "run-id", "init-sql"];
+    const KNOWN = new Set(sub === "query" ? [...COMMON, "sql", "resources"] : [...COMMON, "operation"]);
     const unknown = Object.keys(flags).filter((k) => !KNOWN.has(k));
-    if (unknown.length) throw new Error(`unknown flag(s): ${unknown.map((k) => `--${k}`).join(", ")}`); // a typo must not silently fall back
+    if (unknown.length) throw new Error(`unknown flag(s) for '${sub}': ${unknown.map((k) => `--${k}`).join(", ")}`); // a typo / wrong-subcommand flag must not silently fall back
     const empty = Object.entries(flags).filter(([, v]) => v === "").map(([k]) => k);
     if (empty.length) throw new Error(`flag(s) with an empty value: ${empty.map((k) => `--${k}`).join(", ")}`); // `--db=` etc.
     bindings = parseBindings(flags.bindings);
