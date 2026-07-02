@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { duckdbNodeConn } from "../src/duckdb/node-api.js";
 import type { SqlConn } from "../src/core/ports.js";
-import { sqlReadsOnlyResolvedTables, resolvedBaseTables, sqlUsesNonDeterministicFn } from "../src/duckdb/plan-hermeticity.js";
+import { sqlReadsOnlyResolvedTables, resolvedBaseTables, sqlUsesNonDeterministicFn, hermeticIntrospectionUsable, __resetHermeticIntrospectionCache } from "../src/duckdb/plan-hermeticity.js";
 
 // A SOUND hermeticity proof over the DuckDB physical PLAN: a query is hermetic iff every data-source leaf is a
 // base-table scan of a RESOLVED table (or a pure/constant source) — no file/table-function/replacement-scan read.
@@ -83,5 +83,15 @@ describe("plan-hermeticity: prove a query reads only resolved tables (via EXPLAI
     assert.equal(await sqlUsesNonDeterministicFn(c, "this is not sql"), true);
     // an embedded single quote is escaped, not a break-out
     assert.equal(await sqlUsesNonDeterministicFn(c, "SELECT c FROM variants WHERE c = 'a''b'"), false);
+  });
+
+  test("introspection self-check passes on the current DuckDB build (a parser/plan-format change would flip it -> memo OFF)", async () => {
+    __resetHermeticIntrospectionCache();
+    const c = await conn();
+    // On THIS build the probes agree (volatile flagged, pure not, table-function caught) -> introspection is usable.
+    // If a future DuckDB renamed the AST `function_name` key or a plan operator, one probe would disagree and this
+    // returns false — which run-store uses to disable memoization (fail safe) rather than risk a wrong memo.
+    assert.equal(await hermeticIntrospectionUsable(c), true);
+    __resetHermeticIntrospectionCache();
   });
 });

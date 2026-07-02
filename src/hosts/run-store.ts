@@ -13,7 +13,7 @@ import { OperationRunError, runOperation, runQuery, type OperationResult } from 
 import type { BioRunRecord } from "../core/run-spec.js";
 import type { BioArtifact } from "../core/types.js";
 import { duckdbNodeConn } from "../duckdb/node-api.js";
-import { sqlReadsOnlyResolvedTables, resolvedBaseTables, sqlUsesNonDeterministicFn } from "../duckdb/plan-hermeticity.js";
+import { sqlReadsOnlyResolvedTables, resolvedBaseTables, sqlUsesNonDeterministicFn, hermeticIntrospectionUsable } from "../duckdb/plan-hermeticity.js";
 import { duckdbFileScanResolver } from "../duckdb/resolvers/duckdb-file-scan.js";
 import { duckdbSqlMaterializeResolver } from "../duckdb/resolvers/duckdb-sql-materialize.js";
 import { duckhtsReadBcfResolver } from "../duckdb/resolvers/duckhts-read-bcf.js";
@@ -547,6 +547,7 @@ async function runAndPersist(
         dbPath === ":memory:" &&
         !initUnproven &&
         runSql !== "" &&
+        (await hermeticIntrospectionUsable(conn)) && // guard: if a DuckDB parser/plan-format change broke our introspection, memoization turns OFF (never a wrong memo)
         !(await sqlUsesNonDeterministicFn(conn, runSql)) &&
         (await sqlReadsOnlyResolvedTables(conn, runSql, await resolvedBaseTables(conn)));
       if (resultDigest && runLog && enriched && !hasLiveSource && hermetic) {

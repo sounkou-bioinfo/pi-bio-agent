@@ -120,3 +120,31 @@ export async function sqlUsesNonDeterministicFn(conn: SqlConn, sql: string): Pro
   );
   return Number(rows[0]?.n ?? 0) > 0;
 }
+
+let introspectionUsable: boolean | undefined;
+/**
+ * SELF-CHECK that DuckDB's plan/AST introspection formats are the ones this code understands — a guard against a
+ * DuckDB parser / plan-schema change across versions (a real risk). The physical-plan check fails closed on its own,
+ * but the AST volatile check has a silent gap: if the `function_name` key were renamed, the extractor would find
+ * nothing and read a `random()` query as PURE. So probe known cases — a volatile call MUST be flagged, a pure query
+ * MUST NOT be, and a table function MUST read as ambient. If ANY probe disagrees, the format drifted: return false so
+ * the caller treats runs as non-hermetic (memoization safely OFF) rather than risk a WRONG memo, until the code (and
+ * the loudly-failing plan-hermeticity tests) are updated. Cached per process (the format is a function of the build).
+ */
+export async function hermeticIntrospectionUsable(conn: SqlConn): Promise<boolean> {
+  if (introspectionUsable !== undefined) return introspectionUsable;
+  try {
+    const volatileFlagged = await sqlUsesNonDeterministicFn(conn, "SELECT random() AS r");
+    const pureNotFlagged = !(await sqlUsesNonDeterministicFn(conn, "SELECT 1 AS one"));
+    const ambientCaught = !(await sqlReadsOnlyResolvedTables(conn, "SELECT * FROM generate_series(1, 3)", new Set()));
+    introspectionUsable = volatileFlagged && pureNotFlagged && ambientCaught;
+  } catch {
+    introspectionUsable = false;
+  }
+  return introspectionUsable;
+}
+
+/** Test-only: reset the cached introspection self-check (the format is build-constant, so production never needs this). */
+export function __resetHermeticIntrospectionCache(): void {
+  introspectionUsable = undefined;
+}
