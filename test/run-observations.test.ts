@@ -89,4 +89,18 @@ describe("run-observations: ad-hoc SQL folds into the ONE store as an as-of, att
     assert.equal(v.receiptsDigest, res.casRefs.receipts); // the run fact references receipts + replay by digest
     assert.equal(v.replayDigest, res.casRefs.replay);
   });
+
+  test("run-as-object-DAG: two identical runs share one runObjectDigest (CAS object root — dedup by hash)", async () => {
+    const store = await conn();
+    const cas = fsCasStore(await fsp.mkdtemp(join(tmpdir(), "cas-")));
+    const req = { cwd: process.cwd(), dbPath: ":memory:", manifestPath: "examples/variant-counts/manifest.json", sql: "SELECT count(*) AS n FROM variants", store, author: "agent:A", cas } as const;
+    const a = await runBioQueryFromManifest({ ...req });
+    const b = await runBioQueryFromManifest({ ...req });
+    assert.ok(a.ok && b.ok);
+    if (!a.ok || !b.ok) return;
+    assert.match(a.casRefs!.runObject!, /^sha256:[a-f0-9]{64}$/);
+    assert.notEqual(a.runId, b.runId); // different ledger keys...
+    assert.equal(a.casRefs!.runObject, b.casRefs!.runObject); // ...but ONE content-addressed run DAG root
+    assert.equal(await cas.has({ algorithm: "sha256", digest: a.casRefs!.runObject!.slice(7) }), true);
+  });
 });

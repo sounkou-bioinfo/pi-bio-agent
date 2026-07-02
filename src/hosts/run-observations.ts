@@ -27,6 +27,10 @@ export interface RunObservation {
    *  fetchable from CAS by digest and become optional serialize/exports too (bytes stay OUTSIDE the DB). */
   receiptsDigest?: string;
   replayDigest?: string;
+  /** The RUN OBJECT's content address — a CAS object (LLVM CASObject: Data + Refs) whose refs point at the
+   *  result/receipts/replay/manifest CAS objects. It is the single root digest of the whole run DAG, so two runs
+   *  are identical iff their runObjectDigest matches (dedup/compare by root hash). */
+  runObjectDigest?: string;
 }
 
 /** Record a run as a `run:<runId>` observation in the shared store, attributed to `author`. Best-effort at the
@@ -39,7 +43,7 @@ export async function recordRunObservation(conn: SqlConn, run: RunObservation, n
     value: {
       kind: run.kind, identity: run.identity, status: run.status, sql: run.sql, resources: run.resources, error: run.error,
       runDir: run.runDir, manifestDigest: run.manifestDigest, sourceReceiptDigests: run.sourceReceiptDigests,
-      resultDigest: run.resultDigest, receiptsDigest: run.receiptsDigest, replayDigest: run.replayDigest,
+      resultDigest: run.resultDigest, receiptsDigest: run.receiptsDigest, replayDigest: run.replayDigest, runObjectDigest: run.runObjectDigest,
     },
     recordedAt: now,
     source: author,

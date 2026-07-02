@@ -164,6 +164,8 @@ export interface RunCasRefs {
   result?: string;
   receipts?: string;
   replay?: string;
+  /** The run OBJECT (Data + Refs) content address — the single root digest of the whole run DAG. */
+  runObject?: string;
 }
 
 export type RunOperationResponse =
@@ -267,7 +269,7 @@ function enrichReplay(replay: RunReplaySpec, receipts: ResolutionReceipt[]): Run
 async function recordRun(
   runLog: { store: SqlConn; author?: string } | undefined,
   now: string,
-  args: { runId: string; identity: string; status: string; error: string | undefined; dir: string; replay?: RunReplaySpec; enriched?: RunReplaySpec; resultDigest?: string; receiptsDigest?: string; replayDigest?: string },
+  args: { runId: string; identity: string; status: string; error: string | undefined; dir: string; replay?: RunReplaySpec; enriched?: RunReplaySpec; resultDigest?: string; receiptsDigest?: string; replayDigest?: string; runObjectDigest?: string },
 ): Promise<void> {
   if (!runLog) return;
   const obs: RunObservation = {
@@ -284,6 +286,7 @@ async function recordRun(
     resultDigest: args.resultDigest,
     receiptsDigest: args.receiptsDigest,
     replayDigest: args.replayDigest,
+    runObjectDigest: args.runObjectDigest,
   };
   try {
     await recordRunObservation(runLog.store, obs, now, runLog.author);
@@ -341,8 +344,17 @@ async function runAndPersist(
       const resultDigest = await putCas(result.rows);
       const receiptsDigest = await putCas(receipts);
       const replayDigest = enriched ? await putCas(enriched) : undefined;
+      // run-as-object-DAG (LLVM CASObject: Data + Refs): a single CAS object whose refs point at the result/
+      // receipts/replay/manifest objects — its digest is the root of the whole run DAG, so two identical runs share
+      // one runObjectDigest (dedup/compare by root hash).
+      // Refs must be CONTENT-only (no runId/timestamps) or no two runs ever dedup: use the content-addressed INPUT
+      // CASID (actionInputDigest — manifest+SQL+resolved-source digests) and the result CASID. The run:<id> fact
+      // separately carries the run-specific receipts/replay blob digests.
+      const runObjectDigest = cas && enriched && resultDigest
+        ? await putCas({ schema: "pi-bio.run_object.v1", data: { kind: identity === "ad-hoc.query" ? "query" : "operation", identity, status: run.status }, refs: { input: actionInputDigest(enriched), result: resultDigest } })
+        : undefined;
       // Datomic + CAS: record the run as a fact in the ONE store, referencing content by digest (bytes stay outside).
-      await recordRun(runLog, now, { runId, identity, status: run.status, error: undefined, dir: persisted.dir, replay, enriched, resultDigest, receiptsDigest, replayDigest });
+      await recordRun(runLog, now, { runId, identity, status: run.status, error: undefined, dir: persisted.dir, replay, enriched, resultDigest, receiptsDigest, replayDigest, runObjectDigest });
       // ActionCache (LLVM CAS): map this input's CASID -> the result's CASID, so an identical future run can be
       // memoized/deduped and reproduce() has an input->output handle. Only when both a CAS and the store are present.
       if (resultDigest && runLog && enriched) {
@@ -354,7 +366,7 @@ async function runAndPersist(
           /* best-effort memo: never fail a run because the action-cache write failed */
         }
       }
-      const casRefs = cas ? { result: resultDigest, receipts: receiptsDigest, replay: replayDigest } : undefined;
+      const casRefs = cas ? { result: resultDigest, receipts: receiptsDigest, replay: replayDigest, runObject: runObjectDigest } : undefined;
       return { ok: true, runId, operationId: identity, status: run.status, rowCount: result.rows.length, artifacts: persisted.files, casRefs, runDir: persisted.dir };
     } catch (error) {
       // A run that started and failed at runtime persists a failed-run receipt and returns ok:false; the
