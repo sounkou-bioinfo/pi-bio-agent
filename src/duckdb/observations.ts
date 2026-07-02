@@ -189,6 +189,42 @@ export async function monotonicRecordedAt(conn: SqlConn, statementKey: string, n
   return base;
 }
 
+// In-process per-statement_key write serialization (see monotonicRecordedAt's CONCURRENCY note). Two `openBioStore`
+// handles to ONE file coexist in a single process (DuckDB's exclusive-writer lock is cross-PROCESS only), so without
+// this two concurrent callers could each read a slot's latest, both compute the same +1ms, and collide on the
+// hash-arbitrary observation_id tiebreak. Keyed by statement_key: same-slot writes chain (serialize); different slots
+// run in parallel. A rejected write does NOT poison the chain (the tail is normalized to a settled promise), and the
+// map entry is GC'd when the slot goes idle so it can't grow unbounded. Cross-process/host writers are already
+// serialized elsewhere (the file lock / ducknng RPC), so an in-process chain is the whole fix.
+const slotWriteChains = new Map<string, Promise<void>>();
+/** Serialize `fn` against other calls with the SAME `statementKey` in this process (different keys run in parallel).
+ *  For a MULTI-write state transition (e.g. memory remember/forget writes content + link edges + tombstones as one
+ *  revision) wrap the whole body so a concurrent same-slot writer can't interleave. Do NOT nest a same-key
+ *  recordMonotonicObservation inside — it re-acquires this lock and would deadlock; call recordObservation directly. */
+export async function withSlotLock<T>(statementKey: string, fn: () => Promise<T>): Promise<T> {
+  const prev = slotWriteChains.get(statementKey) ?? Promise.resolve();
+  const curr = prev.then(fn, fn); // run after the prior write settles, regardless of its outcome
+  const tail = curr.then(() => {}, () => {}); // normalized settled tail so one failure can't break the chain
+  slotWriteChains.set(statementKey, tail);
+  try {
+    return await curr;
+  } finally {
+    if (slotWriteChains.get(statementKey) === tail) slotWriteChains.delete(statementKey); // GC when we were the last in line
+  }
+}
+
+/** Record a STATE-MACHINE observation whose `recordedAt` must strictly-monotonically supersede the slot's latest —
+ *  the atomic read-then-write that memory/skill/action-cache/run:<id> writers need. Serializes per statement_key in
+ *  this process (concurrent same-slot writers can't race the +1ms advance) and returns the observation id. `sentinel`
+ *  is the slot's reserved far-future bound (writes at/after it fail closed). The caller passes the observation WITHOUT
+ *  `recordedAt`; this computes it under the lock. */
+export async function recordMonotonicObservation(conn: SqlConn, obs: Omit<BioObservationInput, "recordedAt">, now: string, sentinel: string): Promise<string> {
+  return withSlotLock(obs.statementKey, async () => {
+    const at = await monotonicRecordedAt(conn, obs.statementKey, now, sentinel);
+    return recordObservation(conn, { ...obs, recordedAt: at });
+  });
+}
+
 /** Project the EDGE-LIKE latest-as-of statements (`object_id` set) into a `bio_edges`-shaped table, so the SAME
  *  SemanticSQL closure (`materializeEntailedEdges` with a source table) walks the graph as it stood at time t.
  *  Returns the projected edge count. */

@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { duckdbNodeConn } from "../src/duckdb/node-api.js";
 import type { SqlConn } from "../src/core/ports.js";
-import { createBioObservationSchema, recordObservation, observationsAsOf, materializeBioEdgesAsOf, entailedEdgesAsOf } from "../src/duckdb/observations.js";
+import { createBioObservationSchema, recordObservation, recordMonotonicObservation, observationHistory, observationsAsOf, materializeBioEdgesAsOf, entailedEdgesAsOf } from "../src/duckdb/observations.js";
 
 // Phase 4.0a: the append-only temporal provenance-statement store. The load-bearing property is
 // latest-per-statement_key (NOT per triple) — so supersession works even when the OBJECT or the VALUE changes.
@@ -89,5 +89,28 @@ describe("bio_observations: temporal provenance statements, as-of latest-per-sta
     assert.ok(n >= 3, `closure includes the transitive A->C (got ${n} entailed edges)`);
     const reach = await c.all<{ to_id: string }>("SELECT to_id FROM entailed_edge_as_of WHERE from_id='A' AND predicate='rdfs:subClassOf' ORDER BY to_id");
     assert.deepEqual(reach.map((r) => r.to_id), ["B", "C"], "A reaches B AND (transitively) C as of T1");
+  });
+
+  test("recordMonotonicObservation SERIALIZES concurrent same-slot writes — distinct monotonic timestamps, deterministic latest", async () => {
+    const c = await newConn();
+    const key = "slot:concurrent";
+    const N = 25;
+    const sentinel = "9999-12-31T23:59:59.999Z";
+    // fire N writes CONCURRENTLY at the SAME wall-clock instant on ONE shared connection (the exact in-process race:
+    // two handles/callers to one store). Distinct values => N distinct rows; without the per-slot lock they'd read
+    // the same latest and collide on recorded_at (hash-arbitrary tiebreak => a non-deterministic "current").
+    await Promise.all(Array.from({ length: N }, (_, i) =>
+      recordMonotonicObservation(c, { statementKey: key, subjectId: key, predicate: "p", value: { i } }, "2026-01-01T00:00:00.000Z", sentinel),
+    ));
+    const hist = await observationHistory(c, key); // oldest-first
+    assert.equal(hist.length, N, "all N concurrent writes landed as distinct revisions");
+    const times = hist.map((r) => r.recorded_at);
+    assert.equal(new Set(times).size, N, "every revision got a DISTINCT recorded_at — the per-slot lock prevented collisions");
+    for (let i = 1; i < times.length; i++) {
+      assert.ok(Date.parse(times[i]!) > Date.parse(times[i - 1]!), "recorded_at is strictly increasing (monotonic advance held under concurrency)");
+    }
+    // DIFFERENT slots are NOT serialized against each other (the lock is per-key) — they still record fine concurrently
+    await Promise.all(["a", "b", "c"].map((s) => recordMonotonicObservation(c, { statementKey: `slot:${s}`, subjectId: `slot:${s}`, predicate: "p", value: 1 }, "2026-02-01T00:00:00Z", sentinel)));
+    for (const s of ["a", "b", "c"]) assert.equal((await observationHistory(c, `slot:${s}`)).length, 1);
   });
 });

@@ -8,6 +8,7 @@ import {
   liveOutEdgesAsOf,
   recordObservation,
   monotonicRecordedAt,
+  withSlotLock,
   type ObservationRow,
 } from "../duckdb/observations.js";
 
@@ -71,44 +72,50 @@ export async function ensureMemorySchema(conn: SqlConn): Promise<void> {
 export async function remember(conn: SqlConn, note: MemoryContent, wallNow: string, author?: string): Promise<void> {
   await ensureMemorySchema(conn);
   const subject = memorySubjectId(note.slug);
-  const now = await monotonicNow(conn, subject, wallNow); // strictly after the slug's current revision (deterministic latest-wins)
-  // `source` = the authoring agent. It is part of observation IDENTITY, so two agents remembering the same slug
-  // are two attributed rows (both retained); the latest by recorded_at is "current". This is what makes shared
-  // cross-agent memory trustworthy — you always know WHO said it.
-  await recordObservation(conn, {
-    statementKey: subject,
-    subjectId: subject,
-    predicate: CONTENT,
-    value: { kind: note.kind, title: note.title, hook: note.hook, body: note.body, tags: note.tags, ...(note.sources && note.sources.length ? { sources: note.sources } : {}) },
-    recordedAt: now,
-    source: author,
-  });
-  const newKeys = new Set<string>();
-  for (const link of parseStudyNoteLinks({ body: note.body, links: [] })) {
-    const to = memorySubjectId(link.to);
-    const key = `${subject}|${link.predicate}|${to}`;
-    newKeys.add(key);
+  // SERIALIZE the whole revision (content + link edges + dropped-link tombstones) per slug: it is a multi-write state
+  // transition read against the slot's current latest, so a concurrent same-slug remember/forget must not interleave
+  // (see withSlotLock). Inside the lock we call recordObservation directly at the once-computed monotonic `now` —
+  // NOT recordMonotonicObservation (that would re-acquire this same-key lock and deadlock).
+  await withSlotLock(subject, async () => {
+    const now = await monotonicNow(conn, subject, wallNow); // strictly after the slug's current revision (deterministic latest-wins)
+    // `source` = the authoring agent. It is part of observation IDENTITY, so two agents remembering the same slug
+    // are two attributed rows (both retained); the latest by recorded_at is "current". This is what makes shared
+    // cross-agent memory trustworthy — you always know WHO said it.
     await recordObservation(conn, {
-      statementKey: key,
+      statementKey: subject,
       subjectId: subject,
-      predicate: link.predicate,
-      objectId: to, // edge-like -> projects into bio_edges_as_of for a walkable memory graph
+      predicate: CONTENT,
+      value: { kind: note.kind, title: note.title, hook: note.hook, body: note.body, tags: note.tags, ...(note.sources && note.sources.length ? { sources: note.sources } : {}) },
       recordedAt: now,
       source: author,
     });
-  }
-  // RETRACT links that this revision dropped: without a tombstone, a removed [[link]]'s edge observation is never
-  // superseded, so it lingers in bio_edges_as_of forever (a phantom edge). Tombstone (no objectId) every
-  // currently-live edge OUT of this subject that the new revision no longer declares (indexed, no full-table scan).
-  // ONLY reconcile MEMORY's own wikilink edges (statement_key `${subject}|<pred>|<to>`, see the newKeys above) —
-  // NOT every live edge out of the subject. Another subsystem may have recorded an unrelated edge fact from the same
-  // `agent:memory:<slug>` subject (a different statement_key); tombstoning that here would be silent data loss.
-  const memoryEdgePrefix = `${subject}|`;
-  for (const edge of await liveOutEdgesAsOf(conn, subject, MEMORY_NOW)) {
-    if (edge.statement_key.startsWith(memoryEdgePrefix) && !newKeys.has(edge.statement_key)) {
-      await recordObservation(conn, { statementKey: edge.statement_key, subjectId: subject, predicate: edge.predicate, recordedAt: now, source: author });
+    const newKeys = new Set<string>();
+    for (const link of parseStudyNoteLinks({ body: note.body, links: [] })) {
+      const to = memorySubjectId(link.to);
+      const key = `${subject}|${link.predicate}|${to}`;
+      newKeys.add(key);
+      await recordObservation(conn, {
+        statementKey: key,
+        subjectId: subject,
+        predicate: link.predicate,
+        objectId: to, // edge-like -> projects into bio_edges_as_of for a walkable memory graph
+        recordedAt: now,
+        source: author,
+      });
     }
-  }
+    // RETRACT links that this revision dropped: without a tombstone, a removed [[link]]'s edge observation is never
+    // superseded, so it lingers in bio_edges_as_of forever (a phantom edge). Tombstone (no objectId) every
+    // currently-live edge OUT of this subject that the new revision no longer declares (indexed, no full-table scan).
+    // ONLY reconcile MEMORY's own wikilink edges (statement_key `${subject}|<pred>|<to>`, see the newKeys above) —
+    // NOT every live edge out of the subject. Another subsystem may have recorded an unrelated edge fact from the same
+    // `agent:memory:<slug>` subject (a different statement_key); tombstoning that here would be silent data loss.
+    const memoryEdgePrefix = `${subject}|`;
+    for (const edge of await liveOutEdgesAsOf(conn, subject, MEMORY_NOW)) {
+      if (edge.statement_key.startsWith(memoryEdgePrefix) && !newKeys.has(edge.statement_key)) {
+        await recordObservation(conn, { statementKey: edge.statement_key, subjectId: subject, predicate: edge.predicate, recordedAt: now, source: author });
+      }
+    }
+  });
 }
 
 function rowToContent(row: ObservationRow | null): RecalledMemory | null {
@@ -145,15 +152,19 @@ export async function listMemory(conn: SqlConn, asOf: string = MEMORY_NOW): Prom
 export async function forget(conn: SqlConn, slug: string, wallNow: string, author?: string): Promise<void> {
   await ensureMemorySchema(conn);
   const subject = memorySubjectId(slug);
-  const now = await monotonicNow(conn, subject, wallNow); // strictly after the current content so a same-ms remember→forget deterministically forgets
-  await recordObservation(conn, { statementKey: subject, subjectId: subject, predicate: CONTENT, recordedAt: now, source: author });
-  // Also retract the note's OWN link edges (statement_key `${subject}|…`) — otherwise they linger in bio_edges_as_of
-  // as phantom edges out of a forgotten node. Only memory's wikilink edges, NOT an unrelated subsystem's edge fact
-  // from the same subject (that would be silent data loss); same scoping as remember()'s reconciliation.
-  const memoryEdgePrefix = `${subject}|`;
-  for (const edge of await liveOutEdgesAsOf(conn, subject, MEMORY_NOW)) {
-    if (edge.statement_key.startsWith(memoryEdgePrefix)) {
-      await recordObservation(conn, { statementKey: edge.statement_key, subjectId: subject, predicate: edge.predicate, recordedAt: now, source: author });
+  // SERIALIZE the tombstone + edge retractions per slug (same reasoning as remember): a multi-write transition read
+  // against the slot's current latest must not interleave with a concurrent same-slug write.
+  await withSlotLock(subject, async () => {
+    const now = await monotonicNow(conn, subject, wallNow); // strictly after the current content so a same-ms remember→forget deterministically forgets
+    await recordObservation(conn, { statementKey: subject, subjectId: subject, predicate: CONTENT, recordedAt: now, source: author });
+    // Also retract the note's OWN link edges (statement_key `${subject}|…`) — otherwise they linger in bio_edges_as_of
+    // as phantom edges out of a forgotten node. Only memory's wikilink edges, NOT an unrelated subsystem's edge fact
+    // from the same subject (that would be silent data loss); same scoping as remember()'s reconciliation.
+    const memoryEdgePrefix = `${subject}|`;
+    for (const edge of await liveOutEdgesAsOf(conn, subject, MEMORY_NOW)) {
+      if (edge.statement_key.startsWith(memoryEdgePrefix)) {
+        await recordObservation(conn, { statementKey: edge.statement_key, subjectId: subject, predicate: edge.predicate, recordedAt: now, source: author });
+      }
     }
-  }
+  });
 }

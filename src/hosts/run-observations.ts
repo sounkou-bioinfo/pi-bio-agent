@@ -1,5 +1,5 @@
 import type { SqlConn } from "../core/ports.js";
-import { recordObservation, monotonicRecordedAt } from "../duckdb/observations.js";
+import { recordMonotonicObservation } from "../duckdb/observations.js";
 
 const RUN_SLOT_FUTURE = "9999-12-31T23:59:59.999Z"; // sentinel for "the LATEST run:<id> fact regardless of clock"
 
@@ -38,11 +38,11 @@ export interface RunObservation {
 /** Record a run as a `run:<runId>` observation in the shared store, attributed to `author`. Best-effort at the
  *  call site (logging to the ledger must never fail the run itself). */
 export async function recordRunObservation(conn: SqlConn, run: RunObservation, now: string, author?: string): Promise<void> {
-  // strictly-monotonic recordedAt per run:<id> slot: a REUSED runId re-run overwrites its files, so its ledger fact
-  // must SUPERSEDE the prior one (be current) — a backdated `now` (< the existing latest) would otherwise leave the
-  // authoritative run:<id> fact pointing at the STALE prior run's digests while the files are the new run's.
-  const at = await monotonicRecordedAt(conn, `run:${run.runId}`, now, RUN_SLOT_FUTURE);
-  await recordObservation(conn, {
+  // strictly-monotonic recordedAt per run:<id> slot, SERIALIZED per slot: a REUSED runId re-run overwrites its files,
+  // so its ledger fact must SUPERSEDE the prior one (be current) — a backdated `now` (< the existing latest), or a
+  // concurrent re-run racing the +1ms advance, would otherwise leave the authoritative run:<id> fact pointing at the
+  // STALE prior run's digests while the files are the new run's.
+  await recordMonotonicObservation(conn, {
     statementKey: `run:${run.runId}`,
     subjectId: `run:${run.runId}`,
     predicate: "run",
@@ -51,8 +51,7 @@ export async function recordRunObservation(conn: SqlConn, run: RunObservation, n
       runDir: run.runDir, manifestDigest: run.manifestDigest, sourceReceiptDigests: run.sourceReceiptDigests,
       resultDigest: run.resultDigest, receiptsDigest: run.receiptsDigest, replayDigest: run.replayDigest, runObjectDigest: run.runObjectDigest,
     },
-    recordedAt: at,
     source: author,
     digest: run.digest,
-  });
+  }, now, RUN_SLOT_FUTURE);
 }

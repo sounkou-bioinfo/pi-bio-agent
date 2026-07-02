@@ -1,5 +1,5 @@
 import type { SqlConn } from "../core/ports.js";
-import { createBioObservationSchema, observationAsOfKey, observationHistory, recordObservation, monotonicRecordedAt } from "../duckdb/observations.js";
+import { createBioObservationSchema, observationAsOfKey, observationHistory, recordMonotonicObservation } from "../duckdb/observations.js";
 
 // Skills are one of the three memory kinds (skills / facts / notes), so they get the same temporal treatment as
 // memory notes: each `bio_create_skill` is an append-only observation under `skill:<name>` (supersede-by-subject,
@@ -21,18 +21,17 @@ export interface SkillDef {
 export async function recordSkill(conn: SqlConn, def: SkillDef, now: string, author?: string): Promise<void> {
   await createBioObservationSchema(conn, { ifNotExists: true });
   const subject = skillSubjectId(def.name);
-  // strictly-monotonic recordedAt per skill slot: a re-create at the same (or an earlier) ms must still supersede the
-  // prior revision deterministically — the equal-timestamp tiebreak is hash-arbitrary, so without this a re-created
-  // skill could NOT win in the ledger while SKILL.md carries the newer body.
-  const at = await monotonicRecordedAt(conn, subject, now, NOW);
-  await recordObservation(conn, {
+  // strictly-monotonic recordedAt per skill slot, SERIALIZED per slot: a re-create at the same (or earlier) ms — even
+  // from a concurrent caller — must still supersede the prior revision deterministically (the equal-timestamp
+  // tiebreak is hash-arbitrary, so otherwise a re-created skill could NOT win in the ledger while SKILL.md carries the
+  // newer body).
+  await recordMonotonicObservation(conn, {
     statementKey: subject,
     subjectId: subject,
     predicate: SKILL_DEF,
     value: { description: def.description, body: def.body },
-    recordedAt: at,
     source: author,
-  });
+  }, now, NOW);
 }
 
 /** Recall a skill's definition (and its author) AS OF a time (default now). null if it did not exist yet. */
