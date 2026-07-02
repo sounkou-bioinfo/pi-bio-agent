@@ -356,9 +356,12 @@ async function runAndPersist(
     }
     try {
       const { run, result, receipts } = await body(conn);
-      const enriched = replay ? enrichReplay(replay, receipts) : undefined;
+      let enriched = replay ? enrichReplay(replay, receipts) : undefined;
       // result rows -> CAS FIRST (needed to retarget the artifact below); the run:<id> fact references it by digest.
       const resultDigest = await putCas(result.rows);
+      // PIN the result-content digest into the replay, so reproduce() can verify the OUTPUT matched, not just the
+      // sources (only available when a CAS is present — otherwise reproduce falls back to receipt-only checking).
+      if (enriched && resultDigest) enriched = { ...enriched, resultDigest };
       // Files are the legible VIEW (default). result.json/receipts.json/replay.json are skipped in lean mode
       // (serialize:false); run.json is always written — and in lean mode its output artifact points at the CAS URI,
       // not the unwritten result.json.

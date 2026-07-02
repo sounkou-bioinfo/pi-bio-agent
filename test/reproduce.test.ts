@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { runBioQueryFromManifest } from "../src/hosts/run-store.js";
 import { reproduceRun } from "../src/hosts/reproduce.js";
+import { fsCasStore } from "../src/hosts/fs-cas.js";
 import type { RunReplaySpec } from "../src/core/reproducibility.js";
 
 // C2 — reproduce(): re-execute a RunReplaySpec against a fresh db and compare the produced receipts' DETERMINISTIC
@@ -42,9 +43,29 @@ describe("C2: reproduce() compares deterministic receipt content, not wall-clock
     assert.ok(rep.extra.length > 0, "the real produced digests are reported extra");
   });
 
+  test("compares OUTPUT content: a matching result digest -> resultMatched; a tampered one -> matched=false", async () => {
+    const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-repro-cas-"));
+    const cas = fsCasStore(await fs.mkdtemp(join(tmpdir(), "pi-bio-cas-")));
+    const out = await runBioQueryFromManifest({ cwd, dbPath: ":memory:", manifestPath: MANIFEST, sql: SQL, cas, runId: "origc", now: "2026-07-01T00:00:00Z" });
+    assert.equal(out.ok, true);
+    const replay = JSON.parse(await fs.readFile(join((out as { runDir: string }).runDir, "replay.json"), "utf8")) as RunReplaySpec;
+    assert.match(replay.resultDigest ?? "", /^sha256:/, "a CAS-backed run pins the result-content digest");
+
+    const rep = await reproduceRun({ cwd, replay, cas });
+    assert.equal(rep.matched, true);
+    assert.equal(rep.resultMatched, true, "the re-run's result content matched the pinned digest");
+    assert.equal(rep.producedResultDigest, replay.resultDigest);
+
+    // a re-run whose OUTPUT differs from the pin is caught even if receipts match (the 'matches by content' claim)
+    const wrongOutput: RunReplaySpec = { ...replay, resultDigest: "sha256:" + "0".repeat(64) };
+    const drift = await reproduceRun({ cwd, replay: wrongOutput, cas });
+    assert.equal(drift.resultMatched, false, "a different result content is caught");
+    assert.equal(drift.matched, false, "matched=false when the output content drifted, even with matching receipts");
+  });
+
   test("fail closed: a replay with no pinned digests, or no manifest path, refuses (no hollow match)", async () => {
     const { cwd, replay } = await runOnce();
-    await assert.rejects(() => reproduceRun({ cwd, replay: { ...replay, sourceReceiptDigests: [] } }), /no pinned sourceReceiptDigests/);
+    await assert.rejects(() => reproduceRun({ cwd, replay: { ...replay, sourceReceiptDigests: [], resultDigest: undefined } }), /pins neither sourceReceiptDigests nor a resultDigest/);
     await assert.rejects(() => reproduceRun({ cwd, replay: { ...replay, manifest: undefined } }), /no manifest to re-run/);
   });
 });

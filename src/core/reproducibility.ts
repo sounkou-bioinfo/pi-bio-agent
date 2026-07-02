@@ -214,6 +214,9 @@ export interface RunReplaySpec {
   environment?: EnvAttestationSummary;
   /** stable digests of the receipts this run produced — reproduce()'s pin on the exact provenance it should match. */
   sourceReceiptDigests?: string[];
+  /** CAS digest of the run's RESULT rows — reproduce()'s pin on the OUTPUT content, so a re-run that yields a
+   *  different result is caught (not just a changed source). "matches by content" means this, not only receipts. */
+  resultDigest?: string;
 }
 
 /** sha256 over the canonicalized replay spec — a single handle for the whole replayable bundle. */

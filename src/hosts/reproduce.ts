@@ -19,13 +19,17 @@ export interface ReproduceResult {
   kind: RunReplaySpec["kind"];
   /** the re-run completed without a run-level failure. */
   reproduced: boolean;
-  /** produced content digests == expected (as a set). Only meaningful when `reproduced`. */
+  /** receipts AND (if pinned) the result content matched. Only meaningful when `reproduced`. */
   matched: boolean;
   expected: string[];
   produced: string[];
   /** expected but not produced, and produced but not expected — the concrete drift. */
   missing: string[];
   extra: string[];
+  /** OUTPUT-content check: the re-run's result CAS digest vs the pinned one. undefined = not pinned/not checkable. */
+  resultMatched?: boolean;
+  expectedResultDigest?: string;
+  producedResultDigest?: string;
   runDir?: string;
   error?: string;
 }
@@ -45,8 +49,12 @@ function assertReproducible(replay: RunReplaySpec): void {
   if (!replay || replay.schema !== RUN_REPLAY_SPEC_SCHEMA) throw new Error("reproduce: not a valid RunReplaySpec (fail closed)");
   if (!replay.manifest?.path && !replay.manifest?.snapshot) throw new Error("reproduce: replay has no manifest to re-run (fail closed)");
   if (!replay.manifest?.path) throw new Error("reproduce: this slice re-runs from replay.manifest.path (same-host); a snapshot-only replay is not yet supported");
-  if (!Array.isArray(replay.sourceReceiptDigests) || replay.sourceReceiptDigests.length === 0) {
-    throw new Error("reproduce: replay has no pinned sourceReceiptDigests to verify against (fail closed — a hollow 'match' is worse than an honest refusal)");
+  // Verify against SOMETHING: pinned source receipts (provenance) OR a pinned result digest (output content). A
+  // resource-free run (e.g. `SELECT 1`) legitimately has zero receipts but IS reproducible via its resultDigest —
+  // only refuse a truly hollow replay that pins neither (a vacuous 'match' is worse than an honest refusal).
+  const hasReceiptPins = Array.isArray(replay.sourceReceiptDigests) && replay.sourceReceiptDigests.length > 0;
+  if (!hasReceiptPins && !replay.resultDigest) {
+    throw new Error("reproduce: replay pins neither sourceReceiptDigests nor a resultDigest to verify against (fail closed). A resource-free run must carry a resultDigest — run it with a CAS so the output content is pinned.");
   }
 }
 
@@ -72,13 +80,27 @@ export async function reproduceRun(req: ReproduceRequest): Promise<ReproduceResu
   else if (replay.sql) res = await runBioQueryFromManifest({ ...base, sql: replay.sql, resources: replay.resources });
   else throw new Error("reproduce: replay carries neither an operationId nor sql (nothing to re-run)");
 
-  if (!res.ok) return { runId: replay.runId, kind: replay.kind, reproduced: false, matched: false, expected: replay.sourceReceiptDigests!, produced: [], missing: replay.sourceReceiptDigests!, extra: [], runDir: res.runDir, error: res.error };
+  if (!res.ok) { const exp = replay.sourceReceiptDigests ?? []; return { runId: replay.runId, kind: replay.kind, reproduced: false, matched: false, expected: exp, produced: [], missing: exp, extra: [], runDir: res.runDir, error: res.error }; }
 
   const produced = await producedDigests(res.runDir);
-  const expected = replay.sourceReceiptDigests!;
+  const expected = replay.sourceReceiptDigests ?? [];
   const producedSet = new Set(produced);
   const expectedSet = new Set(expected);
   const missing = expected.filter((d) => !producedSet.has(d));
   const extra = produced.filter((d) => !expectedSet.has(d));
-  return { runId: replay.runId, kind: replay.kind, reproduced: true, matched: missing.length === 0 && extra.length === 0, expected, produced, missing, extra, runDir: res.runDir };
+  const receiptsMatched = missing.length === 0 && extra.length === 0;
+  // OUTPUT content: compare the re-run's result CAS digest to the pinned one. This is what makes "re-run matches by
+  // content" TRUE for the actual output — a re-run with identical inputs but a different result is caught here.
+  const expectedResultDigest = replay.resultDigest;
+  const producedResultDigest = res.casRefs?.result;
+  let resultMatched: boolean | undefined;
+  if (expectedResultDigest) {
+    if (!producedResultDigest) throw new Error("reproduce: replay pins a resultDigest but the re-run produced none — pass a `cas` so the result content can be verified (fail closed)");
+    resultMatched = producedResultDigest === expectedResultDigest;
+  }
+  return {
+    runId: replay.runId, kind: replay.kind, reproduced: true,
+    matched: receiptsMatched && (resultMatched ?? true), // BOTH provenance and (when pinned) output content must match
+    expected, produced, missing, extra, resultMatched, expectedResultDigest, producedResultDigest, runDir: res.runDir,
+  };
 }
