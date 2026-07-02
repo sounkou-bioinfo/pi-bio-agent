@@ -160,13 +160,14 @@ They split by whether the consumer is named yet:
 - **Process-op FILE artifacts → CAS is DONE** (Phase 3): a process op's declared `outputs` are captured into
   CAS, content-addressed, and recorded in the receipt (process-artifacts + process-files-only examples).
 
-**These are ONE thing — the coloc flagship unifies them.** The "real pipeline" the artifact transport waits on
-**is** post-GWAS colocalization ([`examples/coloc/`](../examples/coloc/README.md)). Its WALKING SKELETON is
-**built** (multi-tissue `coloc.abf` over Arrow IPC, DATA harmonization + COMPUTE), so the unification is now
-concrete: **thickening** coloc drives the rest — multi-output / file-producing `ColocEngine` runs force the
-`process` artifact transport (#3, Phase-3 remainder), and recording its per-tissue posteriors as time-versioned
-KG facts is Phase-4's `record` (#2). So the deferred items are not speculative — they are **built as coloc
-thickens**, the anti-idealist "a real consumer forces it" rule made literal (the consumer now exists).
+**The coloc flagship is the consumer that unifies them.** Post-GWAS colocalization
+([`examples/coloc/`](../examples/coloc/README.md)) is the real pipeline; its WALKING SKELETON is **built**
+(multi-tissue `coloc.abf` over Arrow IPC, DATA harmonization + COMPUTE). The `process` artifact transport (#3) it
+would have forced is **already built** (declared `outputs` → CAS, files-only ops — see Phase 3 above); what
+remains is to **exercise** it at flagship scale with a multi-output / file-producing `ColocEngine` run, and to
+record its per-tissue posteriors as time-versioned KG facts — Phase-4's `record` (#2), correctly sequenced behind
+Phase 4. So the one genuinely-remaining leftover (#2) is not speculative: it lands **as coloc thickens**, the
+anti-idealist "a real consumer forces it" rule made literal (the consumer now exists).
 
 ```text
 Phase 0 (done)   Flagship walking skeleton: manifest #1, runOperation -> run/result/receipts, host
