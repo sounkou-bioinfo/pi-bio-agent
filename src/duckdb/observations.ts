@@ -147,6 +147,22 @@ export async function observationAsOfKey(conn: SqlConn, statementKey: string, t:
   return rows[0] ?? null;
 }
 
+/** For a STATE-MACHINE slot (a slug's current value — memory notes, skills): advance `now` to strictly AFTER the
+ *  slot's current latest revision so "latest wins" is deterministic even when two writes collide in one millisecond
+ *  (the equal-timestamp tiebreak is hash-arbitrary observation_id). Also fail closed if the write would land at/after
+ *  the reserved far-future `sentinel` (default as-of reads use it, so a write there is invisible / can overflow the
+ *  year on the +1ms advance). Append-only history is preserved — the advance only nudges a colliding write 1ms. */
+export async function monotonicRecordedAt(conn: SqlConn, statementKey: string, now: string, sentinel: string): Promise<string> {
+  const latest = await observationAsOfKey(conn, statementKey, sentinel);
+  const latestMs = latest ? Date.parse(latest.recorded_at) : NaN;
+  const nowMs = Date.parse(now);
+  const base = latest && Number.isFinite(latestMs) && Number.isFinite(nowMs) && nowMs <= latestMs ? new Date(latestMs + 1).toISOString() : now;
+  if (!Number.isFinite(Date.parse(base)) || Date.parse(base) >= Date.parse(sentinel)) {
+    throw new Error(`recordedAt '${base}' must be a real timestamp strictly before the reserved sentinel (${sentinel})`);
+  }
+  return base;
+}
+
 /** Project the EDGE-LIKE latest-as-of statements (`object_id` set) into a `bio_edges`-shaped table, so the SAME
  *  SemanticSQL closure (`materializeEntailedEdges` with a source table) walks the graph as it stood at time t.
  *  Returns the projected edge count. */

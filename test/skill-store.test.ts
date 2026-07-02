@@ -27,4 +27,13 @@ describe("skill-store: skills are temporal + attributed + superseded (like memor
 
     assert.deepEqual((await skillHistory(c, "hpo-grounding")).map((h) => h.author), ["agent:A", "agent:B"]);
   });
+
+  test("a re-create at the SAME millisecond still deterministically supersedes (monotonic recordedAt)", async () => {
+    const c = await conn();
+    const SAME = "2026-01-01T00:00:05Z";
+    await recordSkill(c, { name: "s", description: "d", body: "old" }, SAME, "agent:A");
+    await recordSkill(c, { name: "s", description: "d", body: "new" }, SAME, "agent:B"); // same ms -> must still win
+    assert.equal((await recallSkill(c, "s"))?.body, "new", "the re-create supersedes even at an identical wall-clock time");
+    assert.equal((await skillHistory(c, "s")).length, 2, "both revisions retained (append-only)");
+  });
 });
