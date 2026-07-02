@@ -13,6 +13,7 @@ import { OperationRunError, runOperation, runQuery, type OperationResult } from 
 import type { BioRunRecord } from "../core/run-spec.js";
 import type { BioArtifact } from "../core/types.js";
 import { duckdbNodeConn } from "../duckdb/node-api.js";
+import { sqlReadsOnlyResolvedTables, resolvedBaseTables } from "../duckdb/plan-hermeticity.js";
 import { duckdbFileScanResolver } from "../duckdb/resolvers/duckdb-file-scan.js";
 import { duckdbSqlMaterializeResolver } from "../duckdb/resolvers/duckdb-sql-materialize.js";
 import { duckhtsReadBcfResolver } from "../duckdb/resolvers/duckhts-read-bcf.js";
@@ -532,19 +533,22 @@ async function runAndPersist(
       // a STALE result when the live source changed underneath (the same class as reproduce's not_reproducible). Only
       // content-pinned runs get an input->output mapping that "a hit can never serve stale" actually holds for.
       const hasLiveSource = receipts.some((r) => r.provenance.some((p) => p.notes?.includes("live_source")));
-      // HERMETICITY: the memo is safe only when the input CASID FULLY determines the output. Escape hatches that
-      // bypass receipts: (a) a FILE-backed dbPath carries ambient tables (prior runs / setup) no receipt pins; (b) the
-      // executed SQL (queries AND operations — both set enriched.sql) can read undeclared sources (a FROM-position
-      // table function / replacement scan / remote URI); (c) the host INIT SQL runs before resolution and can ATTACH
-      // a file DB or read a file — its DIGEST is pinned, but the same init SQL over CHANGED external data would reuse
-      // the key. Require :memory: AND no ambient read in the run SQL AND none in the init SQL (nor an ATTACH); else
-      // skip the memo (fail safe: a skipped memo re-runs, a wrong memo serves stale).
-      // The AMBIENT_SQL_READ denylist can be EVADED by a comment or a quoted identifier hiding a table function
-      // (`FROM /*x*/ ST_Read(...)`, `FROM "read_csv_auto"(...)`). We won't try to reason through those, so any SQL
-      // containing a `/* */` or `--` comment or a `"` double-quoted identifier is treated as NON-hermetic and skipped
-      // (fail closed — legitimate simple queries have none). A DuckDB-plan-based proof is the fully-sound future fix.
-      const unproven = (s: string): boolean => AMBIENT_SQL_READ.test(s) || VOLATILE_SQL.test(s) || /\/\*|--|"/.test(s) || /\battach\b/i.test(s);
-      const hermetic = dbPath === ":memory:" && !unproven(enriched?.sql ?? "") && !(initSql ?? []).some(unproven);
+      // HERMETICITY: the memo is safe only when the input CASID FULLY determines the output. The RUN SQL is proven
+      // hermetic by its PHYSICAL PLAN (sqlReadsOnlyResolvedTables) — every data-source leaf must be a base-table scan
+      // of a RESOLVED (receipt-pinned) table or a pure source, NEVER a table function / file reader / replacement
+      // scan. This is un-evadable (comments/quotes/replacement scans all resolve to the same plan operators) and, as a
+      // bonus, memoizes benign queries the old text denylist over-skipped. Volatile scalar functions (random()/now())
+      // don't appear in the physical plan, so they stay a bounded regex. Also require: :memory: (a file-backed db
+      // carries ambient tables no receipt pins) AND the host INIT SQL has no ambient read / ATTACH (it runs before
+      // resolution and can pull in unpinned tables; it isn't a single EXPLAIN-able query, so it keeps the text check).
+      const runSql = enriched?.sql ?? "";
+      const initUnproven = (initSql ?? []).some((s) => AMBIENT_SQL_READ.test(s) || VOLATILE_SQL.test(s) || /\/\*|--|"/.test(s) || /\battach\b/i.test(s));
+      const hermetic =
+        dbPath === ":memory:" &&
+        !VOLATILE_SQL.test(runSql) &&
+        !initUnproven &&
+        runSql !== "" &&
+        (await sqlReadsOnlyResolvedTables(conn, runSql, await resolvedBaseTables(conn)));
       if (resultDigest && runLog && enriched && !hasLiveSource && hermetic) {
         try {
           // key on the ENRICHED replay so the action key is CONTENT-addressed (includes sourceReceiptDigests) —

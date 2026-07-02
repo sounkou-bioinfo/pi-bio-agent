@@ -208,17 +208,18 @@ describe("ActionCache: input CASID -> output CASID (LLVM CAS ActionCache in the 
     assert.equal(await recallRunResult(store, cas, replay), null, "inline read_csv_auto is non-hermetic -> not memoized -> recall MISS");
   });
 
-  test("HERMETICITY: SQL with a quoted identifier / comment is treated as UNPROVEN — NOT memoized (denylist could be evaded there)", async () => {
+  test("HERMETICITY (plan-based): a benign quoted alias / comment IS memoized — the PLAN proves it reads only pinned tables (no text over-skip)", async () => {
     const store = await conn();
     const cas = fsCasStore(await fsp.mkdtemp(join(tmpdir(), "cas-")));
-    // a double-quoted identifier (or a comment) could hide a table function from the denylist (FROM "read_csv_auto"(...)),
-    // so we won't try to reason through it — any SQL containing one is non-hermetic (fail closed). This is a plain
-    // count with a quoted alias: it runs fine but must NOT be memoized.
-    const res = await runBioQueryFromManifest({ cwd: process.cwd(), dbPath: ":memory:", manifestPath: "examples/variant-counts/manifest.json", sql: 'SELECT count(*) AS "n" FROM variants', store, author: "agent:A", cas });
+    // A double-quoted ALIAS and a comment add NO data source; the physical plan proves the query scans only the
+    // resolved `variants` table, so it IS memoized (the old text denylist wrongly skipped anything with a `"` or a
+    // comment). A quoted/commented TABLE FUNCTION still shows as a table-function leaf in the plan -> not memoized
+    // (covered by the read_csv_auto / replacement-scan tests above), so the evasion is closed at the plan, not the text.
+    const res = await runBioQueryFromManifest({ cwd: process.cwd(), dbPath: ":memory:", manifestPath: "examples/variant-counts/manifest.json", sql: 'SELECT count(*) AS "n" /* a comment */ FROM variants', store, author: "agent:A", cas });
     assert.ok(res.ok, res.ok ? "" : `run failed: ${(res as { error?: unknown }).error}`);
     if (!res.ok) return;
     const replay = JSON.parse(await fsp.readFile(join(res.runDir, "replay.json"), "utf8"));
-    assert.equal(await recallRunResult(store, cas, replay), null, "quoted-identifier SQL is unproven -> not memoized");
+    assert.ok(await recallRunResult(store, cas, replay), "a provably-hermetic quoted/commented query is memoized (plan proof, not text)");
   });
 
   test("HERMETICITY: VOLATILE SQL (random()) is NOT memoized — the input CASID does not determine the output", async () => {
