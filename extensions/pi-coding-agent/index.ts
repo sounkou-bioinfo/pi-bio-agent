@@ -6,6 +6,7 @@ import { deriveStudyPlan, normalizeStudySlug, walkMemoryGraph, type StudyArtifac
 import { deleteStudyNote, makeStudyNote, runtimeSkillRoot, runtimeStudyRoot, validateSkillInput, writeProjectSkill, writeStudyNote } from "../../src/hosts/pi-project.js";
 import { defaultDuckDbExtensionCatalog, findDuckDbExtensions } from "../../src/duckdb/extensions.js";
 import { describeBioManifestFromPath, isRunDbOpenError, runBioOperationFromManifest, runBioQueryFromManifest } from "../../src/hosts/run-store.js";
+import type { CasStore } from "../../src/core/cas.js";
 import { bioStorePath, isBioStoreLocked, openBioStore, type BioStore } from "../../src/hosts/bio-store.js";
 import { isAbsolute, resolve } from "node:path";
 import { stat } from "node:fs/promises";
@@ -172,6 +173,9 @@ export interface BioExtensionOptions {
    *  spawn (R/Python/shell) — same explicit, composed-in grant model as `network`. Absent => process.compute fails
    *  closed (unbound). The prompt/tools advertise this capability; without this it could never actually be granted. */
   process?: { runner: ProcessRunner };
+  /** CAS grant: a content-addressed store so `process.compute` can capture declared FILE outputs by digest, and
+   *  runs can serialize result/receipts/replay bytes outside the DB. Absent => file outputs fail closed. */
+  cas?: CasStore;
   /** The authoring agent id stamped on runs/memory this instance records (shared-store attribution). */
   author?: string;
   /** How to open the ONE store. Default: the project-local file (`openBioStore(cwd)`), a process-exclusive writer
@@ -185,6 +189,7 @@ export interface BioExtensionOptions {
 export function createBioExtension(options: BioExtensionOptions = {}): (pi: ExtensionAPI) => void {
   const network = options.network;
   const processGrant = options.process; // the out-of-process compute grant (threaded into runs so process.compute can bind)
+  const cas = options.cas; // the CAS grant (file outputs + byte serialization); absent => file outputs fail closed
   const author = options.author ?? "agent:local";
   const openStore: OpenStore = options.openStore ?? ((cwd) => openBioStore(cwd));
   return function piBioAgentExtension(pi: ExtensionAPI): void {
@@ -246,7 +251,7 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
       // not strip unknown keys. network/signal are host-composed, never agent-supplied.
       const { dbPath, manifestPath, operationId, runId } = params;
       return text(await withRunLog(openStore, ctx.cwd, dbPath, (storeConn) =>
-        runBioOperationFromManifest({ cwd: ctx.cwd, dbPath, manifestPath, operationId, runId, network, process: processGrant, signal, store: storeConn, author })));
+        runBioOperationFromManifest({ cwd: ctx.cwd, dbPath, manifestPath, operationId, runId, network, process: processGrant, cas, signal, store: storeConn, author })));
     },
   });
 
@@ -266,7 +271,7 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
       // Only schema-approved fields (see bio_run_operation): never spread untrusted params into the host runner.
       const { dbPath, manifestPath, sql, resources, bindings, runId } = params;
       return text(await withRunLog(openStore, ctx.cwd, dbPath, (storeConn) =>
-        runBioQueryFromManifest({ cwd: ctx.cwd, dbPath, manifestPath, sql, resources, bindings, runId, network, process: processGrant, signal, store: storeConn, author })));
+        runBioQueryFromManifest({ cwd: ctx.cwd, dbPath, manifestPath, sql, resources, bindings, runId, network, process: processGrant, cas, signal, store: storeConn, author })));
     },
   });
 
