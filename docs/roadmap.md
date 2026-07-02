@@ -132,10 +132,16 @@ branches + the volatile-scalar `ncurl` fix → `ncurl-retry`'s SQL-native recurs
 project into `bio_edges_as_of` (one closure crosses memory→ontology→fact). The agent's tools use it
 (`bio_remember`/`bio_recall`/`bio_list_memory`/`bio_forget`/`bio_walk_memory`, `bio_create_skill` temporal), a legible
 file is a *view*, and a `pi-bio-agent memory list/show/history` CLI reads it. **CAS bytes stay OUTSIDE the DB**: result
-rows → CAS by digest, the `run:<id>` fact references them (`resultDigest`/`sourceReceiptDigests`/`manifestDigest`);
-a content-addressed **ActionCache** (LLVM-style, `src/hosts/action-cache.ts`) maps input CASID → output CASID
-(dedup/memo/reproduce basis). Sharing escalates local file → shared path → ducknng/quack server → CAS, host-gated.
-**Still open:** receipts/replay bytes → CAS + run-files opt-in (`--serialize`); run-as-object-DAG; `kg-sync`/`study-sync` file-notes→graph modules (removed 2026-07-02).
+rows, the full receipts blob, and the replay bundle all → CAS by digest, the `run:<id>` fact + a `casRefs` response
+reference them (`resultDigest`/`receiptsDigest`/`replayDigest`), and **lean mode** (`serialize:false`, requires a
+cas) skips the JSON files entirely. A content-addressed **ActionCache** (LLVM-style, `src/hosts/action-cache.ts`)
+maps input CASID → output CASID; a **run object** (Data + Refs → input/result CASIDs) gives one root
+`runObjectDigest` per run (dedup by hash); `recallRunResult` replays a recorded run's result from CAS with no
+re-execution. Sharing escalates local file → shared path → a **DuckDB server** (ducknng `run_rpc`, exec opt-in; a
+host may alternatively front its own quack server — we dropped quack as *our* transport but own ducknng) → CAS,
+host-gated (the extension's `openStore` seam lets a host inject the server-backed store).
+**All the previously-deferred store items are now built** (receipts/replay→CAS, `--serialize` lean mode,
+run-as-object-DAG, safe memoized recall); the `kg-sync`/`study-sync` file-notes→graph modules were removed.
 Docs are kept honest by **literate generation** (`npm run readme:examples` runs the manifest; `check:examples`
 fails on drift). The items below are **not partial/owed work** and sandboxing/effect-limits are
 the **host's** job, never ours. They are also where the irreducibly **human** parts cluster (judgment, approval,

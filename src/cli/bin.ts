@@ -3,8 +3,8 @@ import { mainMemory } from "./memory.js";
 import { mainRun } from "./run.js";
 
 /**
- * Thin process wrapper around the testable CLI engines. Each engine takes injected deps (out/err sinks, and for
- * `notes` a connection-factory) and returns an exit code; this file is the only place that touches the real
+ * Thin process wrapper around the testable CLI engines. Each engine takes injected deps (out/err sinks) and
+ * returns an exit code; this file is the only place that touches the real
  * DuckDB driver, process argv/cwd, stdout, and process.exit. Groups:
  *   query / run   — run a manifest's ad-hoc SQL or a declared operation (the substrate's value, provider-agnostic)
  *   memory        — read the temporal memory store (list / show / history, as-of)

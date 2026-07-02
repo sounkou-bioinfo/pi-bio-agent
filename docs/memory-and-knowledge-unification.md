@@ -11,9 +11,9 @@ Notes on what a coding agent's file-based memory system teaches us, and a propos
 unify `pi-bio-agent`'s currently-separate memory representations under one knowledge-unit
 abstraction.
 
-The **core is now IMPLEMENTED** (2026-07-02) — see [Implemented: temporal memory in one
-store](#implemented-2026-07-02-temporal-memory-in-one-store) below. The remaining thread is the agent-tool rewire
-onto it. The rest of this document remains the design rationale it sharpens, alongside
+This is now **IMPLEMENTED** (2026-07-02) — see [Implemented: temporal memory in one
+store](#implemented-2026-07-02-temporal-memory-in-one-store) below (the store, the agent-tool rewire + rename, and
+temporal skills are all done). The rest of this document remains the design rationale it sharpens, alongside
 [`abstraction-derivation.md`](./abstraction-derivation.md) and the storage/skill items in
 [`refinments.md`](./refinments.md).
 
@@ -241,9 +241,10 @@ and returns the persisted note plus a `created` flag.
 
 ## KG-ingest adapter (effectful, gated — implemented)
 
-The pure projection (`studyNoteGraph`) hands off to `syncStudyNoteGraph` in
-`src/duckdb/kg-sync.ts`. It is the first **effectful** surface, kept policy-explicit per
-`design.md`. The sync writes through the one execution port, `SqlConn` (`all`/`run`, declared in
+(HISTORICAL — `kg-sync.ts` / `study-sync.ts` were REMOVED 2026-07-02; memory is now the temporal store. The
+following describes the retired file-notes→graph design.) The pure projection (`studyNoteGraph`) handed off to
+`syncStudyNoteGraph` in `src/duckdb/kg-sync.ts`. It was the first **effectful** surface, kept policy-explicit per
+`design.md`. The sync wrote through the one execution port, `SqlConn` (`all`/`run`, declared in
 `src/core/ports.ts` and shared with the operation runner), so the sync logic stays testable (fake
 port) and injectable (a host passes its own connection); the concrete `@duckdb/node-api` binding is
 a separate file (see below).

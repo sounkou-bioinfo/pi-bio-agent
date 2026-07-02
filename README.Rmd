@@ -265,24 +265,13 @@ pi install git:github.com/sounkou-bioinfo/pi-bio-agent
 
 ## Pi tools
 
-This list is generated from the extension's `registerTool()` calls (`npm run readme`); `npm run check`
-fails if it is stale.
+The `pi-coding-agent` extension registers, over this substrate: `bio_query` / `bio_run_operation` (run a
+manifest's ad-hoc SQL or a declared operation), `bio_describe_model` (learn a manifest or the global model),
+`bio_list_duckdb_extensions`, `bio_validate_select`, the temporal-memory tools `bio_remember` / `bio_recall` /
+`bio_list_memory` / `bio_forget` / `bio_walk_memory` (append-only, as-of, attributed — see the demonstration
+above), `bio_study_plan`, and `bio_create_skill`.
 
-<!-- BEGIN GENERATED:tools (scripts/generate-readme.mjs — do not edit by hand) -->
-- `bio_create_skill` — Create bio skill
-- `bio_forget` — Delete bio study note
-- `bio_describe_model` — Describe Pi Bio model
-- `bio_list_duckdb_extensions` — List bio DuckDB extensions
-- `bio_list_memory` — List bio study notes
-- `bio_query` — Run an ad-hoc bio query
-- `bio_recall` — Read bio study note
-- `bio_run_operation` — Run a bio operation
-- `bio_study_plan` — Plan bio study
-- `bio_validate_select` — Validate bio SQL SELECT
-- `bio_remember` — Write bio study note
-<!-- END GENERATED:tools -->
-
-Generated project-local skills and study notes live under `.pi/bio-agent/` in the current project.
+Project-local skills and the memory store live under `.pi/bio-agent/` in the current project.
 
 ## CLI
 

@@ -77,6 +77,9 @@ async function memoryIndexBlock(open: OpenStore, cwd: string): Promise<string> {
 //      hard dependency of the query. A genuinely broken store still surfaces on the next memory op (withStore).
 async function openRunLog(open: OpenStore, cwd: string, dbPath: string): Promise<BioStore | undefined> {
   const runDb = dbPath === ":memory:" ? "" : isAbsolute(dbPath) ? dbPath : resolve(cwd, dbPath);
+  // (1) covers the DEFAULT local-file store path. A host that injects a CUSTOM file-backed openStore must not run
+  // queries against that same file (we can't see the injected store's path here); a server-backed store (the
+  // intended concurrency answer) has no such conflict. `open()` throwing on a lock is still caught below.
   if (runDb && runDb === bioStorePath(cwd)) return undefined; // (1) the run uses the store file itself
   try {
     return await open(cwd);
