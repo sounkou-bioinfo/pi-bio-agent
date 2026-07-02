@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { duckdbNodeConn } from "../src/duckdb/node-api.js";
 import type { SqlConn } from "../src/core/ports.js";
-import { createBioObservationSchema, recordObservation, recordMonotonicObservation, observationHistory, observationsAsOf, materializeBioEdgesAsOf, entailedEdgesAsOf } from "../src/duckdb/observations.js";
+import { createBioObservationSchema, recordObservation, recordMonotonicObservation, insertObservationIfSlotMax, observationHistory, observationsAsOf, materializeBioEdgesAsOf, entailedEdgesAsOf } from "../src/duckdb/observations.js";
 
 // Phase 4.0a: the append-only temporal provenance-statement store. The load-bearing property is
 // latest-per-statement_key (NOT per triple) — so supersession works even when the OBJECT or the VALUE changes.
@@ -112,5 +112,24 @@ describe("bio_observations: temporal provenance statements, as-of latest-per-sta
     // DIFFERENT slots are NOT serialized against each other (the lock is per-key) — they still record fine concurrently
     await Promise.all(["a", "b", "c"].map((s) => recordMonotonicObservation(c, { statementKey: `slot:${s}`, subjectId: `slot:${s}`, predicate: "p", value: 1 }, "2026-02-01T00:00:00Z", sentinel)));
     for (const s of ["a", "b", "c"]) assert.equal((await observationHistory(c, `slot:${s}`)).length, 1);
+  });
+
+  test("insertObservationIfSlotMax is the cross-process CAS primitive: refuses a stale/equal/backdated timestamp, accepts a strictly-later one", async () => {
+    const c = await newConn();
+    const key = "slot:cas";
+    const T = "2026-03-01T00:00:00.000Z";
+    assert.equal((await insertObservationIfSlotMax(c, { statementKey: key, subjectId: key, predicate: "p", value: 1, recordedAt: T })).inserted, true);
+    // A would-be concurrent writer that read the SAME stale latest and computed the SAME timestamp is REFUSED — this
+    // is the tie the in-process lock can't prevent across PROCESSES; the DB precondition (one atomic statement) does.
+    assert.equal((await insertObservationIfSlotMax(c, { statementKey: key, subjectId: key, predicate: "p", value: 2, recordedAt: T })).inserted, false, "insert AT the current max is refused (no tie)");
+    // ...and a backdated timestamp below the max is refused too.
+    assert.equal((await insertObservationIfSlotMax(c, { statementKey: key, subjectId: key, predicate: "p", value: 3, recordedAt: "2026-02-01T00:00:00.000Z" })).inserted, false, "backdated insert below the max is refused");
+    // A strictly-later timestamp (what the refused writer recomputes on retry) commits.
+    assert.equal((await insertObservationIfSlotMax(c, { statementKey: key, subjectId: key, predicate: "p", value: 2, recordedAt: "2026-03-01T00:00:00.001Z" })).inserted, true, "strictly-later timestamp commits");
+    // A DIFFERENT slot at the same instant is unaffected (the guard is per statement_key).
+    assert.equal((await insertObservationIfSlotMax(c, { statementKey: "slot:other", subjectId: "slot:other", predicate: "p", value: 1, recordedAt: T })).inserted, true);
+    const hist = await observationHistory(c, key); // exactly 2 revisions, strictly ordered
+    assert.equal(hist.length, 2);
+    assert.ok(Date.parse(hist[1]!.recorded_at) > Date.parse(hist[0]!.recorded_at));
   });
 });

@@ -16,6 +16,9 @@ import { materializeEntailedEdges } from "./graph-closure.js";
 // object) would be wrong — so each row names the slot it supersedes, and as-of is latest-per-statement_key.
 
 const TABLE = "bio_observations";
+// Retry ceiling for the monotonic compare-and-set under cross-process contention (each attempt re-reads the slot's
+// latest and picks a strictly-later timestamp). Bounded so pathological contention fails loudly, not forever.
+const MONOTONIC_MAX_ATTEMPTS = 16;
 const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 export interface BioObservationInput {
@@ -87,6 +90,38 @@ export async function recordObservation(conn: SqlConn, obs: BioObservationInput)
       obs.source ?? null, obs.digest ?? null, obs.attrs ? JSON.stringify(obs.attrs) : null, obs.trust ? JSON.stringify(obs.trust) : null],
   );
   return id;
+}
+
+/**
+ * COMPARE-AND-SET insert: record `obs` (which carries an explicit `recordedAt`) ONLY IF that timestamp is still
+ * strictly the maximum for its `statement_key` — i.e. no row for the slot exists at `recorded_at >= obs.recordedAt`.
+ * Returns true if the row was inserted, false if the precondition failed (a concurrent writer already advanced the
+ * slot to/at-or-past that instant). The whole check-and-insert is ONE statement, so on a serialized DuckDB lane —
+ * including a shared ducknng RPC server, which processes each statement atomically — it is the atomic primitive that
+ * makes a monotonic read-modify-write LINEARIZABLE across processes, where an in-process lock cannot reach.
+ * Returns `{ id, inserted }`.
+ */
+export async function insertObservationIfSlotMax(conn: SqlConn, obs: BioObservationInput): Promise<{ id: string; inserted: boolean }> {
+  if (!obs.statementKey || !obs.subjectId || !obs.predicate || !obs.recordedAt) {
+    throw new Error("insertObservationIfSlotMax: statementKey, subjectId, predicate, recordedAt are all required");
+  }
+  try {
+    await conn.all(`SELECT ?::TIMESTAMPTZ, ?::TIMESTAMPTZ, ?::TIMESTAMPTZ`, [obs.recordedAt, obs.validFrom ?? null, obs.validTo ?? null]);
+  } catch {
+    throw new Error(`insertObservationIfSlotMax: recordedAt='${obs.recordedAt}' must be a DuckDB-castable TIMESTAMPTZ`);
+  }
+  const id = obs.observationId ?? observationId(obs);
+  const rows = await conn.all<{ observation_id: string }>(
+    `INSERT INTO ${TABLE} (observation_id, statement_key, subject_id, predicate, object_id, value_json, recorded_at, valid_from, valid_to, source, digest, attrs, trust)
+     SELECT ?, ?, ?, ?, ?, ?::JSON, ?, ?, ?, ?, ?, ?::JSON, ?::JSON
+     WHERE NOT EXISTS (SELECT 1 FROM ${TABLE} WHERE statement_key = ? AND recorded_at::TIMESTAMPTZ >= ?::TIMESTAMPTZ)
+     RETURNING observation_id`,
+    [id, obs.statementKey, obs.subjectId, obs.predicate, obs.objectId ?? null,
+      obs.value === undefined ? null : JSON.stringify(obs.value), obs.recordedAt, obs.validFrom ?? null, obs.validTo ?? null,
+      obs.source ?? null, obs.digest ?? null, obs.attrs ? JSON.stringify(obs.attrs) : null, obs.trust ? JSON.stringify(obs.trust) : null,
+      obs.statementKey, obs.recordedAt],
+  );
+  return { id, inserted: rows.length > 0 };
 }
 
 export interface ObservationRow {
@@ -257,9 +292,22 @@ export async function inTransaction<T>(conn: SqlConn, fn: () => Promise<T>): Pro
  *  is the slot's reserved far-future bound (writes at/after it fail closed). The caller passes the observation WITHOUT
  *  `recordedAt`; this computes it under the lock. */
 export async function recordMonotonicObservation(conn: SqlConn, obs: Omit<BioObservationInput, "recordedAt">, now: string, sentinel: string): Promise<string> {
+  // withSlotLock serializes same-slot writers WITHIN this process (so the +1ms advance can't race between two
+  // in-process connections); the guarded compare-and-set insert then makes the advance atomic at the DATABASE, so
+  // the read-modify-write is LINEARIZABLE even across PROCESSES (a shared ducknng RPC server) where the lock can't
+  // reach. In-process the lock means the CAS precondition never fails (one attempt); across processes a concurrent
+  // advance fails the precondition and we re-read + retry with a strictly-later timestamp.
   return withSlotLock(obs.statementKey, async () => {
-    const at = await monotonicRecordedAt(conn, obs.statementKey, now, sentinel);
-    return recordObservation(conn, { ...obs, recordedAt: at });
+    for (let attempt = 0; attempt < MONOTONIC_MAX_ATTEMPTS; attempt++) {
+      const at = await monotonicRecordedAt(conn, obs.statementKey, now, sentinel);
+      const { id, inserted } = await insertObservationIfSlotMax(conn, { ...obs, recordedAt: at });
+      if (inserted) return id;
+      // Precondition failed: EITHER this exact observation already exists (idempotent no-op → return it), OR a
+      // concurrent writer advanced the slot past `at` (re-read the new latest and retry with a later timestamp).
+      const dup = await conn.all(`SELECT 1 FROM ${TABLE} WHERE observation_id = ? LIMIT 1`, [id]);
+      if (dup.length > 0) return id;
+    }
+    throw new Error(`recordMonotonicObservation: too many concurrent write conflicts on '${obs.statementKey}' (${MONOTONIC_MAX_ATTEMPTS} attempts)`);
   });
 }
 
