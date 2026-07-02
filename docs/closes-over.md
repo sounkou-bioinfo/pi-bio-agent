@@ -29,8 +29,10 @@ coordination pattern:
 
 Multi-agent coordination is therefore transport, not a framework — and status/results flow back into the shared
 SQL ledger, so the coordination is *inspectable data*, not opaque runtime state. Each demo spawns real separate OS
-processes and carries a recorded run in its sibling `.md`. Every NNG protocol is reachable the same way
-(`open_socket(<proto>)` → `listen`/`dial` → `send`/`recv_aio` + `aio_collect`); see the [design notes](./design.md).
+processes and carries a recorded run in its sibling `.md`. Every NNG protocol is **reachable** the same way
+(`open_socket(<proto>)` → `listen`/`dial` → `send`/`recv_aio` + `aio_collect`) — verified end to end, incl. a bus
+round-trip — though not all are yet packaged as a demo (the bus *mesh* demo is pending, per the table above). See
+the [design notes](./design.md).
 
 **Reach: authenticated HTTP, MCP, and streaming.** ducknng's HTTP side (`ncurl_table` / `ncurl_aio`) takes
 **host-provided headers**, so the network leg reaches anything HTTP-shaped *as SQL* while auth stays host-owned:

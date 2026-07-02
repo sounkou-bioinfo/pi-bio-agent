@@ -272,15 +272,15 @@ pi-bio-agent query examples/connectors/clinvar-region.json \
 ``` json
 {
   "ok": true,
-  "runId": "query-1782969642485-b48b15eb",
+  "runId": "query-1782970585759-5f0a4814",
   "status": "succeeded",
   "rowCount": 8,
   "artifacts": {
-    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782969642485-b48b15eb/run.json",
-    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782969642485-b48b15eb/result.json",
-    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782969642485-b48b15eb/receipts.json"
+    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782970585759-5f0a4814/run.json",
+    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782970585759-5f0a4814/result.json",
+    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782970585759-5f0a4814/receipts.json"
   },
-  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782969642485-b48b15eb",
+  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782970585759-5f0a4814",
   "rows": [
     {
       "clinical_significance": "Pathogenic",
@@ -330,15 +330,15 @@ pi-bio-agent query examples/variant-counts/manifest.json \
 ``` json
 {
   "ok": true,
-  "runId": "query-1782969644827-0095fd67",
+  "runId": "query-1782970588381-9c74490f",
   "status": "succeeded",
   "rowCount": 3,
   "artifacts": {
-    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782969644827-0095fd67/run.json",
-    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782969644827-0095fd67/result.json",
-    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782969644827-0095fd67/receipts.json"
+    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782970588381-9c74490f/run.json",
+    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782970588381-9c74490f/result.json",
+    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782970588381-9c74490f/receipts.json"
   },
-  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782969644827-0095fd67",
+  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782970588381-9c74490f",
   "rows": [
     {
       "consequence": "missense",
@@ -373,20 +373,20 @@ pi-bio-agent query examples/run-ledger/manifest.json \
 ``` json
 {
   "ok": true,
-  "runId": "query-1782969644917-51aef2d1",
+  "runId": "query-1782970588482-60a6d68d",
   "status": "succeeded",
   "rowCount": 4,
   "artifacts": {
-    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782969644917-51aef2d1/run.json",
-    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782969644917-51aef2d1/result.json",
-    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782969644917-51aef2d1/receipts.json"
+    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782970588482-60a6d68d/run.json",
+    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782970588482-60a6d68d/result.json",
+    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782970588482-60a6d68d/receipts.json"
   },
-  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782969644917-51aef2d1",
+  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782970588482-60a6d68d",
   "rows": [
     {
       "tool": "ad-hoc.query",
       "status": "succeeded",
-      "runs": 756,
+      "runs": 793,
       "first_run": {
         "micros": 1782757322953000
       }
@@ -447,15 +447,15 @@ pi-bio-agent query examples/connectors/uniprot.json \
 ``` json
 {
   "ok": true,
-  "runId": "query-1782969645100-81b0632a",
+  "runId": "query-1782970588669-c1093a96",
   "status": "succeeded",
   "rowCount": 1,
   "artifacts": {
-    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782969645100-81b0632a/run.json",
-    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782969645100-81b0632a/result.json",
-    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782969645100-81b0632a/receipts.json"
+    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782970588669-c1093a96/run.json",
+    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782970588669-c1093a96/result.json",
+    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782970588669-c1093a96/receipts.json"
   },
-  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782969645100-81b0632a",
+  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782970588669-c1093a96",
   "rows": [
     {
       "primaryAccession": "P04637",

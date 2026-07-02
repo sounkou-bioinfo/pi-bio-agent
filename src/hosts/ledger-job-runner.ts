@@ -44,12 +44,13 @@ export function ledgerJobRunner(conn: SqlConn, dispatch: JobDispatch): JobRunner
       const st = await readStatus(runId);
       if (!st || !isTerminal(st.phase)) return null; // not done yet
       if (st.phase === "cancelled") return { runId, phase: "cancelled" };
-      // a terminal worker (or collectAndRecordBioJob for a local runner) records a result ENVELOPE
-      // {result?, artifacts?, error?} in this slot; tolerate a bare result handle too (a legacy worker that wrote
-      // just the result). So the result of a job run on ANY runner is durable and readable here after a restart.
+      // collectAndRecordBioJob records a SCHEMA-TAGGED result envelope {schema, result?, artifacts?, error?} here;
+      // a distributed worker may instead write a BARE result value. The schema tag is the unambiguous discriminator
+      // (a bare result that happens to be `{result: …}` or `{error: …}` is NOT mistaken for an envelope). So the
+      // result of a job run on ANY runner is durable and readable here after a restart.
       const row = await observationAsOfKey(conn, resultSlot(runId), FUTURE);
       const rv = row?.value_json != null ? (JSON.parse(row.value_json) as unknown) : undefined;
-      const env = rv != null && typeof rv === "object" && ("result" in rv || "artifacts" in rv || "error" in rv)
+      const env = rv != null && typeof rv === "object" && (rv as { schema?: unknown }).schema === "pi-bio.job_result.v1"
         ? (rv as { result?: JobResult["result"]; artifacts?: JobResult["artifacts"]; error?: string })
         : { result: rv as JobResult["result"] };
       if (st.phase === "failed") return { runId, phase: "failed", error: env.error ?? st.message ?? "job failed" };

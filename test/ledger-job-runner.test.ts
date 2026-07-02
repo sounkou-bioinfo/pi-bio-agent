@@ -70,6 +70,21 @@ describe("ledgerJobRunner: distributed JobRunner whose status is data in the sha
     assert.deepEqual(rows, ["running"], "only the worker's 'running' row exists — no queued regression at the later submit time");
   });
 
+  test("a bare result that LOOKS like an envelope ({result:…}) is not misread — only the schema-tagged envelope is", async () => {
+    const conn = await setup();
+    // a worker writes succeeded + a BARE result value that happens to be an object with a `result` key
+    const bareResult = { result: "this is the actual answer", note: "not an envelope" };
+    const dispatch: JobDispatch = async (spec) => {
+      const rec = (slot: string, value: unknown, at: string) => recordObservation(conn, { statementKey: slot, subjectId: `job:${spec.runId}`, predicate: "job_status", value, recordedAt: at, source: "worker" });
+      await rec(`job:${spec.runId}:status`, "succeeded", "2026-07-01T00:00:03Z");
+      await recordObservation(conn, { statementKey: `job:${spec.runId}:result`, subjectId: `job:${spec.runId}`, predicate: "job_result", value: bareResult, recordedAt: "2026-07-01T00:00:03Z", source: "worker" });
+    };
+    const runner = ledgerJobRunner(conn, dispatch);
+    await runner.submit({ runId: "b1", replay: replay("b1") });
+    const res = await runner.collect("b1");
+    assert.deepEqual(res!.result, bareResult, "the whole bare value is the result — NOT reinterpreted as an envelope's .result");
+  });
+
   test("fail closed: submit rejects a replay whose runId does not match", async () => {
     const conn = await setup();
     const runner = ledgerJobRunner(conn, async () => {});

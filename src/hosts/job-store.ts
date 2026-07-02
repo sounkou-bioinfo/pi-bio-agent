@@ -212,7 +212,9 @@ export async function collectAndRecordBioJob(conn: SqlConn, runner: JobRunner, r
     await recordPhase(conn, req.runId, { phase: res.phase, message: res.error }, req.now, req.source ?? "job-store", rec.replayDigest);
     await persistJob(req.cwd, { ...rec, phase: res.phase, updatedAt: req.now });
   }
-  const envelope: { result?: JobResult["result"]; artifacts?: JobResult["artifacts"]; error?: string } = {};
+  // TAG the envelope so the reader can never mistake a bare result value (which may itself be an object with a
+  // `result`/`error` key) for an envelope — the schema marker is the unambiguous discriminator.
+  const envelope: { schema: "pi-bio.job_result.v1"; result?: JobResult["result"]; artifacts?: JobResult["artifacts"]; error?: string } = { schema: "pi-bio.job_result.v1" };
   if (res.result !== undefined) envelope.result = res.result;
   if (res.artifacts !== undefined) envelope.artifacts = res.artifacts;
   if (res.error !== undefined) envelope.error = res.error;
