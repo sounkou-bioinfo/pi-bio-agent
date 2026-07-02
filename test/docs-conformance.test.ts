@@ -11,6 +11,7 @@ import { join, relative } from "node:path";
 
 const ROOT = process.cwd(); // `node --test` runs from the repo root
 const docFiles = [
+  "README.Rmd", // the SOURCE (README.md is rendered from it) — forbid tokens here so a re-render can't reintroduce them
   "README.md",
   ...readdirSync(join(ROOT, "docs")).filter((f) => f.endsWith(".md")).map((f) => join("docs", f)),
 ];
