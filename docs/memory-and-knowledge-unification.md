@@ -160,8 +160,10 @@ hook and no provenance; neither projects into the KG the repo already designed.
 
 6. **Hygiene is a feature: upsert and delete.** `writeStudyNote` used to mint a new uuid file
    per write, so the store only grew and silently duplicated; it now **upserts by slug**
-   (preserving the prior `id`/`createdAt`) with an explicit `deleteStudyNote` path. (Note-level *supersede*
-   is deliberately excluded — see decision 1 below; it belongs on KG facts, not notes.)
+   (preserving the prior `id`/`createdAt`) with an explicit `deleteStudyNote` path. (This is the FILE view;
+   the source of truth is the append-only ledger, where a re-write **supersedes** the slot and every prior
+   revision is retained — see the temporal store above. An earlier draft deliberately excluded note-level
+   supersession; that decision was reversed when memory moved into `bio_observations`.)
 
 7. **Two axes, not one overloaded enum.** Memory `type` is *role* (user / feedback /
    project / reference — about-what). `StudyArtifactKind` is *form* (cheatsheet /

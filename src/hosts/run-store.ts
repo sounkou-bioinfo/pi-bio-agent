@@ -79,6 +79,11 @@ export function runsRoot(cwd: string): string {
 // a job/replay id accepted there MUST persist/execute/reproduce here.
 const RUN_DIR_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 
+// DuckDB ambient-source readers / remote URIs that pull data NOT captured by a resolver receipt — their presence in
+// ad-hoc SQL makes a run NON-HERMETIC, so it must not be memoized in the ActionCache (a hit could serve stale bytes).
+// Conservative denylist: a false match only over-skips memoization (re-run), a miss would over-memoize (unsafe).
+const AMBIENT_SQL_READ = /\b(read_csv(_auto)?|read_parquet|parquet_scan|read_json(_auto)?|read_ndjson|read_text|read_blob|sniff_csv|glob|iceberg_scan|delta_scan)\s*\(|'(https?|s3|gs|gcs|az|azure|r2|hf):/i;
+
 /** Resolve a run's directory, refusing a runId that could escape runsRoot. Centralized so every persistence
  *  path (and the host runner) is path-safe, including the exported persist* helpers called directly. */
 function runDir(cwd: string, runId: string): string {
@@ -452,7 +457,15 @@ async function runAndPersist(
       // a STALE result when the live source changed underneath (the same class as reproduce's not_reproducible). Only
       // content-pinned runs get an input->output mapping that "a hit can never serve stale" actually holds for.
       const hasLiveSource = receipts.some((r) => r.provenance.some((p) => p.notes?.includes("live_source")));
-      if (resultDigest && runLog && enriched && !hasLiveSource) {
+      // HERMETICITY: the memo is safe only when the input CASID FULLY determines the output. Two escape hatches bypass
+      // receipts: (a) a FILE-backed dbPath carries ambient tables (from prior runs / setup) that no receipt pins, and
+      // (b) ad-hoc SQL can read undeclared sources INLINE (read_csv_auto/read_parquet/remote URIs) that leave no
+      // receipt. Either makes the CASID blind to real inputs, so a future hit could serve a stale result. Require
+      // :memory: AND — for the ad-hoc SQL path — no ambient-reader construct in the SQL; else skip the memo (fail
+      // safe: a skipped memo just re-runs, a wrong memo serves stale). (An operation's manifest-authored SQL is not
+      // scanned here — a lower-risk residue than agent-written ad-hoc SQL; declared resolvers already mark live_source.)
+      const hermetic = dbPath === ":memory:" && !AMBIENT_SQL_READ.test(enriched?.sql ?? "");
+      if (resultDigest && runLog && enriched && !hasLiveSource && hermetic) {
         try {
           // key on the ENRICHED replay so the action key is CONTENT-addressed (includes sourceReceiptDigests) —
           // a changed source yields a different key, so a future memoized hit can never serve a stale result.

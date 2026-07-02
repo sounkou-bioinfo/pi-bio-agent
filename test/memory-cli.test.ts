@@ -33,7 +33,11 @@ describe("memory CLI over the ONE temporal store (replaces the stale notes CLI)"
     assert.equal(JSON.parse(out.lines.at(-1)!).title, "ACMG v1"); // as-of the first revision
 
     assert.equal(await mainMemory(["history", "acmg"], deps), 0);
-    assert.deepEqual(JSON.parse(out.lines.at(-1)!).revisions.map((r: { author: string }) => r.author), ["agent:A", "agent:B"]);
+    const hist = JSON.parse(out.lines.at(-1)!).revisions as Array<{ author: string; content: { title: string; body: string } | null }>;
+    assert.deepEqual(hist.map((r) => r.author), ["agent:A", "agent:B"]);
+    // history shows the FULL content per revision, so WHAT changed (body/title) is visible, not just the author/time
+    assert.deepEqual(hist.map((r) => r.content?.body), ["PVS1", "PVS1 refined"]);
+    assert.equal(hist[1]!.content?.title, "ACMG v2");
 
     // history HONORS --as-of: at a time between the two revisions, only the first (agent:A @ T1) is visible
     assert.equal(await mainMemory(["history", "acmg", "--as-of", "2026-01-01T00:00:02Z"], deps), 0);

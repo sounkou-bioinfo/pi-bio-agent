@@ -161,6 +161,34 @@ describe("ActionCache: input CASID -> output CASID (LLVM CAS ActionCache in the 
     assert.equal(await recallRunResult(store, cas, replay), null, "a live-source run is a recall MISS (re-run, never serve a stale cached result)");
   });
 
+  test("HERMETICITY: a FILE-backed dbPath run is NOT memoized (ambient tables aren't receipt-pinned) — recall misses", async () => {
+    const store = await conn();
+    const cas = fsCasStore(await fsp.mkdtemp(join(tmpdir(), "cas-")));
+    const dbFile = join(await fsp.mkdtemp(join(tmpdir(), "db-")), "run.duckdb");
+    const res = await runBioQueryFromManifest({ cwd: process.cwd(), dbPath: dbFile, manifestPath: "examples/variant-counts/manifest.json", sql: "SELECT count(*) AS n FROM variants", store, author: "agent:A", cas });
+    assert.ok(res.ok, res.ok ? "" : `run failed: ${(res as { error?: unknown }).error}`);
+    if (!res.ok) return;
+    const replay = JSON.parse(await fsp.readFile(join(res.runDir, "replay.json"), "utf8"));
+    assert.equal(await recallRunResult(store, cas, replay), null, "a file-backed-db run is non-hermetic -> not memoized -> recall MISS");
+  });
+
+  test("HERMETICITY: ad-hoc SQL with an inline ambient reader (read_csv_auto) is NOT memoized — recall misses", async () => {
+    const store = await conn();
+    const cas = fsCasStore(await fsp.mkdtemp(join(tmpdir(), "cas-")));
+    const cwd = await fsp.mkdtemp(join(tmpdir(), "pi-bio-ambient-"));
+    const csv = join(cwd, "d.csv").replace(/\\/g, "/");
+    await fsp.writeFile(csv, "x\n1\n2\n");
+    const manifest = { schema: "pi-bio.manifest.v1", id: "m", version: "0.1.0", title: "m", description: "m", provides: {} };
+    const mpath = join(cwd, "manifest.json");
+    await fsp.writeFile(mpath, JSON.stringify(manifest));
+    // :memory:, no declared resources — but the agent SQL reads a file INLINE, bypassing any receipt.
+    const res = await runBioQueryFromManifest({ cwd, dbPath: ":memory:", manifestPath: mpath, sql: `SELECT count(*) AS n FROM read_csv_auto('${csv}')`, resources: [], store, author: "agent:A", cas });
+    assert.ok(res.ok, res.ok ? "" : `run failed: ${(res as { error?: unknown }).error}`);
+    if (!res.ok) return;
+    const replay = JSON.parse(await fsp.readFile(join(res.runDir, "replay.json"), "utf8"));
+    assert.equal(await recallRunResult(store, cas, replay), null, "inline read_csv_auto is non-hermetic -> not memoized -> recall MISS");
+  });
+
   test("TOCTOU: bytes deleted BETWEEN cas.has() and the read are a recall MISS (ENOENT), not a thrown error", async () => {
     const store = await conn();
     const replay = { kind: "query" as const, sql: "SELECT 1", sourceReceiptDigests: [] as string[] };

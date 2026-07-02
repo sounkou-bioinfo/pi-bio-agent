@@ -112,6 +112,25 @@ async function openRunLog(open: OpenStore, cwd: string, dbPath: string): Promise
   return (await tryOpen(open, cwd).catch(() => undefined)) ?? undefined;
 }
 
+// Run a bio run WITH best-effort logging into the run-log store, closing the store exactly once. If the run itself
+// fails with a DuckDB LOCK conflict, the run's own db likely ALIASES the store file (a custom-store path openRunLog
+// couldn't detect up front): release the store and RETRY the run WITHOUT logging, rather than fail the query on a
+// logging convenience. Any other error propagates.
+async function withRunLog<T>(open: OpenStore, cwd: string, dbPath: string, run: (storeConn: SqlConn | undefined) => Promise<T>): Promise<T> {
+  const store = await openRunLog(open, cwd, dbPath);
+  if (!store) return run(undefined);
+  let closed = false;
+  const close = () => { if (!closed) { closed = true; store.close(); } };
+  try {
+    return await run(store.conn);
+  } catch (e) {
+    if (isBioStoreLocked(e)) { close(); return await run(undefined); } // db aliased the log store — retry unlogged
+    throw e;
+  } finally {
+    close();
+  }
+}
+
 // open → use → close the ONE store for a memory operation (the store is the source of truth; a re-write here
 // supersedes, a delete tombstones, reads are as-of). Failures propagate (unlike the run-log, memory IS the point).
 async function withStore<T>(open: OpenStore, cwd: string, fn: (conn: SqlConn) => Promise<T>): Promise<T> {
@@ -216,12 +235,8 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
       // host-only capabilities the tool schema omits (duckdbInitSql / now / cwd) if the schema validator does
       // not strip unknown keys. network/signal are host-composed, never agent-supplied.
       const { dbPath, manifestPath, operationId, runId } = params;
-      const store = await openRunLog(openStore, ctx.cwd, dbPath);
-      try {
-        return text(await runBioOperationFromManifest({ cwd: ctx.cwd, dbPath, manifestPath, operationId, runId, network, process: processGrant, signal, store: store?.conn, author }));
-      } finally {
-        store?.close();
-      }
+      return text(await withRunLog(openStore, ctx.cwd, dbPath, (storeConn) =>
+        runBioOperationFromManifest({ cwd: ctx.cwd, dbPath, manifestPath, operationId, runId, network, process: processGrant, signal, store: storeConn, author })));
     },
   });
 
@@ -240,12 +255,8 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
     async execute(_id, params: { dbPath: string; manifestPath: string; sql: string; resources?: string[]; bindings?: Record<string, unknown>; runId?: string }, signal, _onUpdate, ctx) {
       // Only schema-approved fields (see bio_run_operation): never spread untrusted params into the host runner.
       const { dbPath, manifestPath, sql, resources, bindings, runId } = params;
-      const store = await openRunLog(openStore, ctx.cwd, dbPath);
-      try {
-        return text(await runBioQueryFromManifest({ cwd: ctx.cwd, dbPath, manifestPath, sql, resources, bindings, runId, network, process: processGrant, signal, store: store?.conn, author }));
-      } finally {
-        store?.close();
-      }
+      return text(await withRunLog(openStore, ctx.cwd, dbPath, (storeConn) =>
+        runBioQueryFromManifest({ cwd: ctx.cwd, dbPath, manifestPath, sql, resources, bindings, runId, network, process: processGrant, signal, store: storeConn, author })));
     },
   });
 
@@ -317,7 +328,7 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
   pi.registerTool({
     name: "bio_remember",
     label: "Remember (memory note)",
-    description: "Persist an indexed project-local study note under .pi/bio-agent/study-notes. Upserts by slug, so re-writing the same slug updates the note in place. Use for corpus maps, cheatsheets, concept maps, probes, and memories that are too volatile or broad to become skills.",
+    description: "Remember a project-local memory note. APPENDS to the temporal ledger (bio_observations, agent:memory:<slug>): a re-write of the same slug SUPERSEDES the current revision while every prior revision is retained (recall as-of an earlier time still sees it); the store is the source of truth. Also materializes a legible .pi/bio-agent/study-notes/<slug>.json file view (upserted in place). Use for corpus maps, cheatsheets, concept maps, probes, and memories too volatile or broad to become skills.",
     parameters: Type.Object({
       kind: Type.String({ description: "corpus_map | cheatsheet | concept_map | question_bank | rubric | worked_example | failure_case | memory_note | skill_draft | index" }),
       title: Type.String(),

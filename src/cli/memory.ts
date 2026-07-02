@@ -82,7 +82,12 @@ export async function mainMemory(argv: string[], deps: MemoryCliDeps): Promise<n
     const revisions = await memoryHistory(store.conn, slug);
     // asOf is already validated as parseable (or MEMORY_NOW) above, so filter directly.
     const visible = asOf === MEMORY_NOW ? revisions : revisions.filter((r) => Date.parse(r.recordedAt) <= Date.parse(asOf));
-    deps.out(JSON.stringify({ slug, asOf: asOfLabel, revisions: visible.map((r) => ({ recordedAt: r.recordedAt, author: r.author, forgotten: r.content === null, title: r.content?.title })) }, null, 2));
+    // Emit the FULL content per revision (not just title) so "what changed" is actually visible — a title-only trail
+    // hides body/hook/tags/kind edits. A tombstone (forgotten) carries null content.
+    deps.out(JSON.stringify({ slug, asOf: asOfLabel, revisions: visible.map((r) => ({
+      recordedAt: r.recordedAt, author: r.author, forgotten: r.content === null,
+      content: r.content === null ? null : { kind: r.content.kind, title: r.content.title, hook: r.content.hook, body: r.content.body, tags: r.content.tags, ...(r.content.sources ? { sources: r.content.sources } : {}) },
+    })) }, null, 2));
     return 0;
   } finally {
     store.close();
