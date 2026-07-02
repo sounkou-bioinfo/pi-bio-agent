@@ -75,8 +75,8 @@ The important principle: labels are not semantics. A domain phrase becomes usefu
 The KG is a typed graph over facts, artifacts, concepts, and evidence. A simple SQL contract is:
 
 ```sql
--- THE store: one APPEND-ONLY TEMPORAL statement log (BUILT — src/duckdb/observations.ts). There is NO separate
--- authored node/edge table — a node is just an id referenced by rows; re-assertion is a new row, never a mutation.
+-- THE store: one APPEND-ONLY TEMPORAL statement log (BUILT — src/duckdb/observations.ts). There is no separate
+-- authored node table — a node is just an id referenced by rows; re-assertion is a new row, never a mutation.
 -- statement_key = the state SLOT a later row supersedes; a row is edge-like (object_id) or scalar (value_json):
 bio_observations(observation_id, statement_key, subject_id, predicate, object_id, value_json, recorded_at, valid_from, valid_to, source, digest, attrs JSON, trust JSON)
 bio_artifacts(node_id, path, format, role, digest, attrs JSON)
