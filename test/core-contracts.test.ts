@@ -135,7 +135,7 @@ describe("BioRunSpec and storage helpers", () => {
   test("computes project storage layout and CAS paths", () => {
     const layout = bioProjectLayout("/work/project");
     assert.equal(layout.root, "/work/project/.pi/bio-agent");
-    assert.equal(layout.duckdbPath, "/work/project/.pi/bio-agent/bio.duckdb");
+    // the DuckDB store path is deliberately NOT in this file layout — it is owned by bioStorePath() (store.duckdb)
     const address = { algorithm: "sha256" as const, digest: "a".repeat(64), sizeBytes: 1 };
     assert.deepEqual(validateContentAddress(address), []);
     assert.equal(casPathForAddress(layout, address), `/work/project/.pi/bio-agent/cas/sha256/${"a".repeat(64)}`);

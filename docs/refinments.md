@@ -541,7 +541,7 @@ enforces allow/block lists. Both are documented at the opt-in site so a reader d
   - `.pi/bio-agent/resources/`
   - `.pi/bio-agent/cas/<algo>/<digest>`
   - `.pi/bio-agent/artifacts/`
-  - `.pi/bio-agent/bio.duckdb`
+  - `.pi/bio-agent/store.duckdb` (the one temporal `bio_observations` store; owned by `bioStorePath()`, not `bioProjectLayout()`)
 - Define the DuckDB catalog tables for resources, CAS entries, runs, operations, ontology terms, KG nodes/edges, and study-note indexes.
 - Define which resources are copied into CAS versus left as virtual resolver handles.
 - Decide whether CAS writes are automatic for HTTP responses or opt-in per operation policy.

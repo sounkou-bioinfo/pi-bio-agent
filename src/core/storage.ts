@@ -8,7 +8,6 @@ export interface BioProjectLayout {
   resourcesDir: string;
   casDir: string;
   artifactsDir: string;
-  duckdbPath: string;
 }
 
 export function bioProjectLayout(cwd: string, root = ".pi/bio-agent"): BioProjectLayout {
@@ -20,7 +19,9 @@ export function bioProjectLayout(cwd: string, root = ".pi/bio-agent"): BioProjec
     resourcesDir: join(base, "resources"),
     casDir: join(base, "cas"),
     artifactsDir: join(base, "artifacts"),
-    duckdbPath: join(base, "bio.duckdb"),
+    // NOTE: the DuckDB store path is NOT part of this file layout — it is owned by `bioStorePath()` in
+    // src/hosts/bio-store.ts (`.pi/bio-agent/store.duckdb`). Don't re-add a `duckdbPath` here; it drifted to a
+    // stale `bio.duckdb` that pointed at a non-existent db (a consumer would open the wrong, empty file).
   };
 }
 

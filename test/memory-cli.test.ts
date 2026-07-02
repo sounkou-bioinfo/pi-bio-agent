@@ -67,6 +67,23 @@ describe("memory CLI over the ONE temporal store (replaces the stale notes CLI)"
     assert.equal(await mainMemory(["show", "acmg", "--as-of", "2026-01-01T00:00:02Z"], deps), 0, "a strict ISO instant is accepted");
   });
 
+  test("show/history normalize the slug like bio_remember stores it — a raw form finds the normalized note", async () => {
+    const cwd = await fs.mkdtemp(join(tmpdir(), "mem-cli-slug-"));
+    const s1 = await openBioStore(cwd);
+    // stored under the normalized slug `rare-variant` (as makeStudyNote/normalizeStudySlug would)
+    await remember(s1.conn, { slug: "rare-variant", kind: "memory_note", title: "RV", hook: "h", body: "b", tags: [] }, "2026-01-01T00:00:01Z", "agent:A");
+    s1.close();
+    const out = sink();
+    const deps = { cwd, out: out.write, err: sink().write };
+    // the un-normalized form the user might type resolves to the same note (not a false "not found")
+    assert.equal(await mainMemory(["show", "Rare_Variant"], deps), 0, "raw slug is normalized before recall");
+    assert.equal(JSON.parse(out.lines.at(-1)!).slug, "rare-variant");
+    assert.equal(await mainMemory(["history", "  Rare Variant  "], deps), 0, "history normalizes too");
+    assert.equal(JSON.parse(out.lines.at(-1)!).slug, "rare-variant");
+    // a slug that normalizes to empty (all punctuation) is a usage error, not a crash
+    assert.equal(await mainMemory(["show", "!!!"], deps), 2, "un-derivable slug is a usage error");
+  });
+
   test("a usage error (missing slug) is exit 2 and does NOT create/lock the store file (validated before open)", async () => {
     const cwd = await fs.mkdtemp(join(tmpdir(), "mem-cli-usage-"));
     const deps = { cwd, out: sink().write, err: sink().write };

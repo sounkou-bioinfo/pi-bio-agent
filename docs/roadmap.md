@@ -236,12 +236,15 @@ Each slice is end-to-end and deterministic-tested; build the foundation only as 
   (`createBioObservationSchema`/`recordObservation`/`observationsAsOf`/`materializeBioEdgesAsOf`/`entailedEdgesAsOf`)
   + `test/observations-as-of.test.ts` (supersession across a changing object/value, duplicate-triple-allowed,
   idempotency, the as-of edge closure); `materializeEntailedEdges` generalized to take a source/target table.
-- **4.1 — Record a real judgment. BUILT.** `coloc` is the producer: every per-tissue posterior is a scalar
-  observation (`coloc:posterior:PP.Hk`) and the high-PP.H4 tissue becomes the edge `tissue
-  ←shares_causal_variant_with← gwas_locus` (projecting into `bio_edges_as_of`). `test/coloc-record.test.ts` —
-  4.1a deterministic (no R, non-skipped) + 4.1b the real `examples/coloc` run. **The recorder is GENERIC**
-  (`recordObservation`); coloc is *one* producer (a manifest), not a shape the substrate is built toward — any
-  other producer (a categorical classifier, an abstaining call, …) is just more data through the same primitive.
+- **4.1 — Record a real judgment. MAPPING BUILT + TESTED; production wiring owed.** The coloc→judgment mapping
+  is proven in `test/coloc-record.test.ts`: every per-tissue posterior is a scalar observation
+  (`coloc:posterior:PP.Hk`) and the high-PP.H4 tissue becomes the edge `tissue ←shares_causal_variant_with←
+  gwas_locus` (projecting into `bio_edges_as_of`) — 4.1a deterministic (no R, non-skipped) + 4.1b runs the real
+  `examples/coloc` and records its posteriors (skipped when R/nanoarrow absent). What's still OWED: the recorder
+  is wired in *by the test*, not yet inside the production `examples/coloc` pipeline itself. **The recorder is
+  GENERIC** (`recordObservation`); coloc is *one* producer (a manifest), not a shape the substrate is built
+  toward — any other producer (a categorical classifier, an abstaining call, …) is just more data through the
+  same primitive.
 - **4.2 — The activate/rollback state machine. BUILT.** `src/duckdb/activation.ts` (`recordActivation` /
   `activeOperationAsOf` / `rollbackOperation`) — a thin wrapper over `recordObservation`: `statement_key =
   activation:operation:<id>`, the current active version is latest-as-of, `rollback` **appends** the prior

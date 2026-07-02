@@ -507,13 +507,11 @@ async function runAndPersist(
       // store is passed; this is the file-based root for the no-store case.)
       const dir = runDir(cwd, runId);
       await fs.mkdir(dir, { recursive: true });
-      if (cas && (resultDigest || receiptsDigest || replayDigest || runObjectDigest)) {
+      const wroteCasRefs = !!(cas && (resultDigest || receiptsDigest || replayDigest || runObjectDigest));
+      if (wroteCasRefs) {
+        // BEFORE persistRun clears stale JSON: root THIS run's CAS bytes (a lean run writes no receipts.json), or a
+        // crash in that gap would leave them in CAS but unrooted. persistRun doesn't touch cas-refs.json.
         await writeRunFile(dir, "cas-refs.json", { schema: "pi-bio.cas_refs.v1", result: resultDigest, receipts: receiptsDigest, replay: replayDigest, runObject: runObjectDigest });
-      } else {
-        // RUNID REUSE: a prior CAS run at this same runId wrote a cas-refs.json; this run writes none (no cas), so
-        // clear the stale one — else the node-local GC roots its dead digests (keeping swept-able bytes alive) and
-        // the run dir advertises refs that don't belong to the current run.
-        await fs.rm(join(dir, "cas-refs.json"), { force: true });
       }
       // Files are the legible VIEW (default). result.json/receipts.json/replay.json are skipped in lean mode
       // (serialize:false); run.json is always written — and in lean mode its output artifact points at the CAS URI,
@@ -521,6 +519,12 @@ async function runAndPersist(
       const runForFiles = serialize === false && resultDigest ? retargetResultArtifactToCas(run, runId, `cas:${resultDigest}`) : run;
       const persisted = await persistRun(cwd, runId, { run: runForFiles, result, receipts }, { serialize, casBacked: cas !== undefined });
       if (enriched && serialize !== false) await writeRunFile(persisted.dir, "replay.json", enriched);
+      if (!wroteCasRefs) {
+        // RUNID REUSE, no cas: clear a prior CAS run's stale cas-refs.json AFTER persistRun (write-before-delete) —
+        // deleting it BEFORE persistRun would, on a crash in the gap, unroot the PRIOR run's still-referenced bytes
+        // before this run's run.json is durably written.
+        await fs.rm(join(persisted.dir, "cas-refs.json"), { force: true });
+      }
       // COMPLETION time (not run start): the ledger fact + memo record when the run FINISHED, so a long run isn't
       // visible as succeeded before it actually completed. Injected `now` (tests) collapses this to the fixed value.
       const completedAt = injectedNow ?? systemClock();
@@ -574,13 +578,17 @@ async function runAndPersist(
         // window as the success path). persistFailedRun does not touch cas-refs.json, so writing it first is safe.
         const dir = runDir(cwd, runId);
         await fs.mkdir(dir, { recursive: true });
-        if (cas && (receiptsDigest || replayDigest)) {
+        const wroteCasRefs = !!(cas && (receiptsDigest || replayDigest));
+        if (wroteCasRefs) {
           await writeRunFile(dir, "cas-refs.json", { schema: "pi-bio.cas_refs.v1", receipts: receiptsDigest, replay: replayDigest });
-        } else {
-          await fs.rm(join(dir, "cas-refs.json"), { force: true }); // reused runId: clear a prior CAS run's stale cas-refs.json (see the success path)
         }
         const persisted = await persistFailedRun(cwd, runId, { run: error.run, receipts: error.receipts }, { serialize, casBacked: cas !== undefined });
         if (enriched && serialize !== false) await writeRunFile(persisted.dir, "replay.json", enriched); // a failed run is replayable too
+        if (!wroteCasRefs) {
+          // reused runId, no cas: clear a prior CAS run's stale cas-refs.json AFTER persistFailedRun (write-before-
+          // delete) — deleting first would, on a crash in the gap, unroot the prior run's bytes (see the success path).
+          await fs.rm(join(persisted.dir, "cas-refs.json"), { force: true });
+        }
         const failedAt = injectedNow ?? systemClock(); // FAILURE time, not run start (see the success path)
         await recordRun(runLog, failedAt, { runId, identity, kind, status: error.run.status, error: error.message, dir: persisted.dir, replay, enriched, receiptsDigest, replayDigest });
         const casRefs = cas ? { receipts: receiptsDigest, replay: replayDigest } : undefined;

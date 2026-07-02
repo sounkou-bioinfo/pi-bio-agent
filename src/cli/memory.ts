@@ -1,6 +1,7 @@
 import { parseArgs } from "node:util";
 import { openBioStore } from "../hosts/bio-store.js";
 import { listMemory, memoryHistory, recall, normalizeAsOf, MEMORY_NOW } from "../hosts/memory-store.js";
+import { normalizeStudySlug } from "../core/study.js";
 
 // The `memory` CLI: read the ONE temporal store (memory is append-only observations under agent:memory:<slug>).
 // list/show/history are all AS-OF (time-travel); history shows supersession + authorship. Provider-agnostic — no Pi needed.
@@ -67,9 +68,14 @@ export async function mainMemory(argv: string[], deps: MemoryCliDeps): Promise<n
       deps.out(JSON.stringify({ asOf: asOfLabel, count: mems.length, notes: mems.map((m) => ({ slug: m.slug, kind: m.kind, title: m.title, hook: m.hook, author: m.author })) }, null, 2));
       return 0;
     }
-    const slug = positionals[0];
-    if (!slug) {
-      deps.err(`memory ${command} <slug> — a slug is required.\n\n${MEMORY_USAGE}`);
+    // Normalize the slug IDENTICALLY to how bio_remember stores it (makeStudyNote → normalizeStudySlug) and how the
+    // Pi tools bio_recall/bio_forget read it — else `memory show My_Note` queries the raw text and can't find the
+    // note stored as `my-note`. A slug that normalizes to empty (e.g. all punctuation) is a usage error (exit 2).
+    let slug: string;
+    try {
+      slug = normalizeStudySlug(positionals[0]);
+    } catch (e) {
+      deps.err(`memory ${command}: ${e instanceof Error ? e.message : String(e)}\n\n${MEMORY_USAGE}`);
       return 2;
     }
     if (command === "show") {
