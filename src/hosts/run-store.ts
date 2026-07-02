@@ -421,8 +421,8 @@ async function runAndPersist(
  * the SQL after schema discovery and the manifest declares only resources.
  */
 export async function runBioOperationFromManifest(req: RunOperationRequest): Promise<RunOperationResponse> {
-  if (req.runId !== undefined && !/^[A-Za-z0-9._-]+$/.test(req.runId)) {
-    throw new Error("runId must contain only [A-Za-z0-9._-] (no path separators)"); // no run-dir traversal
+  if (req.runId !== undefined && !RUN_DIR_ID_RE.test(req.runId)) {
+    throw new Error("runId must start with a letter/number and contain only [A-Za-z0-9._-] (no path traversal)"); // SAME regex as persistRun -> fail BEFORE effects, not after
   }
   const { registry, raw, manifest, manifestDigest } = await prepareRegistry(req);
   const op = registry.getOperation(req.operationId);
@@ -486,8 +486,8 @@ export interface RunQueryRequest {
  * pinned in provenance.
  */
 export async function runBioQueryFromManifest(req: RunQueryRequest): Promise<RunOperationResponse> {
-  if (req.runId !== undefined && !/^[A-Za-z0-9._-]+$/.test(req.runId)) {
-    throw new Error("runId must contain only [A-Za-z0-9._-] (no path separators)");
+  if (req.runId !== undefined && !RUN_DIR_ID_RE.test(req.runId)) {
+    throw new Error("runId must start with a letter/number and contain only [A-Za-z0-9._-] (no path traversal)"); // SAME regex as persistRun -> fail BEFORE effects, not after
   }
   const { registry, manifest, raw, manifestDigest } = await prepareRegistry(req);
   const resources = req.resources ?? (manifest.provides?.resources ?? []).map((r) => r.id);

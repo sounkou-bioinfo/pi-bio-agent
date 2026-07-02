@@ -11,6 +11,14 @@ import { nodeProcessRunner } from "../src/process/node-process-runner.js";
 // pal review: a non-positive timeoutMs must NOT silently disable the timeout, and params.env must be strings.
 
 describe("SECURITY: spawned children do not inherit host secrets, and CAS/run paths can't escape their root", () => {
+  test("fail closed BEFORE effects: a run-dir-unsafe runId is rejected at the entry, not after the run at persist", async () => {
+    const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-runid-"));
+    await fs.writeFile(join(cwd, "manifest.json"), JSON.stringify({ schema: "pi-bio.manifest.v1", id: "m", version: "0.1.0", title: "m", description: "m", provides: {} }));
+    for (const bad of [".", "..", "-x", ".hidden"]) {
+      await assert.rejects(() => runBioQueryFromManifest({ cwd, dbPath: ":memory:", manifestPath: "manifest.json", sql: "SELECT 1", runId: bad }), /runId must start with|path traversal/);
+    }
+  });
+
   test("a spawned child does NOT see host process.env secrets, but DOES get explicit spec.env + a resolvable PATH", async () => {
     process.env.PI_BIO_FAKE_SECRET = "topsecret-do-not-leak";
     try {

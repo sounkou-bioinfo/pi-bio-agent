@@ -50,6 +50,12 @@ export function httpTableResolver(fetchImpl: FetchLike): BioResolverImpl {
     const reader = READERS[format];
     if (!reader) throw new Error(`http resolver: unknown format '${format}' (expected json, ndjson, or csv)`);
     const headers = (p.headers && typeof p.headers === "object" ? p.headers : {}) as Record<string, string>;
+    // SECURITY: a manifest is agent-authorable DATA, so it must not carry SECRETS. Refuse auth-bearing headers from
+    // manifest params — auth is host-owned, injected via a fetch policy (withAuth), never a manifest field.
+    const RESERVED_AUTH_HEADERS = new Set(["authorization", "cookie", "proxy-authorization", "x-api-key", "api-key", "x-auth-token"]);
+    for (const name of Object.keys(headers)) {
+      if (RESERVED_AUTH_HEADERS.has(name.toLowerCase())) throw new Error(`http.get: '${name}' must not be set in a manifest — secrets are host-owned; inject auth with a host fetch policy (withAuth), not manifest params`);
+    }
     // This resolver materializes a response BODY into a table, so it allows the BODY-RETURNING READ methods:
     // GET, or POST as a QUERY (a body that READS — VEP batch, GraphQL). PUT/DELETE/PATCH (mutations) are refused.
     // HEAD/OPTIONS are also safe but return METADATA/capabilities, not a data body — they belong to API

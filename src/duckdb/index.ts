@@ -8,4 +8,5 @@ export * from "./resolvers/duckhts-read-bcf.js";
 export * from "./resolvers/duckdb-file-scan.js";
 export * from "./resolvers/duckdb-sql-materialize.js";
 export * from "./resolvers/http-table-scan.js";
+export * from "./resolvers/http-policies.js"; // withAuth / withRetry — the host fetch-policy helpers the docs advertise
 export * from "./resolvers/process-compute.js";
