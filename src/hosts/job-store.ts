@@ -191,10 +191,16 @@ export async function collectAndRecordBioJob(conn: SqlConn, runner: JobRunner, r
   if (!rec) throw new Error(`job-store: no durable record for job '${req.runId}' (submit it first)`);
   const res = await collectBioJob(runner, req.runId);
   if (!res) return null; // not terminal yet — nothing durable to record
+  const latest = await latestSlotRow(conn, req.runId);
+  // DURABLY-TERMINAL WINS: if the ledger is already terminal in a DIFFERENT state than the runner reports (the
+  // classic case: a durable CANCEL while a local runner kept going and now says succeeded), the ledger is the
+  // truth — never record the runner's conflicting result. Return the durable terminal state instead.
+  if (latest && isTerminal(latest.phase) && latest.phase !== res.phase) {
+    return { runId: req.runId, phase: latest.phase, ...(latest.phase === "failed" && latest.message ? { error: latest.message } : {}) };
+  }
   // ensure the durable STATUS slot is terminal FIRST: ledgerJobRunner.collect gates on terminal status, so a result
   // recorded while status still says queued/running would be unreachable. Record the terminal phase if the ledger
   // hasn't got there yet (e.g. the caller collected without polling to terminal).
-  const latest = await latestSlotRow(conn, req.runId);
   if (!latest || !isTerminal(latest.phase)) {
     if (latest && !(req.now > latest.at)) throw new Error(`job-store: now '${req.now}' must be strictly after the last status at '${latest.at}' to record the terminal status`);
     await recordPhase(conn, req.runId, { phase: res.phase, message: res.error }, req.now, req.source ?? "job-store", rec.replayDigest);

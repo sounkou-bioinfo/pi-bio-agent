@@ -213,6 +213,24 @@ describe("job durability: rich status is not lost + the ledger timestamp wins + 
     assert.deepEqual((await ledger.collect("k3"))!.result, { ok: 7 }, "result is reachable without a prior poll");
   });
 
+  test("durably-terminal wins: collectAndRecordBioJob does NOT record a runner 'succeeded' over a durable cancel", async () => {
+    const { conn, cwd, clock } = await setup();
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => { release = r; });
+    const local = inMemoryJobRunner({ clock, execute: async () => { await gate; return { result: { ok: true } }; } });
+    await submitBioJob(conn, local, { cwd, runId: "x9", replay: replay("x9"), now: "2026-07-01T00:00:01Z" });
+    await cancelBioJob(conn, { cwd, runId: "x9", now: "2026-07-01T00:00:03Z" }); // durable cancel (no runner)
+    release(); await local.settle("x9"); // the runner itself completes to succeeded
+    assert.equal((await local.status("x9"))!.phase, "succeeded", "runner completed");
+
+    const res = await collectAndRecordBioJob(conn, local, { cwd, runId: "x9", now: "2026-07-01T00:00:10Z" });
+    assert.equal(res!.phase, "cancelled", "the durable cancel wins — not the runner's succeeded");
+    // and no success result leaked into the ledger's result slot
+    const ledger = ledgerJobRunner(conn, async () => {});
+    assert.equal((await ledger.collect("x9"))!.phase, "cancelled");
+    assert.equal((await ledger.collect("x9"))!.result, undefined, "no success result recorded for a cancelled job");
+  });
+
   test("fail closed: an unsafe runId (path traversal) is rejected", async () => {
     const { conn, cwd, clock } = await setup();
     const local = inMemoryJobRunner({ clock, execute: async () => ({}) });

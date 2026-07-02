@@ -56,6 +56,15 @@ describe("CAS-of-bytes: a content-addressed byte store", () => {
     assert.equal(await cas.has(addr), false, "nothing was stored");
   });
 
+  test("an uppercase-hex digest maps to the SAME bytes as lowercase (put verifies + has finds, no case-mismatch)", async () => {
+    const cas = fsCasStore(await fs.mkdtemp(join(tmpdir(), "pi-bio-cas-")));
+    const digest = createHash("sha256").update("hello").digest("hex");
+    await cas.put({ algorithm: "sha256", digest }, "hello");
+    const upper: ContentAddress = { algorithm: "sha256", digest: digest.toUpperCase() };
+    assert.equal(await cas.has(upper), true, "uppercase address finds the lowercase-stored bytes");
+    await cas.put(upper, "hello"); // an uppercase address also VERIFIES (hex is case-agnostic), not a mismatch error
+  });
+
   test("SECURITY: pathFor/remove refuse an address whose digest could escape the CAS root", async () => {
     const cas = fsCasStore(await fs.mkdtemp(join(tmpdir(), "pi-bio-cas-")));
     const hostile = { algorithm: "sha256", digest: "../../../../etc/passwd" } as unknown as ContentAddress;

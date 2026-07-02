@@ -26,7 +26,7 @@ export function fsCasStore(root: string): CasStore {
   const pathFor = (a: ContentAddress): string => {
     const errs = validateContentAddress(a);
     if (errs.length) throw new Error(`fsCasStore: refusing an invalid content address (${errs.join("; ")})`);
-    return join(root, a.algorithm, a.digest);
+    return join(root, a.algorithm, a.digest.toLowerCase()); // lowercase: match casPathForAddress + Node's lowercase sha256 output (uppercase-hex addresses map to the same bytes)
   };
   return {
     pathFor,
@@ -39,7 +39,7 @@ export function fsCasStore(root: string): CasStore {
       // store an unverifiable blob that the sha256-shaped GC could neither root nor trust.
       if (a.algorithm !== "sha256") throw new Error(`CAS put: only sha256 is supported today (got '${a.algorithm}') — refusing to store an unverified address`);
       const actual = createHash("sha256").update(bytes).digest("hex");
-      if (actual !== a.digest) throw new Error(`CAS put: bytes hash to ${actual} but address claims ${a.digest} — refusing to store mismatched content`);
+      if (actual !== a.digest.toLowerCase()) throw new Error(`CAS put: bytes hash to ${actual} but address claims ${a.digest} — refusing to store mismatched content`); // case-insensitive: hex is case-agnostic
       const dest = pathFor(a);
       try { await fs.access(dest); return; } catch { /* not present — write it */ }
       await fs.mkdir(join(root, a.algorithm), { recursive: true });
