@@ -1,8 +1,8 @@
 ---
 type: Proposal
 title: Memory and knowledge unification
-description: "Read before changing study notes, the note-to-graph projection, or the KG-ingest adapter."
-tags: [memory, study-notes, knowledge-unit, kg-sync]
+description: "The temporal memory unification: memory, facts, jobs, and runs are one append-only bio_observations store (Datomic-style, as-of/history/tombstone). Read before changing the memory store or its graph projection. (The former file-notes kg-sync/study-sync modules were removed 2026-07-02.)"
+tags: [memory, temporal, bio-observations, unification]
 ---
 
 # Memory and knowledge unification
@@ -239,7 +239,7 @@ commit to the full `KnowledgeUnit`:
 `studyNoteIndex` now includes `slug`, and `bio_remember` takes an optional `slug`
 and returns the persisted note plus a `created` flag.
 
-## KG-ingest adapter (effectful, gated — implemented)
+## KG-ingest adapter (RETIRED 2026-07-02 — historical design rationale, not current code)
 
 (HISTORICAL — `kg-sync.ts` / `study-sync.ts` were REMOVED 2026-07-02; memory is now the temporal store. The
 following describes the retired file-notes→graph design.) The pure projection (`studyNoteGraph`) handed off to

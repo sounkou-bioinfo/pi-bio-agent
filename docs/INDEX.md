@@ -7,7 +7,7 @@
 
 ## Proposal
 
-- [Memory and knowledge unification](memory-and-knowledge-unification.md) — Read before changing study notes, the note-to-graph projection, or the KG-ingest adapter. _(memory, study-notes, knowledge-unit, kg-sync)_
+- [Memory and knowledge unification](memory-and-knowledge-unification.md) — The temporal memory unification: memory, facts, jobs, and runs are one append-only bio_observations store (Datomic-style, as-of/history/tombstone). Read before changing the memory store or its graph projection. (The former file-notes kg-sync/study-sync modules were removed 2026-07-02.) _(memory, temporal, bio-observations, unification)_
 
 ## Reference
 
