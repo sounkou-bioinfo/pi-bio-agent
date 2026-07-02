@@ -4,6 +4,11 @@ import { listMemory, memoryHistory, recall, MEMORY_NOW } from "../hosts/memory-s
 
 // The `memory` CLI: read the ONE temporal store (memory is append-only observations under agent:memory:<slug>).
 // list/show/history are all AS-OF (time-travel); history shows supersession + authorship. Provider-agnostic — no Pi needed.
+
+// Strict ISO-8601 / RFC3339: a date, optionally with time (T or space), optional seconds/fractional, optional
+// Z/±hh:mm offset. Rejects the lenient forms Date.parse accepts (e.g. "March 1 2026") so --as-of parses identically
+// in JS (the history filter) and DuckDB (list/show TIMESTAMPTZ cast).
+const ISO_INSTANT_RE = /^\d{4}-\d{2}-\d{2}(?:[Tt ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:[Zz]|[+-]\d{2}:?\d{2})?)?$/;
 export interface MemoryCliDeps {
   cwd: string;
   out: (line: string) => void;
@@ -50,8 +55,11 @@ export async function mainMemory(argv: string[], deps: MemoryCliDeps): Promise<n
     deps.err(`memory ${command} <slug> — a slug is required.\n\n${MEMORY_USAGE}`);
     return 2;
   }
-  if (asOf !== MEMORY_NOW && Number.isNaN(Date.parse(asOf))) {
-    deps.err(`memory ${command}: --as-of '${asOf}' is not a valid ISO timestamp\n\n${MEMORY_USAGE}`);
+  // Validate --as-of as a STRICT ISO-8601/RFC3339 instant (NOT lenient Date.parse, which accepts "March 1 2026" and
+  // other forms DuckDB's TIMESTAMPTZ cast may parse differently — that mismatch could defer failure to the DB or give
+  // implementation-dependent time-travel). A strict form is parsed identically by both Date.parse and DuckDB.
+  if (asOf !== MEMORY_NOW && (!ISO_INSTANT_RE.test(asOf) || Number.isNaN(Date.parse(asOf)))) {
+    deps.err(`memory ${command}: --as-of '${asOf}' is not a valid ISO-8601 timestamp (e.g. 2026-01-01 or 2026-01-01T12:00:00Z)\n\n${MEMORY_USAGE}`);
     return 2;
   }
 

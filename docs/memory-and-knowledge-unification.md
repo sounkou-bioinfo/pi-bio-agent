@@ -67,8 +67,10 @@ memory** (report §3.2.2) made literal — the same transport story the substrat
 time-travel param; `bio_forget` = `forget` (retraction); `bio_walk_memory` + the always-on recall index read the
 store. Skills are temporal too (`bio_create_skill` → `skill:<name>` observations, `src/hosts/skill-store.ts`), and
 `pi-bio-agent memory list/show/history` reads the store from the CLI. When the host supplies a `cas` (CAS mode),
-run receipts/replay bytes and result rows live in CAS (referenced by digest) and runs fold in as run-object DAGs and
-recall is memoized by input digest; with no `cas` those bytes stay in the run's JSON files instead.
+run receipts/replay bytes and result rows live in CAS (referenced by digest) and runs fold in as run-object DAGs;
+with no `cas` those bytes stay in the run's JSON files instead. Recall is memoized by input digest (the ActionCache)
+only for a **hermetic** run — one that is CAS-backed, store-logged, and content-pinned: no live/un-snapshotted source
+and no ambient reads (a `:memory:` db, no inline file/remote reads), so a memo hit can never serve a stale result.
 
 ## Where this comes from
 

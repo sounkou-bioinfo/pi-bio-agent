@@ -424,7 +424,7 @@ query: a grammar-of-graphics layer like posit’s
 [**ggsql**](https://github.com/posit-dev/ggsql) draws the run timeline,
 status breakdown, or a manifest→run→receipt DAG straight off
 `run_ledger` — the plot *is* `ggplot(run_ledger) + ...` over SQL,
-nothing bespoke. Agent conversations, jobs, and coloc results land in
+nothing bespoke. Runs, jobs, and coloc results land in
 the same ledger, so the whole workbench view is composed, not coded.
 
 **A scientific-database connector is a manifest, not a client.** The

@@ -55,6 +55,10 @@ describe("memory CLI over the ONE temporal store (replaces the stale notes CLI)"
     assert.equal(await mainMemory(["history", "a", "b"], deps), 2);
     // a malformed --as-of is a usage error for any command (validated before the store is opened)
     assert.equal(await mainMemory(["list", "--as-of", "not-a-time"], deps), 2);
+    // STRICT ISO: a lenient form Date.parse would accept (but DuckDB may parse differently) is rejected up front
+    assert.equal(await mainMemory(["list", "--as-of", "March 1 2026"], deps), 2, "non-ISO date is rejected");
+    assert.equal(await mainMemory(["list", "--as-of", "2026/01/01"], deps), 2, "slash-form date is rejected");
+    assert.equal(await mainMemory(["show", "acmg", "--as-of", "2026-01-01T00:00:02Z"], deps), 0, "a strict ISO instant is accepted");
   });
 
   test("a usage error (missing slug) is exit 2 and does NOT create/lock the store file (validated before open)", async () => {

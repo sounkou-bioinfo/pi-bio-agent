@@ -46,8 +46,9 @@ export interface BioGraphSnapshot {
 
 export { validateReadOnlySelect } from "./sql-guard.js"; // the single shared read-only SQL guard
 
-// graphSqlContract() was a hand-written list of tables — most of which nothing creates. The real schema is
-// what createBioGraphSchema() builds; a generated contract/docs/DDL come from the schema registry. Removed.
+// graphSqlContract() was a hand-written list of tables — most of which nothing creates — and is removed. The real
+// graph tables are built by `createBioObservationSchema()` (the `bio_observations` ledger) and projected by
+// `materializeBioEdgesAsOf()` (`bio_edges_as_of`); a generated contract/docs/DDL would derive from those.
 
 export function makeConceptNode(label: string, count?: number): BioGraphNode {
   const slug = label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
