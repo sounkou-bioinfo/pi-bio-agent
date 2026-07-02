@@ -50,6 +50,11 @@ async function persistJob(cwd: string, rec: JobRecord): Promise<void> {
   await fs.rename(tmp, path); // atomic replace — a concurrent reader never sees a partial file
 }
 
+/** Remove the durable snapshot — compensation for a submit whose runner rejected after the write-ahead marker. */
+async function removeJobRecord(cwd: string, runId: string): Promise<void> {
+  try { await fs.rm(jobFile(cwd, runId), { force: true }); } catch { /* best-effort: the marker may already be gone */ }
+}
+
 /** Read the durable snapshot. Returns null ONLY when the file is absent (ENOENT); a malformed/partial record
  *  THROWS rather than silently becoming a missing job that would erase its replay metadata. */
 export async function readJobRecord(cwd: string, runId: string): Promise<JobRecord | null> {
@@ -106,14 +111,22 @@ export async function submitBioJob(conn: SqlConn, runner: JobRunner, req: Submit
   // Also refuse a runId that already has a LEDGER row (a prior job in the shared store, even if the local snapshot
   // is gone) — otherwise we'd dispatch new work and then adopt the STALE ledger phase/result as this job's state.
   if (await latestSlotRow(conn, req.runId)) throw new Error(`job-store: job '${req.runId}' already exists in the shared ledger (reused runId) — pick a fresh runId`);
-  const digest = replaySpecDigest(req.replay); // compute BEFORE acceptance — a digest failure must not leave a phantom job in the runner
-  await runner.submit({ runId: req.runId, replay: req.replay }); // acceptance — throws if the runner rejects
-  // A dispatched worker (ledgerJobRunner) may ALREADY have reported running/succeeded into the slot before we get
-  // here. Record the initial `queued` ONLY if the slot is still empty — otherwise `queued` at req.now could become
-  // the latest row and REGRESS the worker's phase back to queued.
+  const digest = replaySpecDigest(req.replay); // compute BEFORE any write — a digest failure must leave nothing behind
+  // WRITE-AHEAD: persist the durable "submitted" snapshot BEFORE dispatch. So if the process dies right after the
+  // runner starts work, the job is still KNOWN (readJobRecord succeeds) and a later poll reconciles the ledger —
+  // rather than orphaned work with no durable record. If the runner then REJECTS, compensate by removing the marker.
+  await persistJob(req.cwd, { schema: "pi-bio.job_record.v1", runId: req.runId, phase: "queued", replayDigest: digest, submittedAt: req.now, updatedAt: req.now });
+  try {
+    await runner.submit({ runId: req.runId, replay: req.replay }); // acceptance — throws if the runner rejects
+  } catch (e) {
+    await removeJobRecord(req.cwd, req.runId); // compensate: a rejected submit leaves no phantom marker
+    throw e;
+  }
+  // Record the queued ledger row. A dispatched worker (ledgerJobRunner) may ALREADY have reported running/succeeded
+  // into the slot — record `queued` ONLY if the slot is still empty, so it can't REGRESS the worker's phase. If THIS
+  // write fails, the snapshot above already makes the job known and a later poll records the phase (recoverable).
   const already = await latestSlotRow(conn, req.runId);
   if (!already) await recordPhase(conn, req.runId, { phase: "queued" }, req.now, req.source ?? "job-store", digest);
-  await persistJob(req.cwd, { schema: "pi-bio.job_record.v1", runId: req.runId, phase: already?.phase ?? "queued", replayDigest: digest, submittedAt: req.now, updatedAt: req.now });
   return { runId: req.runId, phase: already?.phase ?? "queued", at: already?.at ?? req.now };
 }
 

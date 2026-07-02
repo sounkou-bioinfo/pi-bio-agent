@@ -265,6 +265,15 @@ describe("job durability: rich status is not lost + the ledger timestamp wins + 
     assert.equal((await ledger.collect("x9"))!.result, undefined, "no success result recorded for a cancelled job");
   });
 
+  test("durable submit: a runner that REJECTS leaves NO phantom snapshot (write-ahead marker is compensated)", async () => {
+    const { conn, cwd } = await setup();
+    const rejecting: JobRunner = { async submit() { throw new Error("runner rejected"); }, async status() { return null; }, async collect() { return null; } };
+    await assert.rejects(() => submitBioJob(conn, rejecting, { cwd, runId: "rej", replay: replay("rej"), now: "2026-07-01T00:00:01Z" }), /runner rejected/);
+    assert.equal(await readJobRecord(cwd, "rej"), null, "the write-ahead marker was removed after the runner rejected — no phantom job");
+    // and the ledger has no row either
+    assert.equal((await conn.all<{ n: bigint }>(`SELECT count(*) n FROM bio_observations WHERE statement_key='job:rej:status'`))[0].n, 0n);
+  });
+
   test("fail closed: a runId with an existing LEDGER row (no local snapshot) is refused — no stale-state adoption", async () => {
     const { conn, cwd, clock } = await setup();
     const runner = inMemoryJobRunner({ clock, execute: async () => ({}) });
