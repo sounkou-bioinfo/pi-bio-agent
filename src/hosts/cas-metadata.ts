@@ -219,11 +219,15 @@ export async function gcSweep(conn: SqlConn, cas: CasStore, opts: { graceMs: num
       await conn.run(`UPDATE cas_object SET state = 'tombstoned' WHERE algorithm = ? AND digest = ? AND state = 'deleting'`, [algorithm, digest]);
       throw e;
     }
-    // The bytes are GONE now. Mark the row `deleted`. CRITICAL: if this UPDATE fails, do NOT revert to `tombstoned` —
-    // that would advertise deleted bytes as reusable/resurrectable and let withCasObject serve a phantom hit. Leaving
-    // it in `deleting` is the SAFE outcome (withCasObject treats `deleting` as a MISS); the stuck row is harmless
-    // metadata cruft a targeted repair can reclaim, never a correctness hazard. Surface the error, don't swallow it.
-    await conn.run(`UPDATE cas_object SET state = 'deleted' WHERE algorithm = ? AND digest = ? AND state = 'deleting'`, [algorithm, digest]);
+    // The bytes are GONE now, so the row MUST read `deleted` — AUTHORITATIVELY, not `WHERE state='deleting'`. On a
+    // shared store a concurrent recordCasObject/withCasObject-resurrect can flip the row to `committed` between our
+    // atomic claim and this point (its cas.put returned early on bytes we then removed); a conditional update would
+    // no-op there, leaving a PHANTOM `committed` row over deleted bytes. Forcing `deleted` makes the metadata match
+    // reality: a later reader sees `deleted` -> MISS -> re-fetch (read sites also guard with cas.has), never a wrong
+    // result. (Residual under concurrency: a cas_ref added in that window dangles at a deleted object — harmless, the
+    // cas.has guard catches it; a fully concurrent-safe reput needs epoch fencing, a tracked refinement. If THIS
+    // update itself errors the row stays `deleting`, still a safe withCasObject MISS.)
+    await conn.run(`UPDATE cas_object SET state = 'deleted' WHERE algorithm = ? AND digest = ?`, [algorithm, digest]);
     swept.push(address);
   }
   return swept;

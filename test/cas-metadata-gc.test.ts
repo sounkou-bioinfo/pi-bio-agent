@@ -68,6 +68,25 @@ describe("CAS metadata GC: ref/lease anti-join (the distributed-safe sweep)", ()
     assert.equal(row!.state, "deleting", "left in 'deleting' (withCasObject miss), never reverted to 'tombstoned' (which would resurrect gone bytes)");
   });
 
+  test("AUTHORITATIVE finalize: a concurrent resurrect to 'committed' DURING the physical remove is overridden to 'deleted' (no phantom committed over gone bytes)", async () => {
+    const { conn, cas } = await setup();
+    const a = await store(cas, conn, "racy reput", 1000);
+    await gcMark(conn, { cutoffMs: 2000, nowMs: 2000 }); // tombstone it
+    // simulate the race: while the sweep is physically removing the bytes, a concurrent recordCasObject/resurrect
+    // flips the row back to 'committed' (its cas.put saw the bytes we are about to delete and returned early).
+    const racyCas = {
+      ...cas,
+      remove: async (addr: ContentAddress) => {
+        await conn.run(`UPDATE cas_object SET state = 'committed', tombstoned_at = NULL WHERE algorithm = ? AND digest = ?`, [addr.algorithm, addr.digest]);
+        return cas.remove(addr);
+      },
+    } as unknown as typeof cas;
+    await gcSweep(conn, racyCas, { graceMs: 0, nowMs: 2000 });
+    assert.equal(await cas.has(a), false, "bytes are physically gone");
+    const [row] = await conn.all<{ state: string }>(`SELECT state FROM cas_object WHERE algorithm = ? AND digest = ?`, [a.algorithm, a.digest]);
+    assert.equal(row!.state, "deleted", "the concurrent 'committed' is overridden to 'deleted' — metadata matches reality (a reader MISSES + re-fetches, never a phantom-committed wrong result)");
+  });
+
   test("an active LEASE protects bytes even with NO ref (the reuse race); an expired lease does not", async () => {
     const { conn, cas } = await setup();
     const a = await store(cas, conn, "being reused by a remote writer", 1000);
