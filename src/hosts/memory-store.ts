@@ -118,4 +118,9 @@ export async function forget(conn: SqlConn, slug: string, now: string, author?: 
   await ensureMemorySchema(conn);
   const subject = memorySubjectId(slug);
   await recordObservation(conn, { statementKey: subject, subjectId: subject, predicate: CONTENT, recordedAt: now, source: author });
+  // Also retract the note's link edges — otherwise they linger in bio_edges_as_of as phantom edges out of a
+  // forgotten node (the same reconciliation remember() does when a link is dropped).
+  for (const edge of await liveOutEdgesAsOf(conn, subject, MEMORY_NOW)) {
+    await recordObservation(conn, { statementKey: edge.statement_key, subjectId: subject, predicate: edge.predicate, recordedAt: now, source: author });
+  }
 }

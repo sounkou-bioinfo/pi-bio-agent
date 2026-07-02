@@ -21,16 +21,26 @@ const actionKey = (inputDigest: string): string => `action:${inputDigest}`;
  * endpoint) get DIFFERENT keys — so a cache hit can never serve a stale result. Pass the ENRICHED replay (the one
  * carrying sourceReceiptDigests); before resolution those digests are absent and the key is content-blind.
  */
+// Recursively sort object keys so semantically identical values hash identically regardless of insertion order
+// (agent bindings are an object whose key order is not meaningful — different order must not miss the cache).
+function canonicalize(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(canonicalize);
+  if (v && typeof v === "object") {
+    return Object.fromEntries(Object.keys(v as Record<string, unknown>).sort().map((k) => [k, canonicalize((v as Record<string, unknown>)[k])]));
+  }
+  return v;
+}
+
 export function actionInputDigest(replay: Pick<RunReplaySpec, "kind" | "manifest" | "operationId" | "sql" | "resources" | "bindings" | "sourceReceiptDigests">): string {
-  const canonical = JSON.stringify([
+  const canonical = JSON.stringify(canonicalize([
     replay.kind,
     replay.manifest?.digest ?? null,
     replay.operationId ?? null,
     replay.sql ?? null,
     [...(replay.resources ?? [])].sort(),
-    replay.bindings ?? null,
+    replay.bindings ?? null, // canonicalize() sorts its keys so binding order doesn't change the CASID
     [...(replay.sourceReceiptDigests ?? [])].sort(), // resolved-content refs -> key captures the input DAG, not just the declaration
-  ]);
+  ]));
   return `sha256:${createHash("sha256").update(canonical).digest("hex")}`;
 }
 

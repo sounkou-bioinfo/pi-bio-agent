@@ -2,7 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { summarizeBioContext, type BioContext } from "../../src/core/context.js";
 import { validateReadOnlySelect } from "../../src/core/knowledge-graph.js";
-import { deriveStudyPlan, walkMemoryGraph, type StudyArtifactKind, type StudyCorpus, type StudyNote } from "../../src/core/study.js";
+import { deriveStudyPlan, normalizeStudySlug, walkMemoryGraph, type StudyArtifactKind, type StudyCorpus, type StudyNote } from "../../src/core/study.js";
 import { deleteStudyNote, makeStudyNote, runtimeSkillRoot, runtimeStudyRoot, writeProjectSkill, writeStudyNote } from "../../src/hosts/pi-project.js";
 import { defaultDuckDbExtensionCatalog, findDuckDbExtensions } from "../../src/duckdb/extensions.js";
 import { describeBioManifestFromPath, runBioOperationFromManifest, runBioQueryFromManifest } from "../../src/hosts/run-store.js";
@@ -346,7 +346,7 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
       asOf: Type.Optional(Type.String({ description: "ISO time — read the revision that was current AS OF then (default now)." })),
     }),
     async execute(_id, params: { id: string; asOf?: string }, _signal, _onUpdate, ctx) {
-      const note = await withStore(openStore, ctx.cwd, (conn) => recall(conn, params.id, params.asOf ?? MEMORY_NOW));
+      const note = await withStore(openStore, ctx.cwd, (conn) => recall(conn, normalizeStudySlug(params.id), params.asOf ?? MEMORY_NOW));
       if (!note) throw new Error(`no memory found for slug '${params.id}'${params.asOf ? ` as of ${params.asOf}` : ""}`);
       return text(note);
     },
@@ -358,9 +358,12 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
     description: "Forget a memory note by slug — a TEMPORAL RETRACTION, not destruction: recall(now) becomes null and it drops from the current list, but recall AS OF an earlier time still sees it (memory is never erased). Prefer updating by slug via bio_remember; forget only rotten units.",
     parameters: Type.Object({ slug: Type.String({ description: "Slug of the note to forget." }) }),
     async execute(_id, params: { slug: string }, _signal, _onUpdate, ctx) {
-      await withStore(openStore, ctx.cwd, (conn) => forget(conn, params.slug, systemClock(), author));
-      await deleteStudyNote(ctx.cwd, params.slug); // remove the legible file view too (the ledger keeps the history)
-      return text({ forgotten: true, slug: params.slug, note: "temporal retraction — recall as-of an earlier time still sees it" });
+      // Normalize ONCE, identically to how bio_remember stores it (makeStudyNote → normalizeStudySlug), so the
+      // ledger tombstone and the file deletion hit the SAME key — a raw/cased slug otherwise tombstones a phantom.
+      const slug = normalizeStudySlug(params.slug);
+      await withStore(openStore, ctx.cwd, (conn) => forget(conn, slug, systemClock(), author));
+      await deleteStudyNote(ctx.cwd, slug); // remove the legible file view too (the ledger keeps the history)
+      return text({ forgotten: true, slug, note: "temporal retraction — recall as-of an earlier time still sees it" });
     },
   });
   };

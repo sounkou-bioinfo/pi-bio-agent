@@ -73,4 +73,13 @@ describe("temporal memory over bio_observations", () => {
     tos = (await c.all<{ to_id: string }>("SELECT to_id FROM bio_edges_as_of WHERE from_id = ?", [memorySubjectId("a")])).map((e) => e.to_id);
     assert.deepEqual(tos, [memorySubjectId("b")], "the dropped link's edge is retracted, only b remains");
   });
+
+  test("forget() retracts the note's link edges too (no phantom edges out of a forgotten node)", async () => {
+    const c = await conn();
+    await remember(c, note("a", "see [[b]]"), T1, "agent:A");
+    await forget(c, "a", T2, "agent:A");
+    await materializeBioEdgesAsOf(c, MEMORY_NOW);
+    const edges = await c.all<{ to_id: string }>("SELECT to_id FROM bio_edges_as_of WHERE from_id = ?", [memorySubjectId("a")]);
+    assert.deepEqual(edges, [], "forgetting the node also retracts its edges");
+  });
 });

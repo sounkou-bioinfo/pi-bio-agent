@@ -307,6 +307,9 @@ async function runAndPersist(
   cas?: CasStore,
   serialize?: boolean,
 ): Promise<RunOperationResponse> {
+  // Fail closed: lean mode drops result/receipts/replay FILES, so without a CAS to hold those bytes they would be
+  // lost entirely (data loss). Refuse rather than silently discard outputs/provenance.
+  if (serialize === false && !cas) throw new Error("serialize:false requires a cas — refusing to skip result/receipts/replay files with nowhere else to store the bytes");
   const instance = await DuckDBInstance.create(resolveInCwd(cwd, dbPath), duckdbConfig);
   const connection = await instance.connect();
   const conn = duckdbNodeConn(connection);

@@ -1,6 +1,6 @@
 import { DuckDBInstance } from "@duckdb/node-api";
 import { promises as fs } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { SqlConn } from "../core/ports.js";
 import { duckdbNodeConn } from "../duckdb/node-api.js";
 import { createBioObservationSchema } from "../duckdb/observations.js";
@@ -40,7 +40,7 @@ export interface BioStore {
 
 export async function openBioStore(cwd: string, opts: { path?: string } = {}): Promise<BioStore> {
   const path = opts.path ?? bioStorePath(cwd);
-  await fs.mkdir(join(cwd, ".pi", "bio-agent"), { recursive: true });
+  await fs.mkdir(dirname(path), { recursive: true }); // the store file's OWN parent — works for a custom opts.path too
   const instance = await DuckDBInstance.create(path);
   const connection = await instance.connect();
   const conn = duckdbNodeConn(connection);
