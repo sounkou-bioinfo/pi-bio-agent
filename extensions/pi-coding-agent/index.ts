@@ -11,7 +11,7 @@ import { isAbsolute, resolve } from "node:path";
 import { forget, listMemory, recall, remember, memorySubjectId, MEMORY_NOW, type MemoryContent } from "../../src/hosts/memory-store.js";
 import { recordSkill, skillSubjectId } from "../../src/hosts/skill-store.js";
 import { systemClock } from "../../src/core/clock.js";
-import type { SqlConn } from "../../src/core/ports.js";
+import type { SqlConn, ProcessRunner } from "../../src/core/ports.js";
 import type { FetchLike } from "../../src/duckdb/resolvers/http-table-scan.js";
 
 function text(payload: unknown) {
@@ -121,6 +121,10 @@ type OpenStore = (cwd: string) => Promise<BioStore>;
 
 export interface BioExtensionOptions {
   network?: { fetch: FetchLike };
+  /** Out-of-process COMPUTE grant: the host injects a ProcessRunner so a manifest's `process.compute` resources can
+   *  spawn (R/Python/shell) — same explicit, composed-in grant model as `network`. Absent => process.compute fails
+   *  closed (unbound). The prompt/tools advertise this capability; without this it could never actually be granted. */
+  process?: { runner: ProcessRunner };
   /** The authoring agent id stamped on runs/memory this instance records (shared-store attribution). */
   author?: string;
   /** How to open the ONE store. Default: the project-local file (`openBioStore(cwd)`), a process-exclusive writer
@@ -133,6 +137,7 @@ export interface BioExtensionOptions {
 
 export function createBioExtension(options: BioExtensionOptions = {}): (pi: ExtensionAPI) => void {
   const network = options.network;
+  const processGrant = options.process; // the out-of-process compute grant (threaded into runs so process.compute can bind)
   const author = options.author ?? "agent:local";
   const openStore: OpenStore = options.openStore ?? ((cwd) => openBioStore(cwd));
   return function piBioAgentExtension(pi: ExtensionAPI): void {
@@ -195,7 +200,7 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
       const { dbPath, manifestPath, operationId, runId } = params;
       const store = await openRunLog(openStore, ctx.cwd, dbPath);
       try {
-        return text(await runBioOperationFromManifest({ cwd: ctx.cwd, dbPath, manifestPath, operationId, runId, network, signal, store: store?.conn, author }));
+        return text(await runBioOperationFromManifest({ cwd: ctx.cwd, dbPath, manifestPath, operationId, runId, network, process: processGrant, signal, store: store?.conn, author }));
       } finally {
         store?.close();
       }
@@ -219,7 +224,7 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
       const { dbPath, manifestPath, sql, resources, bindings, runId } = params;
       const store = await openRunLog(openStore, ctx.cwd, dbPath);
       try {
-        return text(await runBioQueryFromManifest({ cwd: ctx.cwd, dbPath, manifestPath, sql, resources, bindings, runId, network, signal, store: store?.conn, author }));
+        return text(await runBioQueryFromManifest({ cwd: ctx.cwd, dbPath, manifestPath, sql, resources, bindings, runId, network, process: processGrant, signal, store: store?.conn, author }));
       } finally {
         store?.close();
       }
