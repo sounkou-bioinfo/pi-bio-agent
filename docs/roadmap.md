@@ -262,7 +262,7 @@ next. The forbidden/allowed table in §6 is the invariant every slice must alrea
 Reproducibility and long-running tasks are DOMAIN-INHERENT library goals (bioinformatics jobs run for hours; a
 6-hour result that can't say what produced it is a weak receipt) — so by "library facilities must be correct, not
 consumer-gated" they are required, not deferred. Built interleaved: **C1 → L1 → C2 → L2/L3** (C1 makes a job worth
-running; L1 gives reproduce() a job-shaped target; C2 validates it; L2/L3 make it durable + cancellable).
+running; L1 gives reproduceRun() a job-shaped target; C2 validates it; L2/L3 make it durable + cancellable).
 
 - **C1 — environment identity + replay seed. BUILT.** `src/core/reproducibility.ts`: a RUNTIME-AGNOSTIC
   `EnvDescriptor` (composite LAYERS — platform/executable/package_lock/package_snapshot/container_image/duckdb/
@@ -279,7 +279,7 @@ running; L1 gives reproduce() a job-shaped target; C2 validates it; L2/L3 make i
 - **L1 — async JobRunner skeleton.** A `JobRunner` port (submit/status/collect/cancel) over the existing
   `BioRunRecord` (queued/running/waiting/succeeded/failed/cancelled) + job-status observations (`job:<runId>:status`
   as an as-of slot — the SAME temporal substrate as Phase 4). In-memory fake first; outputs → CAS. No NNG, no cancel yet.
-- **C2 — reproduce().** Re-execute `replay.json` + env attestation, diff result/artifact digests →
+- **C2 — reproduceRun().** Re-execute `replay.json` + env attestation, diff result/artifact digests →
   reproduced/diverged/**not_reproducible** (honest: unknown env / missing snapshot / un-snapshotted live source →
   not_reproducible WITH reasons, never fake confidence).
 - **L2/L3 — durable resume + cancellation. BUILT.** `src/hosts/job-store.ts`: `resumeBioJob` rehydrates a job's

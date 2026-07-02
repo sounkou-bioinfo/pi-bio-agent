@@ -25,9 +25,10 @@ tags: [architecture, boundaries, adapters, harness]
 
 ```text
 Host surfaces
-  Pi extension
-  MCP server surface later
-  CLI/service surface later
+  Pi extension                                   (built)
+  CLI (pi-bio-agent bin)                         (built)
+  SDK (importable: ., ./core, ./duckdb, ./hosts) (built)
+  JSON-RPC / MCP server surface                  (later)
 
 Core contracts
   BioManifest (the program: provides resources/resolvers/operations/termSets)
@@ -136,12 +137,11 @@ All surfaces should call the same internal functions. The CLI must not reimpleme
 Initial command/RPC families:
 
 ```text
-registry.listToolSpecs
 registry.resolveResource
 registry.snapshot
 registry.listDuckdbExtensions
-spec.validateToolSpec
 spec.validateBioManifest
+spec.validateBioOperationSpec
 sql.validateReadOnlySelect
 study.plan
 study.writeNote
