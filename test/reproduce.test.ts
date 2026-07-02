@@ -63,6 +63,20 @@ describe("C2: reproduce() compares deterministic receipt content, not wall-clock
     assert.equal(drift.matched, false, "matched=false when the output content drifted, even with matching receipts");
   });
 
+  test("duckdbConfig reproducibility: replay pins the config DIGEST; reproduce must re-supply a matching config", async () => {
+    const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-repro-cfg-"));
+    const duckdbConfig = { threads: "2" };
+    const out = await runBioQueryFromManifest({ cwd, dbPath: ":memory:", manifestPath: MANIFEST, sql: SQL, duckdbConfig, runId: "origcfg", now: "2026-07-01T00:00:00Z" });
+    assert.equal(out.ok, true);
+    const replay = JSON.parse(await fs.readFile(join((out as { runDir: string }).runDir, "replay.json"), "utf8")) as RunReplaySpec;
+    assert.match(replay.duckdbConfigDigest ?? "", /^sha256:/, "the config's DIGEST is pinned (not the secret-bearing config itself)");
+
+    await assert.rejects(() => reproduceRun({ cwd, replay }), /re-supply the same duckdbConfig/); // no config -> refuse
+    await assert.rejects(() => reproduceRun({ cwd, replay, duckdbConfig: { threads: "8" } }), /does not match the pinned duckdbConfigDigest/); // wrong config -> refuse
+    const rep = await reproduceRun({ cwd, replay, duckdbConfig }); // matching config -> reproduces
+    assert.equal(rep.matched, true);
+  });
+
   test("fail closed: a replay with no pinned digests, or no manifest path, refuses (no hollow match)", async () => {
     const { cwd, replay } = await runOnce();
     await assert.rejects(() => reproduceRun({ cwd, replay: { ...replay, sourceReceiptDigests: [], resultDigest: undefined } }), /pins neither sourceReceiptDigests nor a resultDigest/);

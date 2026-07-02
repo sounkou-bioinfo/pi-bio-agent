@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import { systemClock } from "../core/clock.js";
-import { RUN_REPLAY_SPEC_SCHEMA, receiptContentDigest, type RunReplaySpec, type EnvAttestationSummary } from "../core/reproducibility.js";
+import { RUN_REPLAY_SPEC_SCHEMA, receiptContentDigest, canonicalDigest, type RunReplaySpec, type EnvAttestationSummary } from "../core/reproducibility.js";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { createBioRegistry, describeManifest, validateBioManifest, type BioRegistry, type BioManifest, type ManifestDescription, type ResolutionReceipt } from "../core/manifest.js";
@@ -439,6 +439,7 @@ export async function runBioOperationFromManifest(req: RunOperationRequest): Pro
     manifest: { digest: manifestDigest, snapshot: raw, path: req.manifestPath },
     operationId: req.operationId, sql: op.sql.sqlTemplate,
     ...(req.bindings ? { bindings: req.bindings } : {}), ...(req.duckdbInitSql ? { duckdbInitSql: req.duckdbInitSql } : {}),
+    ...(req.duckdbConfig ? { duckdbConfigDigest: canonicalDigest(req.duckdbConfig) } : {}), // pin WHICH config (digest, not the secret-bearing config itself)
     ...(proc ? { process: proc } : {}),
   };
   return runAndPersist(req.cwd, req.dbPath, runId, req.operationId, (conn) => runOperation(registry, conn, { operationId: req.operationId, runId, now, signal: req.signal, cas: req.cas }), now, req.duckdbInitSql, req.bindings, req.duckdbConfig, replay, req.store ? { store: req.store, author: req.author } : undefined, req.cas, req.serialize);
@@ -498,6 +499,7 @@ export async function runBioQueryFromManifest(req: RunQueryRequest): Promise<Run
     manifest: { digest: manifestDigest, snapshot: raw, path: req.manifestPath },
     sql: req.sql, resources,
     ...(req.bindings ? { bindings: req.bindings } : {}), ...(req.duckdbInitSql ? { duckdbInitSql: req.duckdbInitSql } : {}),
+    ...(req.duckdbConfig ? { duckdbConfigDigest: canonicalDigest(req.duckdbConfig) } : {}), // pin WHICH config (digest, not the secret-bearing config itself)
     ...(proc ? { process: proc } : {}),
   };
   return runAndPersist(req.cwd, req.dbPath, runId, "ad-hoc.query", (conn) => runQuery(registry, conn, { sql: req.sql, resources, runId, now, signal: req.signal, cas: req.cas }), now, req.duckdbInitSql, req.bindings, req.duckdbConfig, replay, req.store ? { store: req.store, author: req.author } : undefined, req.cas, req.serialize);

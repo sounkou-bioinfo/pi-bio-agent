@@ -1,6 +1,6 @@
 import { promises as fs } from "node:fs";
 import { join } from "node:path";
-import { RUN_REPLAY_SPEC_SCHEMA, receiptContentDigest, type RunReplaySpec } from "../core/reproducibility.js";
+import { RUN_REPLAY_SPEC_SCHEMA, receiptContentDigest, canonicalDigest, type RunReplaySpec } from "../core/reproducibility.js";
 import type { CasStore } from "../core/cas.js";
 import type { ProcessRunner } from "../core/ports.js";
 import type { FetchLike } from "../duckdb/resolvers/http-table-scan.js";
@@ -42,6 +42,9 @@ export interface ReproduceRequest {
   network?: { fetch: FetchLike };
   process?: { runner: ProcessRunner };
   cas?: CasStore;
+  /** the host re-supplies the DuckDB config (it may bear secrets, so it is NOT stored in the replay — only its
+   *  digest is). reproduce re-applies it and verifies it matches the pinned `duckdbConfigDigest`, failing closed. */
+  duckdbConfig?: Record<string, string>;
   now?: string;
 }
 
@@ -66,9 +69,16 @@ async function producedDigests(runDir: string): Promise<string[]> {
 export async function reproduceRun(req: ReproduceRequest): Promise<ReproduceResult> {
   const replay = req.replay;
   assertReproducible(replay);
+  // DuckDB config affects results but bears secrets, so the replay pins only its DIGEST. To reproduce faithfully the
+  // host must re-supply the SAME config: require it and verify its digest matches, or refuse (a run under a
+  // different/absent config is not a faithful reproduction).
+  if (replay.duckdbConfigDigest) {
+    if (!req.duckdbConfig) throw new Error("reproduce: this run pinned a duckdbConfigDigest — re-supply the same duckdbConfig to reproduce it faithfully (fail closed)");
+    if (canonicalDigest(req.duckdbConfig) !== replay.duckdbConfigDigest) throw new Error("reproduce: the supplied duckdbConfig does not match the pinned duckdbConfigDigest (would not be a faithful reproduction)");
+  }
   const base = {
     cwd: req.cwd, dbPath: req.dbPath ?? ":memory:", manifestPath: replay.manifest!.path!,
-    bindings: replay.bindings, duckdbInitSql: replay.duckdbInitSql,
+    bindings: replay.bindings, duckdbInitSql: replay.duckdbInitSql, duckdbConfig: req.duckdbConfig,
     network: req.network, process: req.process, cas: req.cas,
     runId: `reproduce-${replay.runId}-${Date.now()}`, now: req.now,
   };

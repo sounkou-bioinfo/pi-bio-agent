@@ -27,6 +27,10 @@ export function assertJobReplay(runId: string, replay: RunReplaySpec | undefined
   if (replay.schema !== "pi-bio.run_replay_spec.v1") throw new Error("job: replay.schema must be 'pi-bio.run_replay_spec.v1'");
   if (replay.kind !== "query" && replay.kind !== "operation" && replay.kind !== "process.compute") throw new Error(`job: replay.kind '${String(replay.kind)}' is invalid`);
   if (replay.runId !== runId) throw new Error(`job: replay.runId '${replay.runId}' must match the job runId '${runId}'`);
+  // "a job you cannot reproduce is not a job": reject a hollow {schema,kind,runId} that carries nothing to re-run.
+  // An operation needs its operationId; a query needs its sql. (The manifest to run against is enforced at reproduce
+  // time by reproduceRun, which fails closed without one.)
+  if (!replay.operationId && (typeof replay.sql !== "string" || !replay.sql.trim())) throw new Error("job: replay must carry an operationId or non-empty sql — nothing to re-run otherwise (a job you cannot reproduce is not a job)");
 }
 
 /** The job lifecycle IS the run lifecycle (queued|running|waiting|succeeded|failed|cancelled). */

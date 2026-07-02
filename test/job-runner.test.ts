@@ -76,6 +76,11 @@ describe("L1: JobRunner + job-store over the job:<runId>:status temporal slot", 
       () => submitBioJob(conn, runner, { cwd, runId: "j4", replay: replay("DIFFERENT"), now: "2026-07-01T00:00:01Z" }),
       /replay.runId .* must match/,
     );
+    // a HOLLOW replay (valid schema/kind/runId but nothing to re-run) is rejected — a job you can't reproduce isn't one
+    await assert.rejects(
+      () => submitBioJob(conn, runner, { cwd, runId: "jh", replay: { schema: "pi-bio.run_replay_spec.v1", runId: "jh", kind: "query" } as unknown as RunReplaySpec, now: "2026-07-01T00:00:01Z" }),
+      /operationId or non-empty sql/,
+    );
     // and a backdated/equal-timestamp transition is rejected (the monotonic-ledger guard)
     const r2 = inMemoryJobRunner({ clock, execute: async () => ({}) });
     await submitBioJob(conn, r2, { cwd, runId: "j5", replay: replay("j5"), now: "2026-07-01T00:00:05Z" });
