@@ -91,6 +91,16 @@ describe("Phase 4.4: durable submit -> (park) -> decide approval", () => {
     await assert.rejects(() => decideCandidateApproval(conn, { id: writey.id, version: writey.version, specDigest: sub.specDigest, approved: true, decidedAt: T2, source: "x" }), /not awaiting approval|not parked/);
   });
 
+  test("SECURITY: a candidate whose fixtureSql escapes the sandbox (ATTACH/COPY/INSTALL) FAILS validation and never runs", async () => {
+    const conn = await obsConn();
+    for (const bad of ["ATTACH 'evil.db' AS e", "COPY nums TO '/tmp/x.csv'", "INSTALL httpfs", "LOAD ducknng", "PRAGMA database_list"]) {
+      const c: OperationCandidate = { ...good, fixtureSql: bad };
+      const sub = await submitCandidateForApproval(conn, c, { sandbox: await sandbox(), recordedAt: T1, source: "ci" });
+      assert.equal(sub.validation, "failed", `dangerous fixtureSql rejected: ${bad}`);
+      assert.equal(sub.pendingApproval, false, "not parked — never reaches approval");
+    }
+  });
+
   test("the DURABLE decide requires a PARKED candidate — validation+test passed but not submitted fails closed", async () => {
     const conn = await obsConn();
     // simulate the synchronous path's side effect: validation+test recorded passed, but the candidate was NOT parked

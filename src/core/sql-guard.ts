@@ -35,6 +35,21 @@ function stripLiteralsAndComments(sql: string): string {
   return out;
 }
 
+// Fixture SQL (approval-harness test setup) legitimately needs multi-statement DDL to seed in-memory test data
+// (CREATE TABLE / INSERT / SELECT), so it is NOT read-only — but it must not reach OUTSIDE the throwaway sandbox db:
+// ATTACH/DETACH (another db), COPY / EXPORT / IMPORT (file I/O), INSTALL / LOAD (extensions, incl. network-capable),
+// PRAGMA / CALL / CHECKPOINT / VACUUM (engine side-effects), and the dynamic-SQL query() functions.
+const fixtureForbidden = /\b(attach|detach|copy|install|load|export|import|pragma|call|reset|checkpoint|vacuum)\b/i;
+
+/** Assert `sql` is safe to run as approval-harness FIXTURE setup in a sandbox db: DDL/DML on local tables is fine,
+ *  but statements that escape the sandbox (external db, file I/O, extension load, engine side-effects) are refused. */
+export function assertSafeFixtureSql(sql: string | undefined | null): void {
+  if (!sql || !sql.trim()) return;
+  const scan = stripLiteralsAndComments(sql);
+  if (fixtureForbidden.test(scan)) throw new Error("fixtureSql may seed in-memory test data (CREATE/INSERT/SELECT) but must not ATTACH/COPY/INSTALL/LOAD/EXPORT/IMPORT/PRAGMA — those escape the sandbox (external db / file I/O / extensions / engine side-effects)");
+  if (/\bquery(_table)?\s*\(/i.test(scan)) throw new Error("fixtureSql must not use the dynamic-SQL table functions query()/query_table()");
+}
+
 /** Assert `sql` is a single read-only SELECT/WITH statement; returns it trimmed (sans trailing `;`). Throws otherwise. */
 export function validateReadOnlySelect(sql: string): string {
   const trimmed = sql.trim().replace(/;\s*$/, "");

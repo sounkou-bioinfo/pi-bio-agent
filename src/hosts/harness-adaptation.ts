@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { SqlConn } from "../core/ports.js";
-import { validateReadOnlySelect } from "../core/sql-guard.js";
+import { validateReadOnlySelect, assertSafeFixtureSql } from "../core/sql-guard.js";
 import { recordObservation, observationAsOfKey } from "../duckdb/observations.js";
 import { recordActivation } from "../duckdb/activation.js";
 
@@ -87,7 +87,9 @@ async function validateAndTest(conn: SqlConn, candidate: OperationCandidate, dep
 
   // 1. VALIDATE — the candidate operation must be a single read-only SELECT/WITH (the existing statement guard)
   let validation: "passed" | "failed" = "passed";
-  try { validateReadOnlySelect(candidate.sql); } catch { validation = "failed"; }
+  // the candidate query must be a single read-only SELECT/WITH, AND its fixture setup must not escape the sandbox
+  // (no ATTACH/COPY/INSTALL/… before approval) — both are part of a VALID candidate, checked before any execution.
+  try { validateReadOnlySelect(candidate.sql); assertSafeFixtureSql(candidate.fixtureSql); } catch { validation = "failed"; }
   await recStatus(conn, specDigest, deps.recordedAt, deps.source, "validation", "harness:validation_status", validation);
 
   // 2. TEST — run the candidate over its fixture in a SANDBOX (separate conn — can't touch the real db), compare.
