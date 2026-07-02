@@ -26,9 +26,28 @@ The RLM REPL patterns map directly onto SQL, with `bio_query` as the loop:
 | partition + map (recursive LM calls) | `GROUP BY` + per-partition sub-operations |
 | summarize | SQL aggregates |
 
-The genuinely *semantic* step RLM uses an LM for — inferring each instance's label from free text — is the only
-part that needs judgment; here it is a column (or, in a real run, a judgment-boundary resolver that labels rows
-once and writes them back). Everything distributional is deterministic SQL.
+## Honest scope: this manifest is the *reduce*, not the whole loop
 
-`test/long-context-aggregate-example.test.ts` runs the manifest end-to-end through the host and checks the exact
-counts (`entity 3, human 1, location 2, number 3` for users 1–3) — the determinism that RLM trades away.
+RLM is **map-then-reduce**: recurse an LM over partitions to *infer* a per-row label (the map — the part RLM
+spends recursive LM calls on), then answer distributionally (the reduce). The `GROUP BY` above is only the
+**reduce**, and it is exact *because the labels already exist* — the `entries` table ships with a `label` column.
+Claiming "counting beats the model" from this manifest alone would be overclaiming: it elides the hard, semantic
+**map**.
+
+The map is shown runnably, not asserted:
+
+- **`scripts/rlm-map-reduce.mjs`** (`npm run build && node scripts/rlm-map-reduce.mjs`) — the full shape across
+  **processes**: a supervisor splits an *unlabeled* context into partitions and fans them out to worker
+  **processes**, each labeling its slice in its **own `:memory:` DuckDB SQL REPL** (the semantic map — a `CASE`
+  rule stands in for the LM so it is deterministic and testable); the workers write nothing shared; the **host is
+  the single writer** that merges the label artifacts; only then is the distributional query the deterministic
+  `GROUP BY`. This is why concurrent map workers never contend for DuckDB's process-exclusive write lock.
+- **`test/map-reduce-labeling.test.ts`** — the same partition → parallel-label → host-merge → aggregate shape,
+  in-process, asserting the exact counts.
+
+So: the *semantic* labeling is the judgment boundary (an LM live; a rule in these dogfoods); everything
+**distributional** is deterministic SQL. RLM's win is handling unbounded context; the substrate's win is that the
+reduce, once labels exist, is exact — the counting RLM gets wrong at long context.
+
+`test/long-context-aggregate-example.test.ts` runs *this manifest* (the reduce) end-to-end through the host and
+checks the exact counts (`entity 3, human 1, location 2, number 3` for users 1–3).
