@@ -8,6 +8,7 @@ import { defaultDuckDbExtensionCatalog, findDuckDbExtensions } from "../../src/d
 import { describeBioManifestFromPath, runBioOperationFromManifest, runBioQueryFromManifest } from "../../src/hosts/run-store.js";
 import { bioStorePath, isBioStoreLocked, openBioStore, type BioStore } from "../../src/hosts/bio-store.js";
 import { isAbsolute, resolve } from "node:path";
+import { stat } from "node:fs/promises";
 import { forget, listMemory, recall, remember, memorySubjectId, MEMORY_NOW, type MemoryContent } from "../../src/hosts/memory-store.js";
 import { recordSkill, skillSubjectId } from "../../src/hosts/skill-store.js";
 import { systemClock } from "../../src/core/clock.js";
@@ -83,12 +84,29 @@ async function memoryIndexBlock(open: OpenStore, cwd: string): Promise<string> {
 //      writer), so skip logging rather than break the run;
 //   2. the store cannot be opened (locked by another process / unavailable) — logging is a convenience, not a
 //      hard dependency of the query. A genuinely broken store still surfaces on the next memory op (withStore).
+// True iff both paths name the SAME underlying file (same device + inode) — unmasks a symlink/hardlink alias that a
+// pure path compare misses. Best-effort: a missing file (ENOENT) or stat error means "not provably the same" -> false
+// (the resolved-path check above still catches the same-intended-path case before either file exists).
+async function isSameFile(a: string, b: string): Promise<boolean> {
+  try {
+    const [sa, sb] = await Promise.all([stat(a), stat(b)]);
+    return sa.dev === sb.dev && sa.ino === sb.ino;
+  } catch {
+    return false;
+  }
+}
+
 async function openRunLog(open: OpenStore, cwd: string, dbPath: string): Promise<BioStore | undefined> {
   const runDb = dbPath === ":memory:" ? "" : isAbsolute(dbPath) ? dbPath : resolve(cwd, dbPath);
+  const storePath = resolve(bioStorePath(cwd));
   // (1) covers the DEFAULT local-file store path. A host that injects a CUSTOM file-backed openStore must not run
   // queries against that same file (we can't see the injected store's path here); a server-backed store (the
   // intended concurrency answer) has no such conflict. `open()` throwing on a lock is still caught below.
-  if (runDb && runDb === resolve(bioStorePath(cwd))) return undefined; // (1) the run uses the store file itself — resolve() both sides (bioStorePath(cwd) is relative when cwd is; runDb is already absolute), else a relative cwd misses this guard and self-locks
+  // Catch the run-uses-the-store case two ways: (a) same RESOLVED path (works even before either file exists —
+  // resolve() both sides since bioStorePath(cwd) is relative when cwd is), and (b) same underlying FILE by
+  // device+inode, so a SYMLINK or HARDLINK alias of the store file (which resolve() alone won't unmask) is still
+  // caught — else the run opens the same inode and DuckDB's process-exclusive-writer lock makes the run fail.
+  if (runDb && (resolve(runDb) === storePath || (await isSameFile(runDb, storePath)))) return undefined; // (1)
   // (2) tryOpen returns undefined on a lock conflict (a concurrent agent holds it); a real error also degrades
   // here because run-logging is best-effort and must never fail the query.
   return (await tryOpen(open, cwd).catch(() => undefined)) ?? undefined;

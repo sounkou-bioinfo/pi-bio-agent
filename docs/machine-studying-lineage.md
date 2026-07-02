@@ -32,7 +32,7 @@ In `pi-bio-agent`, this is **not** a biomedical study, cohort, trial, GWAS, or p
 1. **Study notes are harness artifacts, not fact stores.** They help the agent navigate sources and distrust stale priors. Measured biomedical facts still come from tools, resources, KG evidence, or DuckDB-backed data.
 2. **The corpus remains authoritative.** Notes should point back to sources and make retrieval/querying cheaper; they should not become a copied replacement for APIs, ontologies, or reference datasets.
 3. **Hooks are load-bearing.** A note's hook is the retrieval contract: when should the agent read this note? A body without a good hook does not improve expertise efficiently.
-4. **DuckDB/KG projection is justified as amortized context management.** Projecting notes into `memory:<slug>` nodes and queryable edges gives the agent a cheap map before it spends expensive inference/tool budget.
+4. **DuckDB/KG projection is justified as amortized context management.** Projecting notes into `agent:memory:<slug>` nodes and queryable edges gives the agent a cheap map before it spends expensive inference/tool budget.
 5. **Skills are graduation, not the default.** Stable repeated workflows can become skills; volatile corpus knowledge should remain notes until it proves operational.
 6. **Evaluation should prefer cost curves over one-off pass/fail.** Future expertise probes or workflow fixtures should track whether notes reduce tool calls/tokens or improve accuracy at the same budget, not merely whether a final answer is possible.
 7. **Weight-update studying is out of scope for now.** The current substrate focuses on harness-level studying: notes, indexes, operation specs, guarded SQL, resources, and runs. That is compatible with future model-side studying but should not be conflated with it.
@@ -49,7 +49,7 @@ that structure. The two are one bet seen from two sides:
   concept nodes, note-links, ontology mappings, provenance edges — not prose alone (a note's prose
   `body` stays, but it hangs on that structure). That residue is what `remember` records as edge
   observations in the one `bio_observations` log, projected into the `bio_edges_as_of` closure.
-- **Graph makes study cheap.** A queryable map (`memory:<slug>` subjects + edges, joined to ontology and
+- **Graph makes study cheap.** A queryable map (`agent:memory:<slug>` subjects + edges, joined to ontology and
   KG facts) is consulted *before* spending expensive tool/inference budget — the cost-curve win the
   article measures.
 

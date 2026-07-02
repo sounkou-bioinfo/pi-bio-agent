@@ -57,8 +57,11 @@ describe("run-store BigInt serialization: lossless, no silent >2^53 corruption",
 describe("ActionCache: input CASID -> output CASID (LLVM CAS ActionCache in the ONE store)", () => {
   const base = { kind: "query" as const, manifest: { digest: "sha256:m", snapshot: {} as never, path: "x" }, sql: "SELECT 1", resources: ["a", "b"], bindings: undefined, sourceReceiptDigests: ["sha256:s1"] };
 
-  test("the input digest is stable, resource-order-insensitive, and sensitive to SQL/manifest", () => {
-    assert.equal(actionInputDigest(base), actionInputDigest({ ...base, resources: ["b", "a"] }));
+  test("the input digest is stable, resource-order-SENSITIVE, and sensitive to SQL/manifest", () => {
+    assert.equal(actionInputDigest(base), actionInputDigest({ ...base }), "same inputs -> same key (stable)");
+    // resources resolve in EXECUTION order and each resolver CREATE-OR-REPLACEs its table, so [a,b] and [b,a] can
+    // yield different DB state -> different result. The key MUST differ (sorting them would serve a wrong cached hit).
+    assert.notEqual(actionInputDigest(base), actionInputDigest({ ...base, resources: ["b", "a"] }), "resource order changes the key");
     assert.notEqual(actionInputDigest(base), actionInputDigest({ ...base, sql: "SELECT 2" }));
     assert.notEqual(actionInputDigest(base), actionInputDigest({ ...base, manifest: { ...base.manifest, digest: "sha256:other" } }));
   });

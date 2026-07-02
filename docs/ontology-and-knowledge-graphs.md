@@ -22,7 +22,7 @@ document views over it — not the other way round.
 So everything that can be a fact, a concept, or a relationship lives in the **same** append-only
 `bio_observations` log (plus ontology tables), with trust/provenance fields on every row; edge-like rows
 project into the materialized `bio_edges_as_of` closure that graph walks run over. Ontology terms, KG facts,
-observations, artifacts — and the agent's own study notes (`memory:<slug>` subjects, note-links as edge
+observations, artifacts — and the agent's own study notes (`agent:memory:<slug>` subjects, note-links as edge
 observations) — are all one graph, queried the same way. This is *why* `remember` writes note-links as edge
 observations (projected into `bio_edges_as_of`) instead of a separate notes index: **memory is a subject
 family in the one log, not a parallel system.** The "memory and KG stop being two systems" point in

@@ -125,8 +125,10 @@ branches + the volatile-scalar `ncurl` fix → `ncurl-retry`'s SQL-native recurs
 (`examples/coloc`, multi-tissue post-GWAS colocalization, DATA harmonization + out-of-process R `coloc.abf`).
 
 **Temporal memory + one Datomic/CAS store — BUILT (2026-07-02).** Memory is no longer flat files: notes
-(`agent:memory:<slug>`), **skills** (`skill:<name>`), facts, and **runs** (`run:<id>`, incl. ad-hoc SQL) are all
-**append-only, as-of, attributed** observations in ONE `bio_observations` store (`openBioStore`, `src/hosts/bio-store.ts`)
+(`agent:memory:<slug>`), **skills** (`skill:<name>`), and facts are **append-only, as-of, attributed** observations
+in ONE `bio_observations` store (`openBioStore`, `src/hosts/bio-store.ts`); **runs** (`run:<id>`, incl. ad-hoc SQL)
+fold in the same way *when a store/run-log is supplied* (the extension wires it; the CLI opts in via `--ledger`) —
+run files under `.pi/bio-agent/runs/` are always written regardless
 — `bio_observations` IS a Datomic-style immutable time-indexed fact log. Memory ops: `remember`/`recall(asOf)`/
 `memoryHistory`/`forget` (tombstone retraction); a re-write supersedes but keeps the prior revision; `[[links]]`
 project into `bio_edges_as_of` (one as-of closure over observation-backed edges crosses memory, fact, and

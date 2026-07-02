@@ -235,7 +235,7 @@ commit to the full `KnowledgeUnit`:
 - **Links → graph edges (step 3).** An optional `StudyNote.links` field plus `[[slug]]`
   body links, both collected by the pure `parseStudyNoteLinks` (dedup by `(to, predicate)`,
   dangling-tolerant) and projected by the pure `studyNoteLinkEdges` into `BioGraphEdge`
-  records (`memory:<slug>` → `memory:<to>`, default predicate `references`) —
+  records (`agent:memory:<slug>` → `agent:memory:<to>`, default predicate `references`) —
   `src/core/study.ts`. Predicates are a **narrow, closed note-navigation set**
   (`StudyNoteLinkPredicate`: `references | see_also | depends_on | contrasts_with`),
   deliberately excluding KG evidence/provenance predicates — note links are a

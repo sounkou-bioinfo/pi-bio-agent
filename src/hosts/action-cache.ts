@@ -37,9 +37,11 @@ export function actionInputDigest(replay: Pick<RunReplaySpec, "kind" | "manifest
     replay.manifest?.digest ?? null,
     replay.operationId ?? null,
     replay.sql ?? null,
-    [...(replay.resources ?? [])].sort(),
+    replay.resources ?? null, // EXECUTION ORDER preserved (NOT sorted): resources resolve in caller order and each
+                              // resolver CREATE-OR-REPLACEs its table, so [A,B] and [B,A] can yield different DB state
+                              // -> different result. Sorting would collide them under one key and serve a wrong hit.
     replay.bindings ?? null, // canonicalize() sorts its keys so binding order doesn't change the CASID
-    [...(replay.sourceReceiptDigests ?? [])].sort(), // resolved-content refs -> key captures the input DAG, not just the declaration
+    replay.sourceReceiptDigests ?? null, // resolved-content refs, in resolution order (matches `resources`) -> the key captures the input DAG AND the order it was built in
     // RESULT-AFFECTING execution facts — omitting these would collide runs that produce DIFFERENT results and let
     // the ActionCache/recallRunResult serve the WRONG cached result:
     replay.duckdbInitSqlDigest ?? null,  // digest of the init SQL (SET/LOAD/ATTACH change the result); same SQL -> same digest -> same key
