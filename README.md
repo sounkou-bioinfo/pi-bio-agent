@@ -202,14 +202,13 @@ pi --model gpt-5.3-codex-spark -e extensions/pi-coding-agent/index.ts -p \
   "short table."
 ```
 
-> Here’s the count by consequence (from
-> `examples/variant-counts/data/variants.csv` used by `manifest.json`):
+> Here’s the count by consequence:
 >
-> | consequence | variants |
-> |-------------|----------|
-> | stop_gained | 2        |
-> | missense    | 2        |
-> | synonymous  | 1        |
+> | Consequence | Number of variants |
+> |-------------|-------------------:|
+> | missense    |                  2 |
+> | stop_gained |                  2 |
+> | synonymous  |                  1 |
 
 **Going bigger — the agent over live ClinVar.** Point it at
 [`clinvar-region.json`](examples/connectors/clinvar-region.json) and it
@@ -222,48 +221,41 @@ minutes — the reads are ~2s; the rest was model latency):
 
 ``` sh
 pi --model gpt-5.3-codex-spark -e extensions/pi-coding-agent/index.ts -p \
-  "Using the manifest " \
-  "examples/connectors/clinvar-region.json, resolve its " \
-  "'clinvar' resource (a ClinVar VCF region read over HTTP " \
-  "via duckhts). Discover the schema, note that INFO_CLNSIG " \
-  "is an array, then write and run your OWN SQL to count " \
-  "variants by clinical significance (UNNEST + GROUP BY, " \
-  "top 8). Show the SQL you ran and the result table."
+  "Using examples/connectors/clinvar-region.json, how many " \
+  "ClinVar variants are there of each clinical significance " \
+  "in that region? Show the SQL you wrote and the top few " \
+  "rows."
 ```
 
-> Done — using `examples/connectors/clinvar-region.json` I resolved the
-> `clinvar` resource and ran schema discovery plus my own aggregation
-> query.
->
-> ### Schema check (discovered)
->
-> `INFO_CLNSIG` is `VARCHAR[]` (array), not a scalar.
->
-> ### SQL I ran (top-8 clinical significance counts)
+> Using `examples/connectors/clinvar-region.json` (ClinVar TP53 region),
+> I ran:
 >
 > ``` sql
 > SELECT
->   significance AS clinical_significance,
+>   unnest_sig AS clinical_significance,
 >   COUNT(*) AS variant_count
-> FROM clinvar,
->      UNNEST(INFO_CLNSIG) AS u(significance)
-> GROUP BY significance
-> ORDER BY variant_count DESC
-> LIMIT 8;
+> FROM (
+>   SELECT UNNEST(INFO_CLNSIG) AS unnest_sig
+>   FROM clinvar
+> ) s
+> WHERE unnest_sig IS NOT NULL
+> GROUP BY unnest_sig
+> ORDER BY variant_count DESC, clinical_significance
+> LIMIT 5;
 > ```
 >
-> ### Result table
+> Top rows:
 >
 > | clinical_significance                        | variant_count |
-> |----------------------------------------------|--------------:|
-> | Pathogenic                                   |          3593 |
-> | Conflicting_classifications_of_pathogenicity |          2918 |
-> | Likely_benign                                |          2891 |
-> | Uncertain_significance                       |          2445 |
-> | Benign                                       |           704 |
-> | Likely_pathogenic                            |           263 |
-> | Pathogenic/Likely_pathogenic                 |           226 |
-> | Benign/Likely_benign                         |            94 |
+> |----------------------------------------------|---------------|
+> | Pathogenic                                   | 3593          |
+> | Conflicting_classifications_of_pathogenicity | 2918          |
+> | Likely_benign                                | 2891          |
+> | Uncertain_significance                       | 2445          |
+> | Benign                                       | 704           |
+>
+> (These are the top 5; there are 11 total clinical significance
+> categories in this region.)
 
 The **same run with no agent** — the deterministic CLI/SDK path, for
 scripts and CI (the substrate runs and *receipts* the SQL; identical
@@ -279,15 +271,15 @@ pi-bio-agent query examples/connectors/clinvar-region.json \
 ``` json
 {
   "ok": true,
-  "runId": "query-1782939253055",
+  "runId": "query-1782955932252-55dcc226",
   "status": "succeeded",
   "rowCount": 8,
   "artifacts": {
-    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782939253055/run.json",
-    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782939253055/result.json",
-    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782939253055/receipts.json"
+    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782955932252-55dcc226/run.json",
+    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782955932252-55dcc226/result.json",
+    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782955932252-55dcc226/receipts.json"
   },
-  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782939253055",
+  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782955932252-55dcc226",
   "rows": [
     {
       "clinical_significance": "Pathogenic",
@@ -337,15 +329,15 @@ pi-bio-agent query examples/variant-counts/manifest.json \
 ``` json
 {
   "ok": true,
-  "runId": "query-1782939255187",
+  "runId": "query-1782955934413-3bf86252",
   "status": "succeeded",
   "rowCount": 3,
   "artifacts": {
-    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782939255187/run.json",
-    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782939255187/result.json",
-    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782939255187/receipts.json"
+    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782955934413-3bf86252/run.json",
+    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782955934413-3bf86252/result.json",
+    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782955934413-3bf86252/receipts.json"
   },
-  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782939255187",
+  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782955934413-3bf86252",
   "rows": [
     {
       "consequence": "missense",
@@ -380,30 +372,22 @@ pi-bio-agent query examples/run-ledger/manifest.json \
 ``` json
 {
   "ok": true,
-  "runId": "query-1782939255280",
+  "runId": "query-1782955934495-af255e95",
   "status": "succeeded",
   "rowCount": 4,
   "artifacts": {
-    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782939255280/run.json",
-    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782939255280/result.json",
-    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782939255280/receipts.json"
+    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782955934495-af255e95/run.json",
+    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782955934495-af255e95/result.json",
+    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782955934495-af255e95/receipts.json"
   },
-  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782939255280",
+  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782955934495-af255e95",
   "rows": [
     {
       "tool": "ad-hoc.query",
       "status": "succeeded",
-      "runs": 86,
+      "runs": 226,
       "first_run": {
         "micros": 1782757322953000
-      }
-    },
-    {
-      "tool": "ad-hoc.query",
-      "status": "failed",
-      "runs": 1,
-      "first_run": {
-        "micros": 1782932194696000
       }
     },
     {
@@ -420,6 +404,14 @@ pi-bio-agent query examples/run-ledger/manifest.json \
       "runs": 1,
       "first_run": {
         "micros": 1782756761953000
+      }
+    },
+    {
+      "tool": "ad-hoc.query",
+      "status": "failed",
+      "runs": 1,
+      "first_run": {
+        "micros": 1782932194696000
       }
     }
   ]
@@ -454,15 +446,15 @@ pi-bio-agent query examples/connectors/uniprot.json \
 ``` json
 {
   "ok": true,
-  "runId": "query-1782939255409",
+  "runId": "query-1782955934646-48ef0818",
   "status": "succeeded",
   "rowCount": 1,
   "artifacts": {
-    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782939255409/run.json",
-    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782939255409/result.json",
-    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782939255409/receipts.json"
+    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782955934646-48ef0818/run.json",
+    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782955934646-48ef0818/result.json",
+    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782955934646-48ef0818/receipts.json"
   },
-  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782939255409",
+  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782955934646-48ef0818",
   "rows": [
     {
       "primaryAccession": "P04637",
@@ -486,12 +478,12 @@ levers.)
 **We port the whole “AI for science” stack as one Pi extension — not a
 hosted product.** The `pi-coding-agent` extension exposes the entire
 surface over this substrate (query/run a manifest, list DuckDB format
-extensions, validate SQL, and remember/recall/walk a temporal memory graph), so reproducible
-artifacts, connected databases, on-demand and *distributed* compute, and
-grounded review are a Pi extension **you** run, on **your** infra. Each
-[example](examples/) carries a recorded, verified run; see [what the
-substrate closes over](docs/closes-over.md) for the topology / Fugu /
-RLM argument.
+extensions, validate SQL, and remember/recall/walk a temporal memory
+graph), so reproducible artifacts, connected databases, on-demand and
+*distributed* compute, and grounded review are a Pi extension **you**
+run, on **your** infra. Each [example](examples/) carries a recorded,
+verified run; see [what the substrate closes over](docs/closes-over.md)
+for the topology / Fugu / RLM argument.
 
 **And the agent doesn’t just *run* these — it *reads and writes* them.**
 The package ships its `examples/`, `docs/`, and every manifest, so a Pi
@@ -527,8 +519,7 @@ This list is generated from the extension’s `registerTool()` calls
 - `bio_run_operation` — Run a bio operation
 - `bio_study_plan` — Plan bio study
 - `bio_validate_select` — Validate bio SQL SELECT
-- `bio_remember` — Write bio study note
-  <!-- END GENERATED:tools -->
+- `bio_remember` — Write bio study note <!-- END GENERATED:tools -->
 
 Generated project-local skills and study notes live under
 `.pi/bio-agent/` in the current project.

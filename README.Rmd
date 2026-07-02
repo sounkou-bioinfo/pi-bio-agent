@@ -194,7 +194,7 @@ TP53 locus, not the whole file), *discovers the schema*, finds `INFO_CLNSIG` is 
 keeps it to ~20s, not minutes — the reads are ~2s; the rest was model latency):
 
 ```{pi, cache=TRUE, timeout=300}
-Using the manifest examples/connectors/clinvar-region.json, resolve its 'clinvar' resource (a ClinVar VCF region read over HTTP via duckhts). Discover the schema, note that INFO_CLNSIG is an array, then write and run your OWN SQL to count variants by clinical significance (UNNEST + GROUP BY, top 8). Show the SQL you ran and the result table.
+Using examples/connectors/clinvar-region.json, how many ClinVar variants are there of each clinical significance in that region? Show the SQL you wrote and the top few rows.
 ```
 
 The **same run with no agent** — the deterministic CLI/SDK path, for scripts and CI (the substrate runs and
