@@ -272,15 +272,15 @@ pi-bio-agent query examples/connectors/clinvar-region.json \
 ``` json
 {
   "ok": true,
-  "runId": "query-1782967131692-aedca597",
+  "runId": "query-1782968407656-de313c7a",
   "status": "succeeded",
   "rowCount": 8,
   "artifacts": {
-    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782967131692-aedca597/run.json",
-    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782967131692-aedca597/result.json",
-    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782967131692-aedca597/receipts.json"
+    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782968407656-de313c7a/run.json",
+    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782968407656-de313c7a/result.json",
+    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782968407656-de313c7a/receipts.json"
   },
-  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782967131692-aedca597",
+  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782968407656-de313c7a",
   "rows": [
     {
       "clinical_significance": "Pathogenic",
@@ -330,15 +330,15 @@ pi-bio-agent query examples/variant-counts/manifest.json \
 ``` json
 {
   "ok": true,
-  "runId": "query-1782967134061-d7d1eedf",
+  "runId": "query-1782968410186-7a26cae4",
   "status": "succeeded",
   "rowCount": 3,
   "artifacts": {
-    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782967134061-d7d1eedf/run.json",
-    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782967134061-d7d1eedf/result.json",
-    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782967134061-d7d1eedf/receipts.json"
+    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782968410186-7a26cae4/run.json",
+    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782968410186-7a26cae4/result.json",
+    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782968410186-7a26cae4/receipts.json"
   },
-  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782967134061-d7d1eedf",
+  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782968410186-7a26cae4",
   "rows": [
     {
       "consequence": "missense",
@@ -373,20 +373,20 @@ pi-bio-agent query examples/run-ledger/manifest.json \
 ``` json
 {
   "ok": true,
-  "runId": "query-1782967134151-02abe7a5",
+  "runId": "query-1782968410283-b05003fe",
   "status": "succeeded",
   "rowCount": 4,
   "artifacts": {
-    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782967134151-02abe7a5/run.json",
-    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782967134151-02abe7a5/result.json",
-    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782967134151-02abe7a5/receipts.json"
+    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782968410283-b05003fe/run.json",
+    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782968410283-b05003fe/result.json",
+    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782968410283-b05003fe/receipts.json"
   },
-  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782967134151-02abe7a5",
+  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782968410283-b05003fe",
   "rows": [
     {
       "tool": "ad-hoc.query",
       "status": "succeeded",
-      "runs": 671,
+      "runs": 719,
       "first_run": {
         "micros": 1782757322953000
       }
@@ -447,15 +447,15 @@ pi-bio-agent query examples/connectors/uniprot.json \
 ``` json
 {
   "ok": true,
-  "runId": "query-1782967134308-f005a864",
+  "runId": "query-1782968410477-abd82309",
   "status": "succeeded",
   "rowCount": 1,
   "artifacts": {
-    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782967134308-f005a864/run.json",
-    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782967134308-f005a864/result.json",
-    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782967134308-f005a864/receipts.json"
+    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782968410477-abd82309/run.json",
+    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782968410477-abd82309/result.json",
+    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782968410477-abd82309/receipts.json"
   },
-  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782967134308-f005a864",
+  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782968410477-abd82309",
   "rows": [
     {
       "primaryAccession": "P04637",
@@ -534,9 +534,12 @@ the current project.
 
 The substrate is provider-agnostic — you don’t need Pi to use it.
 `query`/`run` execute a manifest through the **same** host functions the
-Pi extension uses; both are fail-closed by default (no network/compute
-unless the host binds them). Results print as JSON; a failed run exits
-`1`, a usage error exits `2`.
+Pi extension uses; both are fail-closed by default — the `http.get`
+fetch and the `process.compute` runner stay unbound unless the host
+injects them. (DuckDB’s *own* remote reads via `httpfs`/`s3` are a
+DuckDB capability, sandboxed by the host — container/seccomp — not gated
+by the library; see the Trust boundary above.) Results print as JSON; a
+failed run exits `1`, a usage error exits `2`.
 
 ``` sh
 # run the agent's ad-hoc SQL over a manifest's declared resources

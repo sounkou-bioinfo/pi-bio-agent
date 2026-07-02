@@ -236,9 +236,11 @@ Three things keep this consistent with the rest of the substrate:
   **host's sandbox decision** (container, namespace, seccomp, cluster). The library **records** what ran
   (command digest, tool + version, input handles, output CAS digests, exit code, duration); it does **not**
   impose the limits. Same posture as the network: accountability, not access control.
-- **Long-running is already modeled.** `BioRunSpec.mode` is `inline | background | subagent | service | batch`
-  and `BioRunRecord` streams `started → progress → checkpoint → completed/failed`. A six-hour job is a
-  `background`/`batch` run whose record accrues progress + checkpoints and ends in output artifacts.
+- **Long-running is already modeled.** `BioRunSpec.mode` is an **open host/backend label** (`string` — `inline`/
+  `background`/`subagent`/`service`/`batch`, or `slurm`/`k8s`/`modal`/`nng-worker`/…; nothing branches on it), while
+  `BioRunStatus`/`BioRunEventType` stay closed because the state machine branches on them. `BioRunRecord` streams
+  `started → progress → checkpoint → completed/failed`. A six-hour job is a `background`/`batch` run whose record
+  accrues progress + checkpoints and ends in output artifacts.
 - **Out-of-process compute is BUILT (table-producing case).** The `process.compute` resolver
   (`src/duckdb/resolvers/process-compute.ts`) + the injected `ProcessRunner` port
   (`src/process/node-process-runner.ts`) already run an out-of-process child (R/Python/Go/shell) over Arrow IPC

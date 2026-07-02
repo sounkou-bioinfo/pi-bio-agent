@@ -18,6 +18,23 @@ const conn = async (): Promise<SqlConn> => {
   return c;
 };
 
+describe("run-store lean mode: run.json never points at an unwritten file", () => {
+  test("serialize:false — the output artifact in run.json is the CAS uri, and result.json is NOT written", async () => {
+    const store = await conn();
+    const cas = fsCasStore(await fsp.mkdtemp(join(tmpdir(), "cas-")));
+    const cwd = await fsp.mkdtemp(join(tmpdir(), "lean-run-"));
+    const res = await runBioQueryFromManifest({
+      cwd, dbPath: ":memory:", manifestPath: join(process.cwd(), "examples/variant-counts/manifest.json"),
+      sql: "SELECT 1 AS x", store, author: "agent:A", cas, serialize: false,
+    });
+    assert.equal(res.ok, true);
+    await assert.rejects(fsp.access(join(res.runDir, "result.json")), "result.json is NOT written in lean mode");
+    const run = JSON.parse(await fsp.readFile(join(res.runDir, "run.json"), "utf8"));
+    const outArt = (run.artifacts ?? []).find((a: { role?: string }) => a.role === "output");
+    assert.match(outArt.path, /^cas:sha256:/, "the output artifact points at CAS, not the missing result.json");
+  });
+});
+
 describe("run-store BigInt serialization: lossless, no silent >2^53 corruption", () => {
   test("a BIGINT beyond 2^53 persists as a lossless decimal string; a small one stays a number", async () => {
     const store = await conn();

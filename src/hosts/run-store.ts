@@ -11,6 +11,7 @@ import type { CasStore } from "../core/cas.js";
 import type { BioResolverImpl, ProcessRunner, SqlConn } from "../core/ports.js";
 import { OperationRunError, runOperation, runQuery, type OperationResult } from "../core/operations.js";
 import type { BioRunRecord } from "../core/run-spec.js";
+import type { BioArtifact } from "../core/types.js";
 import { duckdbNodeConn } from "../duckdb/node-api.js";
 import { duckdbFileScanResolver } from "../duckdb/resolvers/duckdb-file-scan.js";
 import { duckdbSqlMaterializeResolver } from "../duckdb/resolvers/duckdb-sql-materialize.js";
@@ -95,6 +96,20 @@ export interface PersistedRun {
 const MAX_SAFE = 9007199254740991n;
 const bigintToJson = (_key: string, value: unknown): unknown =>
   typeof value !== "bigint" ? value : value >= -MAX_SAFE && value <= MAX_SAFE ? Number(value) : value.toString();
+
+// In lean mode (serialize:false) result.json is NOT written — the result bytes live in CAS. Retarget the run
+// record's output artifact from the (unwritten) `runs/<id>/result.json` path to its `cas:sha256:…` URI, so the
+// always-written run.json never points at a file that does not exist. Only the file-persisted copy is retargeted;
+// the ledger/run-object use the digest directly.
+function retargetResultArtifactToCas(run: BioRunRecord, runId: string, casUri: string): BioRunRecord {
+  const filePath = `runs/${runId}/result.json`;
+  const fix = (a: BioArtifact): BioArtifact => (a.path === filePath ? { ...a, path: casUri } : a);
+  return {
+    ...run,
+    artifacts: run.artifacts?.map(fix),
+    events: run.events.map((e) => (e.artifacts?.length ? { ...e, artifacts: e.artifacts.map(fix) } : e)),
+  };
+}
 
 async function writeRunFile(dir: string, name: string, data: unknown): Promise<string> {
   const path = join(dir, name);
@@ -341,13 +356,14 @@ async function runAndPersist(
     try {
       const { run, result, receipts } = await body(conn);
       const enriched = replay ? enrichReplay(replay, receipts) : undefined;
-      // Files are the legible VIEW (default). result.json/receipts.json/replay.json are skipped in lean mode
-      // (serialize:false); run.json is always written. The bytes below go to CAS regardless (referenced by digest).
-      const persisted = await persistRun(cwd, runId, { run, result, receipts }, { serialize });
-      if (enriched && serialize !== false) await writeRunFile(persisted.dir, "replay.json", enriched);
-      // result rows, the full receipts blob, and the replay bundle -> CAS (bytes OUTSIDE the DB); the run:<id> fact
-      // references each by digest, so every one of those files becomes an optional serialize/export.
+      // result rows -> CAS FIRST (needed to retarget the artifact below); the run:<id> fact references it by digest.
       const resultDigest = await putCas(result.rows);
+      // Files are the legible VIEW (default). result.json/receipts.json/replay.json are skipped in lean mode
+      // (serialize:false); run.json is always written — and in lean mode its output artifact points at the CAS URI,
+      // not the unwritten result.json.
+      const runForFiles = serialize === false && resultDigest ? retargetResultArtifactToCas(run, runId, `cas:${resultDigest}`) : run;
+      const persisted = await persistRun(cwd, runId, { run: runForFiles, result, receipts }, { serialize });
+      if (enriched && serialize !== false) await writeRunFile(persisted.dir, "replay.json", enriched);
       const receiptsDigest = await putCas(receipts);
       const replayDigest = enriched ? await putCas(enriched) : undefined;
       // run-as-object-DAG (LLVM CASObject: Data + Refs): a single CAS object whose refs point at the result/
