@@ -67,7 +67,10 @@ export const duckdbFileScanResolver: BioResolverImpl = async (resource, ctx) => 
       { source: sourceUri, version: inputDigest, retrievedAt: now },
       { source: `duckdb.${fn}`, retrievedAt: now },
     ],
-    provenance: [{ source: "duckdb.file_scan", retrievedAt: now }],
+    // live_source ONLY when we could NOT content-digest the file (remote/unreadable path -> no version above): then
+    // the receipt isn't content-pinned, so reproduce must not claim a match without a CAS output pin. A local file
+    // WITH a content digest is fully reproducible (a changed file is honest drift) — no marker.
+    provenance: [{ source: "duckdb.file_scan", retrievedAt: now, ...(inputDigest === undefined ? { notes: ["live_source"] } : {}) }],
   };
   if (freshness !== undefined) await memoStore(ctx.conn, table, freshness, output);
   return output;

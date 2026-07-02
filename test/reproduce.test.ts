@@ -94,6 +94,32 @@ describe("C2: reproduce() compares deterministic receipt content, not wall-clock
     assert.equal(rep.matched, true);
   });
 
+  test("NOT_REPRODUCIBLE (never fake confidence): an un-snapshotted live source with no result pin does not falsely 'match'", async () => {
+    // duckdb.sql_materialize over read_csv_auto records NO source version, so its receipt digest is blind to the
+    // file's CONTENT. Without a CAS resultDigest, a receipts-only 'match' would be hollow — reproduce must say so.
+    const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-repro-live-"));
+    const dataPath = join(cwd, "data.csv").replace(/\\/g, "/");
+    await fs.writeFile(dataPath, "x\n1\n2\n");
+    const manifest = {
+      schema: "pi-bio.manifest.v1", id: "live", version: "0.1.0", title: "live", description: "live",
+      provides: {
+        resolvers: [{ id: "duckdb.sql_materialize", version: "0.1.0", title: "m", description: "m", output: { mode: "table" } }],
+        resources: [{ id: "live", title: "live", kind: "virtual", resolver: "duckdb.sql_materialize", params: { table: "live", sql: `SELECT * FROM read_csv_auto('${dataPath}')` } }],
+      },
+    };
+    const mpath = join(cwd, "manifest.json");
+    await fs.writeFile(mpath, JSON.stringify(manifest));
+    const out = await runBioQueryFromManifest({ cwd, dbPath: ":memory:", manifestPath: mpath, sql: "SELECT count(*) AS n FROM live", resources: ["live"], runId: "live1", now: "2026-07-01T00:00:00Z" }); // no cas
+    assert.equal(out.ok, true, out.ok ? "" : `run failed: ${(out as { error?: unknown }).error}`);
+    const replay = JSON.parse(await fs.readFile(join((out as { runDir: string }).runDir, "replay.json"), "utf8")) as RunReplaySpec;
+    assert.equal(replay.resultDigest, undefined, "no CAS -> no output content pin");
+
+    const rep = await reproduceRun({ cwd, replay }); // no cas on reproduce either
+    assert.equal(rep.reproduced, true, "the re-run itself completed");
+    assert.equal(rep.matched, false, "an un-content-verified live source must NOT report matched:true");
+    assert.match(rep.notReproducible ?? "", /un-snapshotted live source/, "honest: not_reproducible with a reason");
+  });
+
   test("fail closed: reproduce rejects when the manifest FILE changed since the run (would run different logic)", async () => {
     const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-repro-drift-"));
     const cas = fsCasStore(await fs.mkdtemp(join(tmpdir(), "pi-bio-cas-")));

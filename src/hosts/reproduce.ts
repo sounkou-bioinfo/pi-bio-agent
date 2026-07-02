@@ -31,6 +31,9 @@ export interface ReproduceResult {
   resultMatched?: boolean;
   expectedResultDigest?: string;
   producedResultDigest?: string;
+  /** Set (with a reason) when the run CANNOT be honestly verified — an un-snapshotted live source and no output
+   *  content pin. The roadmap's third C2 outcome: not_reproducible, never fake confidence. `matched` is false. */
+  notReproducible?: string;
   runDir?: string;
   error?: string;
 }
@@ -63,11 +66,6 @@ function assertReproducible(replay: RunReplaySpec): void {
   if (!hasReceiptPins && !replay.resultDigest) {
     throw new Error("reproduce: replay pins neither sourceReceiptDigests nor a resultDigest to verify against (fail closed). A resource-free run must carry a resultDigest — run it with a CAS so the output content is pinned.");
   }
-}
-
-async function producedDigests(runDir: string): Promise<string[]> {
-  const receipts = JSON.parse(await fs.readFile(join(runDir, "receipts.json"), "utf8")) as Parameters<typeof receiptContentDigest>[0][];
-  return receipts.map((r) => receiptContentDigest(r));
 }
 
 export async function reproduceRun(req: ReproduceRequest): Promise<ReproduceResult> {
@@ -115,7 +113,14 @@ export async function reproduceRun(req: ReproduceRequest): Promise<ReproduceResu
 
   if (!res.ok) { const exp = replay.sourceReceiptDigests ?? []; return { runId: replay.runId, kind: replay.kind, reproduced: false, matched: false, expected: exp, produced: [], missing: exp, extra: [], runDir: res.runDir, error: res.error }; }
 
-  const produced = await producedDigests(res.runDir);
+  const receipts = JSON.parse(await fs.readFile(join(res.runDir, "receipts.json"), "utf8")) as (Omit<Parameters<typeof receiptContentDigest>[0], "provenance"> & { provenance: Array<{ source: string; digest?: string; notes?: string[] }> })[];
+  const produced: string[] = receipts.map((r) => receiptContentDigest(r));
+  // An un-snapshotted LIVE source is declared BY THE RESOLVER (which alone knows whether it captured content): a
+  // `live_source` provenance note. duckdb.sql_materialize (reads arbitrary SQL/read_csv_auto — can't cheaply digest
+  // its inputs) always sets it; file_scan sets it only for a remote/unreadable path (no content digest). A receipt
+  // WITHOUT the note is content-pinned (file_scan stamps the file's content digest as the snapshot version), so a
+  // changed source is honest drift — but a live-source receipt digest is blind to the source's CONTENT.
+  const hasLiveSource = receipts.some((r) => (r.provenance ?? []).some((p) => p.notes?.includes("live_source")));
   const expected = replay.sourceReceiptDigests ?? [];
   const producedSet = new Set(produced);
   const expectedSet = new Set(expected);
@@ -130,6 +135,16 @@ export async function reproduceRun(req: ReproduceRequest): Promise<ReproduceResu
   if (expectedResultDigest) {
     if (!producedResultDigest) throw new Error("reproduce: replay pins a resultDigest but the re-run produced none — pass a `cas` so the result content can be verified (fail closed)");
     resultMatched = producedResultDigest === expectedResultDigest;
+  }
+  // Roadmap C2 — never fake confidence: if the ONLY basis is receipts (no CAS resultDigest to verify OUTPUT content)
+  // AND any source is un-snapshotted/live, the receipt match doesn't prove the output is the same (data.csv could
+  // have changed underneath). That is not_reproducible, not a match.
+  if (expectedResultDigest === undefined && hasLiveSource) {
+    return {
+      runId: replay.runId, kind: replay.kind, reproduced: true, matched: false,
+      expected, produced, missing, extra, runDir: res.runDir,
+      notReproducible: "an un-snapshotted live source (a sourceSnapshot with no version, e.g. duckdb.sql_materialize over read_csv_auto) is not content-verified and no resultDigest pins the output — re-run with a `cas` to pin output content",
+    };
   }
   return {
     runId: replay.runId, kind: replay.kind, reproduced: true,

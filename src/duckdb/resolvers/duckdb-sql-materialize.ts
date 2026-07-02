@@ -51,6 +51,9 @@ export const duckdbSqlMaterializeResolver: BioResolverImpl = async (resource, ct
     // the handle identifies the materialized table; we have no byte digest (the SQL/sources are the provenance)
     result: { mode: "reference", name: p.table, pointer: { uri: `table:${p.table}`, format: "table" } },
     sourceSnapshots: declaredSources.map((source) => ({ source, retrievedAt: now })),
-    provenance: [{ source: "duckdb.sql_materialize", retrievedAt: now, digest: sqlDigest, notes: ["sql_materialize", ...extensions.map((e) => `ext:${e}`)] }],
+    // live_source: sql_materialize reads arbitrary SQL (read_csv_auto, undeclared tables, volatile fns) and can't
+    // cheaply digest its inputs, so its receipt is NOT content-addressed — reproduce treats it as not_reproducible
+    // unless the OUTPUT is CAS-pinned (roadmap C2: never fake confidence).
+    provenance: [{ source: "duckdb.sql_materialize", retrievedAt: now, digest: sqlDigest, notes: ["sql_materialize", "live_source", ...extensions.map((e) => `ext:${e}`)] }],
   };
 };
