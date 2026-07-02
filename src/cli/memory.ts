@@ -27,7 +27,14 @@ export async function mainMemory(argv: string[], deps: MemoryCliDeps): Promise<n
     deps.err(MEMORY_USAGE);
     return 2;
   }
-  const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { "as-of": { type: "string" } } });
+  let values: ReturnType<typeof parseArgs>["values"], positionals: string[];
+  try {
+    ({ values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { "as-of": { type: "string" } } }));
+  } catch {
+    // an unknown flag / malformed arg is a USAGE error (exit 2), not a crash (generic exit 1) — match mainRun()
+    deps.err(MEMORY_USAGE);
+    return 2;
+  }
   const asOf = (values["as-of"] as string | undefined) ?? MEMORY_NOW;
   const asOfLabel = asOf === MEMORY_NOW ? "now" : asOf;
 

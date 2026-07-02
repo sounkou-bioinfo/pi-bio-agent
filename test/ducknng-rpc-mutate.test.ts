@@ -16,14 +16,16 @@ const ducknngAvailable = await (async () => {
   } catch { return false; }
 })();
 
-async function startServer(name: string, seedSql: string[]): Promise<{ conn: Awaited<ReturnType<DuckDBInstance["connect"]>>; url: string; close: () => void }> {
+async function startServer(name: string, seedSql: string[]): Promise<{ conn: Awaited<ReturnType<DuckDBInstance["connect"]>>; url: string; close: () => Promise<void> }> {
   const inst = await DuckDBInstance.create(":memory:", { allow_unsigned_extensions: "true" });
   const conn = await inst.connect();
   await conn.run("LOAD ducknng");
   for (const s of seedSql) await conn.run(s);
   await conn.run(`SELECT ducknng_start_server('${name}', 'tcp://127.0.0.1:0', 1, 134217728, 300000, 0::UBIGINT)`); // port 0 = OS-assigned
   const url = String((await conn.runAndReadAll(`SELECT listen FROM ducknng_list_servers() WHERE name = '${name}'`)).getRows()[0]![0]);
-  return { conn, url, close: () => { conn.run(`SELECT ducknng_stop_server('${name}')`).catch(() => {}); inst.closeSync(); } };
+  // AWAIT stop_server before closeSync — closing the instance while the server thread is still tearing down races
+  // the native teardown (the ducknng#4 panic class). Drain the stop first, then release the handle.
+  return { conn, url, close: async () => { await conn.run(`SELECT ducknng_stop_server('${name}')`).catch(() => {}); inst.closeSync(); } };
 }
 
 async function client(): Promise<Awaited<ReturnType<DuckDBInstance["connect"]>>> {
@@ -55,7 +57,7 @@ describe("ducknng RPC: cross-process shared MUTABLE state (the quack->ducknng pi
     // and a read RPC sees the same shared state
     const viaRead = (await c.runAndReadAll(`SELECT * FROM ducknng_query_rpc('${srv.url}', ?, 0::UBIGINT)`, ["SELECT k, v FROM shared ORDER BY k"])).getRows().map((r) => r.map(Number));
     assert.deepEqual(viaRead, [[1, 99], [3, 5]], "query_rpc read sees the mutated shared table");
-    srv.close();
+    await srv.close();
   });
 
   test("run_rpc fails closed until exec is registered (the host security boundary)", async () => {
@@ -66,6 +68,6 @@ describe("ducknng RPC: cross-process shared MUTABLE state (the quack->ducknng pi
     assert.match(String(row.error ?? ""), /unknown RPC method/);
     const n = Number((await srv.conn.runAndReadAll("SELECT count(*)::INTEGER FROM t")).getRows()[0]![0]);
     assert.equal(n, 0, "the table was NOT mutated (fail closed)");
-    srv.close();
+    await srv.close();
   });
 });
