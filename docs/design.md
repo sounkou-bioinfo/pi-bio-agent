@@ -425,7 +425,11 @@ skips the work. `file_scan` opts in with the file's **content digest** (sha256, 
 change with a preserved mtime can't false-hit). It is correct, not a stale-cache footgun, because the memo key is
 **content freshness, not the request** — params/URL is the *call*, not the *value*. **Built:** content-addressed
 byte storage (CAS) for cross-db reuse, and remote freshness via HTTP cache validation (ETag `If-None-Match` →
-`304`, the shared index scoped per host `remoteCacheScope`). `sql_materialize` reads arbitrary SQL/live sources
+`304`, the shared index scoped per host `remoteCacheScope`). Scope note: `remoteCacheScope` is a
+`ResolutionContext` field, so the cross-db shared-remote reuse is active for a host that drives resolvers directly;
+the packaged run tools (`bio_query`/`bio_run_operation` → `runQuery`/`runOperation`) do **not** yet thread it, so
+that path does per-db 304 revalidation without the cross-db shared remote index. Threading `remoteCacheScope`
+through the run requests is a named, host-owned leftover, not an advertised default. `sql_materialize` reads arbitrary SQL/live sources
 and can't cheaply content-pin its inputs, so it is deliberately NOT memoized (it declares `live_source`; a run
 over a live source is not put in the ActionCache and is `not_reproducible` without a CAS output pin). Derived tables (`scale_members`,
 `entailed_edge`) are pure and trivially safe (recompute). **`as_of` is now built** (Phase 4.0a): the temporal

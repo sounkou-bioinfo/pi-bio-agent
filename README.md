@@ -218,7 +218,11 @@ htslib tabix range read — only the TP53 locus, not the whole file),
 *discovers the schema*, finds `INFO_CLNSIG` is an array, and writes its
 **own** `UNNEST` + `GROUP BY`. This is a **live agent run**, produced
 when this README is rendered (a small fast model keeps it to ~20s, not
-minutes — the reads are ~2s; the rest was model latency):
+minutes — the reads are ~2s; the rest was model latency). Unlike the
+zero-config block above, this one is **host-provisioned**: it needs `npm
+run provision:duckhts` and a host that permits `duckhts`'s HTTP range
+reads (DuckDB-native egress — the host's boundary, not a library
+default):
 
 ``` sh
 pi --model gpt-5.3-codex-spark -e extensions/pi-coding-agent/index.ts -p \

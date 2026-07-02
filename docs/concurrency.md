@@ -19,7 +19,7 @@ but it is the wrong substrate for concurrent agents. This page is the map of how
 |---|---|---|
 | **Single project, serial** | `openBioStore(cwd)` (default) | the project-local file. Owner's open — **throws** on a lock conflict (a memory write must not be silently dropped). Runs share it open→write→close in sequence. |
 | **Best-effort read under contention** | `tryOpenBioStore(cwd)` | returns **null** on a lock conflict (a concurrent agent holds it) so a reader/logger degrades instead of failing; a *real* error (corruption/permissions) still throws. Used by the always-on recall index and the run-log — they are conveniences, not hard dependencies. `isBioStoreLocked(err)` is the discriminator. |
-| **Concurrent (the real answer)** | a **server-backed store** injected via the extension's `openStore` seam | one **DuckDB server** is the single writer; many clients read/write through it over RPC — **no file lock, so no contention**. This is how inter-project / inter-agent / inter-process / inter-machine memory works. |
+| **Cross-process sharing** | a **server-backed store** injected via the extension's `openStore` seam | one **DuckDB server** is the single writer; many clients read/write through it over RPC — **no file lock, so no contention**. This is how inter-project / inter-agent / inter-process / inter-machine memory works. Safe today for **distinct slugs** and **serialized** writers; concurrent **same-slug** writes are not yet linearizable (see the residue below). |
 
 `tryOpenBioStore` only makes a *single-file* deployment degrade gracefully. It is **not** how you get real
 concurrency — for that you move the store to a server.

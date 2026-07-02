@@ -191,7 +191,9 @@ How many variants of each consequence are in examples/variant-counts/manifest.js
 and it reads a **ClinVar VCF region straight over HTTP with `duckhts`** (an htslib tabix range read — only the
 TP53 locus, not the whole file), *discovers the schema*, finds `INFO_CLNSIG` is an array, and writes its **own**
 `UNNEST` + `GROUP BY`. This is a **live agent run**, produced when this README is rendered (a small fast model
-keeps it to ~20s, not minutes — the reads are ~2s; the rest was model latency):
+keeps it to ~20s, not minutes — the reads are ~2s; the rest was model latency). Unlike the zero-config block above,
+this one is **host-provisioned**: it needs `npm run provision:duckhts` and a host that permits `duckhts`'s HTTP
+range reads (DuckDB-native egress — the host's boundary, not a library default):
 
 ```{pi, cache=TRUE, timeout=300}
 Using examples/connectors/clinvar-region.json, how many ClinVar variants are there of each clinical significance in that region? Show the SQL you wrote and the top few rows.
