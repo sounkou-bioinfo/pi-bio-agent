@@ -46,8 +46,16 @@ describe("cappedFetchLike: the default networked adapter enforces the byte cap o
     await assert.rejects(async () => (await f("https://x/")).text(), /exceeded byte cap of 8/);
   });
 
-  test("falls back to text() when the runtime exposes no body stream (a mock/older runtime)", async () => {
-    const noBody = (async () => ({ ok: true, status: 200, text: async () => "plain", headers: { get: () => null } })) as unknown as typeof globalThis.fetch;
-    assert.equal(await (await cappedFetchLike(noBody, 4)("https://x/")).text(), "plain");
+  // a fake fetch whose Response has NO body stream (a mock/older runtime) — the text() fallback path
+  const noBodyFetch = (text: string): typeof globalThis.fetch =>
+    (async () => ({ ok: true, status: 200, text: async () => text, headers: { get: () => null } })) as unknown as typeof globalThis.fetch;
+
+  test("falls back to text() when the runtime exposes no body stream, and an UNDER-cap body is returned", async () => {
+    assert.equal(await (await cappedFetchLike(noBodyFetch("plain"), 100)("https://x/")).text(), "plain");
+  });
+
+  test("SECURITY: the no-body-stream fallback ALSO enforces the cap (was unbounded — pal #16)", async () => {
+    // "plain" is 5 bytes > 4 — the fallback path must throw too, not return the unbounded body
+    await assert.rejects(async () => (await cappedFetchLike(noBodyFetch("plain"), 4)("https://x/")).text(), /exceeds the 4-byte cap/);
   });
 });
