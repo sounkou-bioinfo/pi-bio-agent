@@ -2,9 +2,11 @@
 
 [Recursive Language Models](https://alexzhang13.github.io/blog/2025/rlm/) (RLM; Zhang & Khattab,
 [arXiv 2512.24601](https://arxiv.org/abs/2512.24601)) handle unbounded context by storing it as a *variable in a
-Python REPL* and recursively sub-querying an LM. On the OOLONG benchmark — *"among the instances associated with
-these user IDs, how many are label X?"* over thousands of rows — RLM recurses and makes **counting errors** at
-long context.
+Python REPL* and recursively sub-querying an LM. On the OOLONG benchmark (`trec_coarse` split — ~3000–6000 rows,
+132k–263k tokens) the query is *"among the instances associated with these user IDs, how many are label X?"* where
+the labels are the TREC coarse question classes (`number`, `human`, `location`, `description`, `entity`,
+`abbreviation`) and, per the blog, *"the model has to infer the labeling to answer."* RLM's *"performance drop …
+occurs for counting problems, where it makes more errors when the context length increases."*
 
 In this substrate that question is **one `GROUP BY`.** The rows live as a DuckDB table (`entries`); the agent
 never sees the whole context — only the bounded result — so there is no context rot, and the count is exact:
@@ -28,11 +30,13 @@ The RLM REPL patterns map directly onto SQL, with `bio_query` as the loop:
 
 ## Honest scope: this manifest is the *reduce*, not the whole loop
 
-RLM is **map-then-reduce**: recurse an LM over partitions to *infer* a per-row label (the map — the part RLM
-spends recursive LM calls on), then answer distributionally (the reduce). The `GROUP BY` above is only the
-**reduce**, and it is exact *because the labels already exist* — the `entries` table ships with a `label` column.
-Claiming "counting beats the model" from this manifest alone would be overclaiming: it elides the hard, semantic
-**map**.
+The blog describes a **"Partition + Map"** strategy: when the model "cannot directly grep or retrieve information
+due to some semantic equivalence," it chunks the context and runs recursive LM calls to *infer* each row's label —
+the semantic map, the part RLM spends recursive LM calls on. Answering distributionally is then the reduce.
+("map-reduce" is our gloss; the blog's own term is "Partition + Map.") The `GROUP BY` above is only the **reduce**,
+and it is exact *because the labels already exist* — the `entries` table ships with a `label` column. Since OOLONG
+rows arrive **unlabeled** ("the model has to infer the labeling"), claiming "counting beats the model" from this
+manifest alone would be overclaiming: it elides the hard, semantic **map**.
 
 The map is shown runnably, not asserted:
 
