@@ -65,5 +65,5 @@ export function contentAddressUri(address: ContentAddress): string {
 }
 
 export function isContentAddressUri(uri: string): boolean {
-  return /^cas:sha256:[a-fA-F0-9]+$/.test(uri);
+  return /^cas:sha256:[a-fA-F0-9]{64}$/.test(uri); // exactly 64 hex — parity with validateContentAddress (no malformed URI passes)
 }

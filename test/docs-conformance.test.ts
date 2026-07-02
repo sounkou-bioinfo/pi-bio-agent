@@ -28,6 +28,7 @@ const FORBIDDEN: Array<{ re: RegExp; why: string }> = [
   { re: /\bbio_nodes\b/, why: "there is no bio_nodes table; a node is an id referenced by observations" },
   { re: /every NNG topology/, why: "overclaim: the tested topology primitives are push/pull, pub/sub, survey/debate; the rest are ducknng transport" },
   { re: /\bdomain_pack\b|\bdomainPack\b/, why: "the domain-pack concept was removed; a manifest is the program" },
+  { re: /\bsha512\b|\bblake3\b/, why: "CAS is sha256-only; ContentAddressAlgorithm no longer names sha512/blake3" },
 ];
 
 describe("docs-conformance: the public docs name only facilities the code actually has", () => {

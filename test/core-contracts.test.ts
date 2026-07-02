@@ -107,6 +107,7 @@ describe("BioRunSpec and storage helpers", () => {
 
   test("CAS is sha256-only at the type AND uri level", () => {
     assert.equal(isContentAddressUri(`cas:sha256:${"a".repeat(64)}`), true);
+    assert.equal(isContentAddressUri("cas:sha256:abc"), false, "a short/malformed digest is rejected — parity with validateContentAddress (64 hex)");
     assert.equal(isContentAddressUri(`cas:sha512:${"a".repeat(128)}`), false, "sha512 uri rejected — the store backs only sha256");
     assert.equal(isContentAddressUri(`cas:blake3:${"a".repeat(64)}`), false);
     assert.ok(validateContentAddress({ algorithm: "sha512", digest: "0".repeat(128) } as unknown as import("../src/core/resources.js").ContentAddress).includes("algorithm must be sha256"));

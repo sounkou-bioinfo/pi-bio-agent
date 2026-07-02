@@ -156,6 +156,11 @@ describe("job durability: rich status is not lost + the ledger timestamp wins + 
     assert.equal(row!.recorded_at, "2026-07-01T00:00:05Z");
     const v = JSON.parse(row!.value_json!);
     assert.deepEqual(v, { phase: "running", message: "step 2/3", progress: { current: 2, total: 3, unit: "chunks" } });
+
+    // durable resume must NOT degrade a rich status to a bare phase — it surfaces the ledger's message/progress
+    const resumed = await resumeBioJob(conn, { cwd, runId: "p1" });
+    assert.equal(resumed.message, "step 2/3");
+    assert.deepEqual(resumed.progress, { current: 2, total: 3, unit: "chunks" });
   });
 
   test("collectAndRecordBioJob makes an in-memory job's result durable: a FRESH ledgerJobRunner reads it back", async () => {

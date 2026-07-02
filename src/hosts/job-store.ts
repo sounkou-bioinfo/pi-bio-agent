@@ -147,6 +147,8 @@ export async function resumeBioJob(conn: SqlConn, req: { cwd: string; runId: str
     runId: req.runId,
     phase: latest?.phase ?? rec.phase, // the ledger wins; the record is a fallback snapshot
     at: latest?.at ?? rec.updatedAt,
+    message: latest?.message, // surface the durable rich status — don't degrade a resumed job to bare phase
+    progress: latest?.progress,
     replayDigest: rec.replayDigest,
     submittedAt: rec.submittedAt,
   };

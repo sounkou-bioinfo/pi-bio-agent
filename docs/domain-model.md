@@ -93,7 +93,7 @@ materialization record   the resolver run that turned virtual -> CAS/view
 ```
 
 ```ts
-interface ContentAddress { algorithm: "sha256" | "sha512"; digest: string; mediaType?: string; sizeBytes?: number }
+interface ContentAddress { algorithm: "sha256"; digest: string; mediaType?: string; sizeBytes?: number }
 interface VirtualResourceSpec {
   id: ResourceId; title: string; kind: "virtual";
   resolver: string; params: Record<string, unknown>;   // a registered resolver id + its inputs (opaque to core)
