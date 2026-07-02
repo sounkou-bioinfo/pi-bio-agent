@@ -5,10 +5,17 @@
   "description": "Provider-agnostic bioinformatics agent primitives, DuckDB SQL planning, and Pi coding-agent integration.",
   "license": "GPL-2.0-or-later",
   "author": "sounkou-bioinfo",
-  "repository": { "type": "git", "url": "git+https://github.com/sounkou-bioinfo/pi-bio-agent.git" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sounkou-bioinfo/pi-bio-agent.git"
+  },
   "homepage": "https://github.com/sounkou-bioinfo/pi-bio-agent#readme",
-  "bugs": { "url": "https://github.com/sounkou-bioinfo/pi-bio-agent/issues" },
-  "engines": { "node": ">=20" },
+  "bugs": {
+    "url": "https://github.com/sounkou-bioinfo/pi-bio-agent/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  },
   "type": "module",
   "keywords": [
     "pi-package",
@@ -32,10 +39,22 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
-    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
-    "./core": { "types": "./dist/core/index.d.ts", "import": "./dist/core/index.js" },
-    "./duckdb": { "types": "./dist/duckdb/index.d.ts", "import": "./dist/duckdb/index.js" },
-    "./hosts": { "types": "./dist/hosts/index.d.ts", "import": "./dist/hosts/index.js" }
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./core": {
+      "types": "./dist/core/index.d.ts",
+      "import": "./dist/core/index.js"
+    },
+    "./duckdb": {
+      "types": "./dist/duckdb/index.d.ts",
+      "import": "./dist/duckdb/index.js"
+    },
+    "./hosts": {
+      "types": "./dist/hosts/index.d.ts",
+      "import": "./dist/hosts/index.js"
+    }
   },
   "bin": {
     "pi-bio-agent": "dist/cli/bin.js"
@@ -43,7 +62,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "rm -rf dist-test && tsc -p tsconfig.test.json && node --test dist-test/test/*.test.js",
-    "check": "npm run typecheck && npm test && npm run check:docs && npm run check:examples",
+    "check": "npm run typecheck && npm test && npm run check:docs && npm run check:examples && npm run check:readme-tools",
     "docs:index": "node scripts/generate-docs-index.mjs",
     "check:docs": "node scripts/generate-docs-index.mjs --check",
     "readme:rmd": "npm run build && Rscript -e 'rmarkdown::render(\"README.Rmd\", quiet=TRUE)' && rm -f README.html",
@@ -52,7 +71,9 @@
     "provision:duckhts": "node --input-type=module -e \"import {DuckDBInstance} from '@duckdb/node-api'; const c=await(await DuckDBInstance.create(':memory:')).connect(); await c.run('INSTALL duckhts FROM community;'); await c.run('LOAD duckhts;'); console.log('duckhts installed + loaded');\"",
     "provision:ducknng-owned": "bash scripts/provision-ducknng-owned.sh",
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
-    "prepare": "npm run build"
+    "prepare": "npm run build",
+    "readme:tools": "node scripts/generate-readme-tools.mjs",
+    "check:readme-tools": "node scripts/generate-readme-tools.mjs --check"
   },
   "pi": {
     "extensions": [
