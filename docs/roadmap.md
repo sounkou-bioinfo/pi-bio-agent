@@ -83,9 +83,9 @@ hand-writing a skill, and the hard part was **abstention** — a naive count ove
 you refuse to call "no frequency data" rare, the defensible number collapses (~6 documented-rare LoF, 1
 disease-relevant).
 
-That is why it is the flagship: it exposes both bets at once — *substrate over skill sprawl* (the count
-is one SQL filter over annotated variants) and the *abstention/safety gate* (no-frequency ≠ rare; benign
-LoF ≠ actionable). It is intentionally tiny — composition pressure, not clinical realism:
+It exposes both bets at once — *substrate over skill sprawl* (the count is one SQL filter over annotated
+variants) and the *abstention/safety gate* (no-frequency ≠ rare; benign LoF ≠ actionable). Intentionally
+tiny — composition pressure, not clinical realism:
 
 ```text
 3 synthetic variants (no-frequency, benign LoF, documented-rare disease-relevant)
@@ -102,8 +102,7 @@ test asserts the abstention, structure, provenance, and stability — not prose.
 
 ## 5. Phases (walking skeleton first)
 
-Inverted from substrate-first: a thin flagship lands early and stays green as substrate thickens behind
-it.
+Inverted from substrate-first: a thin flagship lands early and stays green as substrate thickens behind it.
 
 **Current position:** the flagship is built (manifest #1); `runOperation` produces run records, results,
 and resolution receipts, persisted under `.pi/bio-agent/runs/`. Built out since: the SQL-native NETWORK
@@ -136,11 +135,10 @@ The expertise-per-budget measurement (§2) runs continuously now that the Phase 
 
 ### Phase 4 slices (walking skeleton first)
 
-Foundation is the **temporal provenance statement**: receipts carry source + digest + time, and Phase 4
-promotes selected results/judgments and activation events into `bio_observations`, whose edge-like rows
-project into graph shape as of time t. `bio_edges` stays the atemporal compiled graph. The irreducible
-**human** stays at `activate` (the approval gate) — the substrate provides the rails, the sign-off is
-hosted, not computed
+Foundation is the **temporal provenance statement**: Phase 4 promotes selected results/judgments and
+activation events into `bio_observations`, whose edge-like rows project into graph shape as of time t
+(`bio_edges` stays the atemporal compiled graph). The irreducible **human** stays at `activate` (the
+approval gate) — the substrate provides the rails, the sign-off is hosted, not computed
 ([design.md](./design.md#where-the-human-stays-in-the-loop-the-judgmentapproval-boundary)).
 
 - **4.0 — Temporal provenance store. BUILT.** `bio_observations` keyed by `statement_key`; `asOf(t)` =
@@ -189,29 +187,25 @@ JobRunner adapter (SLURM/k8s/Modal), scheduler, semantic env compatibility.
 
 A note, not a build — deferred until a real cross-machine/worker-pool consumer forces it. Two
 capabilities unrelated as abstractions but merged as a host SERVICE, never as a substrate concept:
-
-- **Storage/namespace** (`ducknng-fs`): `path → metadata → digest/bytes` over ducknng RPC + CAS + a
-  future FUSE host-port. A systems lane (consistency, chunked reads, reconciliation).
-- **Execution/control** (pure NNG process calling): slots behind the existing `ProcessRunner` port — no
-  new core type. Order: `nngProcessRunner` (shared run dir/CAS, `process.compute` contract unchanged) →
-  `process.nng_compute` (pure Arrow-over-NNG, cross-machine) → `ducknng-fs` host-port + optional
-  `nng-host` daemon.
+**storage/namespace** (`ducknng-fs`: `path → metadata → digest/bytes` over ducknng RPC + CAS + a future
+FUSE host-port) and **execution/control** (pure NNG process calling, slotting behind the existing
+`ProcessRunner` port — no new core type). Order: `nngProcessRunner` (shared run dir/CAS, contract
+unchanged) → `process.nng_compute` (pure Arrow-over-NNG, cross-machine) → `ducknng-fs` host-port.
 
 **GUARDRAIL:** process calling must not depend on the filesystem conceptually. The fs is a staging
 convenience; the execution model stays manifest-declares → host-injects-runner → runner-executes →
-resolver-materializes → run/receipt/observation records what happened.
+resolver-materializes → records what happened.
 
 ## 6. Harness-adaptation doctrine (mods vs hooks)
 
 Extending the harness is core to the Pi lineage — packages, extensions, custom tools, skills, prompts,
-provider registration, reload/install boundaries. `pi-bio-agent` inherits that and makes it
-biomedical-safe and provenance-aware. The lineage is **agent-mediated extension through explicit harness
-surfaces, not arbitrary self-mutation.** This answers "what happens when you update your harness and it's
-hacked to pieces?":
+reload/install boundaries. `pi-bio-agent` inherits that and makes it biomedical-safe and provenance-
+aware. The lineage is **agent-mediated extension through explicit harness surfaces, not arbitrary self-
+mutation.** This answers "what happens when you update your harness and it's hacked to pieces?":
 
 > **Safe adaptation is declarative, validated, reversible, recorded, and never edits core in place.**
 
-Core updates happen through package / git / update mechanisms. Agent-authored changes enter only as
+Core updates happen through package / git / update mechanisms; agent-authored changes enter only as
 specs, skills, operation packs, or extensions — with tests and reload boundaries.
 
 ```text
