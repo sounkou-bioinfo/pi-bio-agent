@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { promises as fsp } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { mainRun, parseFlags } from "../src/cli/run.js";
+import { openBioStore } from "../src/hosts/bio-store.js";
+import { observationAsOfKey } from "../src/duckdb/observations.js";
 import * as sdk from "../src/index.js";
 
 // The `query`/`run` CLI engine wraps the SAME tested host functions the Pi extension uses. Exercised over the
@@ -23,6 +28,35 @@ describe("cli: query/run over a manifest (provider-agnostic entry point)", () =>
     assert.equal(printed.ok, true);
     assert.ok(printed.rowCount > 0, "produced rows");
     assert.deepEqual(printed.rows.map((r) => r.consequence), ["missense", "stop_gained", "synonymous"]);
+  });
+
+  test("--ledger folds the CLI run into the shared store as an attributed run:<id> fact (thesis, from the CLI)", async () => {
+    const s = sink();
+    const ledgerPath = join(await fsp.mkdtemp(join(tmpdir(), "cli-ledger-")), "store.duckdb");
+    const code = await mainRun("query", [MANIFEST, "--db", ":memory:", "--sql", "SELECT count(*) AS n FROM variants",
+      "--run-id", "cli-led", "--ledger", ledgerPath, "--author", "agent:cli-test"], s.deps);
+    assert.equal(code, 0, s.err.join("\n"));
+    // the CLI CLOSED its store handle (DuckDB is a process-exclusive writer), so we can reopen and read the fact back
+    const store = await openBioStore(process.cwd(), { path: ledgerPath });
+    try {
+      const row = await observationAsOfKey(store.conn, "run:cli-led", "9999-12-31T23:59:59.999Z");
+      assert.ok(row, "the CLI recorded the run into the --ledger store");
+      assert.equal(row!.source, "agent:cli-test"); // attributed to --author
+      const v = JSON.parse(row!.value_json!);
+      assert.equal(v.status, "succeeded");
+      assert.equal(v.sql, "SELECT count(*) AS n FROM variants"); // the exact ad-hoc SQL is queryable in the ledger
+    } finally { store.close(); }
+  });
+
+  test("--ledger defaults the author to 'cli' when --author is omitted; without --ledger nothing is recorded", async () => {
+    const s = sink();
+    const ledgerPath = join(await fsp.mkdtemp(join(tmpdir(), "cli-ledger-")), "store.duckdb");
+    assert.equal(await mainRun("query", [MANIFEST, "--db", ":memory:", "--sql", "SELECT 1 AS x", "--run-id", "cli-def", "--ledger", ledgerPath], s.deps), 0, s.err.join("\n"));
+    const store = await openBioStore(process.cwd(), { path: ledgerPath });
+    try {
+      const row = await observationAsOfKey(store.conn, "run:cli-def", "9999-12-31T23:59:59.999Z");
+      assert.equal(row!.source, "cli", "default author is 'cli'");
+    } finally { store.close(); }
   });
 
   test("missing required flags fail with usage (exit 2), not a crash", async () => {

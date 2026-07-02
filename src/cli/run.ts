@@ -1,6 +1,8 @@
 import { promises as fs } from "node:fs";
 import { join } from "node:path";
+import type { SqlConn } from "../core/ports.js";
 import { runBioOperationFromManifest, runBioQueryFromManifest } from "../hosts/run-store.js";
+import { openBioStore } from "../hosts/bio-store.js";
 
 // The `query` / `run` CLI engine — the substrate's actual value at a provider-agnostic entry point (not Pi-only).
 // It wraps the SAME tested host functions the Pi extension uses (runBioQueryFromManifest / runBioOperationFromManifest),
@@ -65,8 +67,9 @@ function parseBindings(raw: string | undefined): Record<string, unknown> | undef
 
 const USAGE =
   "usage:\n" +
-  "  pi-bio-agent query <manifest.json> --db <path|:memory:> --sql \"<SELECT>\" [--resources a,b] [--bindings '{...}'] [--init-sql \"INSTALL ...; LOAD ...\"] [--run-id id]\n" +
-  "  pi-bio-agent run   <manifest.json> --db <path|:memory:> --operation <id> [--bindings '{...}'] [--run-id id]";
+  "  pi-bio-agent query <manifest.json> --db <path|:memory:> --sql \"<SELECT>\" [--resources a,b] [--bindings '{...}'] [--init-sql \"INSTALL ...; LOAD ...\"] [--run-id id] [--ledger <path|auto> [--author name]]\n" +
+  "  pi-bio-agent run   <manifest.json> --db <path|:memory:> --operation <id> [--bindings '{...}'] [--run-id id] [--ledger <path|auto> [--author name]]\n" +
+  "  --ledger records the run as a run:<id> fact in the shared bio_observations store (path, or 'auto' for the project default); --author attributes it (default 'cli').";
 
 /** Split a `;`-separated SQL string into statements WITHOUT splitting a `;` inside a single-quoted string literal
  *  (with `''` escapes). Enough for the provisioning escape hatch (`SET VARIABLE tls = fn('a;b')`); not a full
@@ -98,7 +101,7 @@ export async function mainRun(sub: string, argv: string[], deps: RunCliDeps): Pr
     // PER-SUBCOMMAND flags, not a shared set: `run --resources` / `query --operation` would otherwise be accepted
     // and SILENTLY IGNORED (a `run` still resolves the operation's own requiredResources — the caller's --resources
     // exclusion is a no-op), which is exactly the surprising fall-through the unknown-flag hardening exists to stop.
-    const COMMON = ["db", "bindings", "run-id", "init-sql"];
+    const COMMON = ["db", "bindings", "run-id", "init-sql", "ledger", "author"];
     const KNOWN = new Set(sub === "query" ? [...COMMON, "sql", "resources"] : [...COMMON, "operation"]);
     const unknown = Object.keys(flags).filter((k) => !KNOWN.has(k));
     if (unknown.length) throw new Error(`unknown flag(s) for '${sub}': ${unknown.map((k) => `--${k}`).join(", ")}`); // a typo / wrong-subcommand flag must not silently fall back
@@ -113,19 +116,37 @@ export async function mainRun(sub: string, argv: string[], deps: RunCliDeps): Pr
   // `;`-separated statements. This is how a networked connector gets ducknng + TLS; it is NOT agent SQL.
   const initStmts = flags["init-sql"] ? splitSqlStatements(flags["init-sql"]) : [];
   const duckdbInitSql = initStmts.length ? initStmts : undefined;
-  const common = { cwd: deps.cwd, dbPath, manifestPath, runId, bindings, duckdbInitSql };
+  // Optional LEDGER opt-in: fold this run into the shared bio_observations store as a `run:<id>` fact — the thesis'
+  // "compute status is a row in the one ledger" demonstrated from the provider-agnostic CLI, not just the extension.
+  // EXPLICIT + path-specified (`--ledger <path|auto>`), never an ambient default (the CLI's visible-choice
+  // discipline). FAIL CLOSED: DuckDB is a process-exclusive writer, so if another process (a live Pi session) holds
+  // that store, openBioStore throws and we surface it here — we do NOT silently skip recording the run.
+  let ledger: { conn: SqlConn; close: () => void } | undefined;
+  if (flags.ledger) {
+    try {
+      ledger = await openBioStore(deps.cwd, flags.ledger === "auto" ? {} : { path: flags.ledger });
+    } catch (e) {
+      deps.err(`--ledger: could not open the observation store (${flags.ledger}): ${e instanceof Error ? e.message : String(e)}`);
+      return 1;
+    }
+  }
+  const common = { cwd: deps.cwd, dbPath, manifestPath, runId, bindings, duckdbInitSql, ...(ledger ? { store: ledger.conn, author: flags.author ?? "cli" } : {}) };
 
   let res;
-  if (sub === "query") {
-    if (!flags.sql) { deps.err("query requires --sql <read-only SELECT>"); deps.err(USAGE); return 2; }
-    const resources = flags.resources ? flags.resources.split(",").map((s) => s.trim()).filter(Boolean) : undefined;
-    res = await runBioQueryFromManifest({ ...common, sql: flags.sql, resources });
-  } else if (sub === "run") {
-    if (!flags.operation) { deps.err("run requires --operation <operationId>"); deps.err(USAGE); return 2; }
-    res = await runBioOperationFromManifest({ ...common, operationId: flags.operation });
-  } else {
-    deps.err(USAGE);
-    return 2;
+  try {
+    if (sub === "query") {
+      if (!flags.sql) { deps.err("query requires --sql <read-only SELECT>"); deps.err(USAGE); return 2; }
+      const resources = flags.resources ? flags.resources.split(",").map((s) => s.trim()).filter(Boolean) : undefined;
+      res = await runBioQueryFromManifest({ ...common, sql: flags.sql, resources });
+    } else if (sub === "run") {
+      if (!flags.operation) { deps.err("run requires --operation <operationId>"); deps.err(USAGE); return 2; }
+      res = await runBioOperationFromManifest({ ...common, operationId: flags.operation });
+    } else {
+      deps.err(USAGE);
+      return 2;
+    }
+  } finally {
+    ledger?.close();
   }
 
   if (!res.ok) {
