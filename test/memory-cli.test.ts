@@ -39,5 +39,9 @@ describe("memory CLI over the ONE temporal store (replaces the stale notes CLI)"
     assert.equal(await mainMemory(["show", "nope"], deps), 1); // not found
     // an unknown FLAG is a clean usage error (exit 2), not an uncaught ERR_PARSE_ARGS -> generic exit 1
     assert.equal(await mainMemory(["list", "--bad"], deps), 2);
+    // SURPLUS positionals are a usage error (exit 2), not a silent success against the wrong intended input
+    assert.equal(await mainMemory(["list", "junk"], deps), 2);
+    assert.equal(await mainMemory(["show", "acmg", "typo"], deps), 2);
+    assert.equal(await mainMemory(["history", "a", "b"], deps), 2);
   });
 });

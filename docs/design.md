@@ -410,11 +410,13 @@ lazy/effect monad would be the idealist move (a monad with no instances we need;
 data). The frame makes the deferred work *obvious rather than invented*, and the first piece is now **built**:
 **resolution memoization** (`src/duckdb/resolution-memo.ts`) — a per-table freshness token + stored receipt;
 on re-resolve over a persistent `dbPath`, an unchanged token + a still-present table replays the receipt and
-skips the work. `file_scan` opts in with `mtime+size`. It is correct, not a stale-cache footgun, because the
-memo key is **content freshness, not the request** — params/URL is the *call*, not the *value*. The remaining
-pieces land when a concrete re-run forces them: content-addressed byte storage (CAS) for cross-db reuse; remote
-freshness via HTTP cache validation (ETag / Last-Modified, `If-None-Match` → `304`) once the `FetchLike` port
-exposes headers; `sql_materialize` freshness over its `declaredSources`' mtimes. Derived tables (`scale_members`,
+skips the work. `file_scan` opts in with the file's **content digest** (sha256, not mtime+size — a same-size
+change with a preserved mtime can't false-hit). It is correct, not a stale-cache footgun, because the memo key is
+**content freshness, not the request** — params/URL is the *call*, not the *value*. **Built:** content-addressed
+byte storage (CAS) for cross-db reuse, and remote freshness via HTTP cache validation (ETag `If-None-Match` →
+`304`, the shared index scoped per host `remoteCacheScope`). `sql_materialize` reads arbitrary SQL/live sources
+and can't cheaply content-pin its inputs, so it is deliberately NOT memoized (it declares `live_source`; a run
+over a live source is not put in the ActionCache and is `not_reproducible` without a CAS output pin). Derived tables (`scale_members`,
 `entailed_edge`) are pure and trivially safe (recompute). **`as_of` is now built** (Phase 4.0a): the temporal
 facts live in the append-only `bio_observations` (`src/duckdb/observations.ts`), `observationsAsOf(t)` is
 latest-per-`statement_key`, and edge-like rows project into `bio_edges_as_of(t)` over which the *same*

@@ -78,6 +78,10 @@ describe("http.get: one generic HTTP resolver (injected fetch, no ambient networ
     }
     // allowlisted non-secret headers pass
     await httpTableResolver(okJson([]))(resource({ url: "https://x/y", table: "t", headers: { Accept: "application/json", "Content-Type": "application/json" } }), { conn, now: "t" });
+    // FAIL CLOSED on a MALFORMED headers: a non-object (a typo) is rejected, not silently coerced to {} (which would
+    // send the request with no header); a non-string value is rejected too, not passed to fetch.
+    await assert.rejects(() => httpTableResolver(okJson([]))(resource({ url: "https://x/y", table: "t", headers: "Authorization: Bearer X" }), { conn, now: "t" }), /params\.headers must be an object/);
+    await assert.rejects(() => httpTableResolver(okJson([]))(resource({ url: "https://x/y", table: "t", headers: { Accept: 7 } }), { conn, now: "t" }), /must be a string value/);
   });
 
   test("conditional GET: a 304 to the stored ETag replays the cached receipt (no re-download / re-materialize)", async () => {

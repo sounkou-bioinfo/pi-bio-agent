@@ -38,6 +38,14 @@ export async function mainMemory(argv: string[], deps: MemoryCliDeps): Promise<n
   const asOf = (values["as-of"] as string | undefined) ?? MEMORY_NOW;
   const asOfLabel = asOf === MEMORY_NOW ? "now" : asOf;
 
+  // reject SURPLUS positionals (list takes none; show/history take exactly one slug) — a stray arg is a mistake that
+  // must not silently succeed against the WRONG input (e.g. `memory show good typo` acting on 'good').
+  const maxPositionals = command === "list" ? 0 : 1;
+  if (positionals.length > maxPositionals) {
+    deps.err(`memory ${command}: unexpected extra argument(s) '${positionals.slice(maxPositionals).join(" ")}'\n\n${MEMORY_USAGE}`);
+    return 2;
+  }
+
   const store = await openBioStore(deps.cwd);
   try {
     if (command === "list") {

@@ -62,14 +62,20 @@ export function httpTableResolver(fetchImpl: FetchLike): BioResolverImpl {
     const format = typeof p.format === "string" ? p.format : "json";
     const reader = READERS[format];
     if (!reader) throw new Error(`http resolver: unknown format '${format}' (expected json, ndjson, or csv)`);
-    const headers = (p.headers && typeof p.headers === "object" ? p.headers : {}) as Record<string, string>;
+    // FAIL CLOSED on a malformed `headers`: a non-object (a typo like "headers":"Authorization: Bearer X") must be
+    // REJECTED, not silently coerced to {} (which would send the request with no header — a surprising, unsafe pass).
+    if (p.headers !== undefined && (typeof p.headers !== "object" || p.headers === null || Array.isArray(p.headers))) {
+      throw new Error("http.get: params.headers must be an object of string values");
+    }
+    const headers = (p.headers ?? {}) as Record<string, string>;
     // SECURITY: a manifest is agent-authorable DATA, so it must not carry SECRETS. Use an ALLOWLIST of clearly
     // non-secret headers (a denylist can never be complete — Private-Token, Ocp-Apim-Subscription-Key, X-Foo-Auth,
     // … would slip through). Anything else — including any auth/custom header that might bear a secret — is refused
     // and must be injected by a host fetch policy (withAuth). Fail closed.
     const SAFE_MANIFEST_HEADERS = new Set(["accept", "accept-language", "accept-encoding", "content-type", "content-language", "user-agent", "referer", "if-none-match", "if-modified-since", "cache-control"]);
-    for (const name of Object.keys(headers)) {
+    for (const [name, value] of Object.entries(headers)) {
       if (!SAFE_MANIFEST_HEADERS.has(name.toLowerCase())) throw new Error(`http.get: header '${name}' is not allowed from a manifest — a manifest must not carry secrets. Only non-secret headers (Accept, Content-Type, …) are permitted; inject auth/custom headers via a host fetch policy (withAuth).`);
+      if (typeof value !== "string") throw new Error(`http.get: header '${name}' must be a string value (fail closed, not coerced)`);
     }
     // This resolver materializes a response BODY into a table, so it allows the BODY-RETURNING READ methods:
     // GET, or POST as a QUERY (a body that READS — VEP batch, GraphQL). PUT/DELETE/PATCH (mutations) are refused.
