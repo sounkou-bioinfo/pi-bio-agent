@@ -87,6 +87,18 @@ const RUN_DIR_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 // reader not matching these is the residual denylist risk — the safe direction is to prefer NOT memoizing.)
 const AMBIENT_SQL_READ = /\bread_\w+\s*\(|\b\w*_scan\s*\(|\b(glob|sniff_csv|parquet_metadata|parquet_schema)\s*\(|\b(from|join)\s+'|'(https?|s3|gs|gcs|az|azure|r2|hf|ftp):/i;
 
+// Mark an error that occurred while OPENING the run's DuckDB db (create/connect) — BEFORE any resource resolution or
+// process.compute side effect. A host that logs runs into a store can safely RETRY such a failure unlogged (e.g. the
+// run db aliased the log store's file and lock-conflicted); a lock/error surfacing LATER may have already run side
+// effects, so it must NOT be blindly retried. See the extension's withRunLog.
+export function markRunDbOpenError<E>(err: E): E {
+  if (err && typeof err === "object") (err as { __runDbOpen?: boolean }).__runDbOpen = true;
+  return err;
+}
+export function isRunDbOpenError(err: unknown): boolean {
+  return !!(err && typeof err === "object" && (err as { __runDbOpen?: boolean }).__runDbOpen === true);
+}
+
 /** Resolve a run's directory, refusing a runId that could escape runsRoot. Centralized so every persistence
  *  path (and the host runner) is path-safe, including the exported persist* helpers called directly. */
 function runDir(cwd: string, runId: string): string {
@@ -364,7 +376,11 @@ async function recordRun(
 async function runAndPersist(
   cwd: string, dbPath: string, runId: string, identity: string, kind: "query" | "operation",
   body: (conn: SqlConn) => Promise<{ run: BioRunRecord; result: OperationResult; receipts: ResolutionReceipt[] }>,
-  now: string,
+  // The INJECTED clock (req.now) or undefined. Resolution/receipts use the caller's start-time `now` (captured in
+  // `body`); the run:<id> ledger fact + ActionCache are stamped with a COMPLETION time (systemClock() at record time)
+  // so a long run isn't visible as succeeded/failed BEFORE it finished. When `injectedNow` is set (deterministic
+  // tests) both collapse to it, so test assertions on the timestamp are unchanged.
+  injectedNow: string | undefined,
   initSql?: string[],
   bindings?: Record<string, unknown>,
   duckdbConfig?: Record<string, string>,
@@ -376,13 +392,18 @@ async function runAndPersist(
   // Fail closed: lean mode drops result/receipts/replay FILES, so without a CAS to hold those bytes they would be
   // lost entirely (data loss). Refuse rather than silently discard outputs/provenance.
   if (serialize === false && !cas) throw new Error("serialize:false requires a cas — refusing to skip result/receipts/replay files with nowhere else to store the bytes");
-  const instance = await DuckDBInstance.create(resolveInCwd(cwd, dbPath), duckdbConfig);
+  let instance: DuckDBInstance;
+  try {
+    instance = await DuckDBInstance.create(resolveInCwd(cwd, dbPath), duckdbConfig);
+  } catch (err) {
+    throw markRunDbOpenError(err); // create() failed (bad db/config/lock) — BEFORE any resolution/compute side effect
+  }
   let connection: Awaited<ReturnType<typeof instance.connect>>;
   try {
     connection = await instance.connect();
   } catch (err) {
     instance.closeSync(); // connect() failed (bad db/config/lock) — the finally below can't run yet, so close the instance here or it leaks (a process-exclusive writer lock would linger)
-    throw err;
+    throw markRunDbOpenError(err); // still BEFORE side effects — a host may retry unlogged (see extension withRunLog)
   }
   const conn = duckdbNodeConn(connection);
   // Put a JSON blob in CAS (bytes OUTSIDE the DB) and return its content address, or undefined when no CAS.
@@ -450,8 +471,11 @@ async function runAndPersist(
         // the run dir advertises refs that don't belong to the current run.
         await fs.rm(join(persisted.dir, "cas-refs.json"), { force: true });
       }
+      // COMPLETION time (not run start): the ledger fact + memo record when the run FINISHED, so a long run isn't
+      // visible as succeeded before it actually completed. Injected `now` (tests) collapses this to the fixed value.
+      const completedAt = injectedNow ?? systemClock();
       // Datomic + CAS: record the run as a fact in the ONE store, referencing content by digest (bytes stay outside).
-      await recordRun(runLog, now, { runId, identity, kind, status: run.status, error: undefined, dir: persisted.dir, replay, enriched, resultDigest, receiptsDigest, replayDigest, runObjectDigest });
+      await recordRun(runLog, completedAt, { runId, identity, kind, status: run.status, error: undefined, dir: persisted.dir, replay, enriched, resultDigest, receiptsDigest, replayDigest, runObjectDigest });
       // ActionCache (LLVM CAS): map this input's CASID -> the result's CASID, so an identical future run can be
       // memoized/deduped and reproduce() has an input->output handle. Only when both a CAS and the store are present.
       // SKIP a run with a LIVE SOURCE: its sourceReceiptDigests are blind to the source's CONTENT (sql_materialize /
@@ -471,7 +495,7 @@ async function runAndPersist(
         try {
           // key on the ENRICHED replay so the action key is CONTENT-addressed (includes sourceReceiptDigests) —
           // a changed source yields a different key, so a future memoized hit can never serve a stale result.
-          await actionCachePut(runLog.store, actionInputDigest(enriched), resultDigest, now, runLog.author);
+          await actionCachePut(runLog.store, actionInputDigest(enriched), resultDigest, completedAt, runLog.author);
         } catch {
           /* best-effort memo: never fail a run because the action-cache write failed */
         }
@@ -497,7 +521,8 @@ async function runAndPersist(
         } else {
           await fs.rm(join(persisted.dir, "cas-refs.json"), { force: true }); // reused runId: clear a prior CAS run's stale cas-refs.json (see the success path)
         }
-        await recordRun(runLog, now, { runId, identity, kind, status: error.run.status, error: error.message, dir: persisted.dir, replay, enriched, receiptsDigest, replayDigest });
+        const failedAt = injectedNow ?? systemClock(); // FAILURE time, not run start (see the success path)
+        await recordRun(runLog, failedAt, { runId, identity, kind, status: error.run.status, error: error.message, dir: persisted.dir, replay, enriched, receiptsDigest, replayDigest });
         const casRefs = cas ? { receipts: receiptsDigest, replay: replayDigest } : undefined;
         return { ok: false, runId, operationId: identity, status: error.run.status, error: error.message, casRefs, runDir: persisted.dir };
       }
@@ -539,7 +564,7 @@ export async function runBioOperationFromManifest(req: RunOperationRequest): Pro
     ...(req.duckdbConfig ? { duckdbConfigDigest: canonicalDigest(req.duckdbConfig) } : {}), // pin WHICH config (digest, not the secret-bearing config itself)
     ...(proc ? { process: proc } : {}),
   };
-  return runAndPersist(req.cwd, req.dbPath, runId, req.operationId, "operation", (conn) => runOperation(registry, conn, { operationId: req.operationId, runId, now, signal: req.signal, cas: req.cas }), now, req.duckdbInitSql, req.bindings, req.duckdbConfig, replay, req.store ? { store: req.store, author: req.author } : undefined, req.cas, req.serialize);
+  return runAndPersist(req.cwd, req.dbPath, runId, req.operationId, "operation", (conn) => runOperation(registry, conn, { operationId: req.operationId, runId, now, signal: req.signal, cas: req.cas }), req.now, req.duckdbInitSql, req.bindings, req.duckdbConfig, replay, req.store ? { store: req.store, author: req.author } : undefined, req.cas, req.serialize);
 }
 
 export interface RunQueryRequest {
@@ -599,5 +624,5 @@ export async function runBioQueryFromManifest(req: RunQueryRequest): Promise<Run
     ...(req.duckdbConfig ? { duckdbConfigDigest: canonicalDigest(req.duckdbConfig) } : {}), // pin WHICH config (digest, not the secret-bearing config itself)
     ...(proc ? { process: proc } : {}),
   };
-  return runAndPersist(req.cwd, req.dbPath, runId, "ad-hoc.query", "query", (conn) => runQuery(registry, conn, { sql: req.sql, resources, runId, now, signal: req.signal, cas: req.cas }), now, req.duckdbInitSql, req.bindings, req.duckdbConfig, replay, req.store ? { store: req.store, author: req.author } : undefined, req.cas, req.serialize);
+  return runAndPersist(req.cwd, req.dbPath, runId, "ad-hoc.query", "query", (conn) => runQuery(registry, conn, { sql: req.sql, resources, runId, now, signal: req.signal, cas: req.cas }), req.now, req.duckdbInitSql, req.bindings, req.duckdbConfig, replay, req.store ? { store: req.store, author: req.author } : undefined, req.cas, req.serialize);
 }

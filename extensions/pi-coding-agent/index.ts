@@ -5,7 +5,7 @@ import { validateReadOnlySelect } from "../../src/core/knowledge-graph.js";
 import { deriveStudyPlan, normalizeStudySlug, walkMemoryGraph, type StudyArtifactKind, type StudyCorpus, type StudyNote } from "../../src/core/study.js";
 import { deleteStudyNote, makeStudyNote, runtimeSkillRoot, runtimeStudyRoot, validateSkillInput, writeProjectSkill, writeStudyNote } from "../../src/hosts/pi-project.js";
 import { defaultDuckDbExtensionCatalog, findDuckDbExtensions } from "../../src/duckdb/extensions.js";
-import { describeBioManifestFromPath, runBioOperationFromManifest, runBioQueryFromManifest } from "../../src/hosts/run-store.js";
+import { describeBioManifestFromPath, isRunDbOpenError, runBioOperationFromManifest, runBioQueryFromManifest } from "../../src/hosts/run-store.js";
 import { bioStorePath, isBioStoreLocked, openBioStore, type BioStore } from "../../src/hosts/bio-store.js";
 import { isAbsolute, resolve } from "node:path";
 import { stat } from "node:fs/promises";
@@ -107,9 +107,16 @@ async function openRunLog(open: OpenStore, cwd: string, dbPath: string): Promise
   // device+inode, so a SYMLINK or HARDLINK alias of the store file (which resolve() alone won't unmask) is still
   // caught — else the run opens the same inode and DuckDB's process-exclusive-writer lock makes the run fail.
   if (runDb && (resolve(runDb) === storePath || (await isSameFile(runDb, storePath)))) return undefined; // (1)
-  // (2) tryOpen returns undefined on a lock conflict (a concurrent agent holds it); a real error also degrades
-  // here because run-logging is best-effort and must never fail the query.
-  return (await tryOpen(open, cwd).catch(() => undefined)) ?? undefined;
+  // (2) tryOpen returns undefined on a lock conflict (a concurrent agent holds it — the EXPECTED degrade). A REAL
+  // store error (corruption/permissions) is NOT expected: best-effort logging must still not fail the run, so we
+  // degrade — but SURFACE it (a warning to stderr) rather than swallow it silently, so an operator can fix a broken
+  // store instead of silently losing every run-ledger entry.
+  try {
+    return await tryOpen(open, cwd);
+  } catch (e) {
+    console.warn(`bio-agent: run-log store unavailable (${e instanceof Error ? e.message : String(e)}); continuing without run logging`);
+    return undefined;
+  }
 }
 
 // Run a bio run WITH best-effort logging into the run-log store, closing the store exactly once. If the run itself
@@ -124,7 +131,10 @@ async function withRunLog<T>(open: OpenStore, cwd: string, dbPath: string, run: 
   try {
     return await run(store.conn);
   } catch (e) {
-    if (isBioStoreLocked(e)) { close(); return await run(undefined); } // db aliased the log store — retry unlogged
+    // Retry unlogged ONLY for a lock error at the run's DB OPEN (isRunDbOpenError) — that is BEFORE any resource
+    // resolution / process.compute side effect (the run db aliased the log store's file). A lock surfacing LATER may
+    // have already run side effects, so retrying it could DUPLICATE them — propagate instead.
+    if (isBioStoreLocked(e) && isRunDbOpenError(e)) { close(); return await run(undefined); }
     throw e;
   } finally {
     close();

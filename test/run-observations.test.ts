@@ -8,7 +8,7 @@ import { promises as fsp } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { recordRunObservation } from "../src/hosts/run-observations.js";
-import { runBioQueryFromManifest, runBioOperationFromManifest } from "../src/hosts/run-store.js";
+import { runBioQueryFromManifest, runBioOperationFromManifest, markRunDbOpenError, isRunDbOpenError } from "../src/hosts/run-store.js";
 import { fsCasStore } from "../src/hosts/fs-cas.js";
 import type { CasStore } from "../src/core/cas.js";
 import { collectGarbage } from "../src/hosts/gc.js";
@@ -32,6 +32,18 @@ describe("run-observations: ad-hoc SQL folds into the ONE store as an as-of, att
     assert.equal(v.sql, "SELECT count(*) FROM variants"); // the exact ad-hoc SQL is queryable, not just in a file
     assert.deepEqual(v.sourceReceiptDigests, ["sha256:abc"]); // the fact REFERENCES the immutable content (bytes stay outside)
     assert.equal(v.manifestDigest, "sha256:def");
+  });
+
+  test("run-db-open marker: only a MARKED error is a retry-safe db-open failure; the original message is preserved", () => {
+    // the extension's withRunLog retries a run unlogged ONLY for a lock at the DB OPEN (before side effects). It keys
+    // on this marker AND on isBioStoreLocked (the message), so marking must not clobber the message.
+    const e = new Error("IO Error: Could not set lock on file X: Conflicting lock");
+    assert.equal(isRunDbOpenError(e), false, "an unmarked error is not a db-open failure (a mid-run lock is not retried)");
+    const marked = markRunDbOpenError(e);
+    assert.equal(isRunDbOpenError(marked), true, "a marked error is a db-open failure (safe to retry unlogged)");
+    assert.equal(marked.message, "IO Error: Could not set lock on file X: Conflicting lock", "message preserved so isBioStoreLocked still classifies it");
+    assert.equal(isRunDbOpenError(undefined), false);
+    assert.equal(isRunDbOpenError("nope"), false);
   });
 
   test("recordRunObservation ensures the ledger schema on a FRESH store — the first run's fact is not silently dropped", async () => {
