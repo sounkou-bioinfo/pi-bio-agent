@@ -25,6 +25,19 @@ describe("temporal memory over bio_observations", () => {
     assert.equal((await recall(c, "s"))?.body, "ok");
   });
 
+  test("concurrent same-slug remember() are SERIALIZED — distinct monotonic timestamps, N distinct revisions (no collision)", async () => {
+    const c = await conn();
+    const N = 12;
+    // fire N concurrent remembers of ONE slug at the SAME wall clock — withSlotLock(subject) must serialize them so
+    // each gets a strictly-later recorded_at (no two collide on the hash-arbitrary observation_id tiebreak).
+    await Promise.all(Array.from({ length: N }, (_, i) => remember(c, note("race", `body ${i}`), "2026-01-01T00:00:00.000Z", `agent:${i}`)));
+    const hist = await memoryHistory(c, "race");
+    assert.equal(hist.length, N, "all N concurrent revisions landed distinctly");
+    assert.equal(new Set(hist.map((r) => r.recordedAt)).size, N, "every revision got a DISTINCT recorded_at (serialized monotonic advance)");
+    const latest = await recall(c, "race");
+    assert.ok(latest, "a deterministic latest exists");
+  });
+
   test("ATOMIC revision: a mid-write insert failure ROLLS BACK the whole remember — no partial content/edges", async () => {
     const c = await conn();
     await remember(c, note("base", "seed"), T1, "agent:A"); // an existing revision to prove it survives the failed write

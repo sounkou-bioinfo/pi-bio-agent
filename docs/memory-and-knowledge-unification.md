@@ -129,8 +129,8 @@ hook and no provenance; neither projects into the KG the repo already designed.
 ## Lessons to transfer
 
 1. **Recall matches the hook, not the body.** In the memory system, a vague `description`
-   means a dead memory. `StudyNote.hook` exists but is not enforced. A note whose hook
-   restates its title is invisible. The hook is the contract.
+   means a dead memory. `StudyNote.hook` is now **required and validated** — `validateStudyNote`
+   rejects a missing hook, or one that merely restates the title. The hook is the contract.
 
 2. **Identity should be a stable, human-meaningful slug.** `StudyNote.id` is `date-uuid`:
    not memorable, not stable across edits, useless as a link target. The memory system's
@@ -141,10 +141,11 @@ hook and no provenance; neither projects into the KG the repo already designed.
    edge observation and `materializeBioEdgesAsOf` folds them into the `bio_edges_as_of` closure,
    so memory and knowledge graph are one system walked by the same SemanticSQL closure.
 
-4. **The index is a materialized, loaded artifact — not a recompute.** `MEMORY.md` is
-   durable, human-editable, and the only thing always in context. `studyNoteIndex()`
-   re-reads every file per call and is never persisted. A materialized index is also the
-   natural FTS target that Stage 2 of `refinments.md` already wants.
+4. **The index is a materialized, loaded artifact — not a recompute.** Now realized: the
+   `bio_observations` store is the source of truth, the note JSON files are a legible view, and
+   a generated `INDEX.md` (derived from them via `renderStudyIndex`) is the loaded map —
+   replacing the old `studyNoteIndex()` that re-read every file per call and was never persisted.
+   A materialized index is also the natural FTS target that Stage 2 of `refinments.md` wants.
 
 5. **Memory notes ARE temporal — they live in the same append-only ledger as facts.**
    (This reverses an earlier draft that argued notes should stay plain-mutable with git as
@@ -156,9 +157,9 @@ hook and no provenance; neither projects into the KG the repo already designed.
    and auditable across agents, not a per-workstation git log. The file view (`MEMORY.md` +
    note JSON) is a legible EXPORT of the current revision, not the source of truth.
 
-6. **Hygiene is a feature: upsert and delete.** `writeStudyNote` always mints a new uuid
-   file, so the store only grows and silently duplicates. "Update-don't-duplicate; delete
-   what's wrong" needs upsert-by-slug and an explicit delete path. (Note-level *supersede*
+6. **Hygiene is a feature: upsert and delete.** `writeStudyNote` used to mint a new uuid file
+   per write, so the store only grew and silently duplicated; it now **upserts by slug**
+   (preserving the prior `id`/`createdAt`) with an explicit `deleteStudyNote` path. (Note-level *supersede*
    is deliberately excluded — see decision 1 below; it belongs on KG facts, not notes.)
 
 7. **Two axes, not one overloaded enum.** Memory `type` is *role* (user / feedback /

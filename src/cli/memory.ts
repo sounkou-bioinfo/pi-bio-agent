@@ -3,8 +3,7 @@ import { openBioStore } from "../hosts/bio-store.js";
 import { listMemory, memoryHistory, recall, MEMORY_NOW } from "../hosts/memory-store.js";
 
 // The `memory` CLI: read the ONE temporal store (memory is append-only observations under agent:memory:<slug>).
-// Replaces the pre-temporal-store `notes sync/report` (which projected file notes into a separate graph.duckdb).
-// list/show are AS-OF (time-travel); history shows supersession + authorship. Provider-agnostic — no Pi needed.
+// list/show/history are all AS-OF (time-travel); history shows supersession + authorship. Provider-agnostic — no Pi needed.
 export interface MemoryCliDeps {
   cwd: string;
   out: (line: string) => void;
@@ -16,7 +15,7 @@ export const MEMORY_USAGE = `pi-bio-agent memory <command>
 Commands:
   list    [--as-of <iso>]         list current memory notes (as of a time; default now)
   show    <slug> [--as-of <iso>]  a note's full content (as of a time)
-  history <slug>                  the revision trail — what changed, when, by whom (supersession + tombstones)
+  history <slug> [--as-of <iso>]  the revision trail — what changed, when, by whom (supersession + tombstones); --as-of shows the trail up to that time
 
 Reads .pi/bio-agent/store.duckdb (the ONE temporal store). Memory is append-only, as-of, and attributed;
 a forgotten note is a retraction — history and an earlier as-of still see it.`;

@@ -9,6 +9,7 @@ import {
   recordObservation,
   monotonicRecordedAt,
   inTransaction,
+  withSlotLock,
   type ObservationRow,
 } from "../duckdb/observations.js";
 
@@ -72,12 +73,14 @@ export async function ensureMemorySchema(conn: SqlConn): Promise<void> {
 export async function remember(conn: SqlConn, note: MemoryContent, wallNow: string, author?: string): Promise<void> {
   await ensureMemorySchema(conn);
   const subject = memorySubjectId(note.slug);
-  // ATOMIC + serialized: the whole revision (content + link edges + dropped-link tombstones) is a multi-write state
-  // transition read against the slot's current latest, so it runs in ONE transaction (all-or-nothing — a mid-way
-  // insert failure rolls the whole revision back, never leaving partial edges) serialized per connection (no
-  // concurrent same-slug remember/forget can interleave). Inside we call recordObservation directly at the
-  // once-computed monotonic `now` — NOT recordMonotonicObservation (per-slot lock is subsumed by the per-conn txn).
-  await inTransaction(conn, async () => {
+  // ATOMIC + serialized. withSlotLock(subject) serializes same-slug writes across ALL in-process connections (keyed by
+  // statement_key, NOT by connection) — this is what makes the monotonic read-then-write deterministic even when two
+  // `openBioStore` handles to one file coexist in a process (a per-CONNECTION lock alone would NOT, since they are
+  // distinct connections). inTransaction then makes the whole revision (content + link edges + dropped-link
+  // tombstones) ALL-OR-NOTHING (a mid-way insert failure rolls it all back) and per-connection atomic. Inside we call
+  // recordObservation directly at the once-computed monotonic `now` — NOT recordMonotonicObservation (it would
+  // re-acquire this same-slot lock and deadlock).
+  await withSlotLock(subject, () => inTransaction(conn, async () => {
     const now = await monotonicNow(conn, subject, wallNow); // strictly after the slug's current revision (deterministic latest-wins)
     // `source` = the authoring agent. It is part of observation IDENTITY, so two agents remembering the same slug
     // are two attributed rows (both retained); the latest by recorded_at is "current". This is what makes shared
@@ -116,7 +119,7 @@ export async function remember(conn: SqlConn, note: MemoryContent, wallNow: stri
         await recordObservation(conn, { statementKey: edge.statement_key, subjectId: subject, predicate: edge.predicate, recordedAt: now, source: author });
       }
     }
-  });
+  }));
 }
 
 function rowToContent(row: ObservationRow | null): RecalledMemory | null {
@@ -156,9 +159,10 @@ export async function listMemory(conn: SqlConn, asOf: string = MEMORY_NOW): Prom
 export async function forget(conn: SqlConn, slug: string, wallNow: string, author?: string): Promise<void> {
   await ensureMemorySchema(conn);
   const subject = memorySubjectId(slug);
-  // ATOMIC + serialized (same reasoning as remember): the tombstone + edge retractions are one all-or-nothing
-  // transaction per connection, so a failed edge retraction can't leave a forgotten node with live phantom edges.
-  await inTransaction(conn, async () => {
+  // ATOMIC + serialized (same reasoning as remember): withSlotLock(subject) serializes same-slug writes across all
+  // in-process connections (deterministic monotonic latest-wins), and inTransaction makes the tombstone + edge
+  // retractions one all-or-nothing unit, so a failed edge retraction can't leave a forgotten node with live phantom edges.
+  await withSlotLock(subject, () => inTransaction(conn, async () => {
     const now = await monotonicNow(conn, subject, wallNow); // strictly after the current content so a same-ms remember→forget deterministically forgets
     await recordObservation(conn, { statementKey: subject, subjectId: subject, predicate: CONTENT, recordedAt: now, source: author });
     // Also retract the note's OWN link edges (statement_key `${subject}|…`) — otherwise they linger in bio_edges_as_of
@@ -170,5 +174,5 @@ export async function forget(conn: SqlConn, slug: string, wallNow: string, autho
         await recordObservation(conn, { statementKey: edge.statement_key, subjectId: subject, predicate: edge.predicate, recordedAt: now, source: author });
       }
     }
-  });
+  }));
 }
