@@ -331,16 +331,21 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
     description: "List or search project-local study notes. This is the cheap memory index to scan before reading full notes or creating new skills.",
     parameters: Type.Object({
       query: Type.Optional(Type.String()),
-      limit: Type.Optional(Type.Number()),
+      limit: Type.Optional(Type.Integer({ minimum: 0, description: "Max notes to return (non-negative integer)." })),
       asOf: Type.Optional(Type.String({ description: "ISO time — list memory AS OF then (time-travel; default now)." })),
     }),
     async execute(_id, params: { query?: string; limit?: number; asOf?: string }, _signal, _onUpdate, ctx) {
+      // defense-in-depth beyond the schema: a negative/fractional limit makes slice() do surprising things
+      // (slice(0,-2) drops from the END). Fail closed on an invalid limit rather than return a confusing subset.
+      if (params.limit !== undefined && (!Number.isInteger(params.limit) || params.limit < 0)) {
+        throw new Error(`bio_list_memory: limit must be a non-negative integer (got ${params.limit})`);
+      }
       let mems = await withStore(openStore, ctx.cwd, (conn) => listMemory(conn, params.asOf ?? MEMORY_NOW));
       if (params.query) {
         const q = params.query.toLowerCase();
         mems = mems.filter((m) => `${m.slug} ${m.title} ${m.hook} ${m.body}`.toLowerCase().includes(q));
       }
-      if (params.limit) mems = mems.slice(0, params.limit);
+      if (params.limit !== undefined) mems = mems.slice(0, params.limit);
       return text({ notes: mems.map((m) => ({ slug: m.slug, kind: m.kind, title: m.title, hook: m.hook, tags: m.tags, author: m.author })), root: runtimeStudyRoot(ctx.cwd) });
     },
   });

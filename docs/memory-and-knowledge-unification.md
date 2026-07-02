@@ -45,7 +45,10 @@ projection.)
 
 **Sharing is a host-chosen boundary** (`openBioStore` is the seam — the library records; the host decides where
 the store lives). Because every memory row carries its **author** (`source`) and an **as-of** time, a *shared*
-store stays attributed and consistent:
+store stays attributed and time-consistent. (One caveat: monotonic "latest wins" per slot is serialized
+same-process and across separate processes on a local file store — DuckDB's cross-process exclusive-writer lock —
+but NOT yet across concurrent CLIENTS of a shared server-backed store, where two clients can still collide on the
+read-then-write; that needs a server-side atomic advance+insert / serializable txn, see `monotonicRecordedAt`.)
 
 | Scope | Mechanism | Semantics |
 |---|---|---|

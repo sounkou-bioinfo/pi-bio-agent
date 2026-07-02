@@ -82,6 +82,10 @@ describe("Pi coding-agent extension", () => {
       assert.equal(await recallSkill(badStore.conn, "NOT-kebab"), null, "invalid skill never reached the append-only ledger (validated before recordSkill)");
     } finally { badStore.close(); }
 
+    // #4: bio_list_memory rejects an invalid limit (negative/fractional) rather than doing a surprising slice()
+    await assert.rejects(() => byName.get("bio_list_memory")!.execute("id", { limit: -1 }, undefined, undefined, ctx), /non-negative integer/);
+    await assert.rejects(() => byName.get("bio_list_memory")!.execute("id", { limit: 1.5 }, undefined, undefined, ctx), /non-negative integer/);
+
     const wrote = await byName.get("bio_remember")!.execute("id", {
       kind: "cheatsheet",
       title: "OpenTargets identifiers",

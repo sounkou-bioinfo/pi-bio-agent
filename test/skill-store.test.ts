@@ -15,6 +15,13 @@ const T1 = "2026-01-01T00:00:01Z";
 const T2 = "2026-01-01T00:00:02Z";
 
 describe("skill-store: skills are temporal + attributed + superseded (like memory)", () => {
+  test("reads on a FRESH store (no schema) return null/empty, not a missing-table throw", async () => {
+    const bare = duckdbNodeConn(await (await DuckDBInstance.create(":memory:")).connect()); // NO createBioObservationSchema
+    assert.equal(await recallSkill(bare, "nope"), null, "recallSkill of an unprovisioned store is null");
+    assert.deepEqual(await skillHistory(bare, "nope"), [], "skillHistory of an unprovisioned store is empty");
+  });
+
+
   test("re-creating a skill supersedes now but keeps the prior revision as-of, attributed", async () => {
     const c = await conn();
     await recordSkill(c, { name: "hpo-grounding", description: "v1", body: "step one" }, T1, "agent:A");

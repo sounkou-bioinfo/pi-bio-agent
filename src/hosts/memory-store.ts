@@ -126,17 +126,20 @@ function rowToContent(row: ObservationRow | null): RecalledMemory | null {
 
 /** Recall a memory slug's content (and its author) AS OF a time (default now). null if it did not exist yet or was forgotten by then. */
 export async function recall(conn: SqlConn, slug: string, asOf: string = MEMORY_NOW): Promise<RecalledMemory | null> {
+  await ensureMemorySchema(conn); // a fresh/custom store may lack the table — recall of an empty store is null, not a throw
   return rowToContent(await observationAsOfKey(conn, memorySubjectId(slug), asOf));
 }
 
 /** The full revision trail of a slug (oldest-first) — surfaces WHAT changed, WHEN, and BY WHOM (a tombstone has null content). */
 export async function memoryHistory(conn: SqlConn, slug: string): Promise<{ recordedAt: string; author: string | null; content: RecalledMemory | null }[]> {
+  await ensureMemorySchema(conn); // fresh store -> empty history, not a missing-table throw
   const rows = await observationHistory(conn, memorySubjectId(slug));
   return rows.map((r) => ({ recordedAt: r.recorded_at, author: r.source ?? null, content: rowToContent(r) }));
 }
 
 /** List the memory slugs whose content is live AS OF a time (tombstoned slugs are excluded), each with its author. */
 export async function listMemory(conn: SqlConn, asOf: string = MEMORY_NOW): Promise<RecalledMemory[]> {
+  await ensureMemorySchema(conn); // fresh store -> empty list, not a missing-table throw
   const rows = await observationsAsOf(conn, asOf);
   return rows
     .filter((r) => r.predicate === CONTENT && r.subject_id.startsWith(MEMORY_NS) && r.value_json != null)

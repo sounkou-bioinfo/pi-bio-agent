@@ -36,6 +36,7 @@ export async function recordSkill(conn: SqlConn, def: SkillDef, now: string, aut
 
 /** Recall a skill's definition (and its author) AS OF a time (default now). null if it did not exist yet. */
 export async function recallSkill(conn: SqlConn, name: string, asOf: string = NOW): Promise<(SkillDef & { author: string | null }) | null> {
+  await createBioObservationSchema(conn, { ifNotExists: true }); // fresh/custom store -> null, not a missing-table throw
   const row = await observationAsOfKey(conn, skillSubjectId(name), asOf);
   if (!row || row.value_json == null) return null;
   const v = JSON.parse(row.value_json) as { description: string; body: string };
@@ -44,6 +45,7 @@ export async function recallSkill(conn: SqlConn, name: string, asOf: string = NO
 
 /** The revision trail of a skill (oldest-first) — who changed it and when. */
 export async function skillHistory(conn: SqlConn, name: string): Promise<{ recordedAt: string; author: string | null }[]> {
+  await createBioObservationSchema(conn, { ifNotExists: true }); // fresh store -> empty history, not a missing-table throw
   const rows = await observationHistory(conn, skillSubjectId(name));
   return rows.map((r) => ({ recordedAt: r.recorded_at, author: r.source ?? null }));
 }

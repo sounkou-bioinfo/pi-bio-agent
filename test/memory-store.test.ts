@@ -25,6 +25,13 @@ describe("temporal memory over bio_observations", () => {
     assert.equal((await recall(c, "s"))?.body, "ok");
   });
 
+  test("reads on a FRESH store (no schema) return empty/null, not a missing-table throw", async () => {
+    const c = await conn(); // NO createBioObservationSchema — a bare connection
+    assert.equal(await recall(c, "nope"), null, "recall of an unprovisioned store is null");
+    assert.deepEqual(await listMemory(c), [], "listMemory of an unprovisioned store is empty");
+    assert.deepEqual(await memoryHistory(c, "nope"), [], "memoryHistory of an unprovisioned store is empty");
+  });
+
   test("citations (sources) are persisted INTO the ledger, so recall/shared memory keep provenance (not just the file view)", async () => {
     const c = await conn();
     const sources = [{ url: "https://www.ebi.ac.uk/ols4", locator: "MONDO:0004979", quote: "asthma" }];
