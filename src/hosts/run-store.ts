@@ -359,19 +359,22 @@ async function runAndPersist(
     return `sha256:${digest}`;
   };
   try {
-    // Host-owned connection bootstrap: INSTALL/LOAD/SET (e.g. httpfs + cache_httpfs, an extension dir, a memory
-    // limit) run ONCE on this connection before any resolution. A failure here is a config/pre-flight error
-    // (thrown, not a failed run): the run never started. This is HOST config, not agent SQL — no read-only
-    // guard, by construction the agent cannot supply it (it is composed in at the host, like network/cas).
-    if (initSql) for (const stmt of initSql) await conn.run(stmt);
-    // Agent params are DuckDB SESSION VARIABLES, not a bespoke template DSL: the agent's bindings become
-    // `SET VARIABLE name = value`, so a resource url/body composes them with plain SQL (`'…?q=' ||
-    // getvariable('query')`) and upstream data with subqueries. The host sets them (bio_query is a single SELECT,
-    // it can't); values are parameter-bound, so no injection.
+    // Agent params are DuckDB SESSION VARIABLES: the agent's bindings become `SET VARIABLE name = value`, so a
+    // resource url/body composes them with plain SQL (`'…?q=' || getvariable('query')`). Values are parameter-bound
+    // (no injection). These go FIRST so host init below is AUTHORITATIVE: an agent binding must NOT be able to
+    // override a host-owned session variable (e.g. re-point an `api_base`/`tls` the host provisioned) — host wins.
     if (bindings) for (const [name, value] of Object.entries(bindings)) {
       if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) throw new Error(`binding name '${name}' must be a SQL identifier`);
       await conn.run(`SET VARIABLE ${name} = ?`, [value as never]);
     }
+    // Host-owned connection bootstrap: INSTALL/LOAD/SET (e.g. httpfs + cache_httpfs, an extension dir, a memory
+    // limit) run ONCE on this connection before any resolution — AFTER agent bindings, so host values win on any
+    // name clash. A failure here is a config/pre-flight error (thrown, not a failed run): the run never started.
+    // SECRETS BOUNDARY: session variables set here live in the SAME session as agent-written SQL (bio_query), which
+    // can read them with getvariable() — so a `SET VARIABLE token='…'` would be exfiltratable into result.json. Do
+    // NOT put secrets in SET VARIABLE: use the fetch-layer auth (withAuth headers, never touch SQL) or DuckDB
+    // `CREATE SECRET` (function-scoped, not getvariable-readable). SET VARIABLE is for NON-secret config only.
+    if (initSql) for (const stmt of initSql) await conn.run(stmt);
     try {
       const { run, result, receipts } = await body(conn);
       let enriched = replay ? enrichReplay(replay, receipts) : undefined;

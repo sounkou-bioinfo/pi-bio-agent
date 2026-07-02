@@ -45,7 +45,7 @@ injects no `fetch`, so the `http.get` path fails closed until the host binds one
 These REST manifests hardcode a plain `Accept: application/json` header, but the `headers` argument of
 `ducknng_ncurl_table` is a SQL value — so it *can be composed from a host-owned variable*. That opens the same
 pattern to:
-- **token-gated APIs** — the host sets an `Authorization` header from a `duckdbConfig`/bound variable, never an agent param;
+- **token-gated APIs** — the host sets an `Authorization` header from a `duckdbConfig`/bound variable, never an agent param. **Secrets boundary:** a `SET VARIABLE` / bound variable lives in the SAME DuckDB session as agent-written SQL, so a `bio_query` (agent SQL) could read it back with `getvariable()`. So a secret token belongs in the **`http.get` + `withAuth`** path (a fetch header that never touches SQL) or a DuckDB `CREATE SECRET` (function-scoped, not `getvariable`-readable); if you must gate an `ncurl_table` connector with a session-variable token, expose it only through a **declared operation** (host-authored SQL the agent can't extend with `getvariable`), not `bio_query`;
 - **MCP servers** — an MCP `initialize` / `tools/list` / `tools/call` (JSON-RPC 2.0 over HTTP) **is an `ncurl` POST** — see [`mcp.json`](mcp.json); this example is **structurally validated** here (the manifest is a valid PROGRAM, no network — `test/connectors-example.test.ts`), and live execution is host-gated (needs ducknng + egress). The session id `initialize` returns threads through as a header, and only server-*pushed* notifications need `wss`;
 - **streaming** — SSE / websockets via ducknng `wss`.
 
