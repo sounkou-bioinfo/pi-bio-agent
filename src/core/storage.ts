@@ -32,11 +32,9 @@ export function casPathForAddress(layout: Pick<BioProjectLayout, "casDir">, addr
 
 export function validateContentAddress(address: ContentAddress): string[] {
   const errors: string[] = [];
-  if (!["sha256", "sha512", "blake3"].includes(address.algorithm)) errors.push("algorithm must be sha256, sha512, or blake3");
+  if (address.algorithm !== "sha256") errors.push("algorithm must be sha256"); // sha256-only: the store/GC back nothing else
   if (typeof address.digest !== "string" || !/^[a-fA-F0-9]+$/.test(address.digest)) errors.push("digest must be hexadecimal");
   if (address.algorithm === "sha256" && address.digest?.length !== 64) errors.push("sha256 digest must be 64 hex chars");
-  if (address.algorithm === "sha512" && address.digest?.length !== 128) errors.push("sha512 digest must be 128 hex chars");
-  if (address.algorithm === "blake3" && address.digest?.length !== 64) errors.push("blake3 digest must be 64 hex chars");
   if (address.sizeBytes !== undefined && address.sizeBytes < 0) errors.push("sizeBytes cannot be negative");
   return errors;
 }

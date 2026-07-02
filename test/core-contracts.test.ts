@@ -78,12 +78,38 @@ describe("BioRunSpec and storage helpers", () => {
   });
 
   test("reports malformed run specs without throwing", () => {
-    const errors = validateBioRunSpec({ schema: "x", id: "bad id with spaces", mode: "nope" } as unknown as BioRunSpec);
+    const errors = validateBioRunSpec({ schema: "x", id: "bad id with spaces", mode: "" } as unknown as BioRunSpec);
     assert.ok(errors.includes("schema must be pi-bio.run_spec.v1"));
     assert.ok(errors.some((e) => e.includes("id is required")));
     assert.ok(errors.includes("tool.name is required"));
     assert.ok(errors.includes("mode is invalid"));
     assert.ok(errors.includes("inputs array is required"));
+  });
+
+  test("open type labels: BioRunMode accepts any host/backend vocabulary; the run STATUS stays a closed machine", () => {
+    // mode is an OPEN host label — a public user's backend vocabulary must validate, not be gatekept to 5 words
+    for (const mode of ["slurm", "k8s", "aws-batch", "modal", "nng-worker", "local-daemon"]) {
+      assert.deepEqual(validateBioRunSpec({ ...validRun, mode }), [], `mode '${mode}' must validate`);
+    }
+    assert.ok(validateBioRunSpec({ ...validRun, mode: "" } as unknown as BioRunSpec).includes("mode is invalid"), "empty mode still fails closed");
+    // BioRunStatus stays CLOSED (the state machine branches on it): appendRunEvent drives status transitions
+    const rec = newRunRecord(validRun, "2026-07-01T00:00:00Z");
+    const started = appendRunEvent(rec, { type: "started", at: "2026-07-01T00:00:01Z" });
+    assert.equal(started.status, "running", "started -> running is the closed lifecycle, not an open label");
+  });
+
+  test("open descriptive labels: BioArtifact.role accepts real-world roles (nothing branches on it)", () => {
+    for (const role of ["index", "sidecar", "qc_plot", "checkpoint", "coverage_track", "html_report"]) {
+      const artifact = { kind: "artifact" as const, role, path: `out/${role}` };
+      assert.equal(artifact.role, role); // constructs + type-checks with an arbitrary role
+    }
+  });
+
+  test("CAS is sha256-only at the type AND uri level", () => {
+    assert.equal(isContentAddressUri(`cas:sha256:${"a".repeat(64)}`), true);
+    assert.equal(isContentAddressUri(`cas:sha512:${"a".repeat(128)}`), false, "sha512 uri rejected — the store backs only sha256");
+    assert.equal(isContentAddressUri(`cas:blake3:${"a".repeat(64)}`), false);
+    assert.ok(validateContentAddress({ algorithm: "sha512", digest: "0".repeat(128) } as unknown as import("../src/core/resources.js").ContentAddress).includes("algorithm must be sha256"));
   });
 
   test("computes project storage layout and CAS paths", () => {

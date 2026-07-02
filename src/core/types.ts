@@ -26,7 +26,7 @@ export interface Provenance {
 
 export interface BioArtifact {
   kind: "artifact";
-  role: "input" | "output" | "cache" | "reference" | "report";
+  role: string; // OPEN descriptive label (input/output/cache/report/index/sidecar/qc_plot/checkpoint/…) — no code branches on it
   path: string;
   format?: string;
   mediaType?: string;

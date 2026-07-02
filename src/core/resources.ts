@@ -1,7 +1,10 @@
 import type { JsonValue } from "./json.js";
 import type { Provenance } from "./types.js";
 
-export type ContentAddressAlgorithm = "sha256" | "sha512" | "blake3";
+// sha256 ONLY — the store (fsCasStore) hashes/verifies sha256 and the metadata authority fails closed on anything
+// else, so the type must not advertise algorithms no producer/store/GC backs. Widen only when a second algorithm
+// ships with a real producer, store verification, GC rooting, and tests.
+export type ContentAddressAlgorithm = "sha256";
 export type ResourceHandleMode = "inline" | "reference" | "content_address" | "virtual";
 
 export interface ContentAddress {
@@ -62,5 +65,5 @@ export function contentAddressUri(address: ContentAddress): string {
 }
 
 export function isContentAddressUri(uri: string): boolean {
-  return /^cas:(sha256|sha512|blake3):[a-fA-F0-9]+$/.test(uri);
+  return /^cas:sha256:[a-fA-F0-9]+$/.test(uri);
 }

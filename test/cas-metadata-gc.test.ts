@@ -160,7 +160,7 @@ describe("CAS metadata GC: ref/lease anti-join (the distributed-safe sweep)", ()
 
   test("cas-metadata rejects non-sha256 addresses (aligned with the sha256-only store)", async () => {
     const { conn } = await setup();
-    const bad: ContentAddress = { algorithm: "blake3", digest: "deadbeef" };
+    const bad = { algorithm: "blake3", digest: "deadbeef" } as unknown as ContentAddress; // non-sha256: type-narrowed away, still refused at runtime
     await assert.rejects(recordCasObject(conn, bad, 4, 1000), /only sha256/);
     await assert.rejects(addCasRef(conn, { refId: "r", refType: "run", address: bad }, 1000), /only sha256/);
     await assert.rejects(acquireCasLease(conn, "h", bad, 1000, 1000), /only sha256/);

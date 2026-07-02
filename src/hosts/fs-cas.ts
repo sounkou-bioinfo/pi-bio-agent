@@ -14,10 +14,10 @@ import type { ContentAddress } from "../core/resources.js";
 // stated (no atomic rename, different listing/mtime semantics) and needs a DIFFERENT CasStore implementation —
 // do NOT point this one at an object-store mount.
 //
-// CAS is sha256-only today: every resolver stamps a sha256 address, gc.ts's liveDigests roots by 64-hex digest,
-// and put() (below) only verifies sha256. ContentAddressAlgorithm still NAMES sha512/blake3 as a future option,
-// but nothing produces them — so put() FAILS CLOSED on a non-sha256 address rather than store it unverified
-// (storing an unverified blob the GC then can't root is the real footgun). Widen when a second algorithm has a
+// CAS is sha256-only: every resolver stamps a sha256 address, gc.ts's liveDigests roots by 64-hex digest, and
+// put() (below) only verifies sha256. ContentAddressAlgorithm is the type `"sha256"` — so a non-sha256 address is
+// a type error at the boundary, and put() still FAILS CLOSED at runtime on any that slips past (a legacy/hostile
+// input), rather than store an unverified blob the GC then can't root (the real footgun). Widen when a second algorithm has a
 // real producer + GC support, not before.
 export function fsCasStore(root: string): CasStore {
   const pathFor = (a: ContentAddress): string => join(root, a.algorithm, a.digest);

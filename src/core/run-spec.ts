@@ -3,7 +3,10 @@ import { systemClock } from "./clock.js";
 import type { JsonValue } from "./json.js";
 import type { BioArtifact, Provenance } from "./types.js";
 
-export type BioRunMode = "inline" | "background" | "subagent" | "service" | "batch";
+// OPEN host/backend execution label — inline/background/subagent/service/batch, or slurm/k8s/aws-batch/modal/
+// nng-worker/local-daemon/… No core logic branches on the mode; a host chooses its own vocabulary. (Contrast
+// BioRunStatus/BioRunEventType, which stay closed because the run state machine branches on them.)
+export type BioRunMode = string;
 export type BioRunStatus = "queued" | "running" | "waiting" | "succeeded" | "failed" | "cancelled";
 export type BioRunEventType = "created" | "started" | "progress" | "checkpoint" | "artifact" | "message" | "completed" | "failed" | "cancelled";
 
@@ -74,7 +77,6 @@ export interface BioRunRecord {
 }
 
 const RUN_ID_RE = /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/;
-const RUN_MODES: BioRunMode[] = ["inline", "background", "subagent", "service", "batch"];
 const EVENT_TYPES: BioRunEventType[] = ["created", "started", "progress", "checkpoint", "artifact", "message", "completed", "failed", "cancelled"];
 
 export function validateBioRunSpec(spec: BioRunSpec): string[] {
@@ -85,7 +87,7 @@ export function validateBioRunSpec(spec: BioRunSpec): string[] {
   if (typeof spec.title !== "string" || !spec.title.trim()) errors.push("title is required");
   if (typeof spec.description !== "string" || !spec.description.trim()) errors.push("description is required");
   if (!spec.tool || typeof spec.tool.name !== "string" || !spec.tool.name.trim()) errors.push("tool.name is required");
-  if (!RUN_MODES.includes(spec.mode)) errors.push("mode is invalid");
+  if (typeof spec.mode !== "string" || !spec.mode.trim()) errors.push("mode is invalid"); // open label: require a non-empty string, not membership
   if (!inputs) errors.push("inputs array is required");
   if (spec.budget?.maxWallClockSeconds !== undefined && spec.budget.maxWallClockSeconds <= 0) errors.push("budget.maxWallClockSeconds must be positive");
   if (spec.budget?.maxToolCalls !== undefined && spec.budget.maxToolCalls <= 0) errors.push("budget.maxToolCalls must be positive");
