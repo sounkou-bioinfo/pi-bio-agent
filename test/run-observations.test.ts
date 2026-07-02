@@ -71,4 +71,22 @@ describe("run-observations: ad-hoc SQL folds into the ONE store as an as-of, att
     const digest = v.resultDigest.slice("sha256:".length);
     assert.equal(await cas.has({ algorithm: "sha256", digest }), true); // and the bytes actually live in CAS, not the DB
   });
+
+  test("lean mode (serialize:false) skips result/receipts/replay FILES; their bytes are in CAS, referenced by casRefs + the fact", async () => {
+    const store = await conn();
+    const cas = fsCasStore(await fsp.mkdtemp(join(tmpdir(), "cas-")));
+    const res = await runBioQueryFromManifest({ cwd: process.cwd(), dbPath: ":memory:", manifestPath: "examples/variant-counts/manifest.json", sql: "SELECT count(*) AS n FROM variants", store, author: "agent:A", cas, serialize: false });
+    assert.equal(res.ok, true);
+    if (!res.ok) return;
+    // only run.json on disk — no result.json / receipts.json / replay.json
+    assert.deepEqual((await fsp.readdir(res.runDir)).sort(), ["run.json"]);
+    assert.ok(res.casRefs && res.casRefs.result && res.casRefs.receipts && res.casRefs.replay);
+    for (const ref of [res.casRefs.result, res.casRefs.receipts, res.casRefs.replay]) {
+      assert.match(ref!, /^sha256:[a-f0-9]{64}$/);
+      assert.equal(await cas.has({ algorithm: "sha256", digest: ref!.slice(7) }), true); // bytes are in CAS
+    }
+    const v = JSON.parse((await observationAsOfKey(store, `run:${res.runId}`, MEMORY_NOW))!.value_json!);
+    assert.equal(v.receiptsDigest, res.casRefs.receipts); // the run fact references receipts + replay by digest
+    assert.equal(v.replayDigest, res.casRefs.replay);
+  });
 });

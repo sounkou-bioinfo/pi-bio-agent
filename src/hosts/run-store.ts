@@ -83,7 +83,8 @@ export interface RunPayload {
 
 export interface PersistedRun {
   dir: string;
-  files: { run: string; result: string; receipts: string };
+  // result/receipts are optional: in lean mode (serialize:false) their bytes live in CAS, not as files.
+  files: { run: string; result?: string; receipts?: string };
 }
 
 // DuckDB returns BIGINT/HUGEINT (e.g. a bare `count(*)`) as a JS BigInt, which JSON.stringify cannot
@@ -98,33 +99,29 @@ async function writeRunFile(dir: string, name: string, data: unknown): Promise<s
   return path;
 }
 
-/** Host-level persistence: write run/result/receipts under .pi/bio-agent/runs/<runId>/. result.json IS the
- *  report — whatever the operation's SQL returned. */
-export async function persistRun(cwd: string, runId: string, payload: RunPayload): Promise<PersistedRun> {
+/** Host-level persistence: write run(.json) under .pi/bio-agent/runs/<runId>/, plus — unless `serialize` is false
+ *  — result.json (the report) and receipts.json (the provenance). In lean mode (serialize:false) only run.json is
+ *  written; result/receipts bytes live in CAS by digest (referenced on the run:<id> fact), so the files are an
+ *  OPTIONAL export. run.json is always written (small; the run-ledger example reads it). */
+export async function persistRun(cwd: string, runId: string, payload: RunPayload, opts: { serialize?: boolean } = {}): Promise<PersistedRun> {
   const dir = runDir(cwd, runId);
   await fs.mkdir(dir, { recursive: true });
-  return {
-    dir,
-    files: {
-      run: await writeRunFile(dir, "run.json", payload.run),
-      result: await writeRunFile(dir, "result.json", payload.result),
-      receipts: await writeRunFile(dir, "receipts.json", payload.receipts),
-    },
-  };
+  const files: PersistedRun["files"] = { run: await writeRunFile(dir, "run.json", payload.run) };
+  if (opts.serialize !== false) {
+    files.result = await writeRunFile(dir, "result.json", payload.result);
+    files.receipts = await writeRunFile(dir, "receipts.json", payload.receipts);
+  }
+  return { dir, files };
 }
 
 /** Persist a FAILED run: run.json (status "failed", carrying the error) + receipts.json for whatever resolved
  *  before the failure. No result.json — there is no answer. A failed run is still an auditable receipt. */
-export async function persistFailedRun(cwd: string, runId: string, payload: { run: BioRunRecord; receipts: ResolutionReceipt[] }): Promise<{ dir: string; files: { run: string; receipts: string } }> {
+export async function persistFailedRun(cwd: string, runId: string, payload: { run: BioRunRecord; receipts: ResolutionReceipt[] }, opts: { serialize?: boolean } = {}): Promise<{ dir: string; files: { run: string; receipts?: string } }> {
   const dir = runDir(cwd, runId);
   await fs.mkdir(dir, { recursive: true });
-  return {
-    dir,
-    files: {
-      run: await writeRunFile(dir, "run.json", payload.run),
-      receipts: await writeRunFile(dir, "receipts.json", payload.receipts),
-    },
-  };
+  const files: { run: string; receipts?: string } = { run: await writeRunFile(dir, "run.json", payload.run) };
+  if (opts.serialize !== false) files.receipts = await writeRunFile(dir, "receipts.json", payload.receipts);
+  return { dir, files };
 }
 
 export interface RunOperationRequest {
@@ -138,6 +135,8 @@ export interface RunOperationRequest {
    *  (status + SQL + digest refs, attributed to `author`) directly into the ONE store — no run.json read-back. */
   store?: SqlConn;
   author?: string;
+  /** Lean storage: when false, skip writing result/receipts/replay JSON files — their bytes go to CAS (needs a cas) and the run:<id> fact + casRefs reference them by digest; run.json is always written. Default true. */
+  serialize?: boolean;
   /** Network opt-in: pass a fetch to enable the http.get resolver. Absent = http.get stays unbound and any
    *  networked resource fails closed. The host (not core) owns this policy; nothing is read from ambient state. */
   network?: { fetch: FetchLike };
@@ -159,9 +158,17 @@ export interface RunOperationRequest {
   duckdbConfig?: Record<string, string>;
 }
 
+/** CAS content addresses for a run's immutable outputs — the bytes live in CAS (outside the DB), the fact + this
+ *  response only reference them by digest. Present only when the host passed a CAS. */
+export interface RunCasRefs {
+  result?: string;
+  receipts?: string;
+  replay?: string;
+}
+
 export type RunOperationResponse =
-  | { ok: true; runId: string; operationId: string; status: BioRunRecord["status"]; rowCount: number; artifacts: PersistedRun["files"]; runDir: string }
-  | { ok: false; runId: string; operationId: string; status: BioRunRecord["status"]; error: string; runDir: string };
+  | { ok: true; runId: string; operationId: string; status: BioRunRecord["status"]; rowCount: number; artifacts: PersistedRun["files"]; casRefs?: RunCasRefs; runDir: string }
+  | { ok: false; runId: string; operationId: string; status: BioRunRecord["status"]; error: string; casRefs?: RunCasRefs; runDir: string };
 
 function resolveInCwd(cwd: string, p: string): string {
   return p === ":memory:" || isAbsolute(p) ? p : resolve(cwd, p);
@@ -260,7 +267,7 @@ function enrichReplay(replay: RunReplaySpec, receipts: ResolutionReceipt[]): Run
 async function recordRun(
   runLog: { store: SqlConn; author?: string } | undefined,
   now: string,
-  args: { runId: string; identity: string; status: string; error: string | undefined; dir: string; replay?: RunReplaySpec; enriched?: RunReplaySpec; resultDigest?: string },
+  args: { runId: string; identity: string; status: string; error: string | undefined; dir: string; replay?: RunReplaySpec; enriched?: RunReplaySpec; resultDigest?: string; receiptsDigest?: string; replayDigest?: string },
 ): Promise<void> {
   if (!runLog) return;
   const obs: RunObservation = {
@@ -275,6 +282,8 @@ async function recordRun(
     manifestDigest: args.replay?.manifest?.digest,
     sourceReceiptDigests: args.enriched?.sourceReceiptDigests,
     resultDigest: args.resultDigest,
+    receiptsDigest: args.receiptsDigest,
+    replayDigest: args.replayDigest,
   };
   try {
     await recordRunObservation(runLog.store, obs, now, runLog.author);
@@ -293,10 +302,19 @@ async function runAndPersist(
   replay?: RunReplaySpec,
   runLog?: { store: SqlConn; author?: string },
   cas?: CasStore,
+  serialize?: boolean,
 ): Promise<RunOperationResponse> {
   const instance = await DuckDBInstance.create(resolveInCwd(cwd, dbPath), duckdbConfig);
   const connection = await instance.connect();
   const conn = duckdbNodeConn(connection);
+  // Put a JSON blob in CAS (bytes OUTSIDE the DB) and return its content address, or undefined when no CAS.
+  const putCas = async (obj: unknown): Promise<string | undefined> => {
+    if (!cas) return undefined;
+    const bytes = Buffer.from(JSON.stringify(obj, bigintToNumber), "utf8");
+    const digest = createHash("sha256").update(bytes).digest("hex");
+    await cas.put({ algorithm: "sha256", digest }, bytes); // immutable + idempotent
+    return `sha256:${digest}`;
+  };
   try {
     // Host-owned connection bootstrap: INSTALL/LOAD/SET (e.g. httpfs + cache_httpfs, an extension dir, a memory
     // limit) run ONCE on this connection before any resolution. A failure here is a config/pre-flight error
@@ -313,22 +331,18 @@ async function runAndPersist(
     }
     try {
       const { run, result, receipts } = await body(conn);
-      const persisted = await persistRun(cwd, runId, { run, result, receipts });
-      // C1: seed the REPLAY bundle beside result/receipts — the actual inputs C2's reproduce() will re-execute,
-      // ENRICHED now that receipts exist (their digests + the env attestation summary from provenance).
       const enriched = replay ? enrichReplay(replay, receipts) : undefined;
-      if (enriched) await writeRunFile(persisted.dir, "replay.json", enriched);
-      // Step 2: the result ROWS go to CAS (bytes OUTSIDE the DB); the run fact references them by digest, so
-      // result.json becomes an optional serialize/export. Only when the host opted into a CAS.
-      let resultDigest: string | undefined;
-      if (cas) {
-        const bytes = Buffer.from(JSON.stringify(result.rows, bigintToNumber), "utf8"); // same BigInt coercion as the file path
-        const digest = createHash("sha256").update(bytes).digest("hex");
-        await cas.put({ algorithm: "sha256", digest }, bytes); // immutable + idempotent
-        resultDigest = `sha256:${digest}`;
-      }
+      // Files are the legible VIEW (default). result.json/receipts.json/replay.json are skipped in lean mode
+      // (serialize:false); run.json is always written. The bytes below go to CAS regardless (referenced by digest).
+      const persisted = await persistRun(cwd, runId, { run, result, receipts }, { serialize });
+      if (enriched && serialize !== false) await writeRunFile(persisted.dir, "replay.json", enriched);
+      // result rows, the full receipts blob, and the replay bundle -> CAS (bytes OUTSIDE the DB); the run:<id> fact
+      // references each by digest, so every one of those files becomes an optional serialize/export.
+      const resultDigest = await putCas(result.rows);
+      const receiptsDigest = await putCas(receipts);
+      const replayDigest = enriched ? await putCas(enriched) : undefined;
       // Datomic + CAS: record the run as a fact in the ONE store, referencing content by digest (bytes stay outside).
-      await recordRun(runLog, now, { runId, identity, status: run.status, error: undefined, dir: persisted.dir, replay, enriched, resultDigest });
+      await recordRun(runLog, now, { runId, identity, status: run.status, error: undefined, dir: persisted.dir, replay, enriched, resultDigest, receiptsDigest, replayDigest });
       // ActionCache (LLVM CAS): map this input's CASID -> the result's CASID, so an identical future run can be
       // memoized/deduped and reproduce() has an input->output handle. Only when both a CAS and the store are present.
       if (resultDigest && runLog && enriched) {
@@ -340,16 +354,20 @@ async function runAndPersist(
           /* best-effort memo: never fail a run because the action-cache write failed */
         }
       }
-      return { ok: true, runId, operationId: identity, status: run.status, rowCount: result.rows.length, artifacts: persisted.files, runDir: persisted.dir };
+      const casRefs = cas ? { result: resultDigest, receipts: receiptsDigest, replay: replayDigest } : undefined;
+      return { ok: true, runId, operationId: identity, status: run.status, rowCount: result.rows.length, artifacts: persisted.files, casRefs, runDir: persisted.dir };
     } catch (error) {
       // A run that started and failed at runtime persists a failed-run receipt and returns ok:false; the
       // failure is auditable, not lost. Pre-flight/config errors (which never became a run) still throw.
       if (error instanceof OperationRunError) {
-        const persisted = await persistFailedRun(cwd, runId, { run: error.run, receipts: error.receipts });
         const enriched = replay ? enrichReplay(replay, error.receipts) : undefined;
-        if (enriched) await writeRunFile(persisted.dir, "replay.json", enriched); // a failed run is replayable too
-        await recordRun(runLog, now, { runId, identity, status: error.run.status, error: error.message, dir: persisted.dir, replay, enriched });
-        return { ok: false, runId, operationId: identity, status: error.run.status, error: error.message, runDir: persisted.dir };
+        const persisted = await persistFailedRun(cwd, runId, { run: error.run, receipts: error.receipts }, { serialize });
+        if (enriched && serialize !== false) await writeRunFile(persisted.dir, "replay.json", enriched); // a failed run is replayable too
+        const receiptsDigest = await putCas(error.receipts);
+        const replayDigest = enriched ? await putCas(enriched) : undefined;
+        await recordRun(runLog, now, { runId, identity, status: error.run.status, error: error.message, dir: persisted.dir, replay, enriched, receiptsDigest, replayDigest });
+        const casRefs = cas ? { receipts: receiptsDigest, replay: replayDigest } : undefined;
+        return { ok: false, runId, operationId: identity, status: error.run.status, error: error.message, casRefs, runDir: persisted.dir };
       }
       throw error;
     }
@@ -385,7 +403,7 @@ export async function runBioOperationFromManifest(req: RunOperationRequest): Pro
     ...(req.bindings ? { bindings: req.bindings } : {}), ...(req.duckdbInitSql ? { duckdbInitSql: req.duckdbInitSql } : {}),
     ...(proc ? { process: proc } : {}),
   };
-  return runAndPersist(req.cwd, req.dbPath, runId, req.operationId, (conn) => runOperation(registry, conn, { operationId: req.operationId, runId, now, signal: req.signal, cas: req.cas }), now, req.duckdbInitSql, req.bindings, req.duckdbConfig, replay, req.store ? { store: req.store, author: req.author } : undefined, req.cas);
+  return runAndPersist(req.cwd, req.dbPath, runId, req.operationId, (conn) => runOperation(registry, conn, { operationId: req.operationId, runId, now, signal: req.signal, cas: req.cas }), now, req.duckdbInitSql, req.bindings, req.duckdbConfig, replay, req.store ? { store: req.store, author: req.author } : undefined, req.cas, req.serialize);
 }
 
 export interface RunQueryRequest {
@@ -402,6 +420,8 @@ export interface RunQueryRequest {
   /** Shared-store opt-in (see RunOperationRequest.store): record the run as a `run:<id>` fact in the ONE store. */
   store?: SqlConn;
   author?: string;
+  /** Lean storage: when false, skip writing result/receipts/replay JSON files — their bytes go to CAS (needs a cas) and the run:<id> fact + casRefs reference them by digest; run.json is always written. Default true. */
+  serialize?: boolean;
   network?: { fetch: FetchLike };
   /** COMPUTE opt-in (host grants out-of-process compute): pass a ProcessRunner to enable the process.compute resolver. Absent => process.compute stays unbound and fails closed. */
   process?: { runner: ProcessRunner };
@@ -442,5 +462,5 @@ export async function runBioQueryFromManifest(req: RunQueryRequest): Promise<Run
     ...(req.bindings ? { bindings: req.bindings } : {}), ...(req.duckdbInitSql ? { duckdbInitSql: req.duckdbInitSql } : {}),
     ...(proc ? { process: proc } : {}),
   };
-  return runAndPersist(req.cwd, req.dbPath, runId, "ad-hoc.query", (conn) => runQuery(registry, conn, { sql: req.sql, resources, runId, now, signal: req.signal, cas: req.cas }), now, req.duckdbInitSql, req.bindings, req.duckdbConfig, replay, req.store ? { store: req.store, author: req.author } : undefined, req.cas);
+  return runAndPersist(req.cwd, req.dbPath, runId, "ad-hoc.query", (conn) => runQuery(registry, conn, { sql: req.sql, resources, runId, now, signal: req.signal, cas: req.cas }), now, req.duckdbInitSql, req.bindings, req.duckdbConfig, replay, req.store ? { store: req.store, author: req.author } : undefined, req.cas, req.serialize);
 }
