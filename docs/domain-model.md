@@ -97,7 +97,7 @@ interface ContentAddress { algorithm: "sha256"; digest: string; mediaType?: stri
 interface VirtualResourceSpec {
   id: ResourceId; title: string; kind: "virtual";
   resolver: string; params: Record<string, unknown>;   // a registered resolver id + its inputs (opaque to core)
-  schemaRef?: SchemaId; temporalScope?: TemporalScope; dependencies?: ResourceId[];
+  schemaRef?: SchemaId;                                 // validated keys: id/title/kind/resolver/params/schemaRef (unknown keys rejected)
 }
 ```
 
@@ -114,10 +114,10 @@ minus the clinical scope/ACL/global-singleton specifics.)
 ```ts
 interface BioResolverSpec {       // DECLARATION — serializable, lives in a manifest
   id: string; version: string; title: string; description: string;
-  inputSchema?: unknown;
   output: { mode: "inline" | "reference" | "content_address" | "table"; mediaType?: string; schemaRef?: string };
   temporal?: { kind: "snapshot" | "live" | "as_of"; source?: string; versionRequired?: boolean };
-  policy?: { network: "forbidden" | "explicit" | "allowed"; cache: "none" | "prefer_cas" | "require_cas"; timeoutSeconds?: number };
+  // validated keys: id/version/title/description/output/temporal (unknown keys rejected). Network/compute POLICY is
+  // a HOST concern (injected effects fail closed), not a resolver-spec field; auth is host-owned (see http.get).
 }
 type BioResolverImpl = (resource: VirtualResourceSpec, ctx: ResolutionContext) => Promise<ResolverOutput>;  // BINDING — runtime only
 interface ResolverOutput { result: ResourceHandle; sourceSnapshots: SourceSnapshot[]; provenance: Provenance[]; } // the impl returns only resolved data
@@ -205,7 +205,7 @@ second real source actually disagrees — not a TS abstraction.
 interface BioOperationSpec {
   id: OperationId; title: string;
   transport: "duckdb.sql";          // executable today; widen only when a transport ships with a runner
-  inputSchema?: unknown; outputSchema?: unknown;
+  inputSchema: unknown; outputSchema?: unknown;   // inputSchema is REQUIRED (validateBioOperationSpec)
   sql?: { sqlTemplate: string; readOnly: true; singleStatement?: true; requiredResources?: ResourceId[] };
   notes?: string[];                 // caveats/abstention rationale travel here, as data
 }

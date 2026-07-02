@@ -76,7 +76,11 @@ export function validateBioOperationSpec(spec: BioOperationSpec): string[] {
     if (spec.sql.readOnly !== true) errors.push("sql.readOnly must be true");
     if (typeof spec.sql.sqlTemplate !== "string" || !spec.sql.sqlTemplate.trim()) errors.push("sql.sqlTemplate is required"); // typeof guard: a non-string must fail closed, not TypeError on .trim()
   }
-  if (spec.cache?.ttlSeconds !== undefined && spec.cache.ttlSeconds < 0) errors.push("cache.ttlSeconds cannot be negative");
+  if (spec.cache) {
+    if (!["none", "metadata", "materialize"].includes(spec.cache.mode as string)) errors.push("cache.mode must be one of none, metadata, materialize");
+    if (spec.cache.ttlSeconds !== undefined && (typeof spec.cache.ttlSeconds !== "number" || !Number.isFinite(spec.cache.ttlSeconds) || spec.cache.ttlSeconds < 0)) errors.push("cache.ttlSeconds must be a non-negative number");
+    if (spec.cache.keyFields !== undefined && (!Array.isArray(spec.cache.keyFields) || spec.cache.keyFields.some((k) => typeof k !== "string"))) errors.push("cache.keyFields must be an array of strings");
+  }
   return errors;
 }
 

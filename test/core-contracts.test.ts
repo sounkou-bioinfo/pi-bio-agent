@@ -86,6 +86,14 @@ describe("BioRunSpec and storage helpers", () => {
     assert.ok(errors.includes("inputs array is required"));
   });
 
+  test("fail closed: nested operation.cache shape is validated (mode/ttlSeconds/keyFields), not just non-negative ttl", () => {
+    const withCache = (cache: unknown): BioOperationSpec => ({ ...validOperation, cache: cache as BioOperationSpec["cache"] });
+    assert.ok(validateBioOperationSpec(withCache({ mode: "bogus" })).some((e) => /cache.mode must be one of/.test(e)), "invalid mode rejected");
+    assert.ok(validateBioOperationSpec(withCache({ mode: "metadata", ttlSeconds: "soon" })).some((e) => /cache.ttlSeconds must be a non-negative number/.test(e)), "non-numeric ttl rejected");
+    assert.ok(validateBioOperationSpec(withCache({ mode: "metadata", keyFields: [1, 2] })).some((e) => /cache.keyFields must be an array of strings/.test(e)), "non-string keyFields rejected");
+    assert.deepEqual(validateBioOperationSpec(withCache({ mode: "metadata", ttlSeconds: 3600, keyFields: ["q"] })), [], "a valid cache passes");
+  });
+
   test("fail closed: a non-string sql.sqlTemplate is a validation error, not a TypeError on .trim()", () => {
     const errs = validateBioOperationSpec({ ...validOperation, sql: { sqlTemplate: 1 as unknown as string, readOnly: true, requiredResources: [] } });
     assert.ok(errs.includes("sql.sqlTemplate is required"), "a non-string template fails closed cleanly");
