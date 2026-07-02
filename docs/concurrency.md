@@ -39,22 +39,24 @@ server-backed `conn` is a drop-in: route its `run(sql)` and `all(sql)` through t
 client opens only a throwaway `:memory:` DuckDB to reach the RPC functions — it owns **no** shared state, holds
 **no** file lock; the *server* is the single writer.
 
-```ts
-// sketch — a server-backed SqlConn over the owned ducknng RPC (the host owns the robust version)
-function ducknngStore(url) {                       // url e.g. "tcp://mem-host:9890"
-  // one local :memory: DuckDB just to call the ducknng table functions
-  const local = /* DuckDB connect + LOAD ducknng */;
-  const conn = {
-    run: (sql, params) => local.run(`SELECT * FROM ducknng_run_rpc('${url}', ?, 0::UBIGINT)`, [inline(sql, params)]),
-    all: (sql, params) => local.all(`SELECT * FROM ducknng_query_rpc('${url}', ?, 0::UBIGINT)`, [inline(sql, params)]),
+**This mode is a RUNNABLE example: [`scripts/memory-over-ducknng.mjs`](../scripts/memory-over-ducknng.mjs)**
+(`node scripts/memory-over-ducknng.mjs`, [evidence](../scripts/memory-over-ducknng.md)). It starts a ducknng
+server owning the store and spawns **two separate agent processes**; `agent:A` `remember`s and `agent:B` (a
+distinct OS process) `recall`s it — `"null variant in a LoF gene" by agent:A`, attributed, **no file lock**. The
+memory-store functions are reused unchanged: they take a `SqlConn`, and there the conn routes over RPC:
+
+```js
+function ducknngConn(local, url) {              // `local` = a throwaway :memory: DuckDB with ducknng loaded
+  return {
+    run: async (sql, params) => { await local.runAndReadAll(`SELECT * FROM ducknng_run_rpc('${url}', ?, 0::UBIGINT)`, [inline(sql, params)]); },
+    all: async (sql, params) => (await local.runAndReadAll(`SELECT * FROM ducknng_query_rpc('${url}', ?, 0::UBIGINT)`, [inline(sql, params)])).getRowObjects(),
   };
-  return { conn, close: () => local.close() };
 }
 ```
 
-**Parameters**: ducknng RPC sends a SQL *string*, so the host inlines the `SqlConn` params into that string (escape
-values, or use server-side prepared statements) — this is why the robust `ducknngStore` is host code, not a
-library default. **Security is opt-in**: the server only accepts writes after `ducknng_register_exec_method(...)`,
+**Parameters**: ducknng RPC sends a SQL *string*, so the params are inlined into it (escape values, or use
+server-side prepared statements). The example inlines with escaping as a dogfood; a production `openStore` over
+ducknng does robust param handling — host code, not a library default. **Security is opt-in**: the server only accepts writes after `ducknng_register_exec_method(...)`,
 with mTLS / peer-allowlists ([[honest-boundary]]); reads need no extra grant.
 
 Because every row carries its **author** (`source`, part of observation identity) and an **as-of** time, a shared
