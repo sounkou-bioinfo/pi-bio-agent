@@ -137,6 +137,17 @@ describe("C2: reproduce() compares deterministic receipt content, not wall-clock
     assert.ok(proc?.notes?.includes("live_source"), "process.compute provenance marks live_source (output not content-pinned)");
   });
 
+  test("a near-max-length original runId still reproduces — the derived 'reproduce-…' id is bounded to the 128-char limit", async () => {
+    const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-repro-longid-"));
+    const longRunId = "r".repeat(120); // valid (<=128) but close to the max
+    const out = await runBioQueryFromManifest({ cwd, dbPath: ":memory:", manifestPath: MANIFEST, sql: SQL, runId: longRunId, now: "2026-07-01T00:00:00Z" });
+    assert.equal(out.ok, true, out.ok ? "" : `run failed: ${(out as { error?: unknown }).error}`);
+    const replay = JSON.parse(await fs.readFile(join((out as { runDir: string }).runDir, "replay.json"), "utf8")) as RunReplaySpec;
+    const rep = await reproduceRun({ cwd, replay }); // must NOT throw on a too-long derived runId
+    assert.equal(rep.reproduced, true, rep.error);
+    assert.equal(rep.matched, true, "the run reproduces despite a long original runId (derived id was bounded, not rejected)");
+  });
+
   test("fail closed: reproduce rejects when the manifest FILE changed since the run (would run different logic)", async () => {
     const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-repro-drift-"));
     const cas = fsCasStore(await fs.mkdtemp(join(tmpdir(), "pi-bio-cas-")));

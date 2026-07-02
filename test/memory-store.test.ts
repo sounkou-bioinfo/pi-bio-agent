@@ -15,6 +15,16 @@ const T2 = "2026-01-01T00:00:02Z";
 
 // Memory unified into the temporal store: history + as-of + retraction, the same store as facts.
 describe("temporal memory over bio_observations", () => {
+  test("a write AT/AFTER the MEMORY_NOW sentinel is rejected — a real timestamp must be < 9999 (else invisible to default recall)", async () => {
+    const c = await conn();
+    await assert.rejects(() => remember(c, note("s", "x"), MEMORY_NOW), /strictly before the reserved MEMORY_NOW/);
+    await assert.rejects(() => remember(c, note("s", "x"), "9999-12-31T23:59:59.999Z"), /strictly before the reserved MEMORY_NOW/);
+    await assert.rejects(() => forget(c, "s", MEMORY_NOW), /strictly before the reserved MEMORY_NOW/);
+    // a normal (real) timestamp still works and is recallable as of now
+    await remember(c, note("s", "ok"), T1);
+    assert.equal((await recall(c, "s"))?.body, "ok");
+  });
+
   test("reconciliation only touches MEMORY's own wikilink edges — a foreign edge fact from the same subject survives", async () => {
     const c = await conn();
     await remember(c, note("foo", "hi [[bar]]"), T1); // a memory wikilink edge foo|<pred>|bar

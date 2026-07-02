@@ -32,9 +32,16 @@ export const memorySubjectId = (slug: string): string => `${MEMORY_NS}${slug}`;
 // advance only moves a colliding write 1ms forward — earlier revisions keep their real timestamps).
 async function monotonicNow(conn: SqlConn, subject: string, now: string): Promise<string> {
   const latest = await observationAsOfKey(conn, subject, MEMORY_NOW);
-  if (!latest) return now;
-  const latestMs = Date.parse(latest.recorded_at), nowMs = Date.parse(now);
-  return Number.isFinite(latestMs) && Number.isFinite(nowMs) && nowMs <= latestMs ? new Date(latestMs + 1).toISOString() : now;
+  const latestMs = latest ? Date.parse(latest.recorded_at) : NaN;
+  const nowMs = Date.parse(now);
+  const base = latest && Number.isFinite(latestMs) && Number.isFinite(nowMs) && nowMs <= latestMs ? new Date(latestMs + 1).toISOString() : now;
+  // A memory write MUST land strictly BEFORE the reserved far-future MEMORY_NOW sentinel — default recall()/
+  // listMemory() read as-of MEMORY_NOW, so a revision recorded at/after it would be INVISIBLE as "current" (and can
+  // overflow the year on the +1ms advance). A real clock is always < 9999; this only fires on a sentinel/garbage now.
+  if (!Number.isFinite(Date.parse(base)) || Date.parse(base) >= Date.parse(MEMORY_NOW)) {
+    throw new Error(`memory write time '${base}' must be a real timestamp strictly before the reserved MEMORY_NOW sentinel (${MEMORY_NOW})`);
+  }
+  return base;
 }
 
 export interface MemoryContent {

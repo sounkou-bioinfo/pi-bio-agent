@@ -106,11 +106,18 @@ export async function reproduceRun(req: ReproduceRequest): Promise<ReproduceResu
     const currentDigest = `sha256:${createHash("sha256").update(currentText).digest("hex")}`;
     if (currentDigest !== replay.manifest!.digest) throw new Error(`reproduce: manifest at ${manifestFile} has CHANGED since the run (${currentDigest} != pinned ${replay.manifest!.digest}) — reproduction would run different logic (fail closed)`);
   }
+  // The reproduction run id must stay within the run-dir id limit (128 chars, RUN_DIR_ID_RE) — otherwise an ORIGINAL
+  // runId near that max would, with the `reproduce-…-<epoch>` wrapping, overflow and be rejected before reproduction,
+  // making a valid persisted run unreproducible. Truncate the original portion to fit (it's an internal temp-run id;
+  // full fidelity isn't needed — the epoch suffix keeps it unique).
+  const suffix = `-${Date.now()}`;
+  const budget = 128 - "reproduce-".length - suffix.length;
+  const shortId = replay.runId.slice(0, Math.max(1, budget));
   const base = {
     cwd: req.cwd, dbPath: req.dbPath ?? ":memory:", manifestPath: replay.manifest!.path!,
     bindings: replay.bindings, duckdbInitSql: req.duckdbInitSql, duckdbConfig: req.duckdbConfig,
     network: req.network, process: req.process, cas: req.cas,
-    runId: `reproduce-${replay.runId}-${Date.now()}`, now: req.now,
+    runId: `reproduce-${shortId}${suffix}`, now: req.now,
   };
 
   let res: RunOperationResponse;

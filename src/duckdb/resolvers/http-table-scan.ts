@@ -13,8 +13,11 @@ import { validateReadOnlySelect } from "../../core/sql-guard.js";
 // manifest, never code. Network is INJECTED (the host passes a fetch impl), so there is no ambient network:
 // `npm run check` binds a mock; a real host binds globalThis.fetch. It is NOT a default built-in — a manifest
 // that declares it fails closed until a host explicitly binds it with a fetch, which is the network opt-in.
-// Fail-closed: only http(s) URLs, non-2xx throws, no retry/fallback. The receipt stamps the URL + a sha256 of
-// the exact bytes fetched, so the run records precisely what came back.
+// Fail-closed: only http(s) URLs, non-2xx throws, no retry/fallback. This resolver is for TEXT formats (json /
+// ndjson / csv), so it reads the response as UTF-8 TEXT (`res.text()`) and the receipt stamps the URL + a sha256 of
+// that decoded text — the identity of what the readers actually parse. It is NOT a raw-octet snapshot: a non-UTF-8
+// or binary response is out of scope (DuckDB's json/csv readers assume UTF-8 anyway); pin such sources by their
+// host ETag/digest instead.
 
 // The per-db memo's freshness token for http.get is SCOPE\0ETag: the memo layer treats freshness as opaque, so
 // packing the auth scope into it makes the memo scope-aware without a schema change. '\0' occurs in neither a
@@ -140,7 +143,7 @@ export function httpTableResolver(fetchImpl: FetchLike): BioResolverImpl {
     const digest = createHash("sha256").update(body).digest("hex");
     const etag = res.headers?.get("etag") ?? undefined;
 
-    // CAS mode: snapshot the bytes into the store and scan FROM the CAS path (byte-perfect provenance + cross-db
+    // CAS mode: snapshot the decoded-text bytes into the store and scan FROM the CAS path (text-perfect provenance + cross-db
     // reuse). Fast mode: scan from a throwaway temp file. Either way this is resolver DDL (CREATE), not operation
     // SQL, so it never flows through the read-only guard.
     if (cas) {
