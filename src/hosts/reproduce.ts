@@ -46,6 +46,9 @@ export interface ReproduceRequest {
   /** the host re-supplies the DuckDB config (it may bear secrets, so it is NOT stored in the replay — only its
    *  digest is). reproduce re-applies it and verifies it matches the pinned `duckdbConfigDigest`, failing closed. */
   duckdbConfig?: Record<string, string>;
+  /** the host re-supplies the connection-init SQL (it may bear secrets, so it is NOT stored in the replay — only
+   *  its digest is). reproduce re-applies it and verifies it matches the pinned `duckdbInitSqlDigest`, failing closed. */
+  duckdbInitSql?: string[];
   now?: string;
 }
 
@@ -77,6 +80,12 @@ export async function reproduceRun(req: ReproduceRequest): Promise<ReproduceResu
     if (!req.duckdbConfig) throw new Error("reproduce: this run pinned a duckdbConfigDigest — re-supply the same duckdbConfig to reproduce it faithfully (fail closed)");
     if (canonicalDigest(req.duckdbConfig) !== replay.duckdbConfigDigest) throw new Error("reproduce: the supplied duckdbConfig does not match the pinned duckdbConfigDigest (would not be a faithful reproduction)");
   }
+  // Same for connection-init SQL: the replay pins only its DIGEST (it can carry secrets), so the host must re-supply
+  // the SAME init SQL and we verify the digest — else refuse (fail closed).
+  if (replay.duckdbInitSqlDigest) {
+    if (!req.duckdbInitSql) throw new Error("reproduce: this run pinned a duckdbInitSqlDigest — re-supply the same duckdbInitSql to reproduce it faithfully (fail closed)");
+    if (canonicalDigest(req.duckdbInitSql) !== replay.duckdbInitSqlDigest) throw new Error("reproduce: the supplied duckdbInitSql does not match the pinned duckdbInitSqlDigest (would not be a faithful reproduction)");
+  }
   // VERIFY the manifest hasn't changed: reproduce re-runs from replay.manifest.path (by operationId or sql), so a
   // manifest edited since the original run would execute DIFFERENT logic yet could still 'match' if receipts happen
   // to align. Compare the CURRENT file's digest to the pinned one and fail closed on drift. (manifestDigest =
@@ -88,7 +97,7 @@ export async function reproduceRun(req: ReproduceRequest): Promise<ReproduceResu
   }
   const base = {
     cwd: req.cwd, dbPath: req.dbPath ?? ":memory:", manifestPath: replay.manifest!.path!,
-    bindings: replay.bindings, duckdbInitSql: replay.duckdbInitSql, duckdbConfig: req.duckdbConfig,
+    bindings: replay.bindings, duckdbInitSql: req.duckdbInitSql, duckdbConfig: req.duckdbConfig,
     network: req.network, process: req.process, cas: req.cas,
     runId: `reproduce-${replay.runId}-${Date.now()}`, now: req.now,
   };

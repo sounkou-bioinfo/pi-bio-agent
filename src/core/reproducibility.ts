@@ -206,7 +206,11 @@ export interface RunReplaySpec {
   params?: unknown[];
   resources?: string[];
   bindings?: Record<string, unknown>;
-  duckdbInitSql?: string[];
+  /** DIGEST of the host's connection-init SQL — NOT the SQL itself. Init SQL is host-owned bootstrap that can carry
+   *  secrets (`SET VARIABLE token='…'`, inline PEM), so persisting it verbatim would leak them into replay.json.
+   *  reproduce requires the host to re-supply the same duckdbInitSql and verifies this digest, exactly like
+   *  duckdbConfigDigest. */
+  duckdbInitSqlDigest?: string;
   duckdbConfigDigest?: string;
   /** the RESOLVED process execution facts (what actually ran on this host). */
   process?: { resourceId?: string; table?: string; command?: readonly string[]; inputSql?: string; resultTable?: "arrow" | "artifacts"; outputs?: Array<{ name: string; path: string; kind?: string }> };

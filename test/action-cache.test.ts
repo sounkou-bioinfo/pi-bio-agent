@@ -66,7 +66,7 @@ describe("ActionCache: input CASID -> output CASID (LLVM CAS ActionCache in the 
   });
 
   test("the key is sensitive to RESULT-AFFECTING execution facts (init SQL, config, process, env) — no wrong-result serving", () => {
-    assert.notEqual(actionInputDigest(base), actionInputDigest({ ...base, duckdbInitSql: ["SET threads=1"] }), "init SQL changes the key");
+    assert.notEqual(actionInputDigest(base), actionInputDigest({ ...base, duckdbInitSqlDigest: "sha256:init" }), "init SQL (via its digest) changes the key");
     assert.notEqual(actionInputDigest(base), actionInputDigest({ ...base, duckdbConfigDigest: "sha256:cfg" }), "config changes the key");
     assert.notEqual(actionInputDigest(base), actionInputDigest({ ...base, process: { command: ["Rscript", "fit.R"] } }), "process changes the key");
     assert.notEqual(actionInputDigest(base), actionInputDigest({ ...base, environment: { status: "matched", observedDigest: "sha256:e" } }), "environment changes the key");

@@ -77,6 +77,23 @@ describe("C2: reproduce() compares deterministic receipt content, not wall-clock
     assert.equal(rep.matched, true);
   });
 
+  test("SECURITY: duckdbInitSql is NOT persisted verbatim (secret leak) — only its digest is pinned; reproduce re-supplies + verifies", async () => {
+    const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-repro-init-"));
+    const duckdbInitSql = ["SET VARIABLE secret_token = 'Bearer super-secret-xyz'"]; // host bootstrap that carries a secret
+    const out = await runBioQueryFromManifest({ cwd, dbPath: ":memory:", manifestPath: MANIFEST, sql: SQL, duckdbInitSql, runId: "originit", now: "2026-07-01T00:00:00Z" });
+    assert.equal(out.ok, true, out.ok ? "" : `run failed: ${(out as { error?: unknown }).error}`);
+    const replayText = await fs.readFile(join((out as { runDir: string }).runDir, "replay.json"), "utf8");
+    assert.doesNotMatch(replayText, /super-secret-xyz/, "the secret in init SQL must NOT leak into replay.json");
+    const replay = JSON.parse(replayText) as RunReplaySpec;
+    assert.match(replay.duckdbInitSqlDigest ?? "", /^sha256:/, "only the init-SQL DIGEST is pinned");
+    assert.equal((replay as { duckdbInitSql?: unknown }).duckdbInitSql, undefined, "the raw init SQL is not stored");
+
+    await assert.rejects(() => reproduceRun({ cwd, replay }), /re-supply the same duckdbInitSql/); // no init SQL -> refuse
+    await assert.rejects(() => reproduceRun({ cwd, replay, duckdbInitSql: ["SET VARIABLE secret_token = 'other'"] }), /does not match the pinned duckdbInitSqlDigest/); // wrong -> refuse
+    const rep = await reproduceRun({ cwd, replay, duckdbInitSql }); // matching init SQL -> reproduces
+    assert.equal(rep.matched, true);
+  });
+
   test("fail closed: reproduce rejects when the manifest FILE changed since the run (would run different logic)", async () => {
     const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-repro-drift-"));
     const cas = fsCasStore(await fs.mkdtemp(join(tmpdir(), "pi-bio-cas-")));

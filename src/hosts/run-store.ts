@@ -460,7 +460,7 @@ export async function runBioOperationFromManifest(req: RunOperationRequest): Pro
     schema: RUN_REPLAY_SPEC_SCHEMA, runId, kind: "operation",
     manifest: { digest: manifestDigest, snapshot: raw, path: req.manifestPath },
     operationId: req.operationId, sql: op.sql.sqlTemplate,
-    ...(req.bindings ? { bindings: req.bindings } : {}), ...(req.duckdbInitSql ? { duckdbInitSql: req.duckdbInitSql } : {}),
+    ...(req.bindings ? { bindings: req.bindings } : {}), ...(req.duckdbInitSql ? { duckdbInitSqlDigest: canonicalDigest(req.duckdbInitSql) } : {}), // pin WHICH init SQL (digest, not the possibly-secret-bearing SQL itself)
     ...(req.duckdbConfig ? { duckdbConfigDigest: canonicalDigest(req.duckdbConfig) } : {}), // pin WHICH config (digest, not the secret-bearing config itself)
     ...(proc ? { process: proc } : {}),
   };
@@ -520,7 +520,7 @@ export async function runBioQueryFromManifest(req: RunQueryRequest): Promise<Run
     schema: RUN_REPLAY_SPEC_SCHEMA, runId, kind: "query",
     manifest: { digest: manifestDigest, snapshot: raw, path: req.manifestPath },
     sql: req.sql, resources,
-    ...(req.bindings ? { bindings: req.bindings } : {}), ...(req.duckdbInitSql ? { duckdbInitSql: req.duckdbInitSql } : {}),
+    ...(req.bindings ? { bindings: req.bindings } : {}), ...(req.duckdbInitSql ? { duckdbInitSqlDigest: canonicalDigest(req.duckdbInitSql) } : {}), // pin WHICH init SQL (digest, not the possibly-secret-bearing SQL itself)
     ...(req.duckdbConfig ? { duckdbConfigDigest: canonicalDigest(req.duckdbConfig) } : {}), // pin WHICH config (digest, not the secret-bearing config itself)
     ...(proc ? { process: proc } : {}),
   };
