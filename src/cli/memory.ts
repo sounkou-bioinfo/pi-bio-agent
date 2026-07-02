@@ -5,10 +5,12 @@ import { listMemory, memoryHistory, recall, MEMORY_NOW } from "../hosts/memory-s
 // The `memory` CLI: read the ONE temporal store (memory is append-only observations under agent:memory:<slug>).
 // list/show/history are all AS-OF (time-travel); history shows supersession + authorship. Provider-agnostic — no Pi needed.
 
-// Strict ISO-8601 / RFC3339: a date, optionally with time (T or space), optional seconds/fractional, optional
-// Z/±hh:mm offset. Rejects the lenient forms Date.parse accepts (e.g. "March 1 2026") so --as-of parses identically
-// in JS (the history filter) and DuckDB (list/show TIMESTAMPTZ cast).
-const ISO_INSTANT_RE = /^\d{4}-\d{2}-\d{2}(?:[Tt ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:[Zz]|[+-]\d{2}:?\d{2})?)?$/;
+// Strict ISO-8601 / RFC3339: a date, optionally with time (T or space), optional seconds and up to MILLISECOND
+// fractional (1-3 digits), optional Z/±hh:mm offset. Rejects the lenient forms Date.parse accepts (e.g. "March 1
+// 2026"). Capping the fraction at ms is deliberate: the history filter compares with JS Date.parse (ms resolution)
+// while list/show cast to DuckDB TIMESTAMPTZ (microsecond) — a sub-ms --as-of would be truncated differently by the
+// two, so restrict input to ms (which is also the precision our recorded_at values carry) to keep them consistent.
+const ISO_INSTANT_RE = /^\d{4}-\d{2}-\d{2}(?:[Tt ]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:[Zz]|[+-]\d{2}:?\d{2})?)?$/;
 export interface MemoryCliDeps {
   cwd: string;
   out: (line: string) => void;

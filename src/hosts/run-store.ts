@@ -79,13 +79,15 @@ export function runsRoot(cwd: string): string {
 // a job/replay id accepted there MUST persist/execute/reproduce here.
 const RUN_DIR_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 
-// DuckDB ambient-source readers / remote URIs / REPLACEMENT SCANS that pull data NOT captured by a resolver receipt —
-// their presence in ad-hoc SQL makes a run NON-HERMETIC, so it must not be memoized in the ActionCache (a hit could
-// serve stale bytes). Broad + fail-closed: a false match only over-skips memoization (re-run), a miss over-memoizes
-// (unsafe). Catches any `read_*(`/`*_scan(` table function (present or FUTURE), glob/sniff, a FROM/JOIN <string
-// literal> replacement scan (`FROM 'data.csv'` auto-reads the file), and a remote-URI literal. (An exotic ambient
-// reader not matching these is the residual denylist risk — the safe direction is to prefer NOT memoizing.)
-const AMBIENT_SQL_READ = /\bread_\w+\s*\(|\b\w*_scan\s*\(|\b(glob|sniff_csv|parquet_metadata|parquet_schema)\s*\(|\b(from|join)\s+'|'(https?|s3|gs|gcs|az|azure|r2|hf|ftp):/i;
+// Ad-hoc SQL that pulls data NOT captured by a resolver receipt makes a run NON-HERMETIC, so it must not be memoized
+// in the ActionCache (a hit could serve stale bytes). Broad + fail-closed: a false match only over-skips memoization
+// (re-run), a miss over-memoizes (unsafe). The load-bearing clause is `\b(from|join)\s+(...|[\w$.]+\s*\()` — ANY
+// TABLE FUNCTION invoked in FROM/JOIN position (read_csv_auto(, ST_Read(, parquet_scan(, and any future one) or a
+// string-literal REPLACEMENT SCAN (`FROM 'data.csv'` auto-reads the file). This over-skips pure table functions
+// (generate_series/range/unnest) too — safe. Plus inline named readers (read_*/`*_scan(` in a subquery/expr) and
+// remote-URI literals. (A truly exotic ambient read not matching these is the residual heuristic risk; a plan-based
+// proof would be the fully sound fix — the safe direction here is to prefer NOT memoizing.)
+const AMBIENT_SQL_READ = /\b(from|join)\s+('|[\w$.]+\s*\()|\bread_\w+\s*\(|\b\w*_scan\s*\(|\b(glob|sniff_csv|parquet_metadata|parquet_schema)\s*\(|'(https?|s3|gs|gcs|az|azure|r2|hf|ftp):/i;
 
 // Mark an error that occurred while OPENING the run's DuckDB db (create/connect) — BEFORE any resource resolution or
 // process.compute side effect. A host that logs runs into a store can safely RETRY such a failure unlogged (e.g. the
@@ -156,7 +158,11 @@ async function writeRunFile(dir: string, name: string, data: unknown): Promise<s
  *  — result.json (the report) and receipts.json (the provenance). In lean mode (serialize:false) only run.json is
  *  written; result/receipts bytes live in CAS by digest (referenced on the run:<id> fact), so the files are an
  *  OPTIONAL export. run.json is always written (small; the run-ledger example reads it). */
-export async function persistRun(cwd: string, runId: string, payload: RunPayload, opts: { serialize?: boolean } = {}): Promise<PersistedRun> {
+export async function persistRun(cwd: string, runId: string, payload: RunPayload, opts: { serialize?: boolean; casBacked?: boolean } = {}): Promise<PersistedRun> {
+  // Lean mode DELETES result/receipts/replay files, so it is safe ONLY when their bytes already live in CAS. This
+  // exported helper is a public footgun otherwise (a direct caller could drop provenance with no CAS), so require an
+  // explicit casBacked assertion — runAndPersist sets it after its own serialize:false ⟹ cas guard.
+  if (opts.serialize === false && !opts.casBacked) throw new Error("persistRun: serialize:false deletes result/receipts/replay files — pass casBacked:true only after writing those bytes to CAS, else the provenance is lost");
   const dir = runDir(cwd, runId);
   await fs.mkdir(dir, { recursive: true });
   // Each file write is atomic (temp+rename). On a runId REUSE the DIRECTORY isn't transactionally atomic — a crash
@@ -179,7 +185,8 @@ export async function persistRun(cwd: string, runId: string, payload: RunPayload
 
 /** Persist a FAILED run: run.json (status "failed", carrying the error) + receipts.json for whatever resolved
  *  before the failure. No result.json — there is no answer. A failed run is still an auditable receipt. */
-export async function persistFailedRun(cwd: string, runId: string, payload: { run: BioRunRecord; receipts: ResolutionReceipt[] }, opts: { serialize?: boolean } = {}): Promise<{ dir: string; files: { run: string; receipts?: string } }> {
+export async function persistFailedRun(cwd: string, runId: string, payload: { run: BioRunRecord; receipts: ResolutionReceipt[] }, opts: { serialize?: boolean; casBacked?: boolean } = {}): Promise<{ dir: string; files: { run: string; receipts?: string } }> {
+  if (opts.serialize === false && !opts.casBacked) throw new Error("persistFailedRun: serialize:false deletes receipts/replay files — pass casBacked:true only after writing those bytes to CAS (see persistRun)");
   const dir = runDir(cwd, runId);
   await fs.mkdir(dir, { recursive: true });
   // WRITE-BEFORE-DELETE (see persistRun): write the failed run's files FIRST, then clear a stale result.json/
@@ -457,7 +464,7 @@ async function runAndPersist(
       // (serialize:false); run.json is always written — and in lean mode its output artifact points at the CAS URI,
       // not the unwritten result.json. (Now safe: the CAS bytes above are already durable before this deletes them.)
       const runForFiles = serialize === false && resultDigest ? retargetResultArtifactToCas(run, runId, `cas:${resultDigest}`) : run;
-      const persisted = await persistRun(cwd, runId, { run: runForFiles, result, receipts }, { serialize });
+      const persisted = await persistRun(cwd, runId, { run: runForFiles, result, receipts }, { serialize, casBacked: cas !== undefined });
       if (enriched && serialize !== false) await writeRunFile(persisted.dir, "replay.json", enriched);
       // GC ROOT for lean mode: the node-local collectGarbage roots CAS by scanning surviving run files, but a lean
       // run writes NO receipts.json — so write a tiny cas-refs.json listing THIS run's CAS digests (always, when a
@@ -511,7 +518,7 @@ async function runAndPersist(
         // persistFailedRun deletes/skips the JSON files, so a crash/failed-put can't strand the provenance bytes.
         const receiptsDigest = await putCas(error.receipts);
         const replayDigest = enriched ? await putCas(enriched) : undefined;
-        const persisted = await persistFailedRun(cwd, runId, { run: error.run, receipts: error.receipts }, { serialize });
+        const persisted = await persistFailedRun(cwd, runId, { run: error.run, receipts: error.receipts }, { serialize, casBacked: cas !== undefined });
         if (enriched && serialize !== false) await writeRunFile(persisted.dir, "replay.json", enriched); // a failed run is replayable too
         // SAME GC root as the success path: a lean failed run writes NO receipts.json, so without a cas-refs.json the
         // node-local sweep would delete this failed run's receipts/replay CAS bytes even though the run dir survives

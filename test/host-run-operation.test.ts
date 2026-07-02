@@ -265,7 +265,7 @@ describe("host: bio_run_operation end-to-end", () => {
     const exists = (name: string) => fs.access(join(runsRoot(cwd), runId, name)).then(() => true).catch(() => false);
     await persistRun(cwd, runId, { run: { schema: "pi-bio.run_record.v1" } as never, result: { rows: [{ n: 1 }] } as never, receipts: [{ x: 1 }] as never });
     assert.equal(await exists("result.json"), true);
-    await persistRun(cwd, runId, { run: { schema: "pi-bio.run_record.v1" } as never, result: { rows: [] } as never, receipts: [] }, { serialize: false });
+    await persistRun(cwd, runId, { run: { schema: "pi-bio.run_record.v1" } as never, result: { rows: [] } as never, receipts: [] }, { serialize: false, casBacked: true }); // casBacked: this test asserts the bytes are (notionally) in CAS
     assert.equal(await exists("result.json"), false, "lean re-run cleared the stale result.json (bytes are in CAS)");
     assert.equal(await exists("receipts.json"), false, "and the stale receipts.json");
   });

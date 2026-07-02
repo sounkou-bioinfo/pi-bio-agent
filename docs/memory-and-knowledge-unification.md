@@ -157,8 +157,8 @@ hook and no provenance; neither projects into the KG the repo already designed.
    destroys the prior text), `forget` tombstones it, `recall(slug, asOf)` reads it as of any
    time, and `memoryHistory` returns the full trail — the same as-of / history / retraction
    story facts get, attributed to the authoring agent. This is what makes memory shareable
-   and auditable across agents, not a per-workstation git log. The file view (`MEMORY.md` +
-   note JSON) is a legible EXPORT of the current revision, not the source of truth.
+   and auditable across agents, not a per-workstation git log. The file view (a generated
+   `INDEX.md` + the note JSON files) is a legible EXPORT of the current revision, not the source of truth.
 
 6. **Hygiene is a feature: upsert and delete.** `writeStudyNote` used to mint a new uuid file
    per write, so the store only grew and silently duplicated; it now **upserts by slug**

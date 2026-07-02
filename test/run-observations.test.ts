@@ -8,7 +8,8 @@ import { promises as fsp } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { recordRunObservation } from "../src/hosts/run-observations.js";
-import { runBioQueryFromManifest, runBioOperationFromManifest, markRunDbOpenError, isRunDbOpenError } from "../src/hosts/run-store.js";
+import { runBioQueryFromManifest, runBioOperationFromManifest, markRunDbOpenError, isRunDbOpenError, persistRun, persistFailedRun } from "../src/hosts/run-store.js";
+import type { RunPayload } from "../src/hosts/run-store.js";
 import { fsCasStore } from "../src/hosts/fs-cas.js";
 import type { CasStore } from "../src/core/cas.js";
 import { collectGarbage } from "../src/hosts/gc.js";
@@ -32,6 +33,13 @@ describe("run-observations: ad-hoc SQL folds into the ONE store as an as-of, att
     assert.equal(v.sql, "SELECT count(*) FROM variants"); // the exact ad-hoc SQL is queryable, not just in a file
     assert.deepEqual(v.sourceReceiptDigests, ["sha256:abc"]); // the fact REFERENCES the immutable content (bytes stay outside)
     assert.equal(v.manifestDigest, "sha256:def");
+  });
+
+  test("persistRun/persistFailedRun refuse serialize:false without casBacked — lean mode can't delete provenance with no CAS", async () => {
+    const cwd = await fsp.mkdtemp(join(tmpdir(), "persist-guard-"));
+    // the guard throws BEFORE touching the payload, so a stub payload is fine
+    await assert.rejects(() => persistRun(cwd, "r1", {} as unknown as RunPayload, { serialize: false }), /casBacked:true only after writing those bytes to CAS/);
+    await assert.rejects(() => persistFailedRun(cwd, "r1", {} as unknown as { run: never; receipts: never[] }, { serialize: false }), /casBacked/);
   });
 
   test("run-db-open marker: only a MARKED error is a retry-safe db-open failure; the original message is preserved", () => {

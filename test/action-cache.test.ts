@@ -189,6 +189,23 @@ describe("ActionCache: input CASID -> output CASID (LLVM CAS ActionCache in the 
     assert.equal(await recallRunResult(store, cas, replay), null, "inline read_csv_auto is non-hermetic -> not memoized -> recall MISS");
   });
 
+  test("HERMETICITY: ANY table function in FROM position is NOT memoized (generalizes past named readers — e.g. spatial ST_Read)", async () => {
+    const store = await conn();
+    const cas = fsCasStore(await fsp.mkdtemp(join(tmpdir(), "cas-")));
+    const cwd = await fsp.mkdtemp(join(tmpdir(), "pi-bio-tf-"));
+    const manifest = { schema: "pi-bio.manifest.v1", id: "m", version: "0.1.0", title: "m", description: "m", provides: {} };
+    const mpath = join(cwd, "manifest.json");
+    await fsp.writeFile(mpath, JSON.stringify(manifest));
+    // generate_series is a built-in table function used as a stand-in for ANY FROM-position table function (ST_Read,
+    // read_parquet, a future extension reader): the FROM-function pattern skips memoization for all of them (safely
+    // over-skipping even a pure one), so a reader the named denylist would miss can't be memoized stale.
+    const res = await runBioQueryFromManifest({ cwd, dbPath: ":memory:", manifestPath: mpath, sql: "SELECT count(*) AS n FROM generate_series(1, 3)", resources: [], store, author: "agent:A", cas });
+    assert.ok(res.ok, res.ok ? "" : `run failed: ${(res as { error?: unknown }).error}`);
+    if (!res.ok) return;
+    const replay = JSON.parse(await fsp.readFile(join(res.runDir, "replay.json"), "utf8"));
+    assert.equal(await recallRunResult(store, cas, replay), null, "a FROM-position table function is treated as non-hermetic -> not memoized");
+  });
+
   test("HERMETICITY: a REPLACEMENT SCAN (FROM '<file>') is NOT memoized — the denylist catches FROM-literal reads too", async () => {
     const store = await conn();
     const cas = fsCasStore(await fsp.mkdtemp(join(tmpdir(), "cas-")));
