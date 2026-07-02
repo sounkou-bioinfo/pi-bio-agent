@@ -13,7 +13,7 @@ import { OperationRunError, runOperation, runQuery, type OperationResult } from 
 import type { BioRunRecord } from "../core/run-spec.js";
 import type { BioArtifact } from "../core/types.js";
 import { duckdbNodeConn } from "../duckdb/node-api.js";
-import { sqlReadsOnlyResolvedTables, resolvedBaseTables } from "../duckdb/plan-hermeticity.js";
+import { sqlReadsOnlyResolvedTables, resolvedBaseTables, sqlUsesNonDeterministicFn } from "../duckdb/plan-hermeticity.js";
 import { duckdbFileScanResolver } from "../duckdb/resolvers/duckdb-file-scan.js";
 import { duckdbSqlMaterializeResolver } from "../duckdb/resolvers/duckdb-sql-materialize.js";
 import { duckhtsReadBcfResolver } from "../duckdb/resolvers/duckhts-read-bcf.js";
@@ -533,21 +533,21 @@ async function runAndPersist(
       // a STALE result when the live source changed underneath (the same class as reproduce's not_reproducible). Only
       // content-pinned runs get an input->output mapping that "a hit can never serve stale" actually holds for.
       const hasLiveSource = receipts.some((r) => r.provenance.some((p) => p.notes?.includes("live_source")));
-      // HERMETICITY: the memo is safe only when the input CASID FULLY determines the output. The RUN SQL is proven
-      // hermetic by its PHYSICAL PLAN (sqlReadsOnlyResolvedTables) — every data-source leaf must be a base-table scan
-      // of a RESOLVED (receipt-pinned) table or a pure source, NEVER a table function / file reader / replacement
-      // scan. This is un-evadable (comments/quotes/replacement scans all resolve to the same plan operators) and, as a
-      // bonus, memoizes benign queries the old text denylist over-skipped. Volatile scalar functions (random()/now())
-      // don't appear in the physical plan, so they stay a bounded regex. Also require: :memory: (a file-backed db
-      // carries ambient tables no receipt pins) AND the host INIT SQL has no ambient read / ATTACH (it runs before
-      // resolution and can pull in unpinned tables; it isn't a single EXPLAIN-able query, so it keeps the text check).
+      // HERMETICITY — proven by DuckDB's OWN analysis, no text heuristics. Two SOUND, un-evadable checks on the run
+      // SQL: (1) sqlReadsOnlyResolvedTables walks the PHYSICAL PLAN — every data-source leaf must be a base-table scan
+      // of a RESOLVED (receipt-pinned) table or a pure source, NEVER a table function / file reader / replacement scan
+      // (comments/quotes/replacement scans all collapse to the same plan operators); (2) sqlUsesNonDeterministicFn
+      // walks the parse-time AST (json_serialize_sql) + duckdb_functions.stability — no VOLATILE / CONSISTENT_WITHIN_
+      // QUERY function (random()/now()/uuid()), which don't appear in the physical plan and vary across runs. Both
+      // fail CLOSED. Also require :memory: (a file-backed db carries ambient tables no receipt pins) AND the host INIT
+      // SQL has no ambient read / ATTACH / volatile (it isn't a single serializable query, so it keeps the text check).
       const runSql = enriched?.sql ?? "";
       const initUnproven = (initSql ?? []).some((s) => AMBIENT_SQL_READ.test(s) || VOLATILE_SQL.test(s) || /\/\*|--|"/.test(s) || /\battach\b/i.test(s));
       const hermetic =
         dbPath === ":memory:" &&
-        !VOLATILE_SQL.test(runSql) &&
         !initUnproven &&
         runSql !== "" &&
+        !(await sqlUsesNonDeterministicFn(conn, runSql)) &&
         (await sqlReadsOnlyResolvedTables(conn, runSql, await resolvedBaseTables(conn)));
       if (resultDigest && runLog && enriched && !hasLiveSource && hermetic) {
         try {

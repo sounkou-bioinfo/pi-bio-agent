@@ -83,3 +83,40 @@ export async function sqlReadsOnlyResolvedTables(conn: SqlConn, sql: string, res
   for (const root of plan) visit(root);
   return hermetic;
 }
+
+/**
+ * Prove (via DuckDB's OWN parse-time AST + its function-stability metadata) whether `sql` calls any NON-deterministic
+ * function — `VOLATILE` (random/uuid/nextval/gen_random_uuid) or `CONSISTENT_WITHIN_QUERY` (now/current_timestamp),
+ * both of which vary across runs, so the input CASID can't determine the output. Uses CORE `json_serialize_sql`
+ * (no extension) + `duckdb_functions().stability`, so a quoted/aliased/commented call can't hide the function name
+ * from a regex (`"random"()` normalizes to `random` in the AST). Fails CLOSED (returns true = treat as
+ * non-deterministic → do NOT memoize) on any parse/serialize error.
+ */
+export async function sqlUsesNonDeterministicFn(conn: SqlConn, sql: string): Promise<boolean> {
+  // The `current_*` / `localtime*` forms are non-deterministic KEYWORDS, not function CALLS, so they never appear as
+  // a `function_name` in the AST (nor in the physical plan). Keywords can't be quoted/aliased to hide, so a tiny
+  // keyword regex is sound for them (a comment merely mentioning the word only over-skips a memo — safe).
+  if (/\bcurrent_(timestamp|date|time)\b|\blocaltime(stamp)?\b|\b(transaction|statement)_timestamp\b/i.test(sql)) return true;
+  let astJson: string;
+  try {
+    // json_serialize_sql only PARSES (never executes) its argument and requires a CONSTANT string, so inline `sql`
+    // as a SQL literal with '' escaping. No execution => no injection-to-execution risk; a malformed parse just
+    // returns an error JSON below (fail closed).
+    const rows = await conn.all<Record<string, unknown>>(`SELECT json_serialize_sql('${sql.replace(/'/g, "''")}') AS ast`);
+    astJson = String((rows[0] as { ast?: unknown } | undefined)?.ast ?? "");
+  } catch {
+    return true; // can't serialize -> can't prove deterministic -> fail closed
+  }
+  if (!astJson || /"error"\s*:\s*true/.test(astJson)) return true; // parser error JSON -> fail closed
+  const names = new Set<string>();
+  for (const m of astJson.matchAll(/"function_name"\s*:\s*"([^"]+)"/g)) names.add(m[1].toLowerCase());
+  if (names.size === 0) return false; // no function calls -> deterministic
+  // DuckDB explicitly marks non-deterministic functions; everything else (operators, aggregates, pure scalars) is
+  // CONSISTENT and safe. So flag ONLY the explicitly non-deterministic ones — no over-skip of normal queries.
+  const placeholders = [...names].map(() => "?").join(",");
+  const rows = await conn.all<{ n: number | bigint }>(
+    `SELECT count(*) AS n FROM duckdb_functions() WHERE lower(function_name) IN (${placeholders}) AND stability IN ('VOLATILE', 'CONSISTENT_WITHIN_QUERY')`,
+    [...names],
+  );
+  return Number(rows[0]?.n ?? 0) > 0;
+}

@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { duckdbNodeConn } from "../src/duckdb/node-api.js";
 import type { SqlConn } from "../src/core/ports.js";
-import { sqlReadsOnlyResolvedTables, resolvedBaseTables } from "../src/duckdb/plan-hermeticity.js";
+import { sqlReadsOnlyResolvedTables, resolvedBaseTables, sqlUsesNonDeterministicFn } from "../src/duckdb/plan-hermeticity.js";
 
 // A SOUND hermeticity proof over the DuckDB physical PLAN: a query is hermetic iff every data-source leaf is a
 // base-table scan of a RESOLVED table (or a pure/constant source) — no file/table-function/replacement-scan read.
@@ -60,5 +60,28 @@ describe("plan-hermeticity: prove a query reads only resolved tables (via EXPLAI
     const t = await resolvedBaseTables(c);
     assert.equal(await sqlReadsOnlyResolvedTables(c, "SELECT * FROM no_such_table", t), false);
     assert.equal(await sqlReadsOnlyResolvedTables(c, "this is not sql", t), false);
+  });
+
+  test("non-deterministic functions (AST + stability, not regex): random/now/uuid flagged, incl. quoted; pure not", async () => {
+    const c = await conn();
+    // deterministic: no function, or only CONSISTENT functions/operators/aggregates -> false (safe to memoize)
+    for (const sql of [
+      "SELECT count(*) FROM variants WHERE x > 25",
+      "SELECT upper(c), abs(x) FROM variants GROUP BY 1, 2",
+      "SELECT x + 1 AS y FROM variants",
+    ]) assert.equal(await sqlUsesNonDeterministicFn(c, sql), false, `deterministic: ${sql}`);
+    // non-deterministic: VOLATILE (random/uuid/gen_random_uuid) or CONSISTENT_WITHIN_QUERY (now/current_timestamp)
+    for (const sql of [
+      "SELECT random() AS r FROM variants",
+      'SELECT "random"() AS r FROM variants', // QUOTED — the AST normalizes it; a regex would miss it
+      "SELECT uuid() FROM variants",
+      "SELECT now() FROM variants",
+      "SELECT current_timestamp AS t FROM variants",
+      "SELECT count(*) FROM variants WHERE x < random()", // buried in a predicate
+    ]) assert.equal(await sqlUsesNonDeterministicFn(c, sql), true, `non-deterministic: ${sql}`);
+    // FAIL CLOSED on unparseable SQL (json_serialize_sql returns an error JSON, not a throw)
+    assert.equal(await sqlUsesNonDeterministicFn(c, "this is not sql"), true);
+    // an embedded single quote is escaped, not a break-out
+    assert.equal(await sqlUsesNonDeterministicFn(c, "SELECT c FROM variants WHERE c = 'a''b'"), false);
   });
 });
