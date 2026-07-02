@@ -56,7 +56,7 @@ read-then-write; that needs a server-side atomic advance+insert / serializable t
 |---|---|---|
 | Runs of one project | project-local `store.duckdb` (default) | runs open→write→**close** in sequence; memory/facts accumulate. Proven: a later run reads the earlier run's *authored* memory. |
 | Across projects / users | `openBioStore(cwd, { path })` → a shared path | same file, wider audience |
-| Concurrent / cross-host / cross-agent | a **DuckDB server** — ducknng `run_rpc` (exec opt-in) **or a duckdb quack server** | one writer, many concurrent clients — lifts the process-exclusive-writer lock (not serialize-forever) |
+| Concurrent / cross-host / cross-agent | a **DuckDB server** — ducknng `run_rpc` (exec opt-in; a host may also bring its own server conn) | one writer, many concurrent clients — lifts the process-exclusive-writer lock (not serialize-forever) |
 | Immutable snapshots / archival | **CAS** by digest | shareable, content-addressed |
 
 Access stays host-gated (ducknng mTLS / peer-allowlists / exec opt-in). This is **Fugu's inter-workflow shared

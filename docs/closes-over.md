@@ -15,8 +15,8 @@ add**; they are consequences of one property: **addressable data + SQL + an owne
 ## Agent topologies — NNG protocols as agent patterns
 
 [ducknng](https://github.com/sounkou-bioinfo/ducknng) binds the [NNG](https://nng.nanomsg.org/) scalability
-protocols (the lineage of R's [`nanonext`](https://github.com/r-lib/nanonext) + [`mirai`](https://mirai.r-lib.org/)
-and Python's [`pynng`](https://github.com/codypiersall/pynng)) as first-class SQL. Each protocol *is* an agent
+protocols (in the lineage of R's [`nanonext`](https://github.com/r-lib/nanonext) +
+[`mirai`](https://mirai.r-lib.org/)) as first-class SQL. Each protocol *is* an agent
 coordination pattern:
 
 | NNG protocol | agent pattern | runnable demo (separate processes, over the ducknng socket layer) |
@@ -27,12 +27,11 @@ coordination pattern:
 | `pair` | a **1:1 channel** — proposer↔verifier | `scripts/nng-pair.mjs` (adversarial propose→refute→converge) |
 | `bus` | a **peer mesh** — decentralized consult | reachability TESTED (`test/ducknng-socket-reachability.test.ts` — a bus round-trip); mesh demo pending |
 
-Multi-agent coordination is therefore transport, not a framework — and status/results flow back into the shared
-SQL ledger, so the coordination is *inspectable data*, not opaque runtime state. Each demo spawns real separate OS
-processes and carries a recorded run in its sibling `.md`. Every NNG protocol is **reachable** the same way
-(`open_socket(<proto>)` → `listen`/`dial` → `send`/`recv_aio` + `aio_collect`) — verified end to end, incl. a bus
-round-trip — though not all are yet packaged as a demo (the bus *mesh* demo is pending, per the table above). See
-the [design notes](./design.md).
+Multi-agent coordination is transport, not a framework: message-passing is **NNG**, and status/results land in the
+shared **SQL ledger** — so coordination is *inspectable data*, not opaque runtime state. (The `.md` beside each demo
+script is only a captured run for the record, not part of the mechanism.) Every NNG protocol is **reachable** the
+same way (`open_socket(<proto>)` → `listen`/`dial` → `send`/`recv_aio` + `aio_collect`), verified end to end
+including a bus round-trip; the bus *mesh* demo is still pending. See the [design notes](./design.md).
 
 **Reach: authenticated HTTP, MCP, and streaming.** ducknng's HTTP side (`ncurl_table` / `ncurl_aio`) takes
 **host-provided headers**, so the network leg reaches anything HTTP-shaped *as SQL* while auth stays host-owned:
