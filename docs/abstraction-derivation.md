@@ -96,10 +96,14 @@ The minimum primitives that make many bio workflows simple are:
 2. `BioResolverSpec` + `VirtualResourceSpec` — declared resources resolved through a validated registry
    (`resolveResource`, registry-stamped `ResolutionReceipt`s) into content-addressed or virtual handles.
 3. Ontology tables — terms, edges, mappings, term sets.
-4. Knowledge graph tables — nodes, edges, observations, artifacts, trust blocks.
+4. Knowledge graph — the append-only `bio_observations` log (edge-like + scalar rows; a node is just an id
+   referenced by rows, never a separate authored node table), the compiled `bio_edges_as_of` closure, artifacts,
+   and trust/provenance on every row.
 5. DuckDB substrate — stable SQL over files, extensions, parquet/lake tables, and catalogs; `ducknng` extends
    it to network (`ncurl_table`), cross-process shared-DB RPC, and NNG topologies — network/multi-agent as SQL.
-6. Study notes — indexed, mutable expertise memory distinct from skills.
+6. Memory notes — indexed expertise memory in the append-only `bio_observations` store (`agent:memory:`
+   namespace): append-only, as-of-recallable, tombstone-retractable, per-observation `author` — distinct from
+   skills, not a mutable file store.
 7. The registry (`createBioRegistry`) — the runtime boundary where a manifest's serializable spec
    declarations are bound to executable impls (`bindResolverImpl`) and resolved (`resolveResource`).
 8. Skill writer — promote a stabilized workflow into a project-local Pi skill and reload.

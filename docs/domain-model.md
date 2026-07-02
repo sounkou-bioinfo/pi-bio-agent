@@ -30,7 +30,7 @@ real to ignore. The resolution is **manifests over a small kernel, executed by p
 ```text
 core kernel        identity · resource handles/CAS/resolvers · facts/relations/time · declarations · runs · memory
 manifests          genomics · proteomics · transcriptomics/single-cell · metagenomics · data-science · clinical-annotation
-execution backends DuckDB SQL · CLI · R · Python · HTTP · wasm/local-service
+execution backends DuckDB SQL (data + SQL-native network via ducknng) · `process` out-of-process compute (R/Python/Go/shell over Arrow IPC)
 ```
 
 - **core owns the grammar** (what *is* a resource, operation, fact, run, term, temporal scope, resolver).
@@ -259,17 +259,26 @@ Examples (registered data, not guessed TS classes): a **genomics** pack provides
 **proteomics** provides mzML/FASTA resolvers, UniProt/GO sets, peptide/PSM SQL; **single-cell** provides
 h5ad/Zarr resolvers and PCA/UMAP SQL. Source dialect and analysis are SQL, not per-pack TypeScript.
 
-## Execution backends
+## Execution backends — two transports, not a zoo
 
-`BioOperationSpec`/`BioResolverSpec` separate **what** from **how**. One operation ("annotate variants")
-may have many implementations:
+`BioOperationSpec`/`BioResolverSpec` separate **what** from **how**, but "how" does **not** fan out into a
+per-language backend enum. The congealed shape is **two transports over one substrate**:
 
 ```ts
-type ExecutionBackend = "duckdb.sql" | "cli" | "r" | "python" | "http" | "wasm";
+type BioOperationTransport = "duckdb.sql";   // built today; a `process` transport is earned when a real pipeline needs it
 ```
 
-Core defines only the **contract**; actual execution lives in adapters with policy, provenance, timeouts,
-CAS receipts, and tests. CLI/R/Python are first-class — `bcftools`/`duckhts`, Bioconductor, scanpy/pysam.
+- **`duckdb.sql`** carries both **data** (files/formats as table functions) and **network** (`ducknng_ncurl_table`
+  — an HTTP/GraphQL call IS a SQL table function, not a per-API TypeScript client).
+- **`process`** is the ONE general out-of-process backend (argv in a run dir over Arrow IPC). `Rscript`, `python`,
+  `bcftools`, `nextflow`, `snakemake` are **argv presets over `process`**, never separate transports — one backend,
+  not `runDeseq2()`/`runGatk()` sprawl. `process.compute` (the resolver form — table, file, and files-only outputs)
+  is **built**; the operation-level `process` transport is earned, not prebuilt (see
+  [design notes](design.md#execution-beyond-sql-shell-r-and-workflows-as-process-operations)).
+
+Core defines only the **contract**; actual execution lives in adapters with policy, provenance, timeouts, CAS
+receipts, and tests. CLI/R/Python tools are first-class — `bcftools`/`duckhts`, Bioconductor, scanpy/pysam — but
+they enter as **manifest data + argv over `process`**, not as bespoke per-tool TypeScript.
 
 ## Flagship as proof
 

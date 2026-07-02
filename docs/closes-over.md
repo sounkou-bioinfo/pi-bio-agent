@@ -131,7 +131,7 @@ what it learns as queryable notes, not prompt context.
 - **Machine studying** (Li, Battle, Khattab, 2026) — <https://jacobxli.com/blog/2026/machine-studying/>
 - Sakana Fugu (learned orchestration) — <https://sakana.ai/fugu/> · report <https://arxiv.org/html/2606.21228v1>
 - Recursive Language Models / RLM (REPL over context, OOLONG) — <https://arxiv.org/abs/2512.24601>
-- NNG scalability protocols — <https://nng.nanomsg.org/> · `nanonext` <https://github.com/r-lib/nanonext> · `mirai` <https://mirai.r-lib.org/> · `pynng` <https://github.com/codypiersall/pynng>
+- NNG scalability protocols — <https://nng.nanomsg.org/> · the R lineage `nanonext` <https://github.com/r-lib/nanonext> · `mirai` <https://mirai.r-lib.org/> (a Python worker could bind NNG via `pynng`, a factual binding — not part of the lineage)
 - ducknng (owned Arrow-native NNG transport) — <https://github.com/sounkou-bioinfo/ducknng>
 - SemanticSQL (the `bio_edges` + `entailed_edge` graph shape) — <https://github.com/INCATools/semantic-sql>
 - LinkedIn design thread (sounkou-bioinfo × Manuel) — [comment thread](https://www.linkedin.com/feed/update/urn:li:activity:7473824764575436800?commentUrn=urn%3Ali%3Acomment%3A%28activity%3A7473824764575436800%2C7473848362723680256%29&replyUrn=urn%3Ali%3Acomment%3A%28activity%3A7473824764575436800%2C7476647053071114241%29)

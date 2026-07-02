@@ -25,8 +25,14 @@ knitr::knit_engines$set(pi = function(options) {
   provider <- if (!is.null(options$provider)) options$provider else "openai-codex"
   tmo <- if (!is.null(options$timeout)) options$timeout else 300
   out <- tryCatch(
+    # HERMETIC RENDER: the render agent gets READ-ONLY tools only — read/grep/find/ls + the read-only bio tools
+    # (query/run-operation/describe over an explicit db). NO write/edit/bash, so a documentation render can never
+    # mutate the repo (a live agent once wandered off-prompt and edited a doc mid-render). bio_query/
+    # bio_run_operation persist run records under the gitignored .pi/ only — not the tracked tree.
     system2("pi", c("--provider", provider, "--model", model,
-                    "-e", "extensions/pi-coding-agent/index.ts", "-p", "--no-session", shQuote(prompt)),
+                    "-e", "extensions/pi-coding-agent/index.ts",
+                    "-t", "read,grep,find,ls,bio_describe_model,bio_query,bio_run_operation,bio_list_duckdb_extensions",
+                    "-p", "--no-session", shQuote(prompt)),
             stdout = TRUE, stderr = TRUE, timeout = tmo),
     error = function(e) "[pi unavailable]")
   reply <- paste0("> ", gsub("\n", "\n> ", paste(out, collapse = "\n")))

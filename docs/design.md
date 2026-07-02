@@ -252,15 +252,20 @@ Three things keep this consistent with the rest of the substrate:
   `BioRunStatus`/`BioRunEventType` stay closed because the state machine branches on them. `BioRunRecord` streams
   `started → progress → checkpoint → completed/failed`. A six-hour job is a `background`/`batch` run whose record
   accrues progress + checkpoints and ends in output artifacts.
-- **Out-of-process compute is BUILT (table-producing case).** The `process.compute` resolver
+- **Out-of-process compute is BUILT — table, file, and files-only outputs.** The `process.compute` resolver
   (`src/duckdb/resolvers/process-compute.ts`) + the injected `ProcessRunner` port
-  (`src/process/node-process-runner.ts`) already run an out-of-process child (R/Python/Go/shell) over Arrow IPC
-  and materialize a TABLE — DuckDB → Arrow → child → Arrow → table — with a script-bytes provenance digest,
-  detached process-group kill on timeout/abort, and fail-closed-without-runner (example
-  `examples/process-compute`, tests `process-compute-example`/`process-compute-guards`). What is still missing is
-  the *operation-level* artifact executor — the `process` **BioOperationTransport** that runs an argv command in
-  a run dir, captures stdout/stderr/exit, and registers declared FILE outputs as CAS artifacts (the six-hour
-  batch / Nextflow-Snakemake case). The compute pillar's table path exists; its long-running artifact path does not.
+  (`src/process/node-process-runner.ts`) run an out-of-process child (R/Python/Go/shell) over Arrow IPC with a
+  script-bytes provenance digest, detached process-group kill on timeout/abort, and fail-closed-without-runner.
+  Three output shapes exist: a **TABLE** read back from the child's Arrow IPC (DuckDB → Arrow → child → Arrow →
+  table, `examples/process-compute`); declared **FILE outputs** captured content-addressed into **CAS**
+  (`resultTable: "artifacts"` + `captureDeclaredOutputsToCas` in `src/duckdb/artifact-capture.ts` —
+  relative-path-only, symlink/non-regular-file rejecting, realpath-confined to the work dir, byte-capped,
+  fail-closed-without-CAS; `examples/process-artifacts`); and the **files-only** case where the resource's table
+  IS the captured-artifacts listing (`examples/process-files-only`). What is still missing is only the
+  *operation-level* executor — a `process` **BioOperationTransport** (the OPERATION transport is still
+  `duckdb.sql` only, `BioOperationTransport = "duckdb.sql"`), the argv-in-a-run-dir path for the six-hour batch /
+  Nextflow-Snakemake case. The compute pillar's resolver path — table AND file artifacts — exists; the
+  operation-transport wrapper does not.
 
 **One general backend, not a backend zoo.** When the first executor is built, it is `process` (run an argv
 command in a run dir, capture stdout/stderr/exit, register declared outputs as artifacts). `Rscript`,
@@ -274,14 +279,15 @@ semantics `process` cannot express — polling/resume/cancel of a remote job —
 instances, not imagined.
 
 **Discipline — do not build the transport ahead idealistically.** Speculative non-SQL transports were already
-deleted once (http/graphql/mcp/local with no runner). The table-producing out-of-process case is now served by
-the `process.compute` RESOLVER (above); the OPERATION-level `BioOperationTransport` stays `duckdb.sql` until a
-real pipeline forces a `process` **transport** that captures FILE artifacts (e.g. a Snakemake/Nextflow step or a
-DESeq2 run whose outputs are files, not a single table). A full `BioExecutionSpec` (a backend enum,
+deleted once (http/graphql/mcp/local with no runner). The out-of-process case — table AND file artifacts — is now
+served by the `process.compute` RESOLVER (above); the OPERATION-level `BioOperationTransport` stays `duckdb.sql`
+until a real pipeline forces a `process` **transport** (a Snakemake/Nextflow step or a DESeq2 run driven as an
+*operation*, not a resolved resource). A full `BioExecutionSpec` (a backend enum,
 `container`/`env`/`resources`/`effects`/`capture` fields) is the *sketch of the destination*, not core surface —
 add fields when an executor consumes them. CAS-of-bytes itself is **built** (`src/core/cas.ts` + `src/hosts/fs-cas.ts`,
-proven by `http.get` byte-reuse across DBs in `test/http-cas-reuse.test.ts`); what that artifact transport still
-needs is the wiring of a code op's FILE outputs INTO CAS — those bytes are exactly what CAS exists to address.
+proven by `http.get` byte-reuse across DBs in `test/http-cas-reuse.test.ts`), and the FILE-outputs-into-CAS wiring
+is **built too** (`captureDeclaredOutputsToCas`); what the operation transport still needs is only to reuse that
+same capture from an argv-in-a-run-dir executor.
 
 ## Storage story
 
@@ -308,7 +314,7 @@ cas/<algorithm>/<digest>
 
 A `ResourceHandle` points to the digest and metadata. This is appropriate for downloaded API responses, reference snapshots, VCFs, tables, PDFs, ontology release files, and generated artifacts that need integrity/reproducibility.
 
-CAS is not a consent or retention policy. Sensitive deployments can add deletion/retention policy in adapters. The single-user Pi substrate only needs the primitive.
+CAS is not a consent or retention policy. Sensitive deployments can add deletion/retention policy in adapters. The substrate only needs the primitive; retention/consent is a host concern.
 
 ### 3. Virtual resources: live or expensive data
 
@@ -514,32 +520,36 @@ graph model of harness state.
 
 ### Where the human stays in the loop (the judgment/approval boundary)
 
-The substrate covers the **executable middle** (data → SQL → process). The roadmap's still-deferred work
-([`roadmap.md`](./roadmap.md), groups "A. no consumer yet" and "B. Phase-4-consumed") is not a random backlog —
-it is exactly where the **irreducibly human** parts cluster, and that is by design, not a gap. Locate them
-precisely so they are never quietly automated away:
+The substrate covers the **executable middle** (data → SQL → process). What it deliberately does **not** compute —
+the **irreducibly human** parts — clusters in three places, and that is by design, not a gap. The substrate now
+**records and gates** each (the temporal `bio_observations` store and the Phase-4 governance loop are built); it
+never **decides** them. Locate them precisely so they are never quietly automated away:
 
 - **Judgment** (B: *recording results/judgments as KG facts*). A pathogenicity call, a grounding decision, an
   "this evidence supports X" is a human-or-model *judgment*. The substrate's job is to **record** it as a
   provenance-bearing fact (who/what decided, when, on what evidence, at what confidence) — never to **compute**
   it. SQL can deterministically run the *rule* once a human has fixed it (the rare-high-impact abstention is a
   pinned, tested operation), but the choice of rule and the calls SQL can't decide remain judgments.
-- **Approval / policy** (Phase 4: `activate` / `rollback`). `validate`/`test`/`record` are mechanical; what is
-  not is **promoting** a new skill/spec into active use, or **reverting** one — a policy/approval gate a human
-  (or a human-set policy) owns. `rollback` is also *why* temporal anchoring (B) exists: you can only revert to a
-  prior state if facts are time-versioned (as-of).
-- **Curation** (A: *ontology-ingest*, and *pipeline/tool/version selection* for the `process` artifact
-  transport). Which ontology, which release, which tool at which version, how to reconcile conflicting sources —
-  authored into a manifest by a human, not derivable. The projection (statements → `bio_edges`) and the run
-  (argv → artifacts) are mechanical; the *trust decision* is curatorial.
+- **Approval / policy** (the Phase-4 `activate` / `rollback` gate). `validate`/`test`/`record` are mechanical;
+  what is not is **promoting** a new skill/spec into active use, or **reverting** one — a policy/approval gate a
+  human (or a human-set policy) owns. `rollback` is also *why* temporal anchoring exists: you can only revert to a
+  prior state if facts are time-versioned (as-of). The **mechanism** — submit → validate → test → record →
+  `activate`/`rollback`, with durable park/resume for a pending approval — is **built** (Phase 4.3/4.4,
+  `src/hosts/harness-adaptation.ts` + `src/duckdb/activation.ts`); the injected `ApprovalPolicy` is exactly where
+  the human/host decision plugs in, and the substrate never fabricates it.
+- **Curation** — *ontology-ingest*, and *pipeline/tool/version selection*. Which ontology, which release, which
+  tool at which version, how to reconcile conflicting sources — authored into a manifest by a human, not
+  derivable. The projection (statements → `bio_edges`) and the run (argv → artifacts) are mechanical; the *trust
+  decision* is curatorial.
 
-**The link between A and B is a governance loop.** A's deferred executors **produce** (run a pipeline, ingest an
-ontology); B **records** the human/model *judgment about A's output* as a provenance-bearing, as-of-versioned
-fact; Phase 4 `activate`/`rollback` is the **policy gate** that promotes or reverts on those judgments. So the
-human is threaded through as *judgment → approval*, and the substrate's contribution is to make that loop
-**explicit, accountable, time-versioned, and reversible** — rails for the human decision, not a replacement for
-it. This is the sharp form of the honest boundary (the executable middle is ours; semantic judgment and
-human/policy workflows are deliberately *hosted*, not *computed*).
+**These three are one governance loop, and its rails are built.** An executor **produces** (run a pipeline,
+ingest an ontology); the substrate **records** the human/model *judgment about that output* as a
+provenance-bearing, as-of-versioned fact; the Phase-4 `activate`/`rollback` gate (with durable park/resume
+approval) promotes or reverts on those judgments. So the human is threaded through as *judgment → approval*, and
+the substrate's contribution is to make that loop **explicit, accountable, time-versioned, and reversible** —
+rails for the human decision, not a replacement for it. This is the sharp form of the honest boundary (the
+executable middle is ours; semantic judgment and human/policy workflows are deliberately *hosted*, not
+*computed*).
 
 **The boundary is narrower than "services/auth/streaming are out."** Much of what looks non-SQL is already in
 reach by composition: API **credentials/auth** = DuckDB's `CREATE SECRET` secret manager (host-owned, the same

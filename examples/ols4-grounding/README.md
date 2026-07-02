@@ -31,27 +31,23 @@ resolver + injected fetch) remains the fallback when a DuckDB version has no duc
 
 ## The skill is data, not code
 
-The whole grounding skill is the resource declaration:
-
-```json
-{ "id": "ols4_candidates", "resolver": "http.get",
-  "params": { "url": "https://www.ebi.ac.uk/ols4/api/search?q=asthma&ontology=mondo&fieldList=obo_id,label",
-              "table": "ols4_candidates", "format": "json" } }
-```
-
-The *same* generic `http.get` resolver serves OpenTargets, gnomAD, or any JSON/CSV REST endpoint — point a new
-manifest at a new URL and you have a new "skill", with **zero new TypeScript**. The resolver memoizes by HTTP
-`ETag`, so re-grounding the same endpoint replays a `304 Not Modified` instead of re-downloading.
+The whole grounding skill is the `duckdb.sql_materialize` resource shown above — a `ducknng_ncurl_table` GET whose
+URL is composed in SQL. That *same* generic SQL-materialize path serves OpenTargets, gnomAD, or any JSON/CSV REST
+endpoint — point a new manifest at a new URL and you have a new "skill", with **zero new TypeScript** (a new API is
+an `ncurl_table` call, not a new resolver). The `http.get` TS fallback (for a DuckDB with no ducknng build)
+additionally memoizes by HTTP `ETag`, replaying a `304 Not Modified` instead of re-downloading.
 
 ## Running it
 
-Network is the **host's** capability, never the agent's, and it is granted **by composition** — not by an
-ambient env var (which would inherit across forks/embeddings and is invisible to the model). The default
-entrypoint injects no `fetch`, so the manifest **fails closed**. The operator grants network by loading the
-explicit *networked* entrypoint:
+Network is the **host's** capability, never the agent's. For the SQL-native path the host provisions ducknng once
+via `duckdbInitSql` (`INSTALL ducknng FROM community; LOAD ducknng`) plus a TLS config for HTTPS (shown above), and
+egress is then whatever the host's DuckDB/sandbox allows — the library is not the egress firewall. The `http.get`
+fallback is granted differently: **by composition**, not an ambient env var (which would inherit across
+forks/embeddings and is invisible to the model). Its default entrypoint injects no `fetch`, so an `http.get`
+manifest **fails closed**; the operator grants network by loading the explicit *networked* entrypoint:
 
 ```sh
-# default: no network — http.get is unbound, this manifest fails closed
+# default: no network — http.get is unbound, an http.get manifest fails closed
 pi -e extensions/pi-coding-agent/index.ts
 
 # explicit grant: the operator chooses the networked entrypoint, which composes a fetch in
@@ -77,9 +73,10 @@ WHERE lower(label) = 'asthma'      -- exact-match projection tier; synonym/closu
 Per `disambiguate`, this returns **one** grounded CURIE or zero rows (abstain) — never an invented id. The
 candidate set comes from the source; SQL only chooses among provided CURIEs or returns nothing.
 
-The OLS4 `search` response is materialized as-is by `read_json_auto`; if the endpoint returns a nested
+The OLS4 `search` response is materialized as-is by the resolver; if the endpoint returns a nested
 `{ response: { docs: [...] } }` envelope the agent unnests it in SQL (`SELECT unnest(response.docs) ...`) — that
 is the agent's SQL job, not the resolver's.
 
-`test/ols4-grounding-example.test.ts` runs this manifest end-to-end through the host with an **injected mock
-fetch** (no live network), proving the manifest → resolved table → grounding SQL path works as data.
+`test/ols4-grounding-example.test.ts` runs this manifest end-to-end through the host against a **local ducknng
+server** fixture (`ducknng_start_server` + a registered HTTP route, no external network), proving the manifest →
+`ncurl_table` fetch+parse → grounding SQL path works as data. (It skips when a DuckDB build has no community ducknng.)

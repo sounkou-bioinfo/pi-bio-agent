@@ -56,8 +56,10 @@ Run the test: `npm test` (gated on `Rscript` + the R `nanoarrow` package).
 
 ## How it thickens (and why it's the finish line)
 
-This skeleton is `coloc.abf` on **one locus across a few tissues** (no LD matrix needed). Thickening it is exactly what
-drives the last deferred substrate pieces — it is **one flagship, not three remaining promises**:
+This skeleton is `coloc.abf` on **one locus across a few tissues** (no LD matrix needed). The substrate primitives it
+would lean on are already **built** as standalone examples/phases (the `process` artifact transport in
+[`process-artifacts/`](../process-artifacts/), Phase-4 fact recording, `runPipeline`); thickening coloc is what turns
+them into a real *in-flagship* consumer — it is **one flagship, not three remaining promises**:
 
 - **per-tissue fan-out** over real GTEx eQTL tissues = the partition+map DAG (`runPipeline`);
 - **PLINK2 reference LD** + **SuSiE/HyPrColoc** = richer COMPUTE process ops (these need LD);
@@ -65,5 +67,5 @@ drives the last deferred substrate pieces — it is **one flagship, not three re
   (file outputs → CAS);
 - recording each locus's posteriors as **time-versioned, provenance-bearing KG facts** = Phase-4 `record`.
 
-So coloc is the consumer that converts the artifact transport and the judgment-recording from *deferred* to
-*built-because-driven*.
+So coloc is the flagship that puts the already-built artifact transport and judgment-recording to work as a real
+end-to-end consumer — turning standalone primitives into a driven research pipeline.
