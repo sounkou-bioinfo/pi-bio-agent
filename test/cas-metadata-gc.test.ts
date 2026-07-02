@@ -49,6 +49,25 @@ describe("CAS metadata GC: ref/lease anti-join (the distributed-safe sweep)", ()
     assert.equal(await cas.has(rooted), true, "rooted bytes survive");
   });
 
+  test("CONSISTENCY: removal succeeds but marking 'deleted' fails -> row stays 'deleting' (a MISS), NEVER reverted to 'tombstoned'", async () => {
+    const { conn, cas } = await setup();
+    const garbage = await store(cas, conn, "gone bytes", 1000);
+    await gcMark(conn, { cutoffMs: 2000, nowMs: 2000 }); // tombstone it
+    // a conn whose mark-'deleted' UPDATE throws AFTER the physical byte removal, but everything else works
+    const flaky = {
+      all: <T>(sql: string, params?: unknown[]) => conn.all<T>(sql, params as never),
+      run: async (sql: string, params?: unknown[]) => {
+        if (/state = 'deleted'/.test(sql)) throw new Error("simulated DB failure marking deleted");
+        return conn.run(sql, params as never);
+      },
+    } as unknown as typeof conn;
+    await assert.rejects(() => gcSweep(flaky, cas, { graceMs: 0, nowMs: 2000 }), /simulated DB failure/);
+    // the bytes ARE physically gone (remove ran) — the row must NOT claim them reusable
+    assert.equal(await cas.has(garbage), false, "bytes were physically removed");
+    const [row] = await conn.all<{ state: string }>(`SELECT state FROM cas_object WHERE algorithm = ? AND digest = ?`, [garbage.algorithm, garbage.digest]);
+    assert.equal(row!.state, "deleting", "left in 'deleting' (withCasObject miss), never reverted to 'tombstoned' (which would resurrect gone bytes)");
+  });
+
   test("an active LEASE protects bytes even with NO ref (the reuse race); an expired lease does not", async () => {
     const { conn, cas } = await setup();
     const a = await store(cas, conn, "being reused by a remote writer", 1000);

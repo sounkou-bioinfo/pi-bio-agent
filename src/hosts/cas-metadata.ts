@@ -210,14 +210,17 @@ export async function gcSweep(conn: SqlConn, cas: CasStore, opts: { graceMs: num
     const address: ContentAddress = { algorithm: algorithm as ContentAddress["algorithm"], digest };
     try {
       await cas.remove(address);
-      await conn.run(`UPDATE cas_object SET state = 'deleted' WHERE algorithm = ? AND digest = ? AND state = 'deleting'`, [algorithm, digest]);
     } catch (e) {
-      // the physical remove failed (permissions, a transient mount, an object-store outage). Do NOT leave the row
-      // stuck in `deleting`: a subsequent sweep only claims `tombstoned` rows, so it would be orphaned forever, and
-      // withCasObject treats `deleting` as a miss. Revert to `tombstoned` so a later sweep retries, then surface it.
+      // the physical remove FAILED (permissions, a transient mount, an object-store outage) — the BYTES ARE STILL
+      // PRESENT. Revert to `tombstoned` so a later sweep retries (don't orphan it in `deleting`), then surface it.
       await conn.run(`UPDATE cas_object SET state = 'tombstoned' WHERE algorithm = ? AND digest = ? AND state = 'deleting'`, [algorithm, digest]);
       throw e;
     }
+    // The bytes are GONE now. Mark the row `deleted`. CRITICAL: if this UPDATE fails, do NOT revert to `tombstoned` —
+    // that would advertise deleted bytes as reusable/resurrectable and let withCasObject serve a phantom hit. Leaving
+    // it in `deleting` is the SAFE outcome (withCasObject treats `deleting` as a MISS); the stuck row is harmless
+    // metadata cruft a targeted repair can reclaim, never a correctness hazard. Surface the error, don't swallow it.
+    await conn.run(`UPDATE cas_object SET state = 'deleted' WHERE algorithm = ? AND digest = ? AND state = 'deleting'`, [algorithm, digest]);
     swept.push(address);
   }
   return swept;
