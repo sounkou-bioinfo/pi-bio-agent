@@ -140,7 +140,7 @@ ride the same temporal graph — the DB *is* the audit trail.
 Capability resolvers are **host-injected by composition and fail closed** when unbound: no `fetch` → `http.get`
 is off; no `ProcessRunner` → `process.compute` is off. A run bundles the result with its run record and the
 resolver receipts — *a failed run still leaves an auditable receipt* — under `.pi/bio-agent/runs/<runId>/`.
-Manifests pass a strict allowlist, so cut surface can't ride back in as inert keys.
+Manifests pass a strict **key** allowlist (unknown keys are rejected; each resolver validates its own opaque `params`), so cut surface can't ride back in as inert keys.
 
 ### Trust boundary
 The substrate is deliberately thin: it enforces statement class (read-only, no DDL), manifest shape, and receipt

@@ -142,8 +142,9 @@ closed** when unbound: no `fetch` → `http.get` is off; no
 `ProcessRunner` → `process.compute` is off. A run bundles the result
 with its run record and the resolver receipts — *a failed run still
 leaves an auditable receipt* — under `.pi/bio-agent/runs/<runId>/`.
-Manifests pass a strict allowlist, so cut surface can’t ride back in as
-inert keys.
+Manifests pass a strict **key** allowlist (unknown keys are rejected;
+each resolver validates its own opaque `params`), so cut surface can’t
+ride back in as inert keys.
 
 ### Trust boundary
 
@@ -271,15 +272,15 @@ pi-bio-agent query examples/connectors/clinvar-region.json \
 ``` json
 {
   "ok": true,
-  "runId": "query-1782964768746-042a2b5a",
+  "runId": "query-1782966055194-7d49b2d0",
   "status": "succeeded",
   "rowCount": 8,
   "artifacts": {
-    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782964768746-042a2b5a/run.json",
-    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782964768746-042a2b5a/result.json",
-    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782964768746-042a2b5a/receipts.json"
+    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782966055194-7d49b2d0/run.json",
+    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782966055194-7d49b2d0/result.json",
+    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782966055194-7d49b2d0/receipts.json"
   },
-  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782964768746-042a2b5a",
+  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782966055194-7d49b2d0",
   "rows": [
     {
       "clinical_significance": "Pathogenic",
@@ -329,15 +330,15 @@ pi-bio-agent query examples/variant-counts/manifest.json \
 ``` json
 {
   "ok": true,
-  "runId": "query-1782964771081-74faf2af",
+  "runId": "query-1782966057594-ff6af13a",
   "status": "succeeded",
   "rowCount": 3,
   "artifacts": {
-    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782964771081-74faf2af/run.json",
-    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782964771081-74faf2af/result.json",
-    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782964771081-74faf2af/receipts.json"
+    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782966057594-ff6af13a/run.json",
+    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782966057594-ff6af13a/result.json",
+    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782966057594-ff6af13a/receipts.json"
   },
-  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782964771081-74faf2af",
+  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782966057594-ff6af13a",
   "rows": [
     {
       "consequence": "missense",
@@ -372,20 +373,20 @@ pi-bio-agent query examples/run-ledger/manifest.json \
 ``` json
 {
   "ok": true,
-  "runId": "query-1782964771169-07ce4ec3",
+  "runId": "query-1782966057686-1d56c4a9",
   "status": "succeeded",
   "rowCount": 4,
   "artifacts": {
-    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782964771169-07ce4ec3/run.json",
-    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782964771169-07ce4ec3/result.json",
-    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782964771169-07ce4ec3/receipts.json"
+    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782966057686-1d56c4a9/run.json",
+    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782966057686-1d56c4a9/result.json",
+    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782966057686-1d56c4a9/receipts.json"
   },
-  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782964771169-07ce4ec3",
+  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782966057686-1d56c4a9",
   "rows": [
     {
       "tool": "ad-hoc.query",
       "status": "succeeded",
-      "runs": 586,
+      "runs": 634,
       "first_run": {
         "micros": 1782757322953000
       }
@@ -446,15 +447,15 @@ pi-bio-agent query examples/connectors/uniprot.json \
 ``` json
 {
   "ok": true,
-  "runId": "query-1782964771316-09562840",
+  "runId": "query-1782966057858-e23f1eb0",
   "status": "succeeded",
   "rowCount": 1,
   "artifacts": {
-    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782964771316-09562840/run.json",
-    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782964771316-09562840/result.json",
-    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782964771316-09562840/receipts.json"
+    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782966057858-e23f1eb0/run.json",
+    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782966057858-e23f1eb0/result.json",
+    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782966057858-e23f1eb0/receipts.json"
   },
-  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782964771316-09562840",
+  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782966057858-e23f1eb0",
   "rows": [
     {
       "primaryAccession": "P04637",
