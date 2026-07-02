@@ -113,9 +113,12 @@ export interface SubmitBioJobRequest {
   source?: string;
 }
 
-/** Submit a job. Fail closed: a well-formed matching replay spec is required, a durable record must not already
- *  exist, and the runner must ACCEPT before the ledger/snapshot are touched (so a rejected submit leaves nothing
- *  behind). Records `queued` and persists the snapshot only after acceptance. */
+/** Submit a job. Fail closed: a well-formed matching replay spec is required, and neither a durable record nor a
+ *  ledger row may already exist for the runId. Durability is WRITE-AHEAD: the `queued` snapshot is persisted BEFORE
+ *  dispatch, and a runner REJECTION is compensated by removing it (so a rejected submit leaves nothing behind). The
+ *  deliberate tradeoff vs dispatch-first: a crash in the tiny window AFTER persist but BEFORE the runner accepts
+ *  leaves a durable `queued` record the runner never took (recoverable — a known stuck job — rather than orphaned
+ *  work with no record); see the write-ahead note below for how such a record is reconciled. */
 export async function submitBioJob(conn: SqlConn, runner: JobRunner, req: SubmitBioJobRequest): Promise<JobStatus> {
   assertJobReplay(req.runId, req.replay);
   if (await readJobRecord(req.cwd, req.runId)) throw new Error(`job-store: job '${req.runId}' already submitted`);
@@ -124,8 +127,11 @@ export async function submitBioJob(conn: SqlConn, runner: JobRunner, req: Submit
   if (await latestSlotRow(conn, req.runId)) throw new Error(`job-store: job '${req.runId}' already exists in the shared ledger (reused runId) — pick a fresh runId`);
   const digest = replaySpecDigest(req.replay); // compute BEFORE any write — a digest failure must leave nothing behind
   // WRITE-AHEAD: persist the durable "submitted" snapshot BEFORE dispatch. So if the process dies right after the
-  // runner starts work, the job is still KNOWN (readJobRecord succeeds) and a later poll reconciles the ledger —
-  // rather than orphaned work with no durable record. If the runner then REJECTS, compensate by removing the marker.
+  // runner starts work, the job is still KNOWN (readJobRecord succeeds) and a later poll reconciles the ledger from
+  // the runner's status — rather than orphaned work with no durable record. If the runner then REJECTS, compensate
+  // by removing the marker. CAVEAT: a crash in the window BEFORE runner.submit is reached leaves a `queued` record
+  // the runner never accepted — poll/resume then can't advance it (the runner has no such job). Recovery is to
+  // removeJobRecord that runId and re-submit (the ledger row is only written after acceptance, so it stays clean).
   await persistJob(req.cwd, { schema: "pi-bio.job_record.v1", runId: req.runId, phase: "queued", replayDigest: digest, submittedAt: req.now, updatedAt: req.now });
   try {
     await runner.submit({ runId: req.runId, replay: req.replay }); // acceptance — throws if the runner rejects
