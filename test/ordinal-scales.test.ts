@@ -81,4 +81,11 @@ describe("ordinal scales: a ranked TermSet is the program; SQL thresholds on ran
     const rows = await conn.all<{ member_id: string; rank: number }>("SELECT member_id, rank FROM scale_members WHERE scale_id = 'acmg_classification' ORDER BY rank");
     assert.deepEqual(rows.map((r) => r.member_id), ["benign", "likely_benign", "vus", "likely_pathogenic", "pathogenic"]);
   });
+
+  test("scale_members is RESERVED: if a resource already materialized that table, fail closed (no silent clobber)", async () => {
+    const conn = await memoryConn();
+    // simulate a resource that resolved a table named scale_members into this db BEFORE the scale projection
+    await conn.run("CREATE TABLE scale_members(whatever INT)");
+    await assert.rejects(() => materializeScaleMembers(freshRegistry(), conn), /reserved table name/);
+  });
 });

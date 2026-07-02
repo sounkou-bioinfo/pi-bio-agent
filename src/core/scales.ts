@@ -19,6 +19,19 @@ export const SCALE_MEMBERS_TABLE = "scale_members";
  * queryable. An operation that wants ordering JOINs its grounded member_id to this table and uses `rank`.
  */
 export async function materializeScaleMembers(registry: BioRegistry, conn: SqlConn): Promise<number> {
+  // `scale_members` is a RESERVED internal table (the ordinal-scale projection). Resources resolve into this same
+  // db BEFORE this runs, so a table by that name may already exist — distinguish OUR own projection (a reused
+  // persistent dbPath replaying a prior run: same columns, safe to CREATE OR REPLACE) from a RESOURCE that
+  // clobbered the name (a different schema): the latter fails closed rather than being silently overwritten (which
+  // would hand the operation the WRONG table / misleading binder errors). Manifests must not target `scale_members`.
+  const cols = await conn.all<{ column_name: string }>(`SELECT column_name FROM information_schema.columns WHERE table_name = ?`, [SCALE_MEMBERS_TABLE]);
+  if (cols.length > 0) {
+    const have = new Set(cols.map((c) => c.column_name.toLowerCase()));
+    const ours = ["scale_id", "member_id", "label", "rank"];
+    if (have.size !== ours.length || !ours.every((c) => have.has(c))) {
+      throw new Error(`'${SCALE_MEMBERS_TABLE}' is a reserved table name (the ordinal-scale projection) — a resource must not materialize a table called '${SCALE_MEMBERS_TABLE}'`);
+    }
+  }
   await conn.run(`CREATE OR REPLACE TABLE ${SCALE_MEMBERS_TABLE} (scale_id TEXT, member_id TEXT, label TEXT, rank INTEGER, PRIMARY KEY (scale_id, member_id))`);
   let rows = 0;
   for (const ts of registry.snapshot().termSets) {
