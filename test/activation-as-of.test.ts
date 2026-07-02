@@ -62,6 +62,17 @@ describe("Phase 4.2: activate / rollback as temporal observations", () => {
     await assert.rejects(() => recordActivation(c, { kind: "operation", id: "op", version: "1", specDigest: "sha256:notahex", recordedAt: T1, source: "r" }), /specDigest must be/);
   });
 
+  test("a BACKDATED activation is rejected — it would rewrite history but not become current", async () => {
+    const c = await conn();
+    await recordActivation(c, { kind: "operation", id: "op", version: "2", specDigest: d("v2"), recordedAt: T2, source: "r" });
+    // a rollback/activation at an EARLIER time (T1 < T2) must fail: it wouldn't become current (asOf now still = v2)
+    await assert.rejects(() => recordActivation(c, { kind: "operation", id: "op", version: "1", specDigest: d("v1"), recordedAt: T1, source: "r" }), /BEFORE the current activation|strictly monotonic/);
+    assert.equal((await activeOperationAsOf(c, "op", T3))?.version, "2", "current stays v2 — no retroactive rewrite admitted");
+    // a proper forward rollback (T3 > T2) DOES take effect
+    await recordActivation(c, { kind: "operation", id: "op", version: "1", specDigest: d("v1"), recordedAt: T3, source: "r" });
+    assert.equal((await activeOperationAsOf(c, "op", T3))?.version, "1", "a forward-dated rollback becomes current");
+  });
+
   test("competing equal-timestamp activation is REJECTED; an exact duplicate stays idempotent", async () => {
     const c = await conn();
     await recordActivation(c, { kind: "operation", id: "op", version: "a", specDigest: d("a"), recordedAt: T1, source: "r1" });

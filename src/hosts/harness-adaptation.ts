@@ -63,6 +63,7 @@ const ID = /^[A-Za-z0-9._-]+$/;
 const specDigestOf = (c: OperationCandidate): string =>
   `sha256:${createHash("sha256").update(JSON.stringify([c.id, c.version, c.fixtureSql, c.sql, c.expected])).digest("hex")}`;
 const parseStatus = (row: { value_json: string | null } | null): string | null => (row?.value_json != null ? JSON.parse(row.value_json) as string : null);
+const FAR_FUTURE = "9999-12-31T23:59:59.999Z"; // sentinel for "the LATEST approval state, regardless of the decision clock"
 
 function assertIds(id: string, version: string): void {
   if (!ID.test(id ?? "")) throw new Error("harness: candidate.id must match [A-Za-z0-9._-]+"); // fail-fast (else it'd only fail at activate)
@@ -132,7 +133,9 @@ async function recordApprovalDecision(conn: SqlConn, d: ApprovalDecision): Promi
   // supplies a DIFFERENT id/version (with a valid specDigest) must NOT activate that un-tested operation. Fail closed.
   const identity = parseStatus(await observationAsOfKey(conn, `${candKey}:identity`, d.decidedAt));
   if (identity !== `${d.id}@${d.version}`) throw new Error(`approval decision: id/version '${d.id}@${d.version}' does not match the validated+tested candidate behind specDigest ${d.specDigest} ('${identity ?? "none"}') — cannot activate an operation that was never tested`);
-  const current = parseStatus(await observationAsOfKey(conn, `${candKey}:approval`, d.decidedAt));
+  // check the LATEST approval state (as-of FAR_FUTURE), NOT as-of decidedAt — a terminal decision recorded at a LATER
+  // time must still block a BACKDATED decision (reading as-of decidedAt would not yet see it, admitting a double-decide).
+  const current = parseStatus(await observationAsOfKey(conn, `${candKey}:approval`, FAR_FUTURE));
   if (current === "approved" || current === "rejected") throw new Error(`approval decision: candidate ${d.specDigest} already ${current} — a decision is terminal`);
 
   await recStatus(conn, d.specDigest, d.decidedAt, d.source, "approval", "harness:approval_status", d.approved ? "approved" : "rejected");
@@ -152,13 +155,16 @@ async function recordApprovalDecision(conn: SqlConn, d: ApprovalDecision): Promi
 export async function decideCandidateApproval(conn: SqlConn, d: ApprovalDecision): Promise<{ activated: boolean }> {
   assertIds(d.id, d.version);
   if (!/^sha256:[0-9a-f]{64}$/.test(d.specDigest ?? "")) throw new Error("decideCandidateApproval: specDigest must be sha256:<64 hex>");
-  const pending = await observationAsOfKey(conn, `candidate:${d.specDigest}:approval`, d.decidedAt);
-  const current = parseStatus(pending);
+  // read the LATEST approval state (as-of FAR_FUTURE), not as-of decidedAt: a terminal decision at a LATER time must
+  // block a backdated one, and 'pending' + the strictly-after check must be judged against the CURRENT slot row.
+  const latest = await observationAsOfKey(conn, `candidate:${d.specDigest}:approval`, FAR_FUTURE);
+  const current = parseStatus(latest);
   if (current === "approved" || current === "rejected") throw new Error(`decideCandidateApproval: candidate ${d.specDigest} already ${current} — a decision is terminal`);
   if (current !== "pending") throw new Error(`decideCandidateApproval: candidate ${d.specDigest} is not awaiting approval (never submitted / not parked) — call submitCandidateForApproval first`);
   // compare as EPOCH, not raw strings: lexicographically '…00Z' > '…00.001Z' ('Z' > '.') though it is chronologically
-  // BEFORE it, which would wrongly reject a valid sub-second-later decision.
-  if (pending && Date.parse(pending.recorded_at) >= Date.parse(d.decidedAt)) throw new Error(`decideCandidateApproval: decidedAt (${d.decidedAt}) must be strictly after the pending submit (${pending.recorded_at})`);
+  // BEFORE it, which would wrongly reject a valid sub-second-later decision. decidedAt must be strictly after the
+  // latest slot row (so the decision actually supersedes it — a backdated decidedAt would not become current).
+  if (latest && Date.parse(latest.recorded_at) >= Date.parse(d.decidedAt)) throw new Error(`decideCandidateApproval: decidedAt (${d.decidedAt}) must be strictly after the current approval row (${latest.recorded_at})`);
   return recordApprovalDecision(conn, d);
 }
 

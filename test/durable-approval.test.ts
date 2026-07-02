@@ -65,6 +65,20 @@ describe("Phase 4.4: durable submit -> (park) -> decide approval", () => {
     assert.equal(ok.activated, true);
   });
 
+  test("SECURITY: a terminal decision can't be bypassed by BACKDATING — the check reads the LATEST state, not as-of decidedAt", async () => {
+    const conn = await obsConn();
+    const sub = await submitCandidateForApproval(conn, good, { sandbox: await sandbox(), recordedAt: T1, source: "ci" });
+    // reject it at a LATER time (T2)
+    await decideCandidateApproval(conn, { id: "double.report", version: "1.0.0", specDigest: sub.specDigest, approved: false, decidedAt: T2, source: "bob", reason: "no" });
+    // now try to APPROVE with a decidedAt BETWEEN the submit and the rejection (T1 < T1.5 < T2). As-of that time the
+    // slot looks 'pending', but the LATEST state is 'rejected' — the decision is terminal and must fail closed.
+    await assert.rejects(
+      () => decideCandidateApproval(conn, { id: "double.report", version: "1.0.0", specDigest: sub.specDigest, approved: true, decidedAt: "2026-06-30T00:30:00Z", source: "attacker" }),
+      /already rejected — a decision is terminal/,
+    );
+    assert.equal(await activeOperationAsOf(conn, "double.report", T2), null, "the operation was NOT activated by the backdated approval");
+  });
+
   test("a SUB-SECOND-later decision is accepted (epoch compare, not lexicographic '…00Z' > '…001Z')", async () => {
     const conn = await obsConn();
     const sub = await submitCandidateForApproval(conn, good, { sandbox: await sandbox(), recordedAt: "2026-06-30T00:00:00Z", source: "ci" });
