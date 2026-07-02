@@ -1,10 +1,13 @@
 # Example: rare high-impact variants — the abstention flagship
 
-This is the canonical **safety-through-abstention** example (ClawBio's `rhi_01`): *count the rare
-loss-of-function variants*, a subtle, safety-critical query. The whole "skill" is **data** — a manifest that
-declares two `file_scan` resources and one **pinned, tested operation** (`rare_high_impact.report`). No
-question-specific TypeScript: the classification is SQL the agent could have written after a `DESCRIBE`, but it
-is *pinned* as a declared operation precisely because getting the edge cases wrong is dangerous.
+This is the canonical **abstention** example (ClawBio's `rhi_01`): *count the rare loss-of-function variants*,
+where a naive count over-calls (~110) until you refuse to call an unknown-frequency variant "rare" (~6). The
+whole "skill" is **data** — a manifest that declares two `file_scan` resources and one **declared, tested
+operation** (`rare_high_impact.report`). No question-specific TypeScript: the classification is SQL the agent
+could write after a `DESCRIBE` (and does, for most questions). It is a *declared* operation here for one honest
+reason — it's this flagship's **deterministic regression reference**, so the test can assert the abstention
+structurally and the run stamps a pinned SQL digest for audit. Pinning is **not** a safety mechanism: the safety
+is the abstention *insight* (no-frequency ≠ rare), a principle an ad-hoc agent query applies just as safely.
 
 ```
 annotated_variants (file_scan) ┐
@@ -12,7 +15,7 @@ annotated_variants (file_scan) ┐
 so_loss_of_function (file_scan)┘   rare_high_impact.report
 ```
 
-## Why it is pinned (the abstention)
+## The abstention (the actual point)
 
 The operation classifies each variant into exactly one bucket. The two safety rules ride along as operation
 **notes**, not code-computed prose:
@@ -45,5 +48,5 @@ if it drifts. Not hand-pasted. (Pure SQL over local CSVs — no external depende
 The defensible answer is **included = 1**: the unknown-frequency variant is **abstained** (not silently counted as rare), and the rare-but-Benign loss-of-function variant is **excluded**.
 <!-- END GENERATED:rhi-run -->
 
-So the safety-critical answer is one declared operation away, and the run carries a receipt at every step
+So the abstention is one operation away, and the run carries a receipt at every step
 (the two file digests + the operation's pinned SQL digest) — the abstention is auditable, not implicit.
