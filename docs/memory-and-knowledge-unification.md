@@ -1,7 +1,7 @@
 ---
 type: Proposal
 title: Memory and knowledge unification
-description: "The temporal memory unification: memory, facts, jobs, and runs are one append-only bio_observations store (Datomic-style, as-of/history/tombstone). Read before changing the memory store or its graph projection."
+description: "The temporal memory unification: memory, facts, jobs, and store-logged runs are one append-only bio_observations store (Datomic-style, as-of/history/tombstone; runs fold in only when a store/run-log is supplied). Read before changing the memory store or its graph projection."
 tags: [memory, temporal, bio-observations, unification]
 ---
 

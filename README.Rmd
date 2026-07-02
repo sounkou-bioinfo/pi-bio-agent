@@ -223,7 +223,7 @@ query examples/run-ledger/manifest.json --db :memory: --sql "SELECT tool, status
 Because the graph is a table, a UI is a thin SQL client and a chart is a query: a grammar-of-graphics layer like
 posit's [**ggsql**](https://github.com/posit-dev/ggsql) draws the run timeline, status breakdown, or a
 manifest→run→receipt DAG straight off `run_ledger` — the plot *is* `ggplot(run_ledger) + ...` over SQL, nothing
-bespoke. Runs, jobs, and coloc results land in the same ledger, so the whole workbench view is
+bespoke. Every run is in that file run-ledger; store-logged runs, jobs, and coloc results also fold into the `bio_observations` ledger — so the whole workbench view is
 composed, not coded.
 
 **A scientific-database connector is a manifest, not a client.** The "60+ connected databases" a hosted

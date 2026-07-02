@@ -424,8 +424,9 @@ query: a grammar-of-graphics layer like posit’s
 [**ggsql**](https://github.com/posit-dev/ggsql) draws the run timeline,
 status breakdown, or a manifest→run→receipt DAG straight off
 `run_ledger` — the plot *is* `ggplot(run_ledger) + ...` over SQL,
-nothing bespoke. Runs, jobs, and coloc results land in
-the same ledger, so the whole workbench view is composed, not coded.
+nothing bespoke. Every run is in that file run-ledger; store-logged
+runs, jobs, and coloc results also fold into the `bio_observations`
+ledger — so the whole workbench view is composed, not coded.
 
 **A scientific-database connector is a manifest, not a client.** The
 “60+ connected databases” a hosted workbench advertises are, here, one

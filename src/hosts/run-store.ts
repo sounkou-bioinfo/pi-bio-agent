@@ -337,7 +337,18 @@ function resolvedProcessFacts(manifest: BioManifest, resources: string[]): RunRe
   const r = (manifest.provides?.resources ?? []).find((x) => x.resolver === PROCESS_RESOLVER && resources.includes(x.id));
   if (!r) return undefined;
   const p = r.params as { table?: string; command?: readonly string[]; inputSql?: string; resultTable?: "arrow" | "artifacts"; outputs?: Array<{ name: string; path: string; kind?: string }> };
-  return { resourceId: r.id, table: p.table, command: p.command, inputSql: p.inputSql, resultTable: p.resultTable, outputs: p.outputs };
+  // Build with ONLY DEFINED fields — never leave `undefined`-valued keys. The run-object INPUT CASID is hashed from
+  // this in-memory `replay.process`, but replay.json (JSON.stringify) DROPS undefined keys, so an undefined-valued
+  // key would make the digest recomputed from the recorded replay differ from the original — a process.compute run
+  // object then isn't recomputable from its own replay (breaks reproduce/dedup). Omitting the keys keeps them equal.
+  return {
+    resourceId: r.id,
+    ...(p.table !== undefined ? { table: p.table } : {}),
+    ...(p.command !== undefined ? { command: p.command } : {}),
+    ...(p.inputSql !== undefined ? { inputSql: p.inputSql } : {}),
+    ...(p.resultTable !== undefined ? { resultTable: p.resultTable } : {}),
+    ...(p.outputs !== undefined ? { outputs: p.outputs } : {}),
+  };
 }
 
 /** The env attestation SUMMARY lifted from the receipts' `environment` provenance entry (process.compute records
