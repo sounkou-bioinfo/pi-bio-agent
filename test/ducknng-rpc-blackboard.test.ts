@@ -38,10 +38,14 @@ describe("ducknng RPC blackboard: cross-process publish/await (the stigmergic co
     // start awaiting BEFORE the publish exists; record when it resolves
     assert.equal(await present("late"), false, "not on the board yet");
     let publishedAt = 0;
+    let publishDone: Promise<unknown> = Promise.resolve();
     const awaited = (async () => { while (!(await present("late"))) await new Promise((r) => setTimeout(r, 20)); return Date.now(); })();
     setTimeout(() => {
       publishedAt = Date.now();
-      void publisher.run(`SELECT * FROM ducknng_run_rpc('${url}', ?, 0::UBIGINT)`, ["INSERT INTO board VALUES ('late', 'hello')"]);
+      // the awaiter below still RACES this in-flight publish (the stigmergic point), but we CAPTURE the promise and
+      // JOIN it before teardown — otherwise ducknng_stop_server can race an in-flight nng_ctx_send and abort the
+      // whole process with an nni_panic (ducknng#4: nng_ctx double-release/UAF on close).
+      publishDone = publisher.run(`SELECT * FROM ducknng_run_rpc('${url}', ?, 0::UBIGINT)`, ["INSERT INTO board VALUES ('late', 'hello')"]);
     }, 80);
 
     const resolvedAt = await awaited;
@@ -50,6 +54,7 @@ describe("ducknng RPC blackboard: cross-process publish/await (the stigmergic co
     // and the published note is readable cross-catalog
     const note = (await awaiter.runAndReadAll(`SELECT * FROM ducknng_query_rpc('${url}', ?, 0::UBIGINT)`, ["SELECT note FROM board WHERE slug = 'late'"])).getRows()[0]![0];
     assert.equal(note, "hello");
+    await publishDone; // join the in-flight send before stopping the server (ducknng#4)
     await server.run("SELECT ducknng_stop_server('bb')");
   });
 });
