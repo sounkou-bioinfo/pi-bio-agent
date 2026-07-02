@@ -7,7 +7,9 @@ import { DuckDBInstance } from "@duckdb/node-api";
 import { duckdbNodeConn } from "../src/duckdb/node-api.js";
 import { createBioObservationSchema, observationAsOfKey } from "../src/duckdb/observations.js";
 import { inMemoryJobRunner } from "../src/hosts/in-memory-job-runner.js";
-import { submitBioJob, pollBioJob, collectBioJob, readJobRecord, resumeBioJob, cancelBioJob } from "../src/hosts/job-store.js";
+import { ledgerJobRunner } from "../src/hosts/ledger-job-runner.js";
+import { submitBioJob, pollBioJob, collectBioJob, collectAndRecordBioJob, readJobRecord, resumeBioJob, cancelBioJob } from "../src/hosts/job-store.js";
+import type { JobRunner } from "../src/core/jobs.js";
 import type { RunReplaySpec } from "../src/core/reproducibility.js";
 
 // L1 — the async job lane over the SAME temporal substrate as Phase 4: a `job:<runId>:status` observation slot,
@@ -131,5 +133,65 @@ describe("L2/L3: durable resume (no runner) + cancellation", () => {
     // but the durable ledger is terminal (cancelled) -> poll must NOT append succeeded over it
     const st = await pollBioJob(conn, runner, { cwd, runId: "d1", now: "2026-07-01T00:00:09Z" });
     assert.equal(st.phase, "cancelled", "durably-terminal wins; poll never resurrects");
+  });
+});
+
+describe("job durability: rich status is not lost + the ledger timestamp wins + results survive the runner", () => {
+  test("poll persists the RICH {phase, message, progress} and returns the LEDGER time, not the runner clock", async () => {
+    const { conn, cwd } = await setup();
+    // a runner whose status carries progress+message (as a real long-running worker does), stamped with its OWN clock
+    const runner: JobRunner = {
+      async submit() {},
+      async status(runId) { return { runId, phase: "running", at: "RUNNER-CLOCK", message: "step 2/3", progress: { current: 2, total: 3, unit: "chunks" } }; },
+      async collect() { return null; },
+    };
+    await submitBioJob(conn, runner, { cwd, runId: "p1", replay: replay("p1"), now: "2026-07-01T00:00:01Z" });
+    const st = await pollBioJob(conn, runner, { cwd, runId: "p1", now: "2026-07-01T00:00:05Z" });
+
+    assert.equal(st.phase, "running");
+    assert.equal(st.at, "2026-07-01T00:00:05Z", "#5: the returned timestamp is the LEDGER's (req.now), not RUNNER-CLOCK");
+    assert.deepEqual(st.progress, { current: 2, total: 3, unit: "chunks" });
+    // #4: the DURABLE ledger row carries the rich object, not a bare phase string — progress survives as-of
+    const row = await observationAsOfKey(conn, "job:p1:status", "2026-07-01T00:00:05Z");
+    assert.equal(row!.recorded_at, "2026-07-01T00:00:05Z");
+    const v = JSON.parse(row!.value_json!);
+    assert.deepEqual(v, { phase: "running", message: "step 2/3", progress: { current: 2, total: 3, unit: "chunks" } });
+  });
+
+  test("collectAndRecordBioJob makes an in-memory job's result durable: a FRESH ledgerJobRunner reads it back", async () => {
+    const { conn, cwd, clock } = await setup();
+    const local = inMemoryJobRunner({ clock, execute: async () => ({ result: { rows: [{ answer: 42 }] }, artifacts: [{ name: "out", digest: "sha256:abc" }] }) });
+    await submitBioJob(conn, local, { cwd, runId: "k1", replay: replay("k1"), now: "2026-07-01T00:00:01Z" });
+    await local.settle("k1");
+    await pollBioJob(conn, local, { cwd, runId: "k1", now: "2026-07-01T00:00:09Z" });
+    const res = await collectAndRecordBioJob(conn, local, { cwd, runId: "k1", now: "2026-07-01T00:00:10Z" });
+    assert.equal(res!.phase, "succeeded");
+
+    // the in-memory runner is now "gone" — a fresh ledger-backed runner over the SAME store reads the durable result
+    const ledger = ledgerJobRunner(conn, async () => {});
+    const collected = await ledger.collect("k1");
+    assert.equal(collected!.phase, "succeeded");
+    assert.deepEqual(collected!.result, { rows: [{ answer: 42 }] }, "the result survived the runner via the ledger");
+    assert.deepEqual(collected!.artifacts, [{ name: "out", digest: "sha256:abc" }], "artifacts too");
+  });
+
+  test("a FAILED in-memory job's error is durable: the fresh ledger runner surfaces it from the result slot", async () => {
+    const { conn, cwd, clock } = await setup();
+    const local = inMemoryJobRunner({ clock, execute: async () => { throw new Error("boom in the worker"); } });
+    await submitBioJob(conn, local, { cwd, runId: "k2", replay: replay("k2"), now: "2026-07-01T00:00:01Z" });
+    await local.settle("k2");
+    await pollBioJob(conn, local, { cwd, runId: "k2", now: "2026-07-01T00:00:09Z" });
+    await collectAndRecordBioJob(conn, local, { cwd, runId: "k2", now: "2026-07-01T00:00:10Z" });
+
+    const ledger = ledgerJobRunner(conn, async () => {});
+    const collected = await ledger.collect("k2");
+    assert.equal(collected!.phase, "failed");
+    assert.match(collected!.error!, /boom in the worker/, "the error survived the runner (in-memory put it in collect, not status)");
+  });
+
+  test("collectAndRecordBioJob fails closed without a durable record", async () => {
+    const { conn, cwd, clock } = await setup();
+    const local = inMemoryJobRunner({ clock, execute: async () => ({}) });
+    await assert.rejects(() => collectAndRecordBioJob(conn, local, { cwd, runId: "ghost", now: "2026-07-01T00:00:10Z" }), /no durable record/);
   });
 });

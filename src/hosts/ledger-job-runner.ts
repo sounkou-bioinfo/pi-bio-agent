@@ -43,10 +43,19 @@ export function ledgerJobRunner(conn: SqlConn, dispatch: JobDispatch): JobRunner
     async collect(runId: string): Promise<JobResult | null> {
       const st = await readStatus(runId);
       if (!st || !isTerminal(st.phase)) return null; // not done yet
-      if (st.phase === "failed") return { runId, phase: "failed", error: st.message ?? "job failed" };
       if (st.phase === "cancelled") return { runId, phase: "cancelled" };
-      const row = await observationAsOfKey(conn, resultSlot(runId), FUTURE); // a succeeded worker records its result handle here
-      return { runId, phase: "succeeded", result: row?.value_json != null ? JSON.parse(row.value_json) : undefined };
+      // a terminal worker (or collectAndRecordBioJob for a local runner) records a result ENVELOPE
+      // {result?, artifacts?, error?} in this slot; tolerate a bare result handle too (a legacy worker that wrote
+      // just the result). So the result of a job run on ANY runner is durable and readable here after a restart.
+      const row = await observationAsOfKey(conn, resultSlot(runId), FUTURE);
+      const rv = row?.value_json != null ? (JSON.parse(row.value_json) as unknown) : undefined;
+      const env = rv != null && typeof rv === "object" && ("result" in rv || "artifacts" in rv || "error" in rv)
+        ? (rv as { result?: JobResult["result"]; artifacts?: JobResult["artifacts"]; error?: string })
+        : { result: rv as JobResult["result"] };
+      if (st.phase === "failed") return { runId, phase: "failed", error: env.error ?? st.message ?? "job failed" };
+      const out: JobResult = { runId, phase: "succeeded", result: env.result };
+      if (env.artifacts !== undefined) out.artifacts = env.artifacts; // omit the key when absent (a bare-handle worker)
+      return out;
     },
   };
 }
