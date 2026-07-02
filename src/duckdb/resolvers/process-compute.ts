@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { basename, isAbsolute, join, resolve, sep } from "node:path";
 import { systemClock } from "../../core/clock.js";
 import { validateReadOnlySelect } from "../../core/sql-guard.js";
+import { captureDeclaredOutputsToCas } from "../artifact-capture.js";
 import type { BioResolverImpl, ProcessRunner } from "../../core/ports.js";
 import { attestEnvironment, validateEnvDescriptor, ENV_ATTESTATION_SCHEMA, type EnvDescriptor } from "../../core/reproducibility.js";
 
@@ -183,33 +184,10 @@ export function processComputeResolver(runner: ProcessRunner): BioResolverImpl {
       }
 
       // 3b. FILE ARTIFACTS (#3): capture each declared output into CAS, content-addressed. In arrow mode VALUES came
-      //     back via Arrow (step 3) while FILES go via CAS — never through the IPC (the nf-r-ipc/Nextflow split). A
-      //     missing declared output is fail-closed (a clean exit that skipped a promised file is still a failure).
-      const artifacts: Array<{ name: string; path: string; kind: string; digest: string; size: number }> = [];
-      const dirRoot = resolve(dir);
-      // the work dir itself may sit under a symlinked tmp (e.g. macOS /tmp -> /private/tmp), so the containment
-      // check must compare REALPATHS, not the lexical path — realpath the root once.
-      const realDirRoot = await fs.realpath(dirRoot);
-      for (const o of outputs) {
-        // authoritative containment re-check. Lexical resolve() catches `..` traversal but NOT a symlink the child
-        // created (`ln -s /etc/passwd out.txt` resolves to a path INSIDE dir, and readFile would follow it out).
-        // So: lstat the declared output, reject a symlink or a non-regular file outright, then confirm its realpath
-        // stays within the work dir before reading — a declared output cannot smuggle an arbitrary host file into CAS.
-        const full = resolve(dir, o.path);
-        if (full !== dirRoot && !full.startsWith(dirRoot + sep)) throw new Error(`process.compute: declared output '${o.name}' resolved outside the work dir`);
-        let st;
-        try { st = await fs.lstat(full); }
-        catch { throw new Error(`process.compute: '${command[0]}' exited 0 but did not write declared output '${o.name}' (${o.path})`); }
-        if (st.isSymbolicLink()) throw new Error(`process.compute: declared output '${o.name}' must not be a symlink`);
-        if (!st.isFile()) throw new Error(`process.compute: declared output '${o.name}' must be a regular file`);
-        if (st.size > maxOutputBytes) throw new Error(`process.compute: declared output '${o.name}' is ${st.size} bytes, over the ${maxOutputBytes}-byte cap — refusing to read it whole into memory (fail closed)`);
-        const real = await fs.realpath(full);
-        if (real !== realDirRoot && !real.startsWith(realDirRoot + sep)) throw new Error(`process.compute: declared output '${o.name}' realpath escaped the work dir`);
-        const bytes = await fs.readFile(real);
-        const digest = createHash("sha256").update(bytes).digest("hex");
-        await ctx.cas!.put({ algorithm: "sha256", digest }, bytes); // immutable + idempotent
-        artifacts.push({ name: o.name, path: o.path, kind: o.kind, digest: `sha256:${digest}`, size: bytes.length });
-      }
+      //     back via Arrow (step 3) while FILES go via CAS — never through the IPC (the nf-r-ipc/Nextflow split). The
+      //     capture rules (relative-only, no symlink/non-regular, realpath containment, byte cap, sha256→put) are a
+      //     SHARED host invariant, factored into captureDeclaredOutputsToCas so a future compute adapter reuses them.
+      const artifacts = await captureDeclaredOutputsToCas({ workDir: dir, outputs, cas: ctx.cas!, maxOutputBytes });
 
       // 3c. FILES-ONLY result -> the table IS the artifacts listing (one row per captured output). The tool returned
       //     no rectangular value, but its files are now CAS handles the agent can query (digest) and read downstream.
