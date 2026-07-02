@@ -48,6 +48,10 @@ export function nodeProcessRunner(): ProcessRunner {
       const [exe, ...args] = spec.command;
       if (typeof exe !== "string" || !exe) throw new Error("nodeProcessRunner: command[0] (the executable) is required");
       return new Promise<ProcessRunResult>((resolve, reject) => {
+        // FAIL CLOSED: an ALREADY-aborted signal must prevent the SPAWN entirely. Killing after spawn (below) races
+        // the child's immediate side effects — `sh -c 'touch /tmp/x; sleep 10'` can touch before SIGKILL lands — so
+        // an aborted process.compute would still run effects. Never start it.
+        if (spec.signal?.aborted) { reject(new Error("nodeProcessRunner: signal already aborted — not spawning")); return; }
         // detached (POSIX) puts the child in its OWN process group so a kill can take down the WHOLE tree, not
         // just the direct child — a forking command (a shell wrapper, mclapply, an R worker pool) would otherwise
         // orphan its grandchildren past a timeout/abort, defeating "contained in the child". Windows has no

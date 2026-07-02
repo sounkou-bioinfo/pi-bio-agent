@@ -34,6 +34,19 @@ describe("SECURITY: spawned children do not inherit host secrets, and CAS/run pa
       assert.match(res.stdout, /knob=on/, "explicit spec.env IS passed through");
     } finally { delete process.env.PI_BIO_FAKE_SECRET; }
   });
+
+  test("SECURITY: an ALREADY-aborted signal prevents the SPAWN entirely — no immediate side effects", async () => {
+    const dir = await fs.mkdtemp(join(tmpdir(), "pi-bio-abort-"));
+    const marker = join(dir, "side_effect");
+    const ac = new AbortController();
+    ac.abort();
+    await assert.rejects(
+      () => nodeProcessRunner().run({ command: ["sh", "-c", `touch ${marker}; sleep 10`], signal: ac.signal }),
+      /already aborted|not spawning/,
+    );
+    await new Promise((r) => setTimeout(r, 50)); // give a (wrongly) spawned child time to run its side effect
+    await assert.rejects(() => fs.access(marker), /ENOENT/, "the aborted process never spawned, so it never touched the marker");
+  });
 });
 
 const BASE = {
