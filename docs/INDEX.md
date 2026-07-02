@@ -11,6 +11,7 @@
 
 ## Reference
 
+- [Concurrent memory — running the store over a ducknng/quack server](concurrency.md) — Read before running pi-bio-agent memory across projects, processes, agents, or machines. Explains the three store access modes and how to inject a server-backed store. _(memory, store, concurrency, ducknng, sharing)_
 - [Deriving the abstractions](abstraction-derivation.md) — Read to see why the core primitives exist and where machine-studying fits. _(abstractions, primitives, machine-studying)_
 - [Design notes](design.md) — Read before changing core boundaries, adapters, storage, skills, or the harness-adaptation surface. _(architecture, boundaries, adapters, harness)_
 - [Domain model](domain-model.md) — Read before adding any core type or manifest — kernel slots, resources/CAS/resolvers, temporality, manifests, and execution backends. _(domain-model, resources, resolvers, temporality, manifests, execution-backends)_

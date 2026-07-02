@@ -29,6 +29,20 @@
       ]
     },
     {
+      "slug": "concurrency",
+      "path": "docs/concurrency.md",
+      "type": "Reference",
+      "title": "Concurrent memory — running the store over a ducknng/quack server",
+      "description": "Read before running pi-bio-agent memory across projects, processes, agents, or machines. Explains the three store access modes and how to inject a server-backed store.",
+      "tags": [
+        "memory",
+        "store",
+        "concurrency",
+        "ducknng",
+        "sharing"
+      ]
+    },
+    {
       "slug": "abstraction-derivation",
       "path": "docs/abstraction-derivation.md",
       "type": "Reference",
