@@ -91,8 +91,12 @@ export async function remember(conn: SqlConn, note: MemoryContent, wallNow: stri
   // RETRACT links that this revision dropped: without a tombstone, a removed [[link]]'s edge observation is never
   // superseded, so it lingers in bio_edges_as_of forever (a phantom edge). Tombstone (no objectId) every
   // currently-live edge OUT of this subject that the new revision no longer declares (indexed, no full-table scan).
+  // ONLY reconcile MEMORY's own wikilink edges (statement_key `${subject}|<pred>|<to>`, see the newKeys above) —
+  // NOT every live edge out of the subject. Another subsystem may have recorded an unrelated edge fact from the same
+  // `agent:memory:<slug>` subject (a different statement_key); tombstoning that here would be silent data loss.
+  const memoryEdgePrefix = `${subject}|`;
   for (const edge of await liveOutEdgesAsOf(conn, subject, MEMORY_NOW)) {
-    if (!newKeys.has(edge.statement_key)) {
+    if (edge.statement_key.startsWith(memoryEdgePrefix) && !newKeys.has(edge.statement_key)) {
       await recordObservation(conn, { statementKey: edge.statement_key, subjectId: subject, predicate: edge.predicate, recordedAt: now, source: author });
     }
   }
@@ -134,9 +138,13 @@ export async function forget(conn: SqlConn, slug: string, wallNow: string, autho
   const subject = memorySubjectId(slug);
   const now = await monotonicNow(conn, subject, wallNow); // strictly after the current content so a same-ms remember→forget deterministically forgets
   await recordObservation(conn, { statementKey: subject, subjectId: subject, predicate: CONTENT, recordedAt: now, source: author });
-  // Also retract the note's link edges — otherwise they linger in bio_edges_as_of as phantom edges out of a
-  // forgotten node (the same reconciliation remember() does when a link is dropped).
+  // Also retract the note's OWN link edges (statement_key `${subject}|…`) — otherwise they linger in bio_edges_as_of
+  // as phantom edges out of a forgotten node. Only memory's wikilink edges, NOT an unrelated subsystem's edge fact
+  // from the same subject (that would be silent data loss); same scoping as remember()'s reconciliation.
+  const memoryEdgePrefix = `${subject}|`;
   for (const edge of await liveOutEdgesAsOf(conn, subject, MEMORY_NOW)) {
-    await recordObservation(conn, { statementKey: edge.statement_key, subjectId: subject, predicate: edge.predicate, recordedAt: now, source: author });
+    if (edge.statement_key.startsWith(memoryEdgePrefix)) {
+      await recordObservation(conn, { statementKey: edge.statement_key, subjectId: subject, predicate: edge.predicate, recordedAt: now, source: author });
+    }
   }
 }

@@ -4,7 +4,7 @@ import { DuckDBInstance } from "@duckdb/node-api";
 import { duckdbNodeConn } from "../src/duckdb/node-api.js";
 import type { SqlConn } from "../src/core/ports.js";
 import { forget, listMemory, memoryHistory, memorySubjectId, recall, remember, MEMORY_NOW } from "../src/hosts/memory-store.js";
-import { materializeBioEdgesAsOf } from "../src/duckdb/observations.js";
+import { materializeBioEdgesAsOf, liveOutEdgesAsOf, recordObservation } from "../src/duckdb/observations.js";
 
 const conn = async (): Promise<SqlConn> => duckdbNodeConn(await (await DuckDBInstance.create(":memory:")).connect());
 const note = (slug: string, body: string) => ({ slug, kind: "memory_note", title: slug, hook: `hook ${slug}`, body, tags: [] });
@@ -15,6 +15,23 @@ const T2 = "2026-01-01T00:00:02Z";
 
 // Memory unified into the temporal store: history + as-of + retraction, the same store as facts.
 describe("temporal memory over bio_observations", () => {
+  test("reconciliation only touches MEMORY's own wikilink edges — a foreign edge fact from the same subject survives", async () => {
+    const c = await conn();
+    await remember(c, note("foo", "hi [[bar]]"), T1); // a memory wikilink edge foo|<pred>|bar
+    const subject = memorySubjectId("foo");
+    // another subsystem records an UNRELATED edge fact out of the same agent:memory:foo subject (its OWN statement_key)
+    await recordObservation(c, { statementKey: `fact:supports:foo:disease:X`, subjectId: subject, predicate: "supports", objectId: "disease:X", recordedAt: T1 });
+    // rewrite the note dropping [[bar]] — the memory edge is retracted, but the foreign 'supports' fact must NOT be
+    await remember(c, note("foo", "no links now"), T2);
+    const edges = await liveOutEdgesAsOf(c, subject, MEMORY_NOW);
+    assert.ok(edges.some((e) => e.statement_key === "fact:supports:foo:disease:X"), "the foreign edge fact survives reconciliation");
+    assert.ok(!edges.some((e) => e.statement_key.startsWith(subject + "|")), "the dropped memory wikilink IS retracted");
+    // forget() likewise must not clobber the foreign fact
+    await forget(c, "foo", "2026-01-01T00:00:03Z");
+    const after = await liveOutEdgesAsOf(c, subject, MEMORY_NOW);
+    assert.ok(after.some((e) => e.statement_key === "fact:supports:foo:disease:X"), "forget() leaves the foreign edge fact alone");
+  });
+
   test("an edit supersedes 'now' but the prior revision survives as-of", async () => {
     const c = await conn();
     await remember(c, note("acmg", "v1 body"), T1);
