@@ -10,6 +10,7 @@ import { join, resolve } from "node:path";
 import { recordRunObservation } from "../src/hosts/run-observations.js";
 import { runBioQueryFromManifest, runBioOperationFromManifest } from "../src/hosts/run-store.js";
 import { fsCasStore } from "../src/hosts/fs-cas.js";
+import type { CasStore } from "../src/core/cas.js";
 import { collectGarbage } from "../src/hosts/gc.js";
 import { MEMORY_NOW } from "../src/hosts/memory-store.js";
 
@@ -161,6 +162,26 @@ describe("run-observations: ad-hoc SQL folds into the ONE store as an as-of, att
     assert.notEqual(a.runId, b.runId); // different ledger keys...
     assert.equal(a.casRefs!.runObject, b.casRefs!.runObject); // ...but ONE content-addressed run DAG root
     assert.equal(await cas.has({ algorithm: "sha256", digest: a.casRefs!.runObject!.slice(7) }), true);
+  });
+
+  test("lean-mode DURABILITY: receipts/replay go to CAS BEFORE the run dir is finalized — a failed CAS put can't strand a reused runId's prior provenance", async () => {
+    const cwd = await fsp.mkdtemp(join(tmpdir(), "lean-dur-"));
+    const realCas = fsCasStore(await fsp.mkdtemp(join(tmpdir(), "cas-")));
+    const mp = resolve(process.cwd(), "examples/variant-counts/manifest.json");
+    // run 1: NON-lean with CAS at runId "r" — writes receipts.json AND puts the bytes in CAS
+    const r1 = await runBioQueryFromManifest({ cwd, dbPath: ":memory:", manifestPath: mp, sql: "SELECT count(*) AS n FROM variants", runId: "r", cas: realCas });
+    assert.ok(r1.ok);
+    assert.ok((await fsp.readdir(r1.runDir)).includes("receipts.json"), "the non-lean run wrote receipts.json");
+    // run 2: SAME runId, LEAN, with a CAS that FAILS on the 2nd put (receipts, after result). Because the fix CAS-writes
+    // receipts BEFORE persistRun deletes the stale receipts.json, the failed put aborts the run WITHOUT the deletion —
+    // so run 1's receipts.json survives. (With the old order persistRun would have already deleted it.)
+    let puts = 0;
+    const faulty: CasStore = { ...realCas, put: async (a, b) => { if (++puts === 2) throw new Error("injected CAS put failure"); return realCas.put(a, b); } };
+    await assert.rejects(
+      () => runBioQueryFromManifest({ cwd, dbPath: ":memory:", manifestPath: mp, sql: "SELECT count(*) AS n FROM variants", runId: "r", cas: faulty, serialize: false }),
+      /injected CAS put failure/,
+    );
+    assert.ok((await fsp.readdir(r1.runDir)).includes("receipts.json"), "prior receipts.json survived — the failed lean re-run's CAS write happened BEFORE persistRun could delete it (no data-loss window)");
   });
 
   test("runId REUSE: a re-run WITHOUT a cas clears the prior CAS run's stale cas-refs.json (no stale GC roots / advertised refs)", async () => {

@@ -410,12 +410,10 @@ async function runAndPersist(
       // PIN the result-content digest into the replay, so reproduce() can verify the OUTPUT matched, not just the
       // sources (only available when a CAS is present — otherwise reproduce falls back to receipt-only checking).
       if (enriched && resultDigest) enriched = { ...enriched, resultDigest };
-      // Files are the legible VIEW (default). result.json/receipts.json/replay.json are skipped in lean mode
-      // (serialize:false); run.json is always written — and in lean mode its output artifact points at the CAS URI,
-      // not the unwritten result.json.
-      const runForFiles = serialize === false && resultDigest ? retargetResultArtifactToCas(run, runId, `cas:${resultDigest}`) : run;
-      const persisted = await persistRun(cwd, runId, { run: runForFiles, result, receipts }, { serialize });
-      if (enriched && serialize !== false) await writeRunFile(persisted.dir, "replay.json", enriched);
+      // CAS-write receipts/replay/runObject BEFORE persistRun. In lean mode persistRun DELETES the stale
+      // receipts.json/replay.json (bytes are meant to live in CAS), so writing to CAS first closes a DATA-LOSS window:
+      // a crash or a failed CAS write between the delete and the put would otherwise leave a lean run's provenance
+      // bytes neither on disk nor in CAS. (In non-lean mode the bytes end up in both CAS and files — harmless.)
       const receiptsDigest = await putCas(receipts);
       const replayDigest = enriched ? await putCas(enriched) : undefined;
       // run-as-object-DAG (LLVM CASObject: Data + Refs): a single CAS object whose refs point at the result/
@@ -427,6 +425,12 @@ async function runAndPersist(
       const runObjectDigest = cas && enriched && resultDigest
         ? await putCas({ schema: "pi-bio.run_object.v1", data: { kind, identity, status: run.status }, refs: { input: actionInputDigest(enriched), result: resultDigest } })
         : undefined;
+      // Files are the legible VIEW (default). result.json/receipts.json/replay.json are skipped in lean mode
+      // (serialize:false); run.json is always written — and in lean mode its output artifact points at the CAS URI,
+      // not the unwritten result.json. (Now safe: the CAS bytes above are already durable before this deletes them.)
+      const runForFiles = serialize === false && resultDigest ? retargetResultArtifactToCas(run, runId, `cas:${resultDigest}`) : run;
+      const persisted = await persistRun(cwd, runId, { run: runForFiles, result, receipts }, { serialize });
+      if (enriched && serialize !== false) await writeRunFile(persisted.dir, "replay.json", enriched);
       // GC ROOT for lean mode: the node-local collectGarbage roots CAS by scanning surviving run files, but a lean
       // run writes NO receipts.json — so write a tiny cas-refs.json listing THIS run's CAS digests (always, when a
       // cas is present; harmless when the JSON files also exist), or the sweep would delete a lean run's live
@@ -464,10 +468,12 @@ async function runAndPersist(
       // failure is auditable, not lost. Pre-flight/config errors (which never became a run) still throw.
       if (error instanceof OperationRunError) {
         const enriched = replay ? enrichReplay(replay, error.receipts) : undefined;
-        const persisted = await persistFailedRun(cwd, runId, { run: error.run, receipts: error.receipts }, { serialize });
-        if (enriched && serialize !== false) await writeRunFile(persisted.dir, "replay.json", enriched); // a failed run is replayable too
+        // SAME lean-mode data-loss fix as the success path: CAS-write the failed run's receipts/replay BEFORE
+        // persistFailedRun deletes/skips the JSON files, so a crash/failed-put can't strand the provenance bytes.
         const receiptsDigest = await putCas(error.receipts);
         const replayDigest = enriched ? await putCas(enriched) : undefined;
+        const persisted = await persistFailedRun(cwd, runId, { run: error.run, receipts: error.receipts }, { serialize });
+        if (enriched && serialize !== false) await writeRunFile(persisted.dir, "replay.json", enriched); // a failed run is replayable too
         // SAME GC root as the success path: a lean failed run writes NO receipts.json, so without a cas-refs.json the
         // node-local sweep would delete this failed run's receipts/replay CAS bytes even though the run dir survives
         // and references them (via the run:<id> fact / the returned casRefs). Root them here too.
