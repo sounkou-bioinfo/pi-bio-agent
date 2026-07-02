@@ -225,6 +225,7 @@ export function validateBioManifest(manifest: BioManifest): string[] {
     if (ts.members !== undefined && !Array.isArray(ts.members)) { errors.push(`termSet '${ts.id}' members must be an array`); continue; }
     const seenMembers = new Set<string>();
     for (const m of ts.members ?? []) {
+      if (!m || typeof m !== "object") { errors.push(`termSet '${ts.id}' has a non-object member`); continue; } // fail closed: a null/scalar member would TypeError on m.id
       if (typeof m.id !== "string" || !m.id.trim()) errors.push(`termSet '${ts.id}' has a member with an empty id`);
       else if (seenMembers.has(m.id)) errors.push(`termSet '${ts.id}' has a duplicate member id '${m.id}'`);
       else seenMembers.add(m.id);
@@ -234,6 +235,7 @@ export function validateBioManifest(manifest: BioManifest): string[] {
     if (ts.ordered) {
       const seenRanks = new Set<number>();
       for (const m of ts.members ?? []) {
+        if (!m || typeof m !== "object") continue; // already reported as a non-object member above
         if (typeof m.rank !== "number" || !Number.isInteger(m.rank)) errors.push(`ordered termSet '${ts.id}' member '${m.id}' requires an integer rank`);
         else if (seenRanks.has(m.rank)) errors.push(`ordered termSet '${ts.id}' has a duplicate rank ${m.rank}`);
         else seenRanks.add(m.rank);
@@ -253,7 +255,8 @@ export function validateBioManifest(manifest: BioManifest): string[] {
     if (op.provenance) rejectUnknownKeys(op.provenance, ["includeRequest", "includeResponseDigest", "sources"], `operation '${op.id}'.provenance`, errors);
     if (op.identifiers !== undefined && !Array.isArray(op.identifiers)) errors.push(`operation '${op.id}'.identifiers must be an array`);
     else for (const hint of op.identifiers ?? []) rejectUnknownKeys(hint, ["name", "namespace", "required", "description"], `operation '${op.id}'.identifiers[]`, errors);
-    for (const rid of op.sql?.requiredResources ?? []) {
+    if (op.sql?.requiredResources !== undefined && !Array.isArray(op.sql.requiredResources)) errors.push(`operation '${op.id}'.sql.requiredResources must be an array`);
+    else for (const rid of op.sql?.requiredResources ?? []) {
       if (!resourceIds.has(rid)) errors.push(`operation '${op.id}' requires undeclared resource '${rid}'`);
     }
   }

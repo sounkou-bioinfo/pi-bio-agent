@@ -342,7 +342,13 @@ async function runAndPersist(
   // lost entirely (data loss). Refuse rather than silently discard outputs/provenance.
   if (serialize === false && !cas) throw new Error("serialize:false requires a cas — refusing to skip result/receipts/replay files with nowhere else to store the bytes");
   const instance = await DuckDBInstance.create(resolveInCwd(cwd, dbPath), duckdbConfig);
-  const connection = await instance.connect();
+  let connection: Awaited<ReturnType<typeof instance.connect>>;
+  try {
+    connection = await instance.connect();
+  } catch (err) {
+    instance.closeSync(); // connect() failed (bad db/config/lock) — the finally below can't run yet, so close the instance here or it leaks (a process-exclusive writer lock would linger)
+    throw err;
+  }
   const conn = duckdbNodeConn(connection);
   // Put a JSON blob in CAS (bytes OUTSIDE the DB) and return its content address, or undefined when no CAS.
   const putCas = async (obj: unknown): Promise<string | undefined> => {

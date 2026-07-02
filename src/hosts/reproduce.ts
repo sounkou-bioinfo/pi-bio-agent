@@ -1,6 +1,6 @@
 import { promises as fs } from "node:fs";
 import { createHash } from "node:crypto";
-import { join } from "node:path";
+import { join, resolve, isAbsolute } from "node:path";
 import { RUN_REPLAY_SPEC_SCHEMA, receiptContentDigest, canonicalDigest, type RunReplaySpec } from "../core/reproducibility.js";
 import type { CasStore } from "../core/cas.js";
 import type { ProcessRunner } from "../core/ports.js";
@@ -91,9 +91,13 @@ export async function reproduceRun(req: ReproduceRequest): Promise<ReproduceResu
   // to align. Compare the CURRENT file's digest to the pinned one and fail closed on drift. (manifestDigest =
   // sha256 of the file text, matching prepareRegistry.)
   if (replay.manifest!.digest) {
-    const currentText = await fs.readFile(replay.manifest!.path!, "utf8");
+    // Resolve the (possibly-relative) manifest path against req.cwd — the SAME base the re-run uses
+    // (prepareRegistry: resolveInCwd(req.cwd, path)). Reading it against the process cwd would verify the digest of
+    // a DIFFERENT (or missing) file than the one actually re-run, making same-host replay cwd-sensitive.
+    const manifestFile = isAbsolute(replay.manifest!.path!) ? replay.manifest!.path! : resolve(req.cwd, replay.manifest!.path!);
+    const currentText = await fs.readFile(manifestFile, "utf8");
     const currentDigest = `sha256:${createHash("sha256").update(currentText).digest("hex")}`;
-    if (currentDigest !== replay.manifest!.digest) throw new Error(`reproduce: manifest at ${replay.manifest!.path} has CHANGED since the run (${currentDigest} != pinned ${replay.manifest!.digest}) — reproduction would run different logic (fail closed)`);
+    if (currentDigest !== replay.manifest!.digest) throw new Error(`reproduce: manifest at ${manifestFile} has CHANGED since the run (${currentDigest} != pinned ${replay.manifest!.digest}) — reproduction would run different logic (fail closed)`);
   }
   const base = {
     cwd: req.cwd, dbPath: req.dbPath ?? ":memory:", manifestPath: replay.manifest!.path!,

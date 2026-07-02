@@ -123,6 +123,9 @@ describe("validateBioManifest: fail closed", () => {
     // a present-but-non-array `members` (e.g. {}) returns a shape error, NOT a TypeError from for…of (fail closed)
     assert.doesNotThrow(() => validateBioManifest(baseManifest({ termSets: [{ id: "ts1", title: "T", members: {} }] } as never)));
     assert.ok(validateBioManifest(baseManifest({ termSets: [{ id: "ts1", title: "T", members: {} }] } as never)).some((e) => /members must be an array/.test(e)));
+    // a null/scalar ELEMENT inside members is reported, not a TypeError on m.id (incl. an ordered scale that reads m.rank)
+    assert.doesNotThrow(() => validateBioManifest(baseManifest({ termSets: [{ id: "ts1", title: "T", ordered: true, members: [null] }] } as never)));
+    assert.ok(validateBioManifest(baseManifest({ termSets: [{ id: "ts1", title: "T", members: [null] }] } as never)).some((e) => /non-object member/.test(e)));
   });
 
   test("ordered termSets require a unique integer rank per member (ordinal scale = data)", () => {
@@ -137,6 +140,13 @@ describe("validateBioManifest: fail closed", () => {
       id: "op.y", version: "0.1.0", title: "Y", description: "y",       transport: "duckdb.sql", inputSchema: { type: "object" }, sql: { sqlTemplate: "SELECT 1", readOnly: false as never },
     }] });
     assert.ok(validateBioManifest(m).some((e) => e.includes("sql.readOnly must be true")));
+    // a non-array requiredResources fails closed (no 'not iterable' TypeError)
+    const badReq = baseManifest({ operations: [{
+      id: "op.z", version: "0.1.0", title: "Z", description: "z", transport: "duckdb.sql", inputSchema: { type: "object" },
+      sql: { sqlTemplate: "SELECT 1", readOnly: true, requiredResources: {} },
+    }] } as never);
+    assert.doesNotThrow(() => validateBioManifest(badReq));
+    assert.ok(validateBioManifest(badReq).some((e) => /requiredResources must be an array/.test(e)));
   });
 });
 
