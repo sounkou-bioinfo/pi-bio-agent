@@ -11,15 +11,15 @@ tags: [architecture, boundaries, adapters, harness]
 
 ## The bets (the roots everything else derives from)
 
-1. **The manifest is the program; TypeScript is the interpreter.** A bio agent is not a pile of skills. Manifests, SQL, resources, and ontology data are the PROGRAM; core is a small set of generic primitives that runs them. A new question or data source is a new *manifest* (data), never a new `.ts`. If a question needs a new core file instead of a manifest/SQL/adapter, the bet is failing — redesign it as data.
+1. **The manifest is the program; TypeScript is the interpreter.** A bio agent is not a pile of skills. Manifests, SQL, resources, and ontology data are the PROGRAM; core is a small set of generic primitives that runs them. A new question or data source is a new *manifest* (data), never a new `.ts`. If a question needs a new core file instead of a manifest/SQL/adapter, the bet is failing: redesign it as data.
 
-2. **In SQL we trust — four legs on one DuckDB substrate.**
-   - **Data** — files and formats as SQL (`file_scan`, `duckhts` for VCF/BAM/BED/…).
-   - **Network** — HTTP, cross-process shared state, and multi-agent coordination as SQL, via the owned **ducknng** extension: `ncurl_table` (HTTP is a table function), `run_rpc` (a live shared mutable DB many processes write through), NNG topologies (pub/sub, push/pull, survey, bus, pair). ducknng is central, not a vehicle.
-   - **Compute (code execution)** — code SQL is poor at (an `lm()` fit, an R/Python/Go tool) runs **out-of-process over Arrow IPC** (`process.compute`); only the data contract is SQL/Arrow, the computation is a contained child.
-   - **Knowledge + memory** — ontologies and our own KG share one shape (`bio_edges` + `entailed_edge` closure, from SemanticSQL); grounding is deterministic-SQL-first with fail-closed model fallback. **Memory is machine studying**: the agent studies a corpus before a task is known and retains expertise as *study notes* projected into the KG — data it queries, distinct from *skills* (activated behavior) and *facts* (measured, tool-derived).
+2. **In SQL we trust: four legs on one DuckDB substrate.**
+   - **Data**: files and formats as SQL (`file_scan`, `duckhts` for VCF/BAM/BED/…).
+   - **Network**: HTTP, cross-process shared state, and multi-agent coordination as SQL, via the owned **ducknng** extension: `ncurl_table` (HTTP is a table function), `run_rpc` (a live shared mutable DB many processes write through), NNG topologies (pub/sub, push/pull, survey, bus, pair). ducknng is central, not a vehicle.
+   - **Compute (code execution)**: code SQL is poor at (an `lm()` fit, an R/Python/Go tool) runs **out-of-process over Arrow IPC** (`process.compute`); only the data contract is SQL/Arrow, the computation is a contained child.
+   - **Knowledge + memory**: ontologies and our own KG share one shape (`bio_edges` + `entailed_edge` closure, from SemanticSQL); grounding is deterministic-SQL-first with fail-closed model fallback. **Memory is machine studying**: the agent studies a corpus before a task is known and retains expertise as *study notes* projected into the KG: data it queries, distinct from *skills* (activated behavior) and *facts* (measured, tool-derived).
 
-3. **The discipline that keeps the bet honest.** Interfaces are the contract for in-process code; DI injects host **effects** (SQL conn, fetch, ProcessRunner, CAS), which **fail closed** when unbound. Identity is a **digest**; a human `version` is only a label; a `schema`/`.v1` tag lives only where bytes cross a real serialization/IPC boundary, never on every nested value. Manifests pass a **strict allowlist** so cut surface can't ride back as inert keys. The **judgment / approval decision** (model or human) is the one irreducible boundary — the substrate records and gates it, never computes it.
+3. **The discipline that keeps the bet honest.** Interfaces are the contract for in-process code; DI injects host **effects** (SQL conn, fetch, ProcessRunner, CAS), which **fail closed** when unbound. Identity is a **digest**; a human `version` is only a label; a `schema`/`.v1` tag lives only where bytes cross a real serialization/IPC boundary, never on every nested value. Manifests pass a **strict allowlist** so cut surface can't ride back as inert keys. The **judgment / approval decision** (model or human) is the one irreducible boundary: the substrate records and gates it, never computes it.
 
 ## Main boundary
 
@@ -61,14 +61,13 @@ A Pi tool is a **host surface**, not the same kind of thing as HTTP, DuckDB, MCP
 > builders (or equivalent hand-coded logic) for individual biomedical questions.
 
 A per-question filter ("is this variant rare?", "is this consequence high-impact?") is the agent
-composing SQL over a stable view, or **declarative data** — a predicate-registry entry, an ontology term
-set, a study-note caveat, a generated view/operation spec — not a `frequencyPredicateSql()` in core.
+composing SQL over a stable view, or **declarative data**, a predicate-registry entry, an ontology term set, a study-note caveat, a generated view/operation spec, not a `frequencyPredicateSql()` in core.
 The moment core answers a *question* instead of defining a *primitive*, it has reproduced ClawBio-style
-skill sprawl in a different shape. (`variants.ts` holds only variant identity for exactly this reason — no
+skill sprawl in a different shape. (`variants.ts` holds only variant identity for exactly this reason: no
 question-level builders in core.)
 
 > **Pre-1.0 core has no compatibility promise.** Remove speculative types rather than maintain unclear
-> abstractions — clarity over hodgepodge. Concrete biomedical behavior enters through operation/extension
+> abstractions: clarity over hodgepodge. Concrete biomedical behavior enters through operation/extension
 > **manifests with tests**, never through convenience helpers in core. Keep only: (1) true primitives
 > (identity, coordinates, CURIEs, content addresses); (2) contracts with real boundaries (`BioManifest`,
 > `BioOperationSpec`, `ResourceHandle`, `BioRunSpec`, graph node/edge snapshot, study note); (3) adapters
@@ -76,11 +75,10 @@ question-level builders in core.)
 > real consumer demands it.
 
 **Real abstraction, not idealist abstraction** (this sharpens "until a real consumer demands it", which is too
-crude). An abstraction may be built *ahead of any downstream consumer* when it is **immanent in the concrete** —
-the expressed essence of ≥2–3 things already built and nameable. `duckdb.sql_materialize` qualified: it was
+crude). An abstraction may be built *ahead of any downstream consumer* when it is **immanent in the concrete**: the expressed essence of ≥2–3 things already built and nameable. `duckdb.sql_materialize` qualified: it was
 latent in `file_scan` + `read_bcf` + `http.get` (shared form = "materialize a table from a declared read"), so
 building it was *revealing* a real general, not imagining one. An *idealist* abstraction is imagined a priori
-from outside the work — a shape you can merely picture future things fitting (`ExecutionPolicy` hooks,
+from outside the work: a shape you can merely picture future things fitting (`ExecutionPolicy` hooks,
 `validateSql` mode-enums, fast/CAS/airgapped "modes", a `process` transport with one instance). Those are the
 sprawl to refuse. The discipline that stops "emergent" from becoming a loophole: **name the existing instances
 the abstraction abstracts, never the future ones it might serve.**
@@ -88,7 +86,7 @@ the abstraction abstracts, never the future ones it might serve.**
 ### Powerful by default, host-controlled effects, provenance-aware not policy-obsessed
 
 > **The library is a substrate + receipt system, not a network/filesystem sandbox.** Like Pi, it gives
-> powerful local execution and leaves the *risk boundary* to the host/deployment — container, seccomp,
+> powerful local execution and leaves the *risk boundary* to the host/deployment: container, seccomp,
 > Firecracker, the Pi runtime, corporate egress, or a user-supplied sandbox extension. DuckDB's replacement
 > scans (`FROM 'x.parquet'`), httpfs remote reads, and extension autoloading are **features to ride, not
 > threats to police**; fighting them with brittle SQL regexes is fighting the substrate.
@@ -96,26 +94,24 @@ the abstraction abstracts, never the future ones it might serve.**
 What the library *does* enforce is **accountability, not access**: every answer-producing run records the query
 that ran (a digest of the SQL **and** its bound params), the resources/sources it declared, the resolver
 receipts, and the artifacts it produced.
-`validateReadOnlySelect` is therefore **statement-class only** (one read-only `SELECT`/`WITH`, no writes/DDL —
-because that is what an "operation" *is*), not an egress firewall. The **primary** network path is SQL-native:
+`validateReadOnlySelect` is therefore **statement-class only** (one read-only `SELECT`/`WITH`, no writes/DDL: because that is what an "operation" *is*), not an egress firewall. The **primary** network path is SQL-native:
 `ducknng_ncurl_table` (a DuckDB table function) inside `duckdb.sql_materialize`, with the URL/headers/body
-composed in SQL and the JSON parsed into a table — no TS resolver (the `ols4-grounding` GET and
+composed in SQL and the JSON parsed into a table: no TS resolver (the `ols4-grounding` GET and
 `variant-annotation` POST examples). `http.get` (a TS resolver needing a host-supplied `fetch`) is the
 **fallback** for a DuckDB build with no ducknng, plus the host-driven multi-request retry/fanout seam. Either
 way network is a **host-injected capability** (`file_scan`/`read_bcf`/`sql_materialize` may read remote URIs if
-the environment allows) — the host decides whether egress is possible, the library records that it happened. A
+the environment allows): the host decides whether egress is possible, the library records that it happened. A
 strict "no external I/O / CAS-snapshot-first" profile is an **optional host policy**, not the default stance.
 
-**The host-control surface is the injected ports — not a separate hook framework.** Pi-agent-core makes
-lifecycle hooks (before/after, context transforms) central, and that pattern is real — but in *our* shape it is
+**The host-control surface is the injected ports, not a separate hook framework.** Pi-agent-core makes
+lifecycle hooks (before/after, context transforms) central, and that pattern is real, but in *our* shape it is
 already spelled as dependency injection, so a second hook system would be sugar over composition we have. A
 host that wants policy wraps the port it already supplies: decorate `SqlConn` and you have `validateSql` /
-`beforeQuery` over every execution (a strict no-external-I/O profile is a ~5-line `SqlConn` decorator —
-[`host-policy-via-ports.test.ts`](../test/host-policy-via-ports.test.ts) proves it enforces what the library
+`beforeQuery` over every execution (a strict no-external-I/O profile is a ~5-line `SqlConn` decorator: [`host-policy-via-ports.test.ts`](../test/host-policy-via-ports.test.ts) proves it enforces what the library
 deliberately stopped enforcing); decorate a bound `BioResolverImpl` for `beforeResolve` / `afterResolve`;
 `runOperation` returns `{run, result, receipts}`, so before/after the call *is* `beforeRun` / `afterRun`. An
 explicit `ExecutionPolicy` facade earns its place only when a real host needs cross-cutting, phase-aware policy
-across all resolves + SQL + runs at once that decorating individual ports cannot express cleanly — and then it
+across all resolves + SQL + runs at once that decorating individual ports cannot express cleanly, and then it
 is a thin facade over those ports, with a named consumer, not a speculative interface.
 
 ## Integration surfaces
@@ -126,11 +122,11 @@ Model-provider integration should use `pi-ai` and the Pi auth stack rather than 
 
 Priority order:
 
-1. **TypeScript library API** — importable core contracts, validators, registries, and adapters. This is the source of truth.
-2. **Pi extension** — exposes registry inspection, study-note operations, skill drafting, SQL validation, and later operation execution inside Pi.
-3. **CLI** — scriptable local entry point for validation, indexing, operation-pack testing, and resource/CAS utilities. CLI output should support `--json` for automation.
-4. **JSON-RPC over stdio** — machine interface for editors, other agents, or wrappers that do not run inside Pi. Start with stdio rather than a daemon.
-5. **MCP server surface** — optional later wrapper that projects selected operations/resources as MCP tools/resources. MCP is a transport, not the core architecture.
+1. **TypeScript library API**: importable core contracts, validators, registries, and adapters. This is the source of truth.
+2. **Pi extension**: exposes registry inspection, study-note operations, skill drafting, SQL validation, and later operation execution inside Pi.
+3. **CLI**: scriptable local entry point for validation, indexing, operation-pack testing, and resource/CAS utilities. CLI output should support `--json` for automation.
+4. **JSON-RPC over stdio**: machine interface for editors, other agents, or wrappers that do not run inside Pi. Start with stdio rather than a daemon.
+5. **MCP server surface**: optional later wrapper that projects selected operations/resources as MCP tools/resources. MCP is a transport, not the core architecture.
 
 All surfaces should call the same internal functions. The CLI must not reimplement Pi logic; the Pi extension must not hide logic that the CLI/JSON-RPC cannot exercise. This keeps tests surface-independent.
 
@@ -188,16 +184,16 @@ fails closed unless the HOST explicitly injects the capability:
 
 Precise on extension loading: the host-owned `duckdbInitSql`/`duckdbConfig` (connection bootstrap,
 never an agent tool param) is where a host runs `INSTALL`/`LOAD`. A *manifest* may ALSO request a
-`LOAD` via `params.extensions` (both `duckdb.sql_materialize` and `process.compute`) — but it is
+`LOAD` via `params.extensions` (both `duckdb.sql_materialize` and `process.compute`), but it is
 **LOAD-only and fails closed** if the host has not already provisioned that extension, so it grants no
 new capability the host didn't install. Whether an agent can author such a manifest is the host's
 call. And DuckDB's *own* reachability (httpfs / replacement scans / htslib) once an extension IS
 loaded is a host-provisioned capability: egress confinement is the HOST's boundary (container /
-seccomp / OS) — the library is deliberately not the network/filesystem sandbox. See `docs/refinments.md`.
+seccomp / OS): the library is deliberately not the network/filesystem sandbox. See `docs/refinments.md`.
 
 ## HTTP/API integrations
 
-Many biomedical APIs are mostly the same shape: HTTP (REST or GraphQL) plus a thin layer of biomedical semantics. OpenTargets, Monarch, Ensembl REST/VEP REST, BioThings, ClinVar-style APIs, and similar services should not each become bespoke framework code — they are the **network pillar**: a REST GET or a GraphQL POST is a `ducknng_ncurl_table` call whose URL/body composes in SQL, so a new API is a new manifest, not a new client.
+Many biomedical APIs are mostly the same shape: HTTP (REST or GraphQL) plus a thin layer of biomedical semantics. OpenTargets, Monarch, Ensembl REST/VEP REST, BioThings, ClinVar-style APIs, and similar services should not each become bespoke framework code: they are the **network pillar**: a REST GET or a GraphQL POST is a `ducknng_ncurl_table` call whose URL/body composes in SQL, so a new API is a new manifest, not a new client.
 
 Target shape:
 
@@ -227,11 +223,10 @@ The thin description is still valuable when it encodes identifier namespaces, pr
 
 ## Execution beyond SQL: shell, R, and workflows as process operations
 
-A `duckdb.sql` operation is one transport. Long-running external work — a shell command, an `Rscript`, a
-Nextflow/Snakemake pipeline, an alignment or a variant caller — enters the **same way the question always
+A `duckdb.sql` operation is one transport. Long-running external work, a shell command, an `Rscript`, a Nextflow/Snakemake pipeline, an alignment or a variant caller, enters the **same way the question always
 does: as DATA, not a new TypeScript client.** A *process operation* declares a **command + inputs + declared
 outputs + tool/version**; a host-bound **executor** runs it; the result is **artifacts** (files → CAS), a
-streamed run record, and a receipt — not rows. Those artifacts re-enter as resolved resources for a downstream
+streamed run record, and a receipt, not rows. Those artifacts re-enter as resolved resources for a downstream
 `file_scan` / `sql_materialize` → SQL operation, so a pipeline is just `op → artifact → resource → op`: the
 resource/artifact chain *is* the composition, no DAG engine required.
 
@@ -239,52 +234,50 @@ Three things keep this consistent with the rest of the substrate:
 
 - **Invoke, don't reimplement.** A [Nextflow](https://www.nextflow.io)/[Snakemake](https://snakemake.github.io)
   run is a command that runs a DAG; an R analysis is
-  `Rscript x.R`. We shell out, receipt it, and ingest the outputs — we never embed a workflow engine or an R
+  `Rscript x.R`. We shell out, receipt it, and ingest the outputs: we never embed a workflow engine or an R
   runtime, exactly as we never embed an ontology runtime (we read its SQL) or a graph engine (we materialize
   closure). Absorb the function, not the runtime.
 - **Host-bound and host-gated effects.** The executor is injected by the host (like `http.get`'s `fetch`), and
-  whether shell/R/containers/SLURM are even possible — and any timeout, output cap, or egress — is the
+  whether shell/R/containers/SLURM are even possible, and any timeout, output cap, or egress: is the
   **host's sandbox decision** (container, namespace, seccomp, cluster). The library **records** what ran
   (command digest, tool + version, input handles, output CAS digests, exit code, duration); it does **not**
   impose the limits. Same posture as the network: accountability, not access control.
-- **Long-running is already modeled.** `BioRunSpec.mode` is an **open host/backend label** (`string` — `inline`/
+- **Long-running is already modeled.** `BioRunSpec.mode` is an **open host/backend label** (`string`: `inline`/
   `background`/`subagent`/`service`/`batch`, or `slurm`/`k8s`/`modal`/`nng-worker`/…; nothing branches on it), while
   `BioRunStatus`/`BioRunEventType` stay closed because the state machine branches on them. `BioRunRecord` streams
   `started → progress → checkpoint → completed/failed`. A six-hour job is a `background`/`batch` run whose record
   accrues progress + checkpoints and ends in output artifacts.
-- **Out-of-process compute is BUILT — table, file, and files-only outputs.** The `process.compute` resolver
+- **Out-of-process compute is BUILT: table, file, and files-only outputs.** The `process.compute` resolver
   (`src/duckdb/resolvers/process-compute.ts`) + the injected `ProcessRunner` port
   (`src/process/node-process-runner.ts`) run an out-of-process child (R/Python/Go/shell) over Arrow IPC with a
   script-bytes provenance digest, detached process-group kill on timeout/abort, and fail-closed-without-runner.
   Three output shapes exist: a **TABLE** read back from the child's Arrow IPC (DuckDB → Arrow → child → Arrow →
   table, `examples/process-compute`); declared **FILE outputs** captured content-addressed into **CAS**
-  (`resultTable: "artifacts"` + `captureDeclaredOutputsToCas` in `src/duckdb/artifact-capture.ts` —
-  relative-path-only, symlink/non-regular-file rejecting, realpath-confined to the work dir, byte-capped,
+  (`resultTable: "artifacts"` + `captureDeclaredOutputsToCas` in `src/duckdb/artifact-capture.ts`: relative-path-only, symlink/non-regular-file rejecting, realpath-confined to the work dir, byte-capped,
   fail-closed-without-CAS; `examples/process-artifacts`); and the **files-only** case where the resource's table
   IS the captured-artifacts listing (`examples/process-files-only`). What is still missing is only the
-  *operation-level* executor — a `process` **BioOperationTransport** (the OPERATION transport is still
+  *operation-level* executor: a `process` **BioOperationTransport** (the OPERATION transport is still
   `duckdb.sql` only, `BioOperationTransport = "duckdb.sql"`), the argv-in-a-run-dir path for the six-hour batch /
-  Nextflow-Snakemake case. The compute pillar's resolver path — table AND file artifacts — exists; the
+  Nextflow-Snakemake case. The compute pillar's resolver path, table AND file artifacts, exists; the
   operation-transport wrapper does not.
 
 **One general backend, not a backend zoo.** When the first executor is built, it is `process` (run an argv
 command in a run dir, capture stdout/stderr/exit, register declared outputs as artifacts). `Rscript`,
 `python`, `nextflow`, `snakemake` are **argv presets over `process`** (`["Rscript", script, …]`,
-`["nextflow", "run", …]`), *not* separate transports — exactly as `duckdb.sql_materialize` subsumed the
+`["nextflow", "run", …]`), *not* separate transports: exactly as `duckdb.sql_materialize` subsumed the
 reader resolvers rather than spawning one per format. One backend per tool (`runDeseq2()`, `runGatk()`,
 `runNextflowRnaseq()`) would recreate the skill/API sprawl the substrate exists to avoid; the tool-specific
 part stays **manifest data** (command template, inputs, expected outputs, version probes, post-load SQL,
 fixtures). A genuinely new *transport* (beyond `duckdb.sql` and `process`) is earned only when execution needs
-semantics `process` cannot express — polling/resume/cancel of a remote job — and even then proven against ≥2
+semantics `process` cannot express: polling/resume/cancel of a remote job, and even then proven against ≥2
 instances, not imagined.
 
-**Discipline — do not build the transport ahead idealistically.** Speculative non-SQL transports were already
-deleted once (http/graphql/mcp/local with no runner). The out-of-process case — table AND file artifacts — is now
+**Discipline: do not build the transport ahead idealistically.** Speculative non-SQL transports were already
+deleted once (http/graphql/mcp/local with no runner). The out-of-process case, table AND file artifacts, is now
 served by the `process.compute` RESOLVER (above); the OPERATION-level `BioOperationTransport` stays `duckdb.sql`
 until a real pipeline forces a `process` **transport** (a Snakemake/Nextflow step or a DESeq2 run driven as an
 *operation*, not a resolved resource). A full `BioExecutionSpec` (a backend enum,
-`container`/`env`/`resources`/`effects`/`capture` fields) is the *sketch of the destination*, not core surface —
-add fields when an executor consumes them. CAS-of-bytes itself is **built** (`src/core/cas.ts` + `src/hosts/fs-cas.ts`,
+`container`/`env`/`resources`/`effects`/`capture` fields) is the *sketch of the destination*, not core surface: add fields when an executor consumes them. CAS-of-bytes itself is **built** (`src/core/cas.ts` + `src/hosts/fs-cas.ts`,
 proven by `http.get` byte-reuse across DBs in `test/http-cas-reuse.test.ts`), and the FILE-outputs-into-CAS wiring
 is **built too** (`captureDeclaredOutputsToCas`); what the operation transport still needs is only to reuse that
 same capture from an argv-in-a-run-dir executor.
@@ -351,18 +344,17 @@ DuckDB should hold hot structured facts and indexes. Large raw bytes stay in CAS
 The graph layer follows [SemanticSQL](https://github.com/INCATools/semantic-sql) (how Bioconductor's
 [ontoProc2](https://github.com/vjcitn/ontoProc2) serves OBO ontologies): a tiny fixed relational shape, queried
 by plain SQL, with no graph runtime.
-Two tables carry it, and **the same shape serves imported ontologies and our own committed graph** —
-distinguished only by scope:
+Two tables carry it, and **the same shape serves imported ontologies and our own committed graph**: distinguished only by scope:
 
-- **`bio_edges(from_id, predicate, to_id, attrs, trust)`** — the statement/edge base (`subject=from_id,
+- **`bio_edges(from_id, predicate, to_id, attrs, trust)`**: the statement/edge base (`subject=from_id,
   predicate, object=to_id`). Labels, synonyms, definitions, and relations are all just rows; the predicate is
   an open CURIE vocabulary (`rdfs:subClassOf`, `BFO:0000050` part_of, our own `references`/`measures`/…).
-- **`entailed_edge(from_id, predicate, to_id)`** — the *precomputed transitive closure* over the transitive
+- **`entailed_edge(from_id, predicate, to_id)`**: the *precomputed transitive closure* over the transitive
   predicates (`materializeEntailedEdges(conn, transitivePredicates[, {sourceTable, targetTable}])`, a recursive
   CTE). With it, descendants / ancestors / subsumption / graph-walk are **one indexed JOIN**, no bespoke walker:
   `SELECT from_id FROM entailed_edge WHERE to_id = ? AND predicate = 'rdfs:subClassOf'`.
 - **`bio_observations(observation_id, statement_key, subject_id, predicate, object_id, value_json, recorded_at,
-  valid_from, valid_to, source, digest, attrs, trust)`** — the **append-only temporal** statement log (Phase 4),
+  valid_from, valid_to, source, digest, attrs, trust)`**: the **append-only temporal** statement log (Phase 4),
   kept *separate* from the atemporal `bio_edges` (whose `UNIQUE(from_id,to_id,predicate)` is the compiled-graph
   contract). A row is edge-like (`object_id`) or scalar (`value`); `statement_key` is the *state slot* a later
   row supersedes; `observationsAsOf(t)` is latest-per-`statement_key`; edge-like rows project into
@@ -377,31 +369,31 @@ partial order  subsumption / graph = bio_edges + entailed_edge closure
 ```
 
 A scale is a *total* order (`scale_members.rank`); an ontology or graph is a *partial* order (`entailed_edge`);
-`decideGrounding` membership is unchanged — closure and rank are just another table/column. We absorb the
+`decideGrounding` membership is unchanged: closure and rank are just another table/column. We absorb the
 SemanticSQL *shape*, never a graph or ontology runtime.
 
-**Grounding has two tiers.** A *projection* tier — deterministic, offline, fail-closed: cached CURIEs +
+**Grounding has two tiers.** A *projection* tier, deterministic, offline, fail-closed: cached CURIEs +
 `entailed_edge` + FTS over labels/synonyms answer "text→CURIE (already known)" and "descendants of X" as pure
-SQL. A *judgment* tier — `decideGrounding` over a fresh [OLS4](https://www.ebi.ac.uk/ols4)/search candidate
+SQL. A *judgment* tier: `decideGrounding` over a fresh [OLS4](https://www.ebi.ac.uk/ols4)/search candidate
 set, used only on a projection miss, which **abstains below threshold and never invents a CURIE**.
 
 #### Resolved vs derived tables (and why only one kind carries a receipt)
 
 Every table the operation SQL sees is one of two kinds, and the distinction *is* the provenance model:
 
-- **Resolved** — produced by a resolver from an **external source** (`file_scan`, `sql_materialize`,
+- **Resolved**: produced by a resolver from an **external source** (`file_scan`, `sql_materialize`,
   `read_bcf`, `http.get`, an ingested ontology's `statements`/`bio_edges`). It touched the world, so it carries
   a **receipt** (resolver version, params digest, source snapshot).
-- **Derived** — a **pure function of the program plus already-resolved tables** (`scale_members` from ordered
+- **Derived**: a **pure function of the program plus already-resolved tables** (`scale_members` from ordered
   TermSets, `entailed_edge` as the closure of `bio_edges`). It touched nothing external, so it carries **no
-  receipt** — it is fully **recomputable** from the manifest + the resolved inputs, and that recomputability is
+  receipt**: it is fully **recomputable** from the manifest + the resolved inputs, and that recomputability is
   its provenance.
 
-The operation SQL does not care which it queries — that is the point. This is a real distinction *immanent in
+The operation SQL does not care which it queries: that is the point. This is a real distinction *immanent in
 what we built* (two derived tables already exist), and it earns documentation, not a `Projection` framework:
 the two derivations share a lifecycle (runner materializes them, idempotent) but not a computation (recursive
 closure vs flat rank insert), so unifying them in code would be the idealist move. (A process operation's
-**output artifact** is a third kind — *produced*, CAS-addressed — which re-enters as a *resolved* resource
+**output artifact** is a third kind, *produced*, CAS-addressed, which re-enters as a *resolved* resource
 downstream.)
 
 #### The substrate is a lazy, content-addressed evaluation graph
@@ -410,26 +402,26 @@ Seen from the R / [dbplyr](https://dbplyr.tidyverse.org) / [targets](https://doc
 (the latter's design rationale collected in [targeted-learning](https://github.com/mdsumner/targeted-learning)),
 the whole design is **lazy evaluation**: a manifest is a *lazy expression*, a resource is a **thunk**
 (`resolver + params` is a recipe for a table, not the table), and
-`runQuery`/`runOperation` is the **force** — the `collect()` boundary that resolves the referenced thunks and
+`runQuery`/`runOperation` is the **force**: the `collect()` boundary that resolves the referenced thunks and
 runs the SQL. Receipts (`paramsDigest` + source content digest) are **memoization keys**: a resource is a pure
-function of its params plus source state, so an unchanged digest is a cache hit — which means **CAS is the memo
+function of its params plus source state, so an unchanged digest is a cache hit, which means **CAS is the memo
 table**, not just storage. Derived tables are pure lazy derivations (recomputed from inputs, like a `mutate`),
-which is precisely why they carry no receipt — `scale_members` is recomputed on every force (the runner
+which is precisely why they carry no receipt: `scale_members` is recomputed on every force (the runner
 materializes it before the SQL), while `entailed_edge` is materialized on demand by `materializeEntailedEdges`
 when a graph query needs it. Composition
-(`op → artifact → resource → op`) is a lazy DAG — [targets](https://docs.ropensci.org/targets/) /
+(`op → artifact → resource → op`) is a lazy DAG: [targets](https://docs.ropensci.org/targets/) /
 [Nextflow](https://www.nextflow.io)-shaped.
 
 The discipline is the same as everywhere else: **the laziness lives in DATA** (the declared manifest/SQL is the
 lazy expression), interpreted by thin TS. It is **dbplyr/targets, not [Effect-TS](https://effect.website) /
-fp-ts** — pulling in a TS
+fp-ts**: pulling in a TS
 lazy/effect monad would be the idealist move (a monad with no instances we need; the laziness is already in the
 data). The frame makes the deferred work *obvious rather than invented*, and the first piece is now **built**:
-**resolution memoization** (`src/duckdb/resolution-memo.ts`) — a per-table freshness token + stored receipt;
+**resolution memoization** (`src/duckdb/resolution-memo.ts`): a per-table freshness token + stored receipt;
 on re-resolve over a persistent `dbPath`, an unchanged token + a still-present table replays the receipt and
-skips the work. `file_scan` opts in with the file's **content digest** (sha256, not mtime+size — a same-size
+skips the work. `file_scan` opts in with the file's **content digest** (sha256, not mtime+size: a same-size
 change with a preserved mtime can't false-hit). It is correct, not a stale-cache footgun, because the memo key is
-**content freshness, not the request** — params/URL is the *call*, not the *value*. **Built:** content-addressed
+**content freshness, not the request**: params/URL is the *call*, not the *value*. **Built:** content-addressed
 byte storage (CAS) for cross-db reuse, and remote freshness via HTTP cache validation (ETag `If-None-Match` →
 `304`, the shared index scoped per host `remoteCacheScope`). Scope note: `remoteCacheScope` is a
 `ResolutionContext` field, so the cross-db shared-remote reuse is active for a host that drives resolvers directly;
@@ -520,25 +512,23 @@ graph model of harness state.
 
 ### Where the human stays in the loop (the judgment/approval boundary)
 
-The substrate covers the **executable middle** (data → SQL → process). What it deliberately does **not** compute —
-the **irreducibly human** parts — clusters in three places, and that is by design, not a gap. The substrate now
+The substrate covers the **executable middle** (data → SQL → process). What it deliberately does **not** compute, the **irreducibly human** parts, clusters in three places, and that is by design, not a gap. The substrate now
 **records and gates** each (the temporal `bio_observations` store and the Phase-4 governance loop are built); it
 never **decides** them. Locate them precisely so they are never quietly automated away:
 
 - **Judgment** (B: *recording results/judgments as KG facts*). A pathogenicity call, a grounding decision, an
   "this evidence supports X" is a human-or-model *judgment*. The substrate's job is to **record** it as a
-  provenance-bearing fact (who/what decided, when, on what evidence, at what confidence) — never to **compute**
+  provenance-bearing fact (who/what decided, when, on what evidence, at what confidence): never to **compute**
   it. SQL can deterministically run the *rule* once a human has fixed it (the rare-high-impact abstention is a
   pinned, tested operation), but the choice of rule and the calls SQL can't decide remain judgments.
 - **Approval / policy** (the Phase-4 `activate` / `rollback` gate). `validate`/`test`/`record` are mechanical;
-  what is not is **promoting** a new skill/spec into active use, or **reverting** one — a policy/approval gate a
+  what is not is **promoting** a new skill/spec into active use, or **reverting** one: a policy/approval gate a
   human (or a human-set policy) owns. `rollback` is also *why* temporal anchoring exists: you can only revert to a
-  prior state if facts are time-versioned (as-of). The **mechanism** — submit → validate → test → record →
-  `activate`/`rollback`, with durable park/resume for a pending approval — is **built** (Phase 4.3/4.4,
+  prior state if facts are time-versioned (as-of). The **mechanism**, submit → validate → test → record → `activate`/`rollback`, with durable park/resume for a pending approval, is **built** (Phase 4.3/4.4,
   `src/hosts/harness-adaptation.ts` + `src/duckdb/activation.ts`); the injected `ApprovalPolicy` is exactly where
   the human/host decision plugs in, and the substrate never fabricates it.
-- **Curation** — *ontology-ingest*, and *pipeline/tool/version selection*. Which ontology, which release, which
-  tool at which version, how to reconcile conflicting sources — authored into a manifest by a human, not
+- **Curation**: *ontology-ingest*, and *pipeline/tool/version selection*. Which ontology, which release, which
+  tool at which version, how to reconcile conflicting sources: authored into a manifest by a human, not
   derivable. The projection (statements → `bio_edges`) and the run (argv → artifacts) are mechanical; the *trust
   decision* is curatorial.
 
@@ -546,8 +536,7 @@ never **decides** them. Locate them precisely so they are never quietly automate
 ingest an ontology); the substrate **records** the human/model *judgment about that output* as a
 provenance-bearing, as-of-versioned fact; the Phase-4 `activate`/`rollback` gate (with durable park/resume
 approval) promotes or reverts on those judgments. So the human is threaded through as *judgment → approval*, and
-the substrate's contribution is to make that loop **explicit, accountable, time-versioned, and reversible** —
-rails for the human decision, not a replacement for it. This is the sharp form of the honest boundary (the
+the substrate's contribution is to make that loop **explicit, accountable, time-versioned, and reversible**: rails for the human decision, not a replacement for it. This is the sharp form of the honest boundary (the
 executable middle is ours; semantic judgment and human/policy workflows are deliberately *hosted*, not
 *computed*).
 
@@ -557,8 +546,7 @@ path as our `cache_httpfs`/S3 config) + ducknng mTLS/peer-allowlists + Pi's auth
 **stateful-async** interactions = ducknng query **sessions** (`open_query`/`fetch`/`close`, result handles,
 incremental chunks); **streaming / SSE / websockets** = ducknng `wss` + Pi-mono patterns; a **GraphQL** endpoint
 is an HTTP POST + JSON that `ncurl_table` hits SQL-native (subscriptions = wss/sessions). So the genuinely
-irreducible residue is just the two non-mechanical acts — the **judgment** (the model/human decision) and the
-**approval** (the policy gate) — which the substrate records and gates, never computes. Everything executable is
+irreducible residue is just the two non-mechanical acts, the **judgment** (the model/human decision) and the **approval** (the policy gate), which the substrate records and gates, never computes. Everything executable is
 in the middle or borrowable.
 
 ## Progressive disclosure
@@ -612,13 +600,13 @@ Test what matters:
 
 External projects and references cited above, with URLs (cite sources as links, not bare prose):
 
-- [SemanticSQL](https://github.com/INCATools/semantic-sql) — OBO ontologies as flat SQL (`statements` + `entailed_edge`); the graph shape we borrow.
-- [ontoProc2](https://github.com/vjcitn/ontoProc2) — Bioconductor ontology access over SemanticSQL.
-- [OLS4](https://www.ebi.ac.uk/ols4) (EBI Ontology Lookup Service) — fresh text→CURIE search (the grounding judgment tier).
-- [MONDO](https://mondo.monarchinitiative.org), [HPO](https://hpo.jax.org), [Sequence Ontology](http://www.sequenceontology.org), [OBO Graphs](https://github.com/geneontology/obographs) — ontologies / interchange formats.
-- [targets](https://docs.ropensci.org/targets/) + [targeted-learning](https://github.com/mdsumner/targeted-learning), [dbplyr](https://dbplyr.tidyverse.org) — the lazy / content-addressed evaluation precedents.
-- [Effect-TS](https://effect.website) — typed effect system; we steal the discipline, not the monad.
-- [Nextflow](https://www.nextflow.io), [Snakemake](https://snakemake.github.io) — workflow engines a `process` operation would invoke, not reimplement.
-- [DuckDB](https://duckdb.org) + [DuckDB community extensions](https://community-extensions.duckdb.org) (incl. DuckHTS) — the execution substrate.
-- [ColBERT](https://github.com/stanford-futuredata/ColBERT), [TACHIOM](https://github.com/TusKANNy/tachiom) — late-interaction retrieval (Tier 3; deferred).
-- [Machine Studying](https://jacobxli.com/blog/2026/machine-studying/) — the studying/expertise-per-budget framing.
+- [SemanticSQL](https://github.com/INCATools/semantic-sql): OBO ontologies as flat SQL (`statements` + `entailed_edge`); the graph shape we borrow.
+- [ontoProc2](https://github.com/vjcitn/ontoProc2). Bioconductor ontology access over SemanticSQL.
+- [OLS4](https://www.ebi.ac.uk/ols4) (EBI Ontology Lookup Service): fresh text→CURIE search (the grounding judgment tier).
+- [MONDO](https://mondo.monarchinitiative.org), [HPO](https://hpo.jax.org), [Sequence Ontology](http://www.sequenceontology.org), [OBO Graphs](https://github.com/geneontology/obographs): ontologies / interchange formats.
+- [targets](https://docs.ropensci.org/targets/) + [targeted-learning](https://github.com/mdsumner/targeted-learning), [dbplyr](https://dbplyr.tidyverse.org): the lazy / content-addressed evaluation precedents.
+- [Effect-TS](https://effect.website): typed effect system; we steal the discipline, not the monad.
+- [Nextflow](https://www.nextflow.io), [Snakemake](https://snakemake.github.io): workflow engines a `process` operation would invoke, not reimplement.
+- [DuckDB](https://duckdb.org) + [DuckDB community extensions](https://community-extensions.duckdb.org) (incl. DuckHTS): the execution substrate.
+- [ColBERT](https://github.com/stanford-futuredata/ColBERT), [TACHIOM](https://github.com/TusKANNy/tachiom): late-interaction retrieval (Tier 3; deferred).
+- [Machine Studying](https://jacobxli.com/blog/2026/machine-studying/): the studying/expertise-per-budget framing.

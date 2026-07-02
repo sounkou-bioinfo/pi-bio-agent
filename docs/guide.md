@@ -7,8 +7,7 @@ tags: [guide, manifest, operations, usage]
 
 # User guide
 
-You do not write TypeScript to ask a bioinformatics question here. You write a **manifest** — a JSON file that
-declares the data you want resolved into tables and the SQL that answers your question — and run an operation
+You do not write TypeScript to ask a bioinformatics question here. You write a **manifest**, a JSON file that declares the data you want resolved into tables and the SQL that answers your question, and run an operation
 from it. The substrate resolves the resources, runs your SQL, and writes the answer plus a provenance receipt.
 
 ## 1. A manifest declares data, not questions
@@ -22,7 +21,7 @@ variant_key,consequence,allele_frequency
 3:3000:A:G,stop_gained,
 ```
 
-Then a manifest, `manifest.json`, that declares only **where the data is** — not how to query it:
+Then a manifest, `manifest.json`, that declares only **where the data is**, not how to query it:
 
 ```json
 {
@@ -45,7 +44,7 @@ Then a manifest, `manifest.json`, that declares only **where the data is** — n
 ```
 
 A **resource** names some data and the **resolver** that turns it into a table; resource `path`s are resolved
-relative to the manifest's directory. Note there is **no operation** — declaring one count, one filter, one
+relative to the manifest's directory. Note there is **no operation**: declaring one count, one filter, one
 threshold per question is overfitting (it is ClawBio skill-sprawl in manifest form). The substrate's bet is
 that the agent does schema discovery and writes the SQL.
 
@@ -69,41 +68,40 @@ const res = await runBioQueryFromManifest({ cwd: process.cwd(), dbPath: ":memory
 
 Each run is written under `.pi/bio-agent/runs/<runId>/`:
 
-- `result.json` — the answer; `result.rows` is exactly what your SQL returned (there is no separate report).
-- `run.json` — the run record (status, events, a digest of the SQL that ran).
-- `receipts.json` — one resolution receipt per resolved resource (resolver version, params digest, source snapshot).
+- `result.json`: the answer; `result.rows` is exactly what your SQL returned (there is no separate report).
+- `run.json`: the run record (status, events, a digest of the SQL that ran).
+- `receipts.json`: one resolution receipt per resolved resource (resolver version, params digest, source snapshot).
 
 A query that fails at runtime (e.g. a missing column) returns `{ ok: false, error, runDir }` and still persists
-`run.json` + `receipts.json` — the failure is auditable.
+`run.json` + `receipts.json`: the failure is auditable.
 
 ### When to declare an operation
 
-An **operation** is a *pinned, named, versioned, tested* query — the special case worth saving when a query is
+An **operation** is a *pinned, named, versioned, tested* query: the special case worth saving when a query is
 subtle, reused, or safety-critical (the flagship "rare high-impact variants" abstention is the canonical
 example: getting "unknown frequency ≠ rare" right deserves a tested spec, not re-derivation each time). Declare
 it under `provides.operations` and run it with `bio_run_operation` / `runBioOperationFromManifest({ …,
-operationId })`. For everything exploratory, prefer `bio_query` — most manifests declare only resources.
+operationId })`. For everything exploratory, prefer `bio_query`: most manifests declare only resources.
 
 ## 3. Resolvers (how data becomes a table)
 
 Declare one of the built-in resolvers on a resource and give it `params`. The point of the bet is that most of
-these are **SQL all the way down** — even fetching a remote API is a SQL table function, not a `.ts` file:
+these are **SQL all the way down**: even fetching a remote API is a SQL table function, not a `.ts` file:
 
-- `duckdb.file_scan` — `{ path, table }`; reads csv/tsv/parquet/json natively.
-- `duckdb.sql_materialize` — `{ table, sql, declaredSources?, extensions? }`; the general resolver:
+- `duckdb.file_scan`: `{ path, table }`; reads csv/tsv/parquet/json natively.
+- `duckdb.sql_materialize`: `{ table, sql, declaredSources?, extensions? }`; the general resolver:
   `sql` is a read-only query wrapped into a table. This is also the **SQL-native network path**: with the
   `ducknng` extension, `sql` can be `SELECT * FROM ducknng_ncurl_table(<url>, 'GET', …)` where the URL/headers/
-  body compose in SQL (`getvariable('q') || url_encode(…)`) and the JSON parses straight into columns — no
-  TypeScript at all (the `ols4-grounding` and `variant-annotation` examples are exactly this). A new source —
-  local file, `httpfs`/`s3` read, OR an HTTP/JSON API — is usually just this, with no new code.
-- `duckhts.read_bcf` — `{ path, region?, table }`; VCF/BCF (region-sliced) via the DuckHTS extension
+  body compose in SQL (`getvariable('q') || url_encode(…)`) and the JSON parses straight into columns: no
+  TypeScript at all (the `ols4-grounding` and `variant-annotation` examples are exactly this). A new source, local file, `httpfs`/`s3` read, OR an HTTP/JSON API, is usually just this, with no new code.
+- `duckhts.read_bcf`: `{ path, region?, table }`; VCF/BCF (region-sliced) via the DuckHTS extension
   (`npm run provision:duckhts` first).
-- `process.compute` — `{ table, inputSql, command, env?, timeoutMs? }`; the **compute** escape hatch for what
+- `process.compute`: `{ table, inputSql, command, env?, timeoutMs? }`; the **compute** escape hatch for what
   SQL is poor at (an `lm()` fit, fine-mapping, a Python model). It exports `inputSql` as Arrow IPC, runs an
-  out-of-process child (`["Rscript","./fit.R"]`), and reads its Arrow output back as a table — the *data
+  out-of-process child (`["Rscript","./fit.R"]`), and reads its Arrow output back as a table: the *data
   contract* stays SQL/Arrow even though the computation is external. Needs the host to supply a `ProcessRunner`
   (`runBioQueryFromManifest({ …, process: { runner: nodeProcessRunner() } })`); absent, it fails closed.
-- `http.get` — `{ url, table, format? }`; the **fallback** HTTP fetch (a TS resolver) for a DuckDB build with no
+- `http.get`: `{ url, table, format? }`; the **fallback** HTTP fetch (a TS resolver) for a DuckDB build with no
   `ducknng`, and the seam for the host-driven multi-request retry/fanout over a rate-limited API. Needs the host
   to supply `fetch` (`{ …, network: { fetch: globalThis.fetch } }`); absent, it fails closed.
 
@@ -112,7 +110,7 @@ code runs out-of-process, and even there the boundary is SQL/Arrow. The two capa
 (`http.get` ← `fetch`, `process.compute` ← `ProcessRunner`) are host-injected by composition and fail closed
 when unbound.
 
-The library is **not a network/filesystem sandbox** — whether a remote read or `httpfs` is possible is your
+The library is **not a network/filesystem sandbox**: whether a remote read or `httpfs` is possible is your
 deployment's decision (container, sandbox, the Pi runtime). The substrate records what ran; the host governs
 what may run. A strict "no external I/O" profile is a few lines wrapping the `SqlConn` you inject (see
 [design notes](design.md#powerful-by-default-host-controlled-effects-provenance-aware-not-policy-obsessed)).
@@ -136,7 +134,7 @@ JOIN scale_members cut ON cut.scale_id = 'acmg' AND cut.member_id = 'likely_path
 WHERE s.rank >= cut.rank
 ```
 
-No per-scale code — swap the TermSet and the same SQL pattern works for any ordered scale.
+No per-scale code: swap the TermSet and the same SQL pattern works for any ordered scale.
 
 ## 5. Ontologies and grounding
 
@@ -149,9 +147,8 @@ CURIE by exact/synonym match in SQL first; on a miss, a model may propose a cand
 ## 6. What the substrate refuses
 
 A manifest is validated against a strict allowlist: unknown keys are rejected, not ignored, so cut surface
-(`reportKind`, `requiredColumns`, `columnRoles`, …) cannot ride back in as inert config. A query — ad-hoc or a
-declared operation — must be a single read-only `SELECT`/`WITH`. Resolvers fail closed when an implementation
-is not bound. Everything a query reads, it reads through a resolved resource that leaves a receipt — so a run
+(`reportKind`, `requiredColumns`, `columnRoles`, …) cannot ride back in as inert config. A query, ad-hoc or a declared operation, must be a single read-only `SELECT`/`WITH`. Resolvers fail closed when an implementation
+is not bound. Everything a query reads, it reads through a resolved resource that leaves a receipt, so a run
 is reproducible and every answer has a source path.
 
 ## 7. Memory (the CLI)
@@ -165,5 +162,5 @@ pi-bio-agent memory show <slug> --as-of 2026-07-01T00:00:00Z  # time-travel: wha
 pi-bio-agent memory history <slug>                            # what changed, when, by whom
 ```
 
-Notes are mutable procedural memory and retrieval hooks — not authoritative facts. Measured facts live in
+Notes are mutable procedural memory and retrieval hooks, not authoritative facts. Measured facts live in
 resources, tables, and provenance-bearing observations.

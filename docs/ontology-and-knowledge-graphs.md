@@ -9,34 +9,33 @@ tags: [ontology, knowledge-graph, graph-bet, provenance]
 
 ## The graph bet (the domain wager)
 
-The deepest architectural choice in `pi-bio-agent` is not the memory/study layer — it is the bet that
+The deepest architectural choice in `pi-bio-agent` is not the memory/study layer: it is the bet that
 **agentic biomedicine is best served by one typed-graph substrate**, queried as SQL over DuckDB, rather
 than by organizing the system primarily around per-source API clients, a vector store, or prose context.
-Per-source clients and operation specs remain essential as *adapters and ingestion surfaces* — the bet
+Per-source clients and operation specs remain essential as *adapters and ingestion surfaces*: the bet
 is that they feed the graph, not that they become the organizing substrate. Biomedical knowledge is natively
 graph-shaped: ontologies (`term —is_a→ term`), entities and relations (`variant —in→ gene
 —associated_with→ disease`), evidence (`claim —supports→ entity`), provenance and lineage
 (`fact —derived_from→ fact`), and reanalysis (as-of edges). The domain is graph-first, with tabular and
-document views over it — not the other way round.
+document views over it, not the other way round.
 
 So everything that can be a fact, a concept, or a relationship lives in the **same** append-only
 `bio_observations` log (plus ontology tables), with trust/provenance fields on every row; edge-like rows
 project into the materialized `bio_edges_as_of` closure that graph walks run over. Ontology terms, KG facts,
-observations, artifacts — and the agent's own study notes (`agent:memory:<slug>` subjects, note-links as edge
-observations) — are all one graph, queried the same way. This is *why* `remember` writes note-links as edge
+observations, artifacts, and the agent's own study notes (`agent:memory:<slug>` subjects, note-links as edge observations), are all one graph, queried the same way. This is *why* `remember` writes note-links as edge
 observations (projected into `bio_edges_as_of`) instead of a separate notes index: **memory is a subject
 family in the one log, not a parallel system.** The "memory and KG stop being two systems" point in
 [`memory-and-knowledge-unification.md`](./memory-and-knowledge-unification.md) is the local symptom of
 this global bet; the study/[machine-studying](./machine-studying-lineage.md) angle is one consumer of
 the substrate, not its foundation.
 
-**The harness models itself in the same graph — but only its *declarations*, not its running code.**
+**The harness models itself in the same graph, but only its *declarations*, not its running code.**
 Capabilities, operation specs, resolvers, extensions, skills, runs, and artifacts become nodes, with
 edges like `manifest —provides→ operation`, `operation —requires→ resource`, `run —used→ capability`,
 `run —produced→ artifact`, `skill —derived_from→ study-note`, `operation —requires→ network-policy`.
 This makes the harness *inspectable as graph data*: the agent queries its own capabilities, provenance,
 and run history with the same graph-as-SQL it uses for biology. Crucially, **executable code still lives
-in package files / CAS / artifacts** — the graph records declarations, provenance, dependencies,
+in package files / CAS / artifacts**: the graph records declarations, provenance, dependencies,
 activation, and outputs, never the running code. That boundary is what lets the harness be queryable and
 self-describing without the graph becoming an executor (and is the substrate behind the
 harness-adaptation doctrine in [`roadmap.md`](./roadmap.md#6-harness-adaptation-doctrine-mods-vs-hooks)).
@@ -44,8 +43,7 @@ harness-adaptation doctrine in [`roadmap.md`](./roadmap.md#6-harness-adaptation-
 It is a *bet*, not a theorem, and the design hedges it honestly: not all bio data is usefully
 graph-shaped (dense matrices, sequences, large tables stay tabular/extension-backed or in CAS; the graph
 holds hot structured facts + indexes, not raw bytes), a single graph store can rot into a god-store, and
-"graph-as-SQL over DuckDB" assumes the join/scan performance holds at scale. Those hedges — CAS, virtual
-resources, DuckDB extensions, no-FK dangling tolerance — are what keep the bet from becoming a monolith.
+"graph-as-SQL over DuckDB" assumes the join/scan performance holds at scale. Those hedges, CAS, virtual resources, DuckDB extensions, no-FK dangling tolerance, are what keep the bet from becoming a monolith.
 
 ## Ontologies
 
@@ -88,7 +86,7 @@ bio_edges_as_of(from_id, to_id, predicate, attrs JSON, trust JSON)
 `observationsAsOf(t)` returns the latest row per `statement_key` (recorded_at ≤ t, valid interval contains t);
 edge-like observations project into `bio_edges_as_of(t)` over which the same `entailed_edge` closure runs. A
 measured scalar (a clinical value with `code_system`/`unit`) is just an observation whose `value_json` carries
-`{ code_system, code_id, name, value, unit }` — the general form subsumes the earlier measurement-specific shape.
+`{ code_system, code_id, name, value, unit }`: the general form subsumes the earlier measurement-specific shape.
 
 ### Node families
 

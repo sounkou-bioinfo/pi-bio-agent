@@ -41,16 +41,15 @@ In `pi-bio-agent`, this is **not** a biomedical study, cohort, trial, GWAS, or p
 
 The study/memory framing is the visible half of a deeper choice: see
 [the graph bet](./ontology-and-knowledge-graphs.md#the-graph-bet-the-domain-wager). Machine studying
-defines expertise as knowing *what to search, where, what to distrust, and how to interpret* — i.e.,
+defines expertise as knowing *what to search, where, what to distrust, and how to interpret*: i.e.,
 **structure over the corpus**, captured cheaply ("amortized context management"). A graph is exactly
 that structure. The two are one bet seen from two sides:
 
-- **Study produces graph.** The durable residue of an agent studying a corpus is graph structure —
-  concept nodes, note-links, ontology mappings, provenance edges — not prose alone (a note's prose
+- **Study produces graph.** The durable residue of an agent studying a corpus is graph structure, concept nodes, note-links, ontology mappings, provenance edges, not prose alone (a note's prose
   `body` stays, but it hangs on that structure). That residue is what `remember` records as edge
   observations in the one `bio_observations` log, projected into the `bio_edges_as_of` closure.
 - **Graph makes study cheap.** A queryable map (`agent:memory:<slug>` subjects + edges, joined to ontology and
-  KG facts) is consulted *before* spending expensive tool/inference budget — the cost-curve win the
+  KG facts) is consulted *before* spending expensive tool/inference budget: the cost-curve win the
   article measures.
 
 So the agent's notebook and the domain's knowledge graph are the **same substrate** because expertise
