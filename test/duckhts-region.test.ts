@@ -26,7 +26,9 @@ describe("duckhts.read_bcf region read (tabix range — the gnomAD/coloc tier)",
     assert.equal(rows.length, 1, "only the chrom-2 variant is in the region");
     assert.equal(String(rows[0]!.CHROM), "2");
     assert.equal(Number(rows[0]!.POS), 2000);
-    assert.deepEqual(out.provenance[0]!.notes, ["region read", "region:2:1500-2500"]);
+    // a region read pins only index-digest + data size/mtime (NOT the region's bytes), so it is marked live_source:
+    // reproduce/action-cache treat it as not content-verified — honest, since a changed BGZF slice can keep size/mtime.
+    assert.deepEqual(out.provenance[0]!.notes, ["region read", "region:2:1500-2500", "live_source"]);
     assert.match(out.sourceSnapshots[1]!.version ?? "", /^index-sha256:/); // digests the .tbi, not the whole VCF
   });
 

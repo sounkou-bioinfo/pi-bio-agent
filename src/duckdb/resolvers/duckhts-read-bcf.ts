@@ -85,8 +85,10 @@ export const duckhtsReadBcfResolver: BioResolverImpl = async (resource, ctx) => 
       { source: sourceUri, version: inputDigest, retrievedAt: now },
     ],
     // record the region in provenance so a region read is auditable as exactly the slice it read, not the whole file.
-    // live_source when we could NOT content-pin the input (remote/unreadable -> inputDigest undefined, version null):
-    // then the receipt is blind to the data's content, so reproduce must not claim a match without a CAS output pin.
-    provenance: [{ source: "duckhts.read_bcf", retrievedAt: now, notes: [...(region ? ["region read", `region:${region}`] : ["whole-file read"]), ...(inputDigest === undefined ? ["live_source"] : [])] }],
+    // live_source = the receipt is NOT a byte-content pin, so reproduce/action-cache must not claim a match (or
+    // memoize) without a CAS OUTPUT pin. Two cases: (a) inputDigest undefined (remote/unreadable); (b) a REGION read
+    // — it pins only the index digest + the data file's size/mtime, which a changed BGZF slice can preserve, so it
+    // is NOT content-verified. Only a WHOLE-FILE read (sha256 of the bytes) is content-pinned.
+    provenance: [{ source: "duckhts.read_bcf", retrievedAt: now, notes: [...(region ? ["region read", `region:${region}`] : ["whole-file read"]), ...(region || inputDigest === undefined ? ["live_source"] : [])] }],
   };
 };
