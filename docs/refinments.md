@@ -518,6 +518,15 @@ default): `autoinstall_known_extensions=false` + `autoload_known_extensions=fals
 `disabled_filesystems='HTTPFileSystem,S3FileSystem'` (+ `lock_configuration=true` to seal). Documenting the recipe
 is fine; building/defaulting it into the library is not — that would re-open a closed doctrine.
 
+**(1b) `process.compute.params.env` secrets boundary (pal #15).** The replay manifest snapshot is persisted
+VERBATIM (`run-store.ts` `manifest.snapshot: raw`), so a credential in `params.env` leaks in cleartext into
+replay.json / CAS — asymmetric with host `duckdbInitSql`, which is DIGESTED for exactly this reason. Fixed now at
+the boundary: documented that `params.env` is non-secret-only and host secret env comes through the host-injected
+ProcessRunner (never a manifest param). OPEN DECISION (reproducibility trade-off, don't blind-edit): whether to also
+REDACT `process.compute` env VALUES in the persisted snapshot (keys kept for replay structure, values omitted) —
+closes the leak with no leaky denylist, but loses faithful replay of legit non-secret env values. Parallels the
+initSql digest choice (reduced fidelity for secret-safety). Decide before building.
+
 **(2) Server-side atomic monotonic writes ([[reproducibility-and-longrunning-lane]] residue #2).** Concurrent
 same-slug `remember`/`forget` over separate RPC clients are not linearizable — `withSlotLock` serializes only
 in-process; two clients read the same latest revision, compute the same `recorded_at`, insert competing revisions,

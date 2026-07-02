@@ -182,13 +182,18 @@ enabled by default (local, no ambient capability):
 fails closed unless the HOST explicitly injects the capability:
   network (the `fetch` port — http.get; default entrypoint injects none)
   out-of-process code runtime (`process.compute` — the ProcessRunner grant)
-  extension INSTALL/LOAD + any DuckDB egress config (host-owned `duckdbInitSql`
+  extension INSTALL + egress config on the connection (host-owned `duckdbInitSql`
     / `duckdbConfig`, never an agent tool param)
 ```
 
-Note: DuckDB's *own* reachability (httpfs / replacement scans / htslib) is a host-provisioned
-capability and egress confinement is the HOST's boundary (container / seccomp / OS) — the library
-is deliberately not the network/filesystem sandbox. See `docs/refinments.md`.
+Precise on extension loading: the host-owned `duckdbInitSql`/`duckdbConfig` (connection bootstrap,
+never an agent tool param) is where a host runs `INSTALL`/`LOAD`. A *manifest* may ALSO request a
+`LOAD` via `params.extensions` (both `duckdb.sql_materialize` and `process.compute`) — but it is
+**LOAD-only and fails closed** if the host has not already provisioned that extension, so it grants no
+new capability the host didn't install. Whether an agent can author such a manifest is the host's
+call. And DuckDB's *own* reachability (httpfs / replacement scans / htslib) once an extension IS
+loaded is a host-provisioned capability: egress confinement is the HOST's boundary (container /
+seccomp / OS) — the library is deliberately not the network/filesystem sandbox. See `docs/refinments.md`.
 
 ## HTTP/API integrations
 

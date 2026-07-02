@@ -46,6 +46,15 @@ describe("run-observations: ad-hoc SQL folds into the ONE store as an as-of, att
     assert.equal(ok.ok, true, ok.ok ? "" : `run failed: ${(ok as { error?: unknown }).error}`);
   });
 
+  test("a binding whose name is a reserved SQL keyword is quoted, not a `SET VARIABLE select` syntax error", async () => {
+    const base = { cwd: process.cwd(), dbPath: ":memory:", manifestPath: "examples/variant-counts/manifest.json" } as const;
+    // `select`/`order` pass the identifier regex but are reserved keywords; before quoting, `SET VARIABLE select = ?`
+    // was a syntax error that failed the run. Quoting makes it work AND `getvariable('select')` still resolves it.
+    const ok = await runBioQueryFromManifest({ ...base, sql: "SELECT getvariable('select') AS s", bindings: { select: "kept", order: "x" } });
+    assert.equal(ok.ok, true, ok.ok ? "" : `run failed: ${(ok as { error?: unknown }).error}`);
+    assert.equal(ok.ok && ok.rowCount, 1);
+  });
+
   test("persistRun/persistFailedRun refuse serialize:false without casBacked — lean mode can't delete provenance with no CAS", async () => {
     const cwd = await fsp.mkdtemp(join(tmpdir(), "persist-guard-"));
     // the guard throws BEFORE touching the payload, so a stub payload is fine

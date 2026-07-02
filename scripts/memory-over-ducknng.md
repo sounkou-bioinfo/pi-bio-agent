@@ -14,11 +14,11 @@ process-exclusive-writer lock that blocks concurrent *file* access never applies
 ## Recorded run (2026-07-02)
 
 ```
-=== concurrent memory over a ducknng server: server + two SEPARATE agent processes ===
+=== cross-process shared memory over a ducknng server: server + two SEPARATE agent processes (sequential A→B) ===
   [server pid 355073] ducknng server owns the ONE bio_observations store
   [agent:A pid 355156] REMEMBERED 'acmg-pvs1' through the server (no file opened)
   [agent:B pid 355218] RECALLED over RPC: 'acmg-pvs1' = "null variant in a LoF gene" by agent:A | list=acmg-pvs1
-  PROVED: a SEPARATE process read another agent's attributed memory over the server — no file lock.
+  SHOWN: a SEPARATE process read another agent's attributed memory over the server — no file lock (sequential A→B, not a concurrency test).
 ```
 
 `agent:B` (a distinct process) read `agent:A`'s memory, carrying `agent:A` as the author (`source` is part of

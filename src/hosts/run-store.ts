@@ -467,7 +467,10 @@ async function runAndPersist(
     // override a host-owned session variable (e.g. re-point an `api_base`/`tls` the host provisioned) — host wins.
     if (bindings) for (const [name, value] of Object.entries(bindings)) {
       if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) throw new Error(`binding name '${name}' must be a SQL identifier`);
-      await conn.run(`SET VARIABLE ${name} = ?`, [value as never]);
+      // QUOTE the identifier: a binding whose name is a reserved keyword (e.g. `select`, `order`) passes the regex
+      // but `SET VARIABLE select = ?` is a syntax error. Quoting makes any valid-identifier name work; the logical
+      // name is unchanged, so `getvariable('select')` still resolves it. The regex already forbids `"`, so no escape.
+      await conn.run(`SET VARIABLE "${name}" = ?`, [value as never]);
     }
     // Host-owned connection bootstrap: INSTALL/LOAD/SET (e.g. httpfs + cache_httpfs, an extension dir, a memory
     // limit) run ONCE on this connection before any resolution — AFTER agent bindings, so host values win on any
