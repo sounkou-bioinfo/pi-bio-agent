@@ -1,7 +1,7 @@
 ---
 type: Proposal
 title: Memory and knowledge unification
-description: "The temporal memory unification: memory, facts, jobs, and runs are one append-only bio_observations store (Datomic-style, as-of/history/tombstone). Read before changing the memory store or its graph projection. (The former file-notes kg-sync/study-sync modules were removed 2026-07-02.)"
+description: "The temporal memory unification: memory, facts, jobs, and runs are one append-only bio_observations store (Datomic-style, as-of/history/tombstone). Read before changing the memory store or its graph projection."
 tags: [memory, temporal, bio-observations, unification]
 ---
 
@@ -19,8 +19,8 @@ temporal skills are all done). The rest of this document remains the design rati
 
 ## Implemented (2026-07-02): temporal memory in one store
 
-Memory is no longer flat, last-write-wins files — it is **the same temporal store as facts**, which fixes the one
-thing that violated the unified-data-model bet.
+Memory is **the same temporal store as facts** — append-only, as-of, attributed — which honors the
+unified-data-model bet instead of sitting beside it as flat last-write-wins files.
 
 **Temporal, non-destructive, attributed.** A memory note is observation(s) in `bio_observations` under the
 `agent:memory:<slug>` namespace (`src/hosts/memory-store.ts`):
@@ -58,8 +58,8 @@ memory** (report §3.2.2) made literal — the same transport story the substrat
 `remember(author)` + a legible file view; `bio_recall`/`bio_list_memory` = `recall`/`listMemory` with an `asOf`
 time-travel param; `bio_forget` = `forget` (retraction); `bio_walk_memory` + the always-on recall index read the
 store. Skills are temporal too (`bio_create_skill` → `skill:<name>` observations, `src/hosts/skill-store.ts`), and
-`pi-bio-agent memory list/show/history` reads the store from the CLI. **Still open:** run receipts/replay bytes →
-CAS + run-files opt-in; run-as-object-DAG; retired the `kg-sync`/`study-sync` file-notes→graph modules (removed 2026-07-02).
+`pi-bio-agent memory list/show/history` reads the store from the CLI. Run receipts/replay bytes and result
+rows live in CAS (referenced by digest), runs fold in as run-object DAGs, and recall is memoized by input digest.
 
 ## Where this comes from
 
@@ -240,21 +240,15 @@ commit to the full `KnowledgeUnit`:
 `studyNoteIndex` now includes `slug`, and `bio_remember` takes an optional `slug`
 and returns the persisted note plus a `created` flag.
 
-## Memory → graph projection (current)
+## Memory → graph projection
 
-The memory→graph path is the **temporal store**, not an effectful file sync. `remember`
-(`src/hosts/memory-store.ts`) writes a note's `[[links]]` as edge observations into the ONE `bio_observations`
-log; `materializeBioEdgesAsOf` (`src/duckdb/observations.ts`) folds them into the `bio_edges_as_of` closure as of
-the recall clock; `walkMemoryGraph` (`src/core/study.ts`) does a bounded neighbourhood walk over that graph,
-exposed as the `bio_walk_memory` Pi tool. The projections (`studyNoteLinkEdges` / `studyNoteNode` /
-`studyNoteGraph`) stay pure and dangling-tolerant (an edge may reference an absent target).
-
-The earlier **effectful file-notes→graph sync was removed 2026-07-02**: `kg-sync.ts` / `study-sync.ts`
-(`syncStudyNoteGraph`, `syncProjectStudyNotes`, `reportStudyNoteGraph`), the standalone `createBioGraphSchema`
-with its separate `bio_nodes` / `bio_edges` tables, and the `notes sync/report` CLI. It projected file notes into
-a separate `graph.duckdb`; the temporal store makes that obsolete — one immutable log, one materialized
-closure, with attribution and as-of built in. The current CLI is `src/cli/memory.ts`
-(`memory list/show/history`, as-of by default), compiled via `src/cli/bin.ts` to the `pi-bio-agent` bin.
+`remember` (`src/hosts/memory-store.ts`) writes a note's `[[links]]` as edge observations into the ONE
+`bio_observations` log; `materializeBioEdgesAsOf` (`src/duckdb/observations.ts`) folds them into the
+`bio_edges_as_of` closure as of the recall clock; `walkMemoryGraph` (`src/core/study.ts`) does a bounded
+neighbourhood walk over that graph, exposed as the `bio_walk_memory` Pi tool. The projections
+(`studyNoteLinkEdges` / `studyNoteNode` / `studyNoteGraph`) stay pure and dangling-tolerant (an edge may
+reference an absent target). The CLI is `src/cli/memory.ts` (`memory list/show/history`, as-of by default),
+compiled via `src/cli/bin.ts` to the `pi-bio-agent` bin.
 
 ## Still to do (step 4)
 

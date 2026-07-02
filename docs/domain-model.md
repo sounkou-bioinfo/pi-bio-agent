@@ -236,8 +236,8 @@ the model can choose or abstain, but it can never mint an id the substrate did n
 
 A manifest is the registration boundary for concrete implementations. It declares serializable specs;
 **do not prebuild a giant framework — let the flagship pull each `provides.*` kind into existence.**
-(There is no mandatory "domains" taxonomy tag — that was a ClawBio-era vestige the substrate never consumed;
-a manifest is simply THE PROGRAM, a named bag of `provides.*`.)
+(A manifest is simply THE PROGRAM — a named bag of `provides.*`, with no taxonomy tag the substrate must
+interpret.)
 
 ```ts
 interface BioManifest {

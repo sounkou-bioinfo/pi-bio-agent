@@ -63,8 +63,8 @@ A per-question filter ("is this variant rare?", "is this consequence high-impact
 composing SQL over a stable view, or **declarative data** — a predicate-registry entry, an ontology term
 set, a study-note caveat, a generated view/operation spec — not a `frequencyPredicateSql()` in core.
 The moment core answers a *question* instead of defining a *primitive*, it has reproduced ClawBio-style
-skill sprawl in a different shape. (`variants.ts` was trimmed to variant identity for exactly this
-reason; the question-level builders were removed.)
+skill sprawl in a different shape. (`variants.ts` holds only variant identity for exactly this reason — no
+question-level builders in core.)
 
 > **Pre-1.0 core has no compatibility promise.** Remove speculative types rather than maintain unclear
 > abstractions — clarity over hodgepodge. Concrete biomedical behavior enters through operation/extension

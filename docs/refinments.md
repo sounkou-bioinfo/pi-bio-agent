@@ -11,8 +11,7 @@ Open design issues and cleanup targets. Keep this file focused on what still nee
 
 ## Naming and layering
 
-- The manifest (`BioManifest`) is the user-facing contract; keep transport details out of it. (The
-  `BioToolSpec` self-description subsystem was removed — it was a hand-kept, drifted, unenforced catalog.)
+- The manifest (`BioManifest`) is the user-facing contract; keep transport details out of it.
 - Continue refining `BioOperationSpec` with concrete manifest fixtures before adding execution.
 - Keep broad types in `types.ts` provisional unless they gain validators, tests, or a real consumer.
 - Separate host surfaces from execution adapters in code and docs:

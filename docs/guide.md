@@ -166,5 +166,4 @@ pi-bio-agent memory history <slug>                            # what changed, wh
 ```
 
 Notes are mutable procedural memory and retrieval hooks — not authoritative facts. Measured facts live in
-resources, tables, and provenance-bearing observations. (The prior `notes sync/report` command, which projected
-file notes into a separate `graph.duckdb`, is superseded by memory-as-observations in the one store.)
+resources, tables, and provenance-bearing observations.
