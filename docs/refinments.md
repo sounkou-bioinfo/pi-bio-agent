@@ -272,8 +272,8 @@ Resolutions (these are ADDRESSABLE via known machinery, not open research):
 
 ### Streaming transports (decided — not either/or, three needs, three tools)
 - **Pull-streaming HTTP** (large bodies; byte-cap so a runaway response can't exhaust memory): read the runtime
-  `fetch` body (a `ReadableStream`) with a cap. BUILT: `src/duckdb/resolvers/http-stream.ts` `readCapped(stream,
-  maxBytes)` — the byte-cap half of pal #4. DuckDB-native equivalent: `ducknng_ncurl`.
+  `fetch` body (a `ReadableStream`) with a cap. BUILT + WIRED: `src/duckdb/resolvers/http-stream.ts` `readCapped(stream,
+  maxBytes)`, applied by the default networked adapter (`cappedFetchLike`) — the byte-cap half of pal #4. DuckDB-native equivalent: `ducknng_ncurl`.
 - **SSE** (server-sent events: LLM token streams, progress): parse `data:` frames off the same chunked stream.
   **pi-mono** ([github.com/badlogic/pi-mono](https://github.com/badlogic/pi-mono)) has these exact parsing
   patterns (it streams LLM output) — adopt them for an SSE transport.
@@ -516,9 +516,10 @@ in hand; none are speculative, but none should be half-built autonomously.
 - **Cancellation — DONE.** `AbortSignal` now threads Pi tool -> RunQuery/RunOperationRequest -> runQuery/
   runOperation -> `ResolutionContext.signal` -> http.get's injected fetch. An aborted tool call tears the
   request down (best-effort; a resolver that can't honor it ignores it).
-- **Byte cap / timeout (still open).** `maxBytes`/timeout need streaming: the current `FetchResponse.text()`
-  reads the whole body. To cap, the response contract would expose a byte stream the resolver reads with a
-  limit, aborting via the (now-threaded) signal when exceeded. Consumer: a huge/unbounded remote response.
+- **Byte cap — DONE (timeout still open).** The default networked adapter (`index-networked.ts` `cappedFetchLike`)
+  now shapes `FetchResponse.text()` through `readCapped(res.body, DEFAULT_MAX_RESPONSE_BYTES)`, so a runaway/
+  unbounded remote body can't exhaust process memory; a host wraps its own fetch for a tighter/per-endpoint cap.
+  Timeout is still host-policy (wrap the fetch with an `AbortSignal` deadline).
 - **304 revalidation provenance.** A `304` replays the stored receipt with the original `retrievedAt` — honest
   about the BYTES (unchanged) but silent that freshness was reconfirmed later. Optional enhancement: stamp a
   `revalidatedAt` note so the receipt shows "T1 bytes, revalidated current at T2". Not a correctness bug.
