@@ -17,6 +17,19 @@ async function newConn(): Promise<SqlConn> {
 }
 
 describe("bio_observations: temporal provenance statements, as-of latest-per-statement_key", () => {
+  test("as-of ordering is TEMPORAL, not lexicographic — mixed ISO forms (…Z vs …sssZ) sort correctly", async () => {
+    const c = await newConn();
+    const key = "state:x";
+    // '…01.500Z' is temporally LATER than '…01Z' (=…01.000Z), but lexicographically SMALLER ('.' < 'Z') — so a
+    // TEXT sort would wrongly pick '…01Z' as current. TIMESTAMPTZ comparison must pick the '…01.500Z' row.
+    await recordObservation(c, { statementKey: key, subjectId: "x", predicate: "p", value: "correct-latest", recordedAt: "2026-01-01T00:00:01.500Z" });
+    await recordObservation(c, { statementKey: key, subjectId: "x", predicate: "p", value: "stale-earlier", recordedAt: "2026-01-01T00:00:01Z" });
+    const rows = await observationsAsOf(c, "2026-06-01T00:00:00Z");
+    const cur = rows.find((r) => r.statement_key === key);
+    assert.equal(JSON.parse(cur!.value_json!), "correct-latest", "the temporally-latest row wins, not the lexicographically-largest");
+  });
+
+
   test("supersession across a CHANGING OBJECT (the activation case partition-by-triple would break)", async () => {
     const c = await newConn();
     await recordObservation(c, { statementKey: "activation:operation:foo", subjectId: "operation:foo", predicate: "active_version", objectId: "operation:foo@v1", recordedAt: T1 });

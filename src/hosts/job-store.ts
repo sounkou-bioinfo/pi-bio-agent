@@ -20,6 +20,10 @@ import { recordObservation, observationAsOfKey } from "../duckdb/observations.js
 
 const FUTURE = "9999-12-31T23:59:59.999Z"; // sentinel for "the absolute latest row of a slot, regardless of now"
 const PHASES = new Set<JobPhase>(["queued", "running", "waiting", "succeeded", "failed", "cancelled"]);
+// compare timestamps as EPOCH ms, never as strings: string '>' mis-orders mixed ISO forms ('…01Z' > '…01.999Z'
+// lexicographically but is temporally BEFORE it), which would admit a backdated transition. new Date parses both.
+const afterTs = (a: string, b: string): boolean => new Date(a).getTime() > new Date(b).getTime();
+const beforeTs = (a: string, b: string): boolean => new Date(a).getTime() < new Date(b).getTime();
 const isTerminal = (p: JobPhase): boolean => p === "succeeded" || p === "failed" || p === "cancelled";
 // runId is interpolated into a filesystem path (`<runId>.json`) — it MUST be a safe token (no path separators, no
 // leading dot), or a hostile/typo'd id could traverse outside `.pi/bio-agent/jobs`. Same shape as a run id.
@@ -159,7 +163,7 @@ export async function pollBioJob(conn: SqlConn, runner: JobRunner, req: { cwd: s
   const richChanged = !!latest && latest.phase === st.phase
     && (latest.message !== st.message || JSON.stringify(latest.progress ?? null) !== JSON.stringify(st.progress ?? null));
   if (!latest || latest.phase !== st.phase || richChanged) {
-    if (latest && !(req.now > latest.at)) throw new Error(`job-store: now '${req.now}' must be strictly after the last status at '${latest.at}' to record a transition`);
+    if (latest && !afterTs(req.now, latest.at)) throw new Error(`job-store: now '${req.now}' must be strictly after the last status at '${latest.at}' to record a transition`);
     await recordPhase(conn, req.runId, { phase: st.phase, message: st.message, progress: st.progress }, req.now, req.source ?? "job-store", existing.replayDigest);
     await persistJob(req.cwd, { ...existing, phase: st.phase, updatedAt: req.now });
     // return the LEDGER-consistent status: the timestamp actually written (req.now), never the runner's clock.
@@ -199,7 +203,7 @@ export async function cancelBioJob(conn: SqlConn, req: { cwd: string; runId: str
   const phase = latest?.phase ?? rec.phase;
   if (isTerminal(phase)) throw new Error(`job-store: job '${req.runId}' is already terminal (${phase}) — cannot cancel`);
   const lastAt = latest?.at ?? rec.updatedAt; // guard against a non-monotonic `now` even when no ledger row exists yet
-  if (!(req.now > lastAt)) throw new Error(`job-store: now '${req.now}' must be strictly after the last status at '${lastAt}' to cancel`);
+  if (!afterTs(req.now, lastAt)) throw new Error(`job-store: now '${req.now}' must be strictly after the last status at '${lastAt}' to cancel`);
   // record the DURABLE cancel FIRST, then best-effort stop the work — a runner.cancel that throws must NOT lose the
   // durable cancel (the ledger is the truth; the runner kill is a courtesy).
   await recordPhase(conn, req.runId, { phase: "cancelled" }, req.now, req.source ?? "job-store", rec.replayDigest);
@@ -239,7 +243,7 @@ export async function collectAndRecordBioJob(conn: SqlConn, runner: JobRunner, r
   // recorded while status still says queued/running would be unreachable. Record the terminal phase if the ledger
   // hasn't got there yet (e.g. the caller collected without polling to terminal).
   if (!latest || !isTerminal(latest.phase)) {
-    if (latest && !(req.now > latest.at)) throw new Error(`job-store: now '${req.now}' must be strictly after the last status at '${latest.at}' to record the terminal status`);
+    if (latest && !afterTs(req.now, latest.at)) throw new Error(`job-store: now '${req.now}' must be strictly after the last status at '${latest.at}' to record the terminal status`);
     await recordPhase(conn, req.runId, { phase: res.phase, message: res.error }, req.now, req.source ?? "job-store", rec.replayDigest);
     await persistJob(req.cwd, { ...rec, phase: res.phase, updatedAt: req.now });
   }
@@ -249,7 +253,7 @@ export async function collectAndRecordBioJob(conn: SqlConn, runner: JobRunner, r
   // req.now must be at-or-after that terminal time (else a result would be visible before the status that produced
   // it). `latest` is re-read here because the block above may have just recorded the terminal status.
   const terminal = await latestSlotRow(conn, req.runId);
-  if (terminal && isTerminal(terminal.phase) && req.now < terminal.at) throw new Error(`job-store: result 'now' ${req.now} is before the terminal status at ${terminal.at} — refusing to record a result that predates its status`);
+  if (terminal && isTerminal(terminal.phase) && beforeTs(req.now, terminal.at)) throw new Error(`job-store: result 'now' ${req.now} is before the terminal status at ${terminal.at} — refusing to record a result that predates its status`);
   const envelope: { schema: "pi-bio.job_result.v1"; result?: JobResult["result"]; artifacts?: JobResult["artifacts"]; error?: string } = { schema: "pi-bio.job_result.v1" };
   if (res.result !== undefined) envelope.result = res.result;
   if (res.artifacts !== undefined) envelope.artifacts = res.artifacts;

@@ -92,10 +92,12 @@ export interface ObservationRow {
 // recordedAt per state change, so "current" is never ambiguous; equal-timestamp rows for one slot should be exact
 // provenance duplicates of the same state, never competing state changes.
 const asOfSql = (table: string): string =>
-  `WITH eligible AS (
-     SELECT * FROM ${table} WHERE recorded_at <= ? AND (valid_from IS NULL OR valid_from <= ?) AND (valid_to IS NULL OR valid_to > ?)
+  // compare/ORDER as TIMESTAMPTZ, not TEXT: lexicographic sort mis-orders mixed valid ISO forms ('…01Z' vs
+   // '…01.999Z'), which would return the wrong current row / admit a backdated one. DuckDB parses both forms.
+   `WITH eligible AS (
+     SELECT * FROM ${table} WHERE recorded_at::TIMESTAMPTZ <= ?::TIMESTAMPTZ AND (valid_from IS NULL OR valid_from::TIMESTAMPTZ <= ?::TIMESTAMPTZ) AND (valid_to IS NULL OR valid_to::TIMESTAMPTZ > ?::TIMESTAMPTZ)
    ), ranked AS (
-     SELECT *, row_number() OVER (PARTITION BY statement_key ORDER BY recorded_at DESC, observation_id DESC) AS rn FROM eligible
+     SELECT *, row_number() OVER (PARTITION BY statement_key ORDER BY recorded_at::TIMESTAMPTZ DESC, observation_id DESC) AS rn FROM eligible
    )
    SELECT * FROM ranked WHERE rn = 1`;
 
@@ -107,7 +109,7 @@ export async function observationsAsOf(conn: SqlConn, t: string): Promise<Observ
  *  observationAsOfKey (latest as-of), this returns the whole append-only trail so callers can show what changed. */
 export async function observationHistory(conn: SqlConn, statementKey: string): Promise<ObservationRow[]> {
   return conn.all<ObservationRow>(
-    `SELECT * FROM ${TABLE} WHERE statement_key = ? ORDER BY recorded_at ASC, observation_id ASC`,
+    `SELECT * FROM ${TABLE} WHERE statement_key = ? ORDER BY recorded_at::TIMESTAMPTZ ASC, observation_id ASC`,
     [statementKey],
   );
 }
@@ -118,9 +120,9 @@ export async function liveOutEdgesAsOf(conn: SqlConn, subjectId: string, t: stri
   return conn.all<{ statement_key: string; predicate: string }>(
     `SELECT statement_key, predicate FROM (
        SELECT statement_key, predicate, object_id,
-              row_number() OVER (PARTITION BY statement_key ORDER BY recorded_at DESC, observation_id DESC) AS rn
+              row_number() OVER (PARTITION BY statement_key ORDER BY recorded_at::TIMESTAMPTZ DESC, observation_id DESC) AS rn
        FROM ${TABLE}
-       WHERE subject_id = ? AND recorded_at <= ? AND (valid_from IS NULL OR valid_from <= ?) AND (valid_to IS NULL OR valid_to > ?)
+       WHERE subject_id = ? AND recorded_at::TIMESTAMPTZ <= ?::TIMESTAMPTZ AND (valid_from IS NULL OR valid_from::TIMESTAMPTZ <= ?::TIMESTAMPTZ) AND (valid_to IS NULL OR valid_to::TIMESTAMPTZ > ?::TIMESTAMPTZ)
      ) WHERE rn = 1 AND object_id IS NOT NULL`,
     [subjectId, t, t, t],
   );
@@ -129,8 +131,8 @@ export async function liveOutEdgesAsOf(conn: SqlConn, subjectId: string, t: stri
 /** The single latest statement for ONE slot as of t — keyed, no full-table scan (what a state machine wants). */
 export async function observationAsOfKey(conn: SqlConn, statementKey: string, t: string): Promise<ObservationRow | null> {
   const rows = await conn.all<ObservationRow>(
-    `SELECT * FROM ${TABLE} WHERE statement_key = ? AND recorded_at <= ? AND (valid_from IS NULL OR valid_from <= ?) AND (valid_to IS NULL OR valid_to > ?)
-     ORDER BY recorded_at DESC, observation_id DESC LIMIT 1`,
+    `SELECT * FROM ${TABLE} WHERE statement_key = ? AND recorded_at::TIMESTAMPTZ <= ?::TIMESTAMPTZ AND (valid_from IS NULL OR valid_from::TIMESTAMPTZ <= ?::TIMESTAMPTZ) AND (valid_to IS NULL OR valid_to::TIMESTAMPTZ > ?::TIMESTAMPTZ)
+     ORDER BY recorded_at::TIMESTAMPTZ DESC, observation_id DESC LIMIT 1`,
     [statementKey, t, t, t],
   );
   return rows[0] ?? null;
