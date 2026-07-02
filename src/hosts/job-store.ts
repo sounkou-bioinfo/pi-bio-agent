@@ -50,6 +50,13 @@ async function persistJob(cwd: string, rec: JobRecord): Promise<void> {
   await fs.rename(tmp, path); // atomic replace — a concurrent reader never sees a partial file
 }
 
+/** A JobRunner is host-injected but may be buggy or hostile — VALIDATE what it returns before persisting it into the
+ *  ledger/snapshot, or a bad `runId`/`phase` would corrupt the durable record and only fail closed for LATER readers. */
+function assertRunnerStatus(runId: string, st: { runId: string; phase: JobPhase }): void {
+  if (st.runId !== runId) throw new Error(`job-store: runner returned status for '${st.runId}', expected '${runId}' — refusing to record a mismatched job`);
+  if (!PHASES.has(st.phase)) throw new Error(`job-store: runner returned an invalid phase ${JSON.stringify(st.phase)} for '${runId}'`);
+}
+
 /** Remove the durable snapshot — compensation for a submit whose runner rejected after the write-ahead marker. */
 async function removeJobRecord(cwd: string, runId: string): Promise<void> {
   try { await fs.rm(jobFile(cwd, runId), { force: true }); } catch { /* best-effort: the marker may already be gone */ }
@@ -145,6 +152,7 @@ export async function pollBioJob(conn: SqlConn, runner: JobRunner, req: { cwd: s
   }
   const st = await runner.status(req.runId);
   if (!st) throw new Error(`job-store: no job '${req.runId}' is known to the runner`);
+  assertRunnerStatus(req.runId, st); // validate the runner's return before it can reach the durable ledger
   // record a new row on a PHASE change OR a same-phase rich-status change (progress/message moved) — so a
   // long-running job's progress is durable and readable as-of t, not just its phase transitions. Recording only
   // on actual CHANGE (not every poll) keeps the ledger bounded to real updates.
@@ -203,7 +211,9 @@ export async function cancelBioJob(conn: SqlConn, req: { cwd: string; runId: str
 /** Collect a job's result — null until it is terminal (succeeded/failed/cancelled). */
 export async function collectBioJob(runner: JobRunner, runId: string): Promise<JobResult | null> {
   const res = await runner.collect(runId);
-  if (!res || res.phase === "queued" || res.phase === "running" || res.phase === "waiting") return null;
+  if (!res) return null;
+  assertRunnerStatus(runId, res); // validate the runner's return (runId match + valid phase) before any caller records it
+  if (res.phase === "queued" || res.phase === "running" || res.phase === "waiting") return null;
   return res;
 }
 

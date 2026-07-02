@@ -265,6 +265,19 @@ describe("job durability: rich status is not lost + the ledger timestamp wins + 
     assert.equal((await ledger.collect("x9"))!.result, undefined, "no success result recorded for a cancelled job");
   });
 
+  test("fail closed: a buggy/hostile runner returning a mismatched runId or invalid phase is refused before the ledger", async () => {
+    const { conn, cwd } = await setup();
+    const good: JobRunner = { async submit() {}, async status() { return null; }, async collect() { return null; } };
+    // wrong runId
+    const wrongId: JobRunner = { ...good, async status(runId) { return { runId: "OTHER", phase: "running", at: "T" }; } };
+    await submitBioJob(conn, wrongId, { cwd, runId: "v1", replay: replay("v1"), now: "2026-07-01T00:00:01Z" });
+    await assert.rejects(() => pollBioJob(conn, wrongId, { cwd, runId: "v1", now: "2026-07-01T00:00:09Z" }), /status for 'OTHER'/);
+    // invalid phase
+    const badPhase: JobRunner = { ...good, async status(runId) { return { runId, phase: "banana" as never, at: "T" }; } };
+    await submitBioJob(conn, badPhase, { cwd, runId: "v2", replay: replay("v2"), now: "2026-07-01T00:00:01Z" });
+    await assert.rejects(() => pollBioJob(conn, badPhase, { cwd, runId: "v2", now: "2026-07-01T00:00:09Z" }), /invalid phase/);
+  });
+
   test("durable submit: a runner that REJECTS leaves NO phantom snapshot (write-ahead marker is compensated)", async () => {
     const { conn, cwd } = await setup();
     const rejecting: JobRunner = { async submit() { throw new Error("runner rejected"); }, async status() { return null; }, async collect() { return null; } };

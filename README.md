@@ -168,15 +168,15 @@ arrived at that spine independently — convergent design on primitives
 that are discovered, not invented. We owe them nothing; the overlap only
 confirms the substrate is real. The difference is what it runs *on*:
 
-|                      | a hosted AI-science workbench         | **pi-bio-agent**                                                                                                                                                                                                                                                    |
-|----------------------|---------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| the program          | agent-orchestrated code               | a **manifest + SQL** — data, not code; a new question is a new manifest, zero new `.ts`                                                                                                                                                                             |
-| reproducibility      | “keep the exact code + environment”   | **content-addressed receipts + a deterministic `receiptContentDigest` + an as-of temporal ledger** — a re-run *matches by content*, and counting is a `GROUP BY`, not re-executed code                                                                              |
-| where it runs        | a vendor’s cloud                      | **your** laptop / cluster / HPC — an importable library + CLI; the host owns effects and egress (“the library records what ran; the host decides what may run”)                                                                                                     |
-| compute distribution | SSH-to-HPC / Modal                    | a **topology over data-in-SQL** — ducknng NNG `push`/`pull`, with status flowing back into the same job ledger; workers in **R (`nanonext`/`mirai`), Python (`pynng`), or node**                                                                                    |
-| agent patterns       | one coordinating agent + actor-critic | **agent topologies as tested primitives** — push/pull, pub/sub, survey/debate — over the **full NNG socket family** ducknng exposes (req/rep, bus, pair); *closes over* Fugu (workflow-as-data + CAS shared memory) and RLM (SQL-REPL over context, no context rot) |
-| trust model          | a model-based reviewer                | **fail-closed determinism** — strict-allowlist manifests, a read-only SQL guard, grounding that abstains and never invents a CURIE                                                                                                                                  |
-| openness             | a closed product                      | **open, deterministic, inspectable** — each row above is shipped code with tests in `test/`, and a docs-conformance check keeps these docs matching the code                                                                                                        |
+|                      | a hosted AI-science workbench         | **pi-bio-agent**                                                                                                                                                                                                                                                                                                                                                                  |
+|----------------------|---------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| the program          | agent-orchestrated code               | a **manifest + SQL** — data, not code; a new question is a new manifest, zero new `.ts`                                                                                                                                                                                                                                                                                           |
+| reproducibility      | “keep the exact code + environment”   | **content-addressed receipts + a deterministic `receiptContentDigest` + an as-of temporal ledger** — a re-run *matches by content*, and counting is a `GROUP BY`, not re-executed code                                                                                                                                                                                            |
+| where it runs        | a vendor’s cloud                      | **your** laptop / cluster / HPC — an importable library + CLI; the host owns effects and egress (“the library records what ran; the host decides what may run”)                                                                                                                                                                                                                   |
+| compute distribution | SSH-to-HPC / Modal                    | a **topology over data-in-SQL** — ducknng NNG `push`/`pull`, with status flowing back into the same job ledger; workers in **R (`nanonext`/`mirai`), Python (`pynng`), or node**                                                                                                                                                                                                  |
+| agent patterns       | one coordinating agent + actor-critic | **agent topologies** — push/pull, pub/sub, survey/debate as **tested** primitives (`test/`), plus proposer↔verifier `pair` and a multi-provider survey jury as runnable **demos** (`scripts/`); the whole NNG socket family (req/rep, bus, …) is reachable via ducknng; *closes over* Fugu (workflow-as-data + CAS shared memory) and RLM (SQL-REPL over context, no context rot) |
+| trust model          | a model-based reviewer                | **fail-closed determinism** — strict-allowlist manifests, a read-only SQL guard, grounding that abstains and never invents a CURIE                                                                                                                                                                                                                                                |
+| openness             | a closed product                      | **open, deterministic, inspectable** — each row above is shipped code with tests in `test/`, and a docs-conformance check keeps these docs matching the code                                                                                                                                                                                                                      |
 
 Same destination; we own the road. A hosted product adds features on top
 of an opaque runtime — we own the substrate those features are
@@ -272,15 +272,15 @@ pi-bio-agent query examples/connectors/clinvar-region.json \
 ``` json
 {
   "ok": true,
-  "runId": "query-1782970585759-5f0a4814",
+  "runId": "query-1782975604736-02fcbee8",
   "status": "succeeded",
   "rowCount": 8,
   "artifacts": {
-    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782970585759-5f0a4814/run.json",
-    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782970585759-5f0a4814/result.json",
-    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782970585759-5f0a4814/receipts.json"
+    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782975604736-02fcbee8/run.json",
+    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782975604736-02fcbee8/result.json",
+    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782975604736-02fcbee8/receipts.json"
   },
-  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782970585759-5f0a4814",
+  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782975604736-02fcbee8",
   "rows": [
     {
       "clinical_significance": "Pathogenic",
@@ -330,15 +330,15 @@ pi-bio-agent query examples/variant-counts/manifest.json \
 ``` json
 {
   "ok": true,
-  "runId": "query-1782970588381-9c74490f",
+  "runId": "query-1782975607084-c6ac9d74",
   "status": "succeeded",
   "rowCount": 3,
   "artifacts": {
-    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782970588381-9c74490f/run.json",
-    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782970588381-9c74490f/result.json",
-    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782970588381-9c74490f/receipts.json"
+    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782975607084-c6ac9d74/run.json",
+    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782975607084-c6ac9d74/result.json",
+    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782975607084-c6ac9d74/receipts.json"
   },
-  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782970588381-9c74490f",
+  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782975607084-c6ac9d74",
   "rows": [
     {
       "consequence": "missense",
@@ -373,20 +373,20 @@ pi-bio-agent query examples/run-ledger/manifest.json \
 ``` json
 {
   "ok": true,
-  "runId": "query-1782970588482-60a6d68d",
+  "runId": "query-1782975607196-27c2c026",
   "status": "succeeded",
   "rowCount": 4,
   "artifacts": {
-    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782970588482-60a6d68d/run.json",
-    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782970588482-60a6d68d/result.json",
-    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782970588482-60a6d68d/receipts.json"
+    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782975607196-27c2c026/run.json",
+    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782975607196-27c2c026/result.json",
+    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782975607196-27c2c026/receipts.json"
   },
-  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782970588482-60a6d68d",
+  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782975607196-27c2c026",
   "rows": [
     {
       "tool": "ad-hoc.query",
       "status": "succeeded",
-      "runs": 793,
+      "runs": 962,
       "first_run": {
         "micros": 1782757322953000
       }
@@ -447,15 +447,15 @@ pi-bio-agent query examples/connectors/uniprot.json \
 ``` json
 {
   "ok": true,
-  "runId": "query-1782970588669-c1093a96",
+  "runId": "query-1782975607402-da0ba53c",
   "status": "succeeded",
   "rowCount": 1,
   "artifacts": {
-    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782970588669-c1093a96/run.json",
-    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782970588669-c1093a96/result.json",
-    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782970588669-c1093a96/receipts.json"
+    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782975607402-da0ba53c/run.json",
+    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782975607402-da0ba53c/result.json",
+    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782975607402-da0ba53c/receipts.json"
   },
-  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782970588669-c1093a96",
+  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1782975607402-da0ba53c",
   "rows": [
     {
       "primaryAccession": "P04637",
