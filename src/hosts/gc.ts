@@ -3,7 +3,10 @@ import { join } from "node:path";
 import type { CasStore } from "../core/cas.js";
 import type { SqlConn } from "../core/ports.js";
 import { gcMarkSweep } from "./cas-metadata.js";
+import { latestValuesByPrefix } from "../duckdb/observations.js";
 import { runsRoot } from "./run-store.js";
+
+const LEDGER_FUTURE = "9999-12-31T23:59:59.999Z"; // sentinel: "the LATEST run:<id> facts regardless of clock"
 
 // Garbage collection for the substrate's two unbounded stores: the CAS (content-addressed bytes) and the run
 // directory. The model: the CAS is a HEAP; a run's receipts are its ROOTS; MARK-AND-SWEEP deletes CAS entries
@@ -141,6 +144,14 @@ export interface CollectGarbageOpts {
    *  distributed GC, where the complete root set is ROWS, not a scraped union. `conn` may be a local DuckDB or a
    *  ducknng-served shared db; the SQL is the same. This is the supported way to GC a shared CAS safely. */
   metadata?: { conn: SqlConn; cas: CasStore; cutoffMs?: number; graceMs?: number };
+  /** The shared observation STORE (bio_observations). A `run:<id>` ledger fact REFERENCES its result/receipts/
+   *  replay/source bytes by digest and OUTLIVES the run directory (Datomic model: files are optional serialize,
+   *  the fact is the durable reference). Pruning a run DIR while its ledger fact is still live would otherwise
+   *  leave those bytes rooted by nothing on disk — the receipt-scan sweep would delete them and the fact's digest
+   *  reference would dangle (a later "did this run? fetch its result from CAS" fails). Pass the store so GC ALSO
+   *  roots from the LIVE run:<id> facts; byte-lifetime then follows fact-lifetime (tombstone a run fact to release
+   *  its bytes), which is the intended model. Node-local / receipt-scan path only. */
+  store?: SqlConn;
 }
 
 /** End-to-end GC for a project: prune runs first, then mark-and-sweep the CAS rooted at the SURVIVING runs'
@@ -191,6 +202,11 @@ export async function collectGarbage(cwd: string, opts: CollectGarbageOpts = {})
     fs.readFile(join(runsDir, name, "cas-refs.json"), "utf8").catch(() => ""),
     fs.readFile(join(runsDir, name, "run.json"), "utf8").catch(() => ""),
   ])));
+  // LEDGER roots: a live `run:<id>` fact references CAS bytes by digest and outlives the run DIR — so when a store
+  // is supplied, root from the latest run:<id> facts too. Without this, pruning a run dir whose ledger fact is still
+  // live would strand its result/receipts/replay bytes (rooted by nothing on disk) and the sweep would delete them,
+  // dangling the fact's digest reference. (The run-fact JSON carries every digest field, so liveDigests roots them.)
+  if (opts.store) rootJsons.push(...(await latestValuesByPrefix(opts.store, "run:", LEDGER_FUTURE)));
   const live = liveDigests(rootJsons);
   // cross-writer roots: the union of all writers' live digests — lowercased so an uppercase-hex root still matches
   // the lowercase CAS files (else it would fail to protect live bytes and the sweep would delete them).

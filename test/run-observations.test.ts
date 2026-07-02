@@ -145,4 +145,24 @@ describe("run-observations: ad-hoc SQL folds into the ONE store as an as-of, att
     assert.equal(a.casRefs!.runObject, b.casRefs!.runObject); // ...but ONE content-addressed run DAG root
     assert.equal(await cas.has({ algorithm: "sha256", digest: a.casRefs!.runObject!.slice(7) }), true);
   });
+
+  test("DATA-LOSS: GC roots from LIVE run:<id> ledger facts — pruning the run DIR must not strand ledger-referenced CAS bytes", async () => {
+    const store = await conn();
+    const cas = fsCasStore(await fsp.mkdtemp(join(tmpdir(), "cas-")));
+    const casRoot = (cas as unknown as { pathFor: (a: { algorithm: string; digest: string }) => string }).pathFor({ algorithm: "sha256", digest: "a".repeat(64) }).replace(/\/sha256\/.*$/, "");
+    const cwd = await fsp.mkdtemp(join(tmpdir(), "gc-ledger-"));
+    const res = await runBioQueryFromManifest({ cwd, dbPath: ":memory:", manifestPath: resolve(process.cwd(), "examples/variant-counts/manifest.json"), sql: "SELECT count(*) AS n FROM variants", store, author: "agent:A", cas });
+    assert.ok(res.ok);
+    const v = JSON.parse((await observationAsOfKey(store, `run:${res.runId}`, MEMORY_NOW))!.value_json!);
+    const rd = v.resultDigest.slice("sha256:".length);
+    assert.equal(await cas.has({ algorithm: "sha256", digest: rd }), true);
+    // prune the run DIR (keep 0) — the run:<id> ledger fact stays live and STILL references rd (files are optional
+    // serialize; the fact is the durable reference). WITH the store, GC roots from that live fact -> bytes survive.
+    await collectGarbage(cwd, { casRoot, runs: { keep: 0 }, minAgeMs: 0, store });
+    assert.equal(await cas.has({ algorithm: "sha256", digest: rd }), true, "ledger-rooted result bytes survived GC after the run dir was pruned");
+    // CONTRAST — the gap this closes: a GC WITHOUT the store roots only from the (now-gone) dir, so the still-live
+    // ledger fact's bytes are stranded and swept (a later 'fetch this run's result from CAS by digest' would fail).
+    await collectGarbage(cwd, { casRoot, runs: { keep: 0 }, minAgeMs: 0 });
+    assert.equal(await cas.has({ algorithm: "sha256", digest: rd }), false, "without the store the ledger-referenced bytes are unrooted and swept (the gap the store-rooting closes)");
+  });
 });

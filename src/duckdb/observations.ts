@@ -137,6 +137,23 @@ export async function liveOutEdgesAsOf(conn: SqlConn, subjectId: string, t: stri
   );
 }
 
+/** The latest-as-of, non-tombstoned `value_json` for EVERY slot whose statement_key starts with the literal
+ *  `prefix` (e.g. "run:"). Used by GC to root CAS bytes from LIVE ledger facts: a `run:<id>` fact outlives the
+ *  run directory (Datomic model — files become optional serialize, the fact is the durable digest reference), so
+ *  its referenced bytes must be retained as long as the fact is live. `prefix` is a LITERAL (no LIKE wildcards). */
+export async function latestValuesByPrefix(conn: SqlConn, prefix: string, t: string): Promise<string[]> {
+  const rows = await conn.all<{ value_json: string | null }>(
+    `SELECT value_json FROM (
+       SELECT statement_key, value_json,
+              row_number() OVER (PARTITION BY statement_key ORDER BY recorded_at::TIMESTAMPTZ DESC, observation_id DESC) AS rn
+       FROM ${TABLE}
+       WHERE starts_with(statement_key, ?) AND recorded_at::TIMESTAMPTZ <= ?::TIMESTAMPTZ AND (valid_from IS NULL OR valid_from::TIMESTAMPTZ <= ?::TIMESTAMPTZ) AND (valid_to IS NULL OR valid_to::TIMESTAMPTZ > ?::TIMESTAMPTZ)
+     ) WHERE rn = 1 AND value_json IS NOT NULL`,
+    [prefix, t, t, t],
+  );
+  return rows.map((r) => r.value_json).filter((v): v is string => v != null);
+}
+
 /** The single latest statement for ONE slot as of t — keyed, no full-table scan (what a state machine wants). */
 export async function observationAsOfKey(conn: SqlConn, statementKey: string, t: string): Promise<ObservationRow | null> {
   const rows = await conn.all<ObservationRow>(
