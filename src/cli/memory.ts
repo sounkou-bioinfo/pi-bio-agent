@@ -67,9 +67,17 @@ export async function mainMemory(argv: string[], deps: MemoryCliDeps): Promise<n
       deps.out(JSON.stringify({ asOf: asOfLabel, ...note }, null, 2));
       return 0;
     }
-    // history
+    // history — HONOR --as-of: show only revisions recorded AT OR BEFORE that time (a time-travelled trail), not
+    // future ones. Default (MEMORY_NOW) shows the whole trail. A provided-but-unparseable time is a usage error
+    // (exit 2), matching how list/show fail on a bad TIMESTAMPTZ rather than silently returning nothing.
     const revisions = await memoryHistory(store.conn, slug);
-    deps.out(JSON.stringify({ slug, revisions: revisions.map((r) => ({ recordedAt: r.recordedAt, author: r.author, forgotten: r.content === null, title: r.content?.title })) }, null, 2));
+    let visible = revisions;
+    if (asOf !== MEMORY_NOW) {
+      const cutoff = Date.parse(asOf);
+      if (Number.isNaN(cutoff)) { deps.err(`memory history: --as-of '${asOf}' is not a valid ISO timestamp\n\n${MEMORY_USAGE}`); return 2; }
+      visible = revisions.filter((r) => Date.parse(r.recordedAt) <= cutoff);
+    }
+    deps.out(JSON.stringify({ slug, asOf: asOfLabel, revisions: visible.map((r) => ({ recordedAt: r.recordedAt, author: r.author, forgotten: r.content === null, title: r.content?.title })) }, null, 2));
     return 0;
   } finally {
     store.close();

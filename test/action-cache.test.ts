@@ -66,6 +66,15 @@ describe("ActionCache: input CASID -> output CASID (LLVM CAS ActionCache in the 
     assert.notEqual(actionInputDigest(base), actionInputDigest({ ...base, manifest: { ...base.manifest, digest: "sha256:other" } }));
   });
 
+  test("bindings with a bigint don't crash the digest (tagged, stable, injective); a non-plain object fails closed", () => {
+    const d1 = actionInputDigest({ ...base, bindings: { n: 10n } });
+    assert.match(d1, /^sha256:[a-f0-9]{64}$/, "a bigint binding produces a digest, not a JSON.stringify throw");
+    assert.equal(d1, actionInputDigest({ ...base, bindings: { n: 10n } }), "same bigint -> stable key");
+    assert.notEqual(d1, actionInputDigest({ ...base, bindings: { n: 11n } }), "different bigint -> different key");
+    assert.notEqual(d1, actionInputDigest({ ...base, bindings: { n: 10 } }), "bigint 10n and number 10 are tagged apart (no collision)");
+    assert.throws(() => actionInputDigest({ ...base, bindings: { d: new Date() } }), /non-plain object/, "a Date (or other non-plain object) fails closed rather than mis-keying");
+  });
+
   test("content-addressed: a changed source (different sourceReceiptDigests) yields a DIFFERENT key — no stale dedup", () => {
     assert.notEqual(actionInputDigest(base), actionInputDigest({ ...base, sourceReceiptDigests: ["sha256:s2"] }));
   });

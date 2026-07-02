@@ -24,8 +24,19 @@ const actionKey = (inputDigest: string): string => `action:${inputDigest}`;
 // Recursively sort object keys so semantically identical values hash identically regardless of insertion order
 // (agent bindings are an object whose key order is not meaningful — different order must not miss the cache).
 function canonicalize(v: unknown): unknown {
+  // bigint: JSON.stringify THROWS on it, so a binding carrying a DuckDB BIGINT would crash the whole digest (and the
+  // run-object CAS write). Tag it losslessly + injectively — `__bigint__:5` can't collide with the real string "5"
+  // or the number 5 — so a bigint binding is keyed, not a crash.
+  if (typeof v === "bigint") return `__bigint__:${v.toString()}`;
   if (Array.isArray(v)) return v.map(canonicalize);
   if (v && typeof v === "object") {
+    // Plain objects only. A non-plain object (Date, Map, class instance) has no meaningful own-key projection here —
+    // Object.keys(new Date()) is [], so every Date would collapse to {} and collide. Replay inputs come from JSON
+    // tool params (plain values); reject a non-plain object rather than silently mis-key it. Fail closed.
+    const proto = Object.getPrototypeOf(v);
+    if (proto !== Object.prototype && proto !== null) {
+      throw new Error(`actionInputDigest: replay contains a non-plain object (${proto?.constructor?.name ?? "unknown"}); inputs must be JSON-serializable (plain objects/arrays/primitives)`);
+    }
     return Object.fromEntries(Object.keys(v as Record<string, unknown>).sort().map((k) => [k, canonicalize((v as Record<string, unknown>)[k])]));
   }
   return v;

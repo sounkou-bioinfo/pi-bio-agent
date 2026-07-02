@@ -35,6 +35,12 @@ describe("memory CLI over the ONE temporal store (replaces the stale notes CLI)"
     assert.equal(await mainMemory(["history", "acmg"], deps), 0);
     assert.deepEqual(JSON.parse(out.lines.at(-1)!).revisions.map((r: { author: string }) => r.author), ["agent:A", "agent:B"]);
 
+    // history HONORS --as-of: at a time between the two revisions, only the first (agent:A @ T1) is visible
+    assert.equal(await mainMemory(["history", "acmg", "--as-of", "2026-01-01T00:00:02Z"], deps), 0);
+    assert.deepEqual(JSON.parse(out.lines.at(-1)!).revisions.map((r: { author: string }) => r.author), ["agent:A"], "future revisions are excluded as of an earlier time");
+    // a malformed --as-of on history is a usage error (exit 2), not a silent empty result
+    assert.equal(await mainMemory(["history", "acmg", "--as-of", "not-a-time"], deps), 2);
+
     assert.equal(await mainMemory(["bogus"], deps), 2); // usage error
     assert.equal(await mainMemory(["show", "nope"], deps), 1); // not found
     // an unknown FLAG is a clean usage error (exit 2), not an uncaught ERR_PARSE_ARGS -> generic exit 1
