@@ -35,8 +35,12 @@ export interface CasStore {
   // re-downloads (a cache miss, never a dangling read). Making the index self-rooting would pin its bytes
   // forever (an unbounded cache) — deliberately not done; durable cross-host reuse belongs to the ducknng-fs /
   // shared-CAS lane with real refs/leases (docs/refinments.md), not to this best-effort filesystem index.
-  /** The validator (ETag) + content address last stored for a URL, if any. */
-  getRemote(url: string): Promise<{ etag: string; address: ContentAddress } | undefined>;
-  /** Record the validator + content address for a URL after a real fetch. */
-  putRemote(url: string, etag: string, address: ContentAddress): Promise<void>;
+  // Keyed by (scope, url), NOT url alone: the caller passes a host-owned `remoteCacheScope` so authenticated
+  // responses that VARY by caller can never cross-contaminate (tenant A's bytes must not satisfy tenant B's GET
+  // for the same URL). A host uses one constant scope for public content (full reuse) or a per-principal scope
+  // for authenticated content (isolation). See ResolutionContext.remoteCacheScope.
+  /** The validator (ETag) + content address last stored for a URL WITHIN a scope, if any. */
+  getRemote(url: string, scope: string): Promise<{ etag: string; address: ContentAddress } | undefined>;
+  /** Record the validator + content address for a URL WITHIN a scope after a real fetch. */
+  putRemote(url: string, etag: string, address: ContentAddress, scope: string): Promise<void>;
 }

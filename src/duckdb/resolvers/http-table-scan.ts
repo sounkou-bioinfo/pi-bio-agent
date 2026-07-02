@@ -76,9 +76,13 @@ export function httpTableResolver(fetchImpl: FetchLike): BioResolverImpl {
     //                  already-stored CAS bytes WITHOUT re-downloading. The per-db memo wins when both apply.
     const memoable = method === "GET" && Object.keys(headers).length === 0; // POST is body-dependent: skip the ETag/304 memo
     const cas = ctx.cas;
+    // The cross-db shared remote index is FAIL-CLOSED: only consulted/populated when the host supplies a
+    // remoteCacheScope (auth is injected by a fetch policy AFTER this point and is invisible here, so a scopeless
+    // shared index could leak one caller's authenticated bytes to another — see ResolutionContext.remoteCacheScope).
+    const scope = ctx.remoteCacheScope;
     const memo = memoable ? await memoGet(ctx.conn, table) : undefined;
     const sameUrl = memo?.receipt.sourceSnapshots[0]?.source === url;
-    const casRemote = !memo && memoable && cas ? await cas.getRemote(url) : undefined;
+    const casRemote = !memo && memoable && cas && scope !== undefined ? await cas.getRemote(url, scope) : undefined;
     const validator = memo && sameUrl ? memo.freshness : casRemote?.etag;
     const conditional = validator !== undefined ? { ...headers, "If-None-Match": validator } : headers;
     const res = await fetchImpl(url, { method, headers: conditional, body: requestBody, signal: ctx.signal });
@@ -98,7 +102,7 @@ export function httpTableResolver(fetchImpl: FetchLike): BioResolverImpl {
         // cross-db: the unchanged bytes are already in CAS (a prior fetch put them) — materialize from them, no download
         await materializeFrom(cas.pathFor(casRemote.address));
         const output = outputFor(casRemote.address.digest);
-        if (memoable) await memoStore(ctx.conn, table, casRemote.etag, output); // seed THIS db's memo
+        if (memoable) await memoStore(ctx.conn, table, casRemote.etag, output); // seed THIS db's memo (scope already matched on the getRemote hit)
         return output;
       }
       throw new Error(`http resolver: GET ${url} returned 304 but no cached bytes were available to replay`);
@@ -116,7 +120,7 @@ export function httpTableResolver(fetchImpl: FetchLike): BioResolverImpl {
       const address = { algorithm: "sha256" as const, digest };
       await cas.put(address, body);
       await materializeFrom(cas.pathFor(address));
-      if (memoable && etag !== undefined) await cas.putRemote(url, etag, address); // seed the cross-db index
+      if (memoable && etag !== undefined && scope !== undefined) await cas.putRemote(url, etag, address, scope); // seed the cross-db index (host-scoped only)
     } else {
       const dir = await fs.mkdtemp(join(tmpdir(), "pi-bio-http-"));
       const file = join(dir, format === "csv" ? "body.csv" : "body.json");

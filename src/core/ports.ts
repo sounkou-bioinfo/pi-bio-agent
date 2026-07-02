@@ -61,6 +61,15 @@ export interface ResolutionContext {
    *  scan the source directly, no snapshot. Reuse is for WHOLE objects (an API JSON response, a dump) — NOT a
    *  substitute for range/tabix access to a small region of a huge indexed file (that is duckhts' job). */
   cas?: CasStore;
+  /** Cross-db remote-cache SCOPE (host-owned; fail-closed). The http.get resolver's per-db memo is safe (one db =
+   *  one run = one auth context), but the CAS *cross-db* remote index (url→ETag+bytes, shared by every db on the
+   *  root) is only safe when the response does not VARY by caller. A resolver cannot see this: host auth is
+   *  injected by a fetch policy (withAuth) AFTER the resolver decides memoability, so an authenticated request
+   *  looks header-free. So the cross-db index is consulted/populated ONLY when the host provides a scope, and it
+   *  is keyed per-scope — a host partitions by auth principal (so tenant A's bytes never satisfy tenant B), or
+   *  uses one constant scope (e.g. "public") for genuinely un-authenticated content to get full cross-db reuse.
+   *  Absent → the shared index is skipped entirely (the per-db memo still works); no cross-scope leak is possible. */
+  remoteCacheScope?: string;
 }
 
 /**

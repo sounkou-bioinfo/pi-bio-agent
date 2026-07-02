@@ -5,6 +5,10 @@ import type { CasStore } from "../core/cas.js";
 import type { ContentAddress } from "../core/resources.js";
 import { validateContentAddress } from "../core/storage.js";
 
+/** Path-safe key for the (scope, url) cross-db remote index. '\0' can occur in neither input, so distinct pairs
+ *  never alias into one file — the scope isolates caller-varying (authenticated) responses. */
+const remoteKey = (scope: string, url: string): string => createHash("sha256").update(`${scope}\0${url}`).digest("hex");
+
 // Filesystem CAS rooted at a host-chosen POSIX-like directory (e.g. .pi/bio-agent/cas, or a shared cross-project
 // filesystem mount). Layout: <root>/<algorithm>/<digest>. The host owns WHERE the store lives — the library only
 // addresses by hash, so swapping a project-local store for a shared one is a host composition choice, not a code
@@ -60,20 +64,22 @@ export function fsCasStore(root: string): CasStore {
       // should reach here; the store itself does not decide liveness.
       await fs.rm(pathFor(a), { force: true });
     },
-    // Cross-db remote index: <root>/remote/<sha256(url)>.json. Keyed by URL hash (not the raw URL) so the
-    // filename is path-safe regardless of the URL's characters.
-    async getRemote(url) {
-      const p = join(root, "remote", `${createHash("sha256").update(url).digest("hex")}.json`);
+    // Cross-db remote index: <root>/remote/<sha256(scope\0url)>.json. Keyed by (scope, url) — the scope isolates
+    // authenticated/caller-varying responses (tenant A's ETag+bytes never satisfy tenant B), while the hash keeps
+    // the filename path-safe regardless of the URL's characters. A '\0' separator can't occur in either input, so
+    // distinct (scope,url) pairs never alias.
+    async getRemote(url, scope) {
+      const p = join(root, "remote", `${remoteKey(scope, url)}.json`);
       try {
         const { etag, address } = JSON.parse(await fs.readFile(p, "utf8")) as { etag: string; address: ContentAddress };
         return { etag, address };
       } catch { return undefined; }
     },
-    async putRemote(url, etag, address) {
+    async putRemote(url, etag, address, scope) {
       await fs.mkdir(join(root, "remote"), { recursive: true });
-      const p = join(root, "remote", `${createHash("sha256").update(url).digest("hex")}.json`);
+      const p = join(root, "remote", `${remoteKey(scope, url)}.json`);
       const tmp = `${p}.tmp-${process.pid}-${Date.now()}`;
-      await fs.writeFile(tmp, JSON.stringify({ url, etag, address }));
+      await fs.writeFile(tmp, JSON.stringify({ url, scope, etag, address }));
       await fs.rename(tmp, p); // the validator is mutable (last-seen) — overwrite is correct
     },
   };

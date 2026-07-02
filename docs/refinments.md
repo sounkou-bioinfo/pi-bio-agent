@@ -145,9 +145,12 @@ raw BYTES across dbs/projects, keyed by content hash. BUILT:
   (filesystem, `<root>/<algo>/<digest>`, atomic).
 - Host opt-in by composition (`cas` threads RunRequest -> runQuery/runOperation -> `ResolutionContext.cas`),
   default absent = fast mode.
-- `http.get` CAS mode: a 200 snapshots the body under its sha256 + seeds the url->ETag index; a DIFFERENT db
-  with an empty per-db memo sends If-None-Match from that index and on 304 materializes from CAS bytes with NO
-  re-download (test: body downloads exactly once across two dbs).
+- `http.get` CAS mode: a 200 snapshots the body under its sha256 + seeds the (scope,url)->ETag index; a DIFFERENT
+  db with an empty per-db memo but the SAME host-provided `remoteCacheScope` sends If-None-Match from that index
+  and on 304 materializes from CAS bytes with NO re-download (test: body downloads exactly once across two dbs).
+  The scope is FAIL-CLOSED: the cross-db index is skipped entirely without a scope, and is keyed per-scope so an
+  authenticated response (host auth injected by a fetch policy is invisible to the resolver's memo decision) can
+  never leak one caller's bytes to another. Public content uses one constant scope for full reuse.
 
 ### Honest scope — CAS is for WHOLE objects, not a universal remote cache (pal #7)
 CAS-of-whole-bytes is right for a REST/JSON API body or a moderate dump fetched by `http.get` itself. It is the
