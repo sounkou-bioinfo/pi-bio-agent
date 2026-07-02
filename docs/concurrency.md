@@ -1,6 +1,6 @@
 ---
 type: Reference
-title: Concurrent memory — running the store over a ducknng/quack server
+title: Concurrent memory — running the store over a ducknng server
 description: "Read before running pi-bio-agent memory across projects, processes, agents, or machines. Explains the three store access modes and how to inject a server-backed store."
 tags: [memory, store, concurrency, ducknng, sharing]
 ---
@@ -24,7 +24,7 @@ but it is the wrong substrate for concurrent agents. This page is the map of how
 `tryOpenBioStore` only makes a *single-file* deployment degrade gracefully. It is **not** how you get real
 concurrency — for that you move the store to a server.
 
-## Running over a ducknng (or quack) server
+## Running over a ducknng server (or any host-supplied server `SqlConn`)
 
 The extension takes an injectable store opener:
 
@@ -35,7 +35,8 @@ createBioExtension({ author: "agent:worker-3", openStore: myServerStore });
 `openStore(cwd)` returns a `BioStore` = `{ conn: SqlConn, close() }`. Because every memory op (`remember`,
 `recall`, `listMemory`, …) and every run recorder is written against the `SqlConn` port (`all` / `run`), a
 server-backed `conn` is a drop-in: route its `run(sql)` and `all(sql)` through the **owned ducknng** RPC
-(`ducknng_run_rpc` / `ducknng_query_rpc`) to a `ducknng_start_server`, or through a **duckdb quack** server. The
+(`ducknng_run_rpc` / `ducknng_query_rpc`) to a `ducknng_start_server` (or any other host-supplied server `SqlConn` —
+we own/backport **ducknng**; **quack** was dropped, but a host may still bring its own server conn). The
 client opens only a throwaway `:memory:` DuckDB to reach the RPC functions — it owns **no** shared state, holds
 **no** file lock; the *server* is the single writer.
 
@@ -86,5 +87,5 @@ The transport is dogfooded end to end:
 - `scripts/nng-job-runner.mjs` — a separate worker process writes a `job:<id>:status` observation over RPC that
   the coordinator reads back with the same `observationAsOfKey` — a language-agnostic distributed backend.
 
-So: the local file is the default for one project; a ducknng/quack **server** is the store when memory must be
+So: the local file is the default for one project; a ducknng **server** (or other host-supplied server conn) is the store when memory must be
 shared across projects, processes, agents, or machines — the same owned transport the topology scripts already use.

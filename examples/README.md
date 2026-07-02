@@ -54,7 +54,7 @@ boundary analysis in [`docs/refinments.md`](../docs/refinments.md).
 | Example | Proof |
 |---|---|
 | `test/http-cas-reuse.test.ts` | **CAS** — a second db with an empty memo 304s from the shared content store and materializes with **no re-download** (immutable cross-db reuse) |
-| `test/run-store-init-sql.test.ts` | the host **connection-init hook** (`duckdbInitSql`) — where an agent runs `INSTALL/LOAD` extensions before resolution |
+| `test/run-store-init-sql.test.ts` | the host **connection-init hook** (`duckdbInitSql`) — where the **host** (never the agent) runs `INSTALL/LOAD` extensions before resolution; it is host-owned and not exposed through any agent tool |
 | **live:** [`scripts/ducknng-rpc-mutate.mjs`](../scripts/ducknng-rpc-mutate.md) | **ducknng RPC** — separate processes **mutate** one shared table in place (`UPDATE`/`DELETE`/upsert) via `ducknng_run_rpc` against a server running native DuckDB, exec opt-in. The mutate-in-place quack can't do; a fact-superseding KG needs it. |
 | **live:** [`scripts/blackboard-shared.mjs`](../scripts/blackboard-shared.md) | **ducknng RPC blackboard** — a decentralized pub/sub diamond DAG across separate processes (publish = `run_rpc` INSERT, await = poll `query_rpc`); order emerges from shared writes, no coordinator. |
 

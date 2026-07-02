@@ -15,7 +15,9 @@ import { duckdbNodeConn } from "../dist/duckdb/node-api.js";
 import { createBioObservationSchema } from "../dist/duckdb/observations.js";
 import { remember, recall, listMemory } from "../dist/hosts/memory-store.js";
 
-const ADDR = "tcp://127.0.0.1:9891";
+// Unique-per-run address (avoids a fixed-port conflict): the supervisor derives it from its own pid and exports it
+// so the spawned server + agent children inherit the SAME value via env. Falls back to a pid-derived port.
+const ADDR = process.env.PI_BIO_MEM_ADDR ?? `tcp://127.0.0.1:${10000 + (process.pid % 50000)}`;
 const T = "2026-07-02T00:00:00Z";
 
 // inline SqlConn params into a plain SQL string (ducknng RPC sends a string, not bound params).
@@ -55,7 +57,7 @@ async function agent(role, action) {
     const all = await listMemory(conn);
     console.log(`  [${role} pid ${process.pid}] RECALLED over RPC: ${note ? `'${note.slug}' = "${note.body}" by ${note.author}` : "(nothing)"} | list=${all.map((m) => m.slug).join(",")}`);
     if (!note || note.author !== "agent:A") { console.error("FAIL: agent:B did not read agent:A's attributed memory"); process.exit(1); }
-    console.log("  PROVED: a SEPARATE process read another agent's attributed memory over the server — no file lock.");
+    console.log("  SHOWN: a SEPARATE process read another agent's attributed memory over the server — no file lock (sequential A→B, not a concurrency test).");
   }
   c.closeSync(); inst.closeSync();
 }
@@ -69,13 +71,15 @@ const mode = process.argv[2];
 if (mode === "serve") await serve();
 else if (mode === "agent") await agent(process.argv[3], process.argv[4]);
 else {
-  console.log("=== concurrent memory over a ducknng server: server + two SEPARATE agent processes ===");
+  process.env.PI_BIO_MEM_ADDR = ADDR; // export so the spawned server + agents share this run's unique address
+  console.log("=== cross-process shared memory over a ducknng server: server + two SEPARATE agent processes (sequential A→B) ===");
   const server = spawnChild(["serve"]);
   await new Promise((r) => setTimeout(r, 1500));
   await spawnChild(["agent", "agent:A", "remember"]);
   await spawnChild(["agent", "agent:B", "recall"]);
   await server;
-  console.log("What it proves: the memory store ran on ONE ducknng server; two distinct OS processes shared it");
-  console.log("(A wrote, B read A's attributed note) — the SqlConn was RPC, no process opened the store file, so the");
-  console.log("process-exclusive-writer lock never applied. This is the inter-process/agent/machine mode of the store.");
+  console.log("What it shows: the memory store ran on ONE ducknng server; two distinct OS processes shared it");
+  console.log("(A wrote, then B read A's attributed note) — the SqlConn was RPC, no process opened the store file, so the");
+  console.log("process-exclusive-writer lock never applied. This is separate-process RPC SHARING — NOT concurrent writes,");
+  console.log("and NOT inter-machine/persistent (the server DB is :memory:).");
 }

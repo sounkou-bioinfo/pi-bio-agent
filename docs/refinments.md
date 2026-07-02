@@ -209,10 +209,11 @@ separate efforts.
   "context rot" because no call holds the whole context. **We close over it: `bio_query` over DuckDB is the same
   loop with context as TABLES, not a string var.** peek=`LIMIT`/schema discovery; grep=`WHERE LIKE`/`regexp`/
   FTS; partition+map=`GROUP BY` + per-partition sub-operations; summarize=SQL aggregates; the agent only ever
-  sees BOUNDED results. Sharper: RLM's OOLONG benchmark ("among these user IDs, how many label X over 6000
-  rows") is literally a `GROUP BY` — RLM recurses and makes counting errors at long context; we one-shot it
-  deterministically. Semantic-only sub-calls ("label each row") fall back to the judgment boundary
-  (`decideGrounding`/sub-agent); recursion depth = nested sub-operations.
+  sees BOUNDED results. Sharper: the REDUCE half of RLM's OOLONG benchmark ("among these user IDs, how many label
+  X over 6000 rows") is a `GROUP BY` *once the labels exist* — RLM recurses and can miscount at long context, and
+  the count is exact for us. But the MAP half (labeling each row) is NOT solved by SQL — it stays the judgment/LM
+  boundary (`decideGrounding`/sub-agent); the `GROUP BY` is only the deterministic reduce after labels exist.
+  Recursion depth = nested sub-operations.
 - **[Sakana Fugu](https://sakana.ai/fugu)**: its "shared memory so agents don't re-discover artifacts" = our
   CAS + `studyNoteIndex`; workflow-as-data with access lists = a conductor manifest / `StudyScaffold` (below).
 - **Networked agents**: stigmergy via a shared CAS root — agents communicate by content-addressed receipted

@@ -171,18 +171,24 @@ The extension should provide:
 
 The Pi extension should avoid becoming a second core. Its tools should call shared library functions that are also callable from CLI and JSON-RPC. If a Pi tool contains substantial logic, that logic belongs in `src/` with tests. When the Pi extension needs model-provider access, it should use the `modelRegistry`/`AuthStorage` services provided by Pi's extension context or `pi.registerProvider(...)` for provider registration, not package-local credential machinery.
 
-Initial Pi extension execution policy:
+Pi extension execution policy (as shipped):
 
 ```text
-safe by default:
+enabled by default (local, no ambient capability):
   list / describe / validate / study / draft
+  resource materialization + local DuckDB query/operation execution
+    (bio_query / bio_run_operation over an explicit dbPath)
 
-explicit opt-in later:
-  network operation execution
-  code runtime execution
-  resource materialization
-  DuckDB query execution beyond validation
+fails closed unless the HOST explicitly injects the capability:
+  network (the `fetch` port — http.get; default entrypoint injects none)
+  out-of-process code runtime (`process.compute` — the ProcessRunner grant)
+  extension INSTALL/LOAD + any DuckDB egress config (host-owned `duckdbInitSql`
+    / `duckdbConfig`, never an agent tool param)
 ```
+
+Note: DuckDB's *own* reachability (httpfs / replacement scans / htslib) is a host-provisioned
+capability and egress confinement is the HOST's boundary (container / seccomp / OS) — the library
+is deliberately not the network/filesystem sandbox. See `docs/refinments.md`.
 
 ## HTTP/API integrations
 
