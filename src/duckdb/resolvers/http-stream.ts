@@ -1,8 +1,9 @@
 // Bounded streaming read — the byte-cap half of pal #4 (cancellation + bounds). Reads a response body stream up
 // to `maxBytes` and ABORTS beyond it, so a runaway/huge response cannot exhaust memory. The host's fetch adapter
-// uses this instead of `response.text()` when a cap is set. SSE token streams parse `data:` frames off this same
-// stream (pi-mono, github.com/badlogic/pi-mono, has those patterns); bidirectional/push uses wss over nng /
-// ducknng — see docs/refinments.md "Streaming transports".
+// uses this instead of `response.text()` when a cap is set. It returns the RAW decoded bytes — there is NO SSE
+// frame parser here: parsing `data:` frames off a text/event-stream is a SEPARATE layer NOT yet in-tree (the
+// pi-mono patterns, github.com/badlogic/pi-mono, are the reference for when it lands); bidirectional/push is wss
+// over nng / ducknng. See docs/refinments.md "Streaming transports".
 
 async function* asAsyncIterable(src: AsyncIterable<Uint8Array> | ReadableStream<Uint8Array>): AsyncIterable<Uint8Array> {
   if (Symbol.asyncIterator in src) { yield* src as AsyncIterable<Uint8Array>; return; }

@@ -2,8 +2,8 @@
   "schema": "pi-bio.manifest.v1",
   "id": "connector-mcp",
   "version": "0.1.0",
-  "title": "MCP server over SQL — a JSON-RPC call is an ncurl POST (proven)",
-  "description": "An MCP (Model Context Protocol) server call as a MANIFEST, zero TypeScript. MCP is JSON-RPC 2.0 over HTTP, so `initialize` / `tools/list` / `tools/call` is a ducknng_ncurl_table POST — verified live against a public MCP server (DeepWiki). The endpoint is the binding {mcp_url}; the host provisions ducknng + TLS. The session id `initialize` returns threads through as a header on the next call; only server-pushed SSE notifications use ducknng wss.",
+  "title": "MCP server over SQL — a JSON-RPC call is an ncurl POST (JSON response)",
+  "description": "An MCP (Model Context Protocol) server call as a MANIFEST, zero TypeScript. MCP is JSON-RPC 2.0 over HTTP, so `initialize` / `tools/list` / `tools/call` is a ducknng_ncurl_table POST — structurally validated here and verified live against a public MCP server (DeepWiki). This path requests `Accept: application/json` and materializes the JSON-RPC RESPONSE into a table; it does NOT parse an SSE (`text/event-stream`) response — a server that answers the POST with `data:` frames needs an SSE frame parser (a documented gap, not in-tree). The endpoint is the binding {mcp_url}; the host provisions ducknng + TLS. The session id `initialize` returns threads through as a header on the next call; server-PUSHED SSE notifications are a separate ducknng wss concern.",
   "provides": {
     "resolvers": [{ "id": "duckdb.sql_materialize", "version": "0.1.0", "title": "SQL materialize", "description": "Materialize a table from a read-only SELECT (an MCP JSON-RPC POST via ducknng_ncurl_table).", "output": { "mode": "table" } }],
     "resources": [{
@@ -11,7 +11,7 @@
       "params": {
         "table": "mcp_initialize",
         "extensions": ["ducknng"],
-        "sql": "SELECT * FROM ducknng_ncurl_table(getvariable('mcp_url'), 'POST', '[{\"name\":\"Content-Type\",\"value\":\"application/json\"},{\"name\":\"Accept\",\"value\":\"application/json, text/event-stream\"}]', json_object('jsonrpc','2.0','id',1,'method','initialize','params', json_object('protocolVersion','2025-06-18','capabilities', json_object(), 'clientInfo', json_object('name','pi-bio-agent','version','0.1.0')))::VARCHAR::BLOB, 20000, coalesce(getvariable('tls'), 0)::UBIGINT)"
+        "sql": "SELECT * FROM ducknng_ncurl_table(getvariable('mcp_url'), 'POST', '[{\"name\":\"Content-Type\",\"value\":\"application/json\"},{\"name\":\"Accept\",\"value\":\"application/json\"}]', json_object('jsonrpc','2.0','id',1,'method','initialize','params', json_object('protocolVersion','2025-06-18','capabilities', json_object(), 'clientInfo', json_object('name','pi-bio-agent','version','0.1.0')))::VARCHAR::BLOB, 20000, coalesce(getvariable('tls'), 0)::UBIGINT)"
       }
     }]
   }
