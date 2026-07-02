@@ -155,8 +155,11 @@ export async function withCasObject<R>(
     // `committed` are safe to hold under our lease.
     if (state === "deleted" || state === "deleting" || state === undefined) return { hit: false };
     if (state === "tombstoned") {
-      // bytes still present (not swept yet) and we hold a lease -> revive rather than re-fetch
-      await conn.run(`UPDATE cas_object SET state = 'committed', tombstoned_at = NULL WHERE algorithm = ? AND digest = ?`, [address.algorithm, address.digest.toLowerCase()]);
+      // bytes still present (not swept yet) and we hold a lease -> revive rather than re-fetch. REFRESH committed_at
+      // too (same invariant as recordCasObject's resurrect): a revived object keeping its OLD committed_at is
+      // immediately mark-eligible again — the next gcMark (committed_at < cutoff, and our lease may already be gone)
+      // would re-tombstone it and a sweep could delete the just-reused bytes before a durable ref roots them.
+      await conn.run(`UPDATE cas_object SET state = 'committed', tombstoned_at = NULL, committed_at = ? WHERE algorithm = ? AND digest = ?`, [nowMs, address.algorithm, address.digest.toLowerCase()]);
     }
     return { hit: true, result: await onHit() };
   } finally {

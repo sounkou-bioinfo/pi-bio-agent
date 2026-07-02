@@ -130,6 +130,20 @@ describe("CAS metadata GC: ref/lease anti-join (the distributed-safe sweep)", ()
     assert.deepEqual(r3, { hit: false }, "deleted object -> miss (caller re-fetches)");
   });
 
+  test("reviving a tombstoned object REFRESHES committed_at, so the next mark can't immediately re-tombstone the reuse", async () => {
+    const { conn, cas } = await setup();
+    const a = await store(cas, conn, "revive-refresh", 1000); // committed long ago
+    await gcMark(conn, { cutoffMs: 2000, nowMs: 2000 }); // no ref/lease + old commit -> tombstoned
+    // revive it under a SHORT lease at a much later time; the lease is expired by the mark below, so ONLY a refreshed
+    // committed_at can protect it — this is the shared-CAS reuse-safety window the invariant guards.
+    await withCasObject(conn, a, "reader", 1, async () => "reused", 3000);
+    const st = await conn.all<{ state: string; committed_at: number }>(`SELECT state, committed_at FROM cas_object WHERE digest = ?`, [a.digest]);
+    assert.equal(st[0]!.state, "committed", "revived to committed");
+    assert.equal(Number(st[0]!.committed_at), 3000, "committed_at refreshed to the revive time, not left at 1000");
+    // a mark whose cutoff sits BETWEEN the old commit (1000) and the revive (3000) must NOT re-tombstone the reuse
+    assert.deepEqual(await gcMark(conn, { cutoffMs: 2500, nowMs: 3500 }), [], "refreshed committed_at (3000) >= cutoff (2500) — the just-reused bytes are not re-tombstoned before a ref roots them");
+  });
+
   test("sweep RE-CHECKS refs/leases at claim time — a ref or lease added AFTER mark protects bytes from the sweep", async () => {
     // the race the atomic claim closes: the old SELECT-then-loop sweep would delete an object that got re-rooted or
     // leased between the mark and the delete. The claim's NOT EXISTS must re-check, so such an object is skipped.
