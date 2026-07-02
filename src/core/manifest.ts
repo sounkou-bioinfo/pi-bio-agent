@@ -246,6 +246,13 @@ export function validateBioManifest(manifest: BioManifest): string[] {
     // inputSchema/outputSchema are JSON Schemas — opaque, not key-checked.
     rejectUnknownKeys(op, ["id", "version", "title", "description", "transport", "inputSchema", "outputSchema", "identifiers", "sql", "cache", "provenance", "notes"], `operation '${op.id}'`, errors);
     if (op.sql) rejectUnknownKeys(op.sql, ["sqlTemplate", "readOnly", "singleStatement", "requiredResources"], `operation '${op.id}'.sql`, errors);
+    // Strict admission is "every structural level" (see rejectUnknownKeys' doc, which names a smuggled `client`):
+    // the NESTED operation objects must be key-checked too, else `cache.client`/`provenance.client`/an extra
+    // identifier key rides along as inert JSON a future reader might honor.
+    if (op.cache) rejectUnknownKeys(op.cache, ["mode", "ttlSeconds", "keyFields"], `operation '${op.id}'.cache`, errors);
+    if (op.provenance) rejectUnknownKeys(op.provenance, ["includeRequest", "includeResponseDigest", "sources"], `operation '${op.id}'.provenance`, errors);
+    if (op.identifiers !== undefined && !Array.isArray(op.identifiers)) errors.push(`operation '${op.id}'.identifiers must be an array`);
+    else for (const hint of op.identifiers ?? []) rejectUnknownKeys(hint, ["name", "namespace", "required", "description"], `operation '${op.id}'.identifiers[]`, errors);
     for (const rid of op.sql?.requiredResources ?? []) {
       if (!resourceIds.has(rid)) errors.push(`operation '${op.id}' requires undeclared resource '${rid}'`);
     }

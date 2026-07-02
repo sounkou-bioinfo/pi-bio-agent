@@ -61,6 +61,19 @@ describe("validateBioManifest: fail closed", () => {
     }] });
     assert.ok(validateBioManifest(onSql).some((e) => e.includes("unknown key 'requiredColumns'")));
 
+    // "every structural level" means the NESTED operation objects too: cache / provenance / identifiers[] — a
+    // smuggled `client` there must not ride along (the doc names exactly this key).
+    const nested = (extra: Record<string, unknown>) => baseManifest({ operations: [{
+      id: "op1", version: "0.1.0", title: "Op", description: "d",       transport: "duckdb.sql", inputSchema: { type: "object" },
+      sql: { sqlTemplate: "SELECT 1 AS x FROM t1", readOnly: true, requiredResources: ["t1"] }, ...extra,
+    } as never] });
+    assert.ok(validateBioManifest(nested({ cache: { mode: "none", client: "x" } })).some((e) => e.includes("unknown key 'client'")), "cache.client rejected");
+    assert.ok(validateBioManifest(nested({ provenance: { includeRequest: true, client: "x" } })).some((e) => e.includes("unknown key 'client'")), "provenance.client rejected");
+    assert.ok(validateBioManifest(nested({ identifiers: [{ name: "gene", namespace: "HGNC", client: "x" }] })).some((e) => e.includes("unknown key 'client'")), "identifiers[].client rejected");
+    // and a non-array identifiers fails closed (no TypeError), like termSet members
+    assert.doesNotThrow(() => validateBioManifest(nested({ identifiers: {} })));
+    assert.ok(validateBioManifest(nested({ identifiers: {} })).some((e) => /identifiers must be an array/.test(e)));
+
     // opacity is still allowed where core declared it: resource.params and the operation's JSON inputSchema
     const opaqueOk = baseManifest({ resources: [{ id: "t1", title: "T1", kind: "virtual", resolver: "inline.table", params: { ...tableParams("t1"), anything: { nested: true } } }] });
     assert.deepEqual(validateBioManifest(opaqueOk), []);
