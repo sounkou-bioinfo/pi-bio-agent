@@ -114,7 +114,16 @@ async function validateAndTest(conn: SqlConn, candidate: OperationCandidate, dep
 export async function submitCandidateForApproval(conn: SqlConn, candidate: OperationCandidate, deps: { sandbox: SqlConn; recordedAt: string; source: string }): Promise<SubmitOutcome> {
   const { specDigest, validation, test } = await validateAndTest(conn, candidate, deps);
   const pendingApproval = validation === "passed" && test === "passed";
-  if (pendingApproval) await recStatus(conn, specDigest, deps.recordedAt, deps.source, "approval", "harness:approval_status", "pending");
+  if (pendingApproval) {
+    // A TERMINAL decision is PERMANENT per specDigest (content-addressed = the exact same candidate). Refuse to
+    // re-park an already-decided candidate — otherwise re-submitting after a REJECTION would supersede 'rejected'
+    // with 'pending', and a later approve would activate the very spec that was terminally rejected.
+    const prior = parseStatus(await observationAsOfKey(conn, `candidate:${specDigest}:approval`, FAR_FUTURE));
+    if (prior === "approved" || prior === "rejected") {
+      throw new Error(`submitCandidateForApproval: candidate ${specDigest} was already ${prior} — a terminal decision is permanent; a re-submit must not reset it to pending`);
+    }
+    await recStatus(conn, specDigest, deps.recordedAt, deps.source, "approval", "harness:approval_status", "pending");
+  }
   return { specDigest, validation, test, pendingApproval };
 }
 

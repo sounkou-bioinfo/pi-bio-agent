@@ -33,6 +33,15 @@ describe("run-observations: ad-hoc SQL folds into the ONE store as an as-of, att
     assert.equal(v.manifestDigest, "sha256:def");
   });
 
+  test("a BACKDATED re-run of the same runId still SUPERSEDES in the ledger (monotonic) — no stale-digest current fact", async () => {
+    const c = await conn();
+    // first run at T2 pins digest 'new-ish'; a REUSED runId re-run arrives BACKDATED at T1 (< T2) with fresh digests
+    await recordRunObservation(c, { runId: "r", kind: "query", identity: "ad-hoc.query", status: "succeeded", resultDigest: "sha256:" + "1".repeat(64) }, "2026-01-01T00:00:02Z", "agent:A");
+    await recordRunObservation(c, { runId: "r", kind: "query", identity: "ad-hoc.query", status: "succeeded", resultDigest: "sha256:" + "2".repeat(64) }, "2026-01-01T00:00:01Z", "agent:B");
+    const v = JSON.parse((await observationAsOfKey(c, "run:r", MEMORY_NOW))!.value_json!);
+    assert.equal(v.resultDigest, "sha256:" + "2".repeat(64), "the LATER re-run's fact is current — the backdated write was advanced past the prior, not left stale");
+  });
+
   test("a real run records its run:<id> fact DIRECTLY into the store (no file read-back), with actual digests", async () => {
     const store = await conn();
     const res = await runBioQueryFromManifest({

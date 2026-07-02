@@ -65,6 +65,18 @@ describe("Phase 4.4: durable submit -> (park) -> decide approval", () => {
     assert.equal(ok.activated, true);
   });
 
+  test("SECURITY: re-submitting a terminally-REJECTED candidate is refused (a terminal decision is permanent, not reset to pending)", async () => {
+    const conn = await obsConn();
+    const sub = await submitCandidateForApproval(conn, good, { sandbox: await sandbox(), recordedAt: T1, source: "ci" });
+    await decideCandidateApproval(conn, { id: "double.report", version: "1.0.0", specDigest: sub.specDigest, approved: false, decidedAt: T2, source: "bob", reason: "no" });
+    // re-submitting the SAME candidate (same specDigest) at a later time must NOT reset 'rejected' back to 'pending'
+    const sb = await sandbox();
+    await assert.rejects(
+      () => submitCandidateForApproval(conn, good, { sandbox: sb, recordedAt: "2026-06-30T03:00:00Z", source: "ci" }),
+      /already rejected — a terminal decision is permanent/,
+    );
+  });
+
   test("SECURITY: a terminal decision can't be bypassed by BACKDATING — the check reads the LATEST state, not as-of decidedAt", async () => {
     const conn = await obsConn();
     const sub = await submitCandidateForApproval(conn, good, { sandbox: await sandbox(), recordedAt: T1, source: "ci" });
