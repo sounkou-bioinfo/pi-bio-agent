@@ -99,7 +99,9 @@ export function httpTableResolver(fetchImpl: FetchLike): BioResolverImpl {
     // freshness token (SCOPE\0ETag), so no memo-schema change is needed.
     const scope = ctx.remoteCacheScope;
     const memoRaw = memoable && scope !== undefined ? await memoGet(ctx.conn, table) : undefined;
-    const memo = memoRaw && unpackScope(memoRaw.freshness) === scope ? memoRaw : undefined;
+    // Trust a memo row only if its freshness is a well-formed SCOPE\0ETag whose scope matches — a malformed entry
+    // (no \0, e.g. a raw etag left by an older bug, or a server-crafted value) is a MISS, never a cross-scope hit.
+    const memo = memoRaw && memoRaw.freshness.includes("\0") && unpackScope(memoRaw.freshness) === scope ? memoRaw : undefined;
     const sameUrl = memo?.receipt.sourceSnapshots[0]?.source === url;
     const casRemote = !memo && memoable && cas && scope !== undefined ? await cas.getRemote(url, scope) : undefined;
     const validator = memo && sameUrl ? unpackEtag(memo.freshness) : casRemote?.etag;
@@ -121,7 +123,7 @@ export function httpTableResolver(fetchImpl: FetchLike): BioResolverImpl {
         // cross-db: the unchanged bytes are already in CAS (a prior fetch put them) — materialize from them, no download
         await materializeFrom(cas.pathFor(casRemote.address));
         const output = outputFor(casRemote.address.digest);
-        if (memoable) await memoStore(ctx.conn, table, casRemote.etag, output); // seed THIS db's memo (scope already matched on the getRemote hit)
+        if (memoable && scope !== undefined) await memoStore(ctx.conn, table, packFreshness(scope, casRemote.etag), output); // seed THIS db's memo SCOPED (this path only runs with a scope) — must pack, not store the raw etag, or a later unpackScope mis-parses it
         return output;
       }
       throw new Error(`http resolver: GET ${url} returned 304 but no cached bytes were available to replay`);

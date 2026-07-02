@@ -49,6 +49,13 @@ describe("CAS-of-bytes: cross-db remote reuse (http.get)", () => {
     // the receipt addresses the same content and is tagged as a CAS resolution
     assert.equal(out2.provenance[0]!.notes?.includes("cas"), true);
     assert.match(out2.sourceSnapshots[0]!.version ?? "", /^sha256:[0-9a-f]{64}$/);
+
+    // SECURITY: the per-db memo db2 seeded via the CAS-304 path is SCOPED — a DIFFERENT scope on the SAME db must
+    // NOT replay it (a prior bug stored the raw ETag here, so a server-crafted ETag could be mis-parsed as another
+    // scope). It re-fetches under its own scope instead.
+    const out3 = await httpTableResolver(fetchImpl)(resource(params), { conn: db2, now: "T3", cas, remoteCacheScope: "tenant:evil" });
+    assert.equal(bodyDownloads, 2, "a different scope on the same db did not inherit the CAS-304-seeded memo");
+    assert.match(out3.sourceSnapshots[0]!.version ?? "", /^sha256:[0-9a-f]{64}$/);
   });
 
   test("SECURITY: the cross-db index is fail-closed — no scope means NO cross-db reuse (per-db memo still works)", async () => {

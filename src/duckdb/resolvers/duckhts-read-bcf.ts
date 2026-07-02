@@ -84,7 +84,9 @@ export const duckhtsReadBcfResolver: BioResolverImpl = async (resource, ctx) => 
       { source: "duckhts", version: duckhtsVersion, retrievedAt: now },
       { source: sourceUri, version: inputDigest, retrievedAt: now },
     ],
-    // record the region in provenance so a region read is auditable as exactly the slice it read, not the whole file
-    provenance: [{ source: "duckhts.read_bcf", retrievedAt: now, notes: region ? ["region read", `region:${region}`] : ["whole-file read"] }],
+    // record the region in provenance so a region read is auditable as exactly the slice it read, not the whole file.
+    // live_source when we could NOT content-pin the input (remote/unreadable -> inputDigest undefined, version null):
+    // then the receipt is blind to the data's content, so reproduce must not claim a match without a CAS output pin.
+    provenance: [{ source: "duckhts.read_bcf", retrievedAt: now, notes: [...(region ? ["region read", `region:${region}`] : ["whole-file read"]), ...(inputDigest === undefined ? ["live_source"] : [])] }],
   };
 };

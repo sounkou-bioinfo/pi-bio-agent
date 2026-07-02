@@ -42,5 +42,10 @@ export function validateReadOnlySelect(sql: string): string {
   if (scan.includes(";")) throw new Error("one statement only");
   if (!/^(select|with)\b/i.test(trimmed)) throw new Error("query must be a SELECT or WITH ... SELECT");
   if (forbiddenSql.test(scan)) throw new Error("query contains forbidden write/DDL keywords");
+  // DuckDB's dynamic-SQL table functions EXECUTE a string as SQL, so a write hidden in that string (which the
+  // literal-strip removes from `scan`) would otherwise slip past the keyword check: `SELECT * FROM query('CREATE
+  // TABLE pwn AS SELECT 1')` runs DDL. The function NAME is outside the string, so it survives in `scan` — reject
+  // the call form (not a bare `query` column) at the boundary. (prepare/execute are covered by forbiddenSql.)
+  if (/\bquery(_table)?\s*\(/i.test(scan)) throw new Error("query contains a dynamic-SQL table function (query()/query_table()) — forbidden");
   return trimmed; // return the ORIGINAL sql (literals intact) — only the SCAN copy was stripped
 }

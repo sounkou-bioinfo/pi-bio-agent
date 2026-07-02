@@ -36,9 +36,14 @@ describe("validateReadOnlySelect: the single read-only SQL guard", () => {
       ["SELECT 1; DROP TABLE v", /one statement only/],
       ["CREATE TABLE v AS SELECT 1", /SELECT/],
       ["WITH x AS (DELETE FROM y RETURNING *) SELECT * FROM x", /forbidden/],
+      // DuckDB dynamic-SQL table functions EXECUTE their string arg — a write hidden in the (stripped) literal must not slip past
+      ["SELECT * FROM query('CREATE TABLE pwn AS SELECT 1')", /dynamic-SQL table function/],
+      ["SELECT * FROM query_table('pwn', true)", /dynamic-SQL table function/],
     ] as const) {
       assert.throws(() => validateReadOnlySelect(sql), re, sql);
     }
+    // but a plain column/identifier literally named 'query' is fine (only the CALL form query( is rejected)
+    assert.equal(validateReadOnlySelect("SELECT query FROM searches"), "SELECT query FROM searches");
   });
 
   // The guard is statement-class only — NOT a network/filesystem firewall. DuckDB replacement scans and
