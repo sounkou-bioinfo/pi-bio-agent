@@ -200,6 +200,26 @@ describe("job durability: rich status is not lost + the ledger timestamp wins + 
     await assert.rejects(() => collectAndRecordBioJob(conn, local, { cwd, runId: "ghost", now: "2026-07-01T00:00:10Z" }), /no durable record/);
   });
 
+  test("progress within a phase is DURABLE: a same-phase progress change records a new as-of row", async () => {
+    const { conn, cwd } = await setup();
+    let progress = { current: 1, total: 3, unit: "chunks" };
+    const runner: JobRunner = { async submit() {}, async status(runId) { return { runId, phase: "running", at: "RUNNER", progress }; }, async collect() { return null; } };
+    await submitBioJob(conn, runner, { cwd, runId: "pg1", replay: replay("pg1"), now: "2026-07-01T00:00:01Z" });
+    await pollBioJob(conn, runner, { cwd, runId: "pg1", now: "2026-07-01T00:00:05Z" }); // records running @ 1/3
+    progress = { current: 2, total: 3, unit: "chunks" };
+    await pollBioJob(conn, runner, { cwd, runId: "pg1", now: "2026-07-01T00:00:07Z" }); // SAME phase, new progress -> new row
+    progress = { current: 2, total: 3, unit: "chunks" };
+    const before = (await conn.all<{ n: bigint }>(`SELECT count(*) n FROM bio_observations WHERE statement_key='job:pg1:status'`))[0].n;
+    await pollBioJob(conn, runner, { cwd, runId: "pg1", now: "2026-07-01T00:00:09Z" }); // UNCHANGED progress -> no new row
+    const after = (await conn.all<{ n: bigint }>(`SELECT count(*) n FROM bio_observations WHERE statement_key='job:pg1:status'`))[0].n;
+    assert.equal(Number(after), Number(before), "an unchanged poll does NOT record — bounded to real updates");
+
+    // as-of the two poll times reflects the DIFFERENT progress values (durable history)
+    assert.deepEqual(JSON.parse((await observationAsOfKey(conn, "job:pg1:status", "2026-07-01T00:00:05Z"))!.value_json!).progress, { current: 1, total: 3, unit: "chunks" });
+    assert.deepEqual(JSON.parse((await observationAsOfKey(conn, "job:pg1:status", "2026-07-01T00:00:07Z"))!.value_json!).progress, { current: 2, total: 3, unit: "chunks" });
+    assert.deepEqual((await resumeBioJob(conn, { cwd, runId: "pg1" })).progress, { current: 2, total: 3, unit: "chunks" }, "resume shows the latest durable progress");
+  });
+
   test("collectAndRecordBioJob records the terminal STATUS too, so the result is reachable WITHOUT a prior poll", async () => {
     const { conn, cwd, clock } = await setup();
     const local = inMemoryJobRunner({ clock, execute: async () => ({ result: { ok: 7 } }) });

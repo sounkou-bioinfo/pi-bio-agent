@@ -114,9 +114,9 @@ export async function submitBioJob(conn: SqlConn, runner: JobRunner, req: Submit
   return { runId: req.runId, phase: already?.phase ?? "queued", at: already?.at ?? req.now };
 }
 
-/** Poll a job: read the runner's current status and record it as a new observation IFF the phase actually changed
- *  AND `now` is strictly after the slot's last row (so the ledger advances only on real, monotonic transitions).
- *  Fails closed if the durable record is missing. Every recorded transition carries the job's replay digest. */
+/** Poll a job: read the runner's current status and record it as a new observation IFF the phase OR the rich status
+ *  (progress/message) actually changed AND `now` is strictly after the slot's last row (so the ledger advances only
+ *  on real, monotonic updates — durable progress, not every poll). Fails closed if the durable record is missing. */
 export async function pollBioJob(conn: SqlConn, runner: JobRunner, req: { cwd: string; runId: string; now: string; source?: string }): Promise<JobStatus> {
   const existing = await readJobRecord(req.cwd, req.runId);
   if (!existing) throw new Error(`job-store: no durable record for job '${req.runId}' (submit it first)`);
@@ -129,7 +129,12 @@ export async function pollBioJob(conn: SqlConn, runner: JobRunner, req: { cwd: s
   }
   const st = await runner.status(req.runId);
   if (!st) throw new Error(`job-store: no job '${req.runId}' is known to the runner`);
-  if (!latest || latest.phase !== st.phase) {
+  // record a new row on a PHASE change OR a same-phase rich-status change (progress/message moved) — so a
+  // long-running job's progress is durable and readable as-of t, not just its phase transitions. Recording only
+  // on actual CHANGE (not every poll) keeps the ledger bounded to real updates.
+  const richChanged = !!latest && latest.phase === st.phase
+    && (latest.message !== st.message || JSON.stringify(latest.progress ?? null) !== JSON.stringify(st.progress ?? null));
+  if (!latest || latest.phase !== st.phase || richChanged) {
     if (latest && !(req.now > latest.at)) throw new Error(`job-store: now '${req.now}' must be strictly after the last status at '${latest.at}' to record a transition`);
     await recordPhase(conn, req.runId, { phase: st.phase, message: st.message, progress: st.progress }, req.now, req.source ?? "job-store", existing.replayDigest);
     await persistJob(req.cwd, { ...existing, phase: st.phase, updatedAt: req.now });
