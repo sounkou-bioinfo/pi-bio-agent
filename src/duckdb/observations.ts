@@ -218,6 +218,39 @@ export async function withSlotLock<T>(statementKey: string, fn: () => Promise<T>
   }
 }
 
+// Per-CONNECTION transaction serialization. DuckDB allows only ONE active transaction per connection, so two
+// overlapping BEGINs on one connection throw; this WeakMap chain guarantees transactions on a given connection run
+// one at a time. Keyed by the connection object so distinct connections transact in parallel.
+const connTxnChains = new WeakMap<object, Promise<void>>();
+/** Run `fn` as a single DuckDB transaction (BEGIN → COMMIT; ROLLBACK on throw), serialized per connection. Use for a
+ *  MULTI-STATEMENT state transition that must be ALL-OR-NOTHING (memory remember/forget: content + link edges +
+ *  tombstones) — a mid-way insert failure then rolls the whole revision back instead of leaving partial edges.
+ *  CONTRACT: while this transaction is open the connection must NOT be used by ANOTHER concurrent writer, or that
+ *  write joins (and can be rolled back with) this txn. The extension opens a FRESH connection per op, which
+ *  satisfies it; a caller that shares one connection across concurrent subsystems must serialize them itself. */
+export async function inTransaction<T>(conn: SqlConn, fn: () => Promise<T>): Promise<T> {
+  const key = conn as unknown as object;
+  const prev = connTxnChains.get(key) ?? Promise.resolve();
+  const run = prev.then(async () => {
+    await conn.run("BEGIN TRANSACTION");
+    try {
+      const r = await fn();
+      await conn.run("COMMIT");
+      return r;
+    } catch (e) {
+      try { await conn.run("ROLLBACK"); } catch { /* surface the ORIGINAL error, not a rollback failure */ }
+      throw e;
+    }
+  });
+  const tail = run.then(() => {}, () => {}); // normalized settled tail so one failure doesn't break the chain
+  connTxnChains.set(key, tail);
+  try {
+    return await run;
+  } finally {
+    if (connTxnChains.get(key) === tail) connTxnChains.delete(key); // GC when idle
+  }
+}
+
 /** Record a STATE-MACHINE observation whose `recordedAt` must strictly-monotonically supersede the slot's latest —
  *  the atomic read-then-write that memory/skill/action-cache/run:<id> writers need. Serializes per statement_key in
  *  this process (concurrent same-slot writers can't race the +1ms advance) and returns the observation id. `sentinel`

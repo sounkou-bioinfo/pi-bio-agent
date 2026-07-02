@@ -25,6 +25,26 @@ describe("temporal memory over bio_observations", () => {
     assert.equal((await recall(c, "s"))?.body, "ok");
   });
 
+  test("ATOMIC revision: a mid-write insert failure ROLLS BACK the whole remember — no partial content/edges", async () => {
+    const c = await conn();
+    await remember(c, note("base", "seed"), T1, "agent:A"); // an existing revision to prove it survives the failed write
+    // wrap the conn so the 2nd INSERT (the link edge, after the content insert) throws — simulating a mid-txn failure
+    let inserts = 0;
+    const faulty: SqlConn = {
+      all: (sql, params) => c.all(sql, params),
+      run: (sql, params) => {
+        if (/INSERT INTO bio_observations/i.test(sql) && ++inserts === 2) throw new Error("injected mid-write failure");
+        return c.run(sql, params);
+      },
+    };
+    await assert.rejects(() => remember(faulty, { ...note("base", "NEW body [[other]]"), slug: "base" }, T2, "agent:B"), /injected mid-write failure/);
+    // the transaction rolled back: the base note still reads its ORIGINAL content, and the failed revision's edge is absent
+    const still = await recall(c, "base");
+    assert.equal(still?.body, "seed", "the failed remember rolled back — original content intact, no partial revision");
+    const edges = await liveOutEdgesAsOf(c, memorySubjectId("base"), MEMORY_NOW);
+    assert.deepEqual(edges, [], "no partial link edge from the rolled-back revision");
+  });
+
   test("reads on a FRESH store (no schema) return empty/null, not a missing-table throw", async () => {
     const c = await conn(); // NO createBioObservationSchema — a bare connection
     assert.equal(await recall(c, "nope"), null, "recall of an unprovisioned store is null");

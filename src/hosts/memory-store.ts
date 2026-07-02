@@ -8,7 +8,7 @@ import {
   liveOutEdgesAsOf,
   recordObservation,
   monotonicRecordedAt,
-  withSlotLock,
+  inTransaction,
   type ObservationRow,
 } from "../duckdb/observations.js";
 
@@ -72,11 +72,12 @@ export async function ensureMemorySchema(conn: SqlConn): Promise<void> {
 export async function remember(conn: SqlConn, note: MemoryContent, wallNow: string, author?: string): Promise<void> {
   await ensureMemorySchema(conn);
   const subject = memorySubjectId(note.slug);
-  // SERIALIZE the whole revision (content + link edges + dropped-link tombstones) per slug: it is a multi-write state
-  // transition read against the slot's current latest, so a concurrent same-slug remember/forget must not interleave
-  // (see withSlotLock). Inside the lock we call recordObservation directly at the once-computed monotonic `now` —
-  // NOT recordMonotonicObservation (that would re-acquire this same-key lock and deadlock).
-  await withSlotLock(subject, async () => {
+  // ATOMIC + serialized: the whole revision (content + link edges + dropped-link tombstones) is a multi-write state
+  // transition read against the slot's current latest, so it runs in ONE transaction (all-or-nothing — a mid-way
+  // insert failure rolls the whole revision back, never leaving partial edges) serialized per connection (no
+  // concurrent same-slug remember/forget can interleave). Inside we call recordObservation directly at the
+  // once-computed monotonic `now` — NOT recordMonotonicObservation (per-slot lock is subsumed by the per-conn txn).
+  await inTransaction(conn, async () => {
     const now = await monotonicNow(conn, subject, wallNow); // strictly after the slug's current revision (deterministic latest-wins)
     // `source` = the authoring agent. It is part of observation IDENTITY, so two agents remembering the same slug
     // are two attributed rows (both retained); the latest by recorded_at is "current". This is what makes shared
@@ -155,9 +156,9 @@ export async function listMemory(conn: SqlConn, asOf: string = MEMORY_NOW): Prom
 export async function forget(conn: SqlConn, slug: string, wallNow: string, author?: string): Promise<void> {
   await ensureMemorySchema(conn);
   const subject = memorySubjectId(slug);
-  // SERIALIZE the tombstone + edge retractions per slug (same reasoning as remember): a multi-write transition read
-  // against the slot's current latest must not interleave with a concurrent same-slug write.
-  await withSlotLock(subject, async () => {
+  // ATOMIC + serialized (same reasoning as remember): the tombstone + edge retractions are one all-or-nothing
+  // transaction per connection, so a failed edge retraction can't leave a forgotten node with live phantom edges.
+  await inTransaction(conn, async () => {
     const now = await monotonicNow(conn, subject, wallNow); // strictly after the current content so a same-ms remember→forget deterministically forgets
     await recordObservation(conn, { statementKey: subject, subjectId: subject, predicate: CONTENT, recordedAt: now, source: author });
     // Also retract the note's OWN link edges (statement_key `${subject}|…`) — otherwise they linger in bio_edges_as_of
