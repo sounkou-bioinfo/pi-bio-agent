@@ -375,7 +375,6 @@ substrate. This list is generated from the extension’s `registerTool()`
 calls (`npm run readme:tools`); `npm run check` fails if it drifts.
 
 <!-- BEGIN GENERATED:tools (scripts/generate-readme-tools.mjs — do not edit by hand) -->
-
 - `bio_describe_model` — Describe Pi Bio model
 - `bio_run_operation` — Run a bio operation
 - `bio_query` — Run an ad-hoc bio query
@@ -387,7 +386,8 @@ calls (`npm run readme:tools`); `npm run check` fails if it drifts.
 - `bio_list_memory` — List memory
 - `bio_walk_memory` — Walk bio memory graph
 - `bio_recall` — Recall memory note
-- `bio_forget` — Forget memory note <!-- END GENERATED:tools -->
+- `bio_forget` — Forget memory note
+<!-- END GENERATED:tools -->
 
 Project-local skills and the memory store live under `.pi/bio-agent/` in
 the current project.
