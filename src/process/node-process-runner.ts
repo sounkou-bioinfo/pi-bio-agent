@@ -3,9 +3,15 @@ import { StringDecoder } from "node:string_decoder";
 import type { ProcessRunner, ProcessRunResult, ProcessRunSpec } from "../core/ports.js";
 import { ENV_DESCRIPTOR_SCHEMA, unknownEnvDescriptor, type EnvDescriptor } from "../core/reproducibility.js";
 
-// A minimal, NON-SECRET base environment for a spawned child: just enough to resolve binaries and locale, never
-// the host's arbitrary vars (that's where secrets — *_API_KEY, *_TOKEN, AWS_*, … — live). An allowlist, not a
+// A minimal base environment for a spawned child: just enough to resolve binaries and locale, never the host's
+// arbitrary vars (that's where ENV-VAR secrets — *_API_KEY, *_TOKEN, AWS_*, … — live). An allowlist, not a
 // denylist, so a newly-invented secret var name can't slip through. The host adds anything else via spec.env.
+//
+// SCOPE — this allowlists ENV VARS; it is NOT a filesystem/secret SANDBOX. `HOME`/`USER` are passed so real tools
+// work (R user libraries, git, conda), but that means a child can still do file-based credential discovery
+// (`~/.aws/credentials`, `.netrc`, cloud-CLI caches) and copy those bytes into an output artifact. Env hygiene is
+// the library's job; FILESYSTEM/network isolation is the HOST's — a secret-bearing host must run a jailed/container
+// ProcessRunner (or an empty HOME), exactly like the DuckDB egress residue. nodeProcessRunner is the trusting default.
 const SAFE_ENV_KEYS = ["PATH", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "TMPDIR", "TEMP", "TMP", "SHELL", "USER", "LOGNAME", "SystemRoot", "PATHEXT", "COMSPEC", "WINDIR"];
 function safeBaseEnv(): Record<string, string> {
   const out: Record<string, string> = {};
