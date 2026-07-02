@@ -176,6 +176,17 @@ live when this README renders (the push/pull, pub/sub, and survey topologies are
 scripts/nng-job-runner.mjs
 ```
 
+**And files, not just status — because this is bioinformatics.** A job produces a *file* (a plot, a VCF), and
+another agent has to read it. Here one process plots a real PNG, stores the bytes in a content-addressed store
+(CAS), and records only the **digest** in the shared ledger over ducknng RPC; a *separate* reader process reads
+that digest and fetches the exact bytes from CAS. Files move by content address, the ledger moves the reference.
+(A shared CAS covers the common HPC shared-storage case; a no-shared-filesystem deployment ships the CAS bytes over
+the same transport. No separate distributed-filesystem layer is needed.)
+
+```{nng}
+scripts/nng-file-handoff.mjs
+```
+
 **A database connector is a manifest, not a client.** The "60+ connected databases" a hosted workbench advertises
 are, here, one file each: [`examples/connectors/`](examples/connectors/) ships UniProt, RCSB PDB, MyGene, and
 Reactome, and a new one is a new URL. The manifest declares *where* the data is; the agent discovers the schema

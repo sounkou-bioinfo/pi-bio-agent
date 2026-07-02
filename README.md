@@ -162,15 +162,15 @@ pi-bio-agent query examples/connectors/clinvar-region.json \
 ``` json
 {
   "ok": true,
-  "runId": "query-1783034343257-9257b089",
+  "runId": "query-1783035599597-10ea5274",
   "status": "succeeded",
   "rowCount": 8,
   "artifacts": {
-    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783034343257-9257b089/run.json",
-    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783034343257-9257b089/result.json",
-    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783034343257-9257b089/receipts.json"
+    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783035599597-10ea5274/run.json",
+    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783035599597-10ea5274/result.json",
+    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783035599597-10ea5274/receipts.json"
   },
-  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783034343257-9257b089",
+  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783035599597-10ea5274",
   "rows": [
     {
       "sig": "Pathogenic",
@@ -227,30 +227,30 @@ pi-bio-agent query examples/run-ledger/manifest.json \
 ``` json
 {
   "ok": true,
-  "runId": "query-1783034345634-0f019bad",
+  "runId": "query-1783035602017-e2c5a760",
   "status": "succeeded",
   "rowCount": 4,
   "artifacts": {
-    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783034345634-0f019bad/run.json",
-    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783034345634-0f019bad/result.json",
-    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783034345634-0f019bad/receipts.json"
+    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783035602017-e2c5a760/run.json",
+    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783035602017-e2c5a760/result.json",
+    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783035602017-e2c5a760/receipts.json"
   },
-  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783034345634-0f019bad",
+  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783035602017-e2c5a760",
   "rows": [
     {
       "tool": "ad-hoc.query",
       "status": "succeeded",
-      "n": 3108
+      "n": 3175
     },
     {
       "tool": "ad-hoc.query",
       "status": "failed",
-      "n": 145
+      "n": 149
     },
     {
       "tool": "rare_high_impact.report",
       "status": "succeeded",
-      "n": 71
+      "n": 75
     },
     {
       "tool": "counts.by_consequence",
@@ -285,15 +285,41 @@ node scripts/nng-job-runner.mjs
 
     Distributed compute over ducknng: a separate worker reports job status into the shared ledger
 
-      [coordinator pid 3063923] job ledger up; 'wgs-annotate-chr22' recorded as queued
-      [worker nng-worker-1 pid 3064002] reported 'running' over ducknng RPC
-      [worker nng-worker-1 pid 3064002] reported 'succeeded' over ducknng RPC
+      [coordinator pid 3126300] job ledger up; 'wgs-annotate-chr22' recorded as queued
+      [worker nng-worker-1 pid 3126406] reported 'running' over ducknng RPC
+      [worker nng-worker-1 pid 3126406] reported 'succeeded' over ducknng RPC
       [coordinator] 'wgs-annotate-chr22' final status, read back from the shared slot: "succeeded"
 
     A SEPARATE worker process wrote the job's status (running, then succeeded) into the coordinator's
     job:<id>:status slot over ducknng RPC, and the coordinator read it back with the same as-of query it
     uses for any observation. The job-store code did not change, and the worker can be any language that
     speaks NNG. A language-agnostic distributed backend over our owned transport, not an opaque runtime.
+
+**And files, not just status — because this is bioinformatics.** A job
+produces a *file* (a plot, a VCF), and another agent has to read it.
+Here one process plots a real PNG, stores the bytes in a
+content-addressed store (CAS), and records only the **digest** in the
+shared ledger over ducknng RPC; a *separate* reader process reads that
+digest and fetches the exact bytes from CAS. Files move by content
+address, the ledger moves the reference. (A shared CAS covers the common
+HPC shared-storage case; a no-shared-filesystem deployment ships the CAS
+bytes over the same transport. No separate distributed-filesystem layer
+is needed.)
+
+``` sh
+node scripts/nng-file-handoff.mjs
+```
+
+    Distributed file I/O over ducknng: one agent plots a file, another reads it back by digest
+
+      [coordinator pid 3126548] job ledger + ducknng server up; shared CAS at /tmp/pi-bio-handoff-cas-3126537
+      [agent:producer pid 3126641] plotted coverage.png (8354 B) -> CAS sha256:80c6dd525767…; recorded the digest in the ledger
+      [agent:reader pid 3126739] read the ledger, fetched 'coverage.png' from CAS by digest: 8354 B, PNG=true, sha256:80c6dd525767…
+
+    The producer wrote a real PNG into a content-addressed store and recorded only its DIGEST in the
+    shared ledger over ducknng RPC. A SEPARATE reader process read that digest and fetched the exact bytes
+    from CAS. Files move by content address; the ledger moves the reference. No ducknng-fs needed: a shared
+    CAS covers the HPC case, and a no-shared-FS deployment ships the CAS bytes over the same transport.
 
 **A database connector is a manifest, not a client.** The “60+ connected
 databases” a hosted workbench advertises are, here, one file each:
@@ -313,15 +339,15 @@ pi-bio-agent query examples/connectors/uniprot.json \
 ``` json
 {
   "ok": true,
-  "runId": "query-1783034352378-fab879ca",
+  "runId": "query-1783035616931-09fd4556",
   "status": "succeeded",
   "rowCount": 1,
   "artifacts": {
-    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783034352378-fab879ca/run.json",
-    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783034352378-fab879ca/result.json",
-    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783034352378-fab879ca/receipts.json"
+    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783035616931-09fd4556/run.json",
+    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783035616931-09fd4556/result.json",
+    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783035616931-09fd4556/receipts.json"
   },
-  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783034352378-fab879ca",
+  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783035616931-09fd4556",
   "rows": [
     {
       "primaryAccession": "P04637",
