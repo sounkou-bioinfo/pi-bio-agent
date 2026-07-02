@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { duckdbNodeConn } from "../src/duckdb/node-api.js";
-import { createBioObservationSchema, observationAsOfKey } from "../src/duckdb/observations.js";
+import { createBioObservationSchema, observationAsOfKey, recordObservation } from "../src/duckdb/observations.js";
 import { inMemoryJobRunner } from "../src/hosts/in-memory-job-runner.js";
 import { ledgerJobRunner } from "../src/hosts/ledger-job-runner.js";
 import { submitBioJob, pollBioJob, collectBioJob, collectAndRecordBioJob, readJobRecord, resumeBioJob, cancelBioJob } from "../src/hosts/job-store.js";
@@ -193,5 +193,35 @@ describe("job durability: rich status is not lost + the ledger timestamp wins + 
     const { conn, cwd, clock } = await setup();
     const local = inMemoryJobRunner({ clock, execute: async () => ({}) });
     await assert.rejects(() => collectAndRecordBioJob(conn, local, { cwd, runId: "ghost", now: "2026-07-01T00:00:10Z" }), /no durable record/);
+  });
+
+  test("collectAndRecordBioJob records the terminal STATUS too, so the result is reachable WITHOUT a prior poll", async () => {
+    const { conn, cwd, clock } = await setup();
+    const local = inMemoryJobRunner({ clock, execute: async () => ({ result: { ok: 7 } }) });
+    await submitBioJob(conn, local, { cwd, runId: "k3", replay: replay("k3"), now: "2026-07-01T00:00:01Z" });
+    await local.settle("k3");
+    // NO pollBioJob — the durable status is still 'queued'; collectAndRecord must advance it to terminal so a
+    // fresh ledger runner (which gates on terminal status) can read the result.
+    await collectAndRecordBioJob(conn, local, { cwd, runId: "k3", now: "2026-07-01T00:00:10Z" });
+    const ledger = ledgerJobRunner(conn, async () => {});
+    assert.equal((await ledger.status("k3"))!.phase, "succeeded", "status advanced to terminal by collectAndRecord");
+    assert.deepEqual((await ledger.collect("k3"))!.result, { ok: 7 }, "result is reachable without a prior poll");
+  });
+
+  test("fail closed: an unsafe runId (path traversal) is rejected", async () => {
+    const { conn, cwd, clock } = await setup();
+    const local = inMemoryJobRunner({ clock, execute: async () => ({}) });
+    for (const bad of ["../evil", "a/b", ".hidden", "x y"]) {
+      await assert.rejects(() => submitBioJob(conn, local, { cwd, runId: bad, replay: { schema: "pi-bio.run_replay_spec.v1", runId: bad, kind: "query", sql: "SELECT 1" }, now: "2026-07-01T00:00:01Z" }), /unsafe runId|runId/);
+    }
+  });
+
+  test("fail closed: a corrupt status phase in the ledger throws, not a bogus typed phase", async () => {
+    const { conn, cwd, clock } = await setup();
+    const local = inMemoryJobRunner({ clock, execute: async () => ({}) });
+    await submitBioJob(conn, local, { cwd, runId: "z1", replay: replay("z1"), now: "2026-07-01T00:00:01Z" });
+    // a hostile/corrupt shared-ledger row lands in the status slot
+    await recordObservation(conn, { statementKey: "job:z1:status", subjectId: "job:z1", predicate: "job_status", value: "banana", recordedAt: "2026-07-01T00:00:05Z", source: "hostile" });
+    await assert.rejects(() => resumeBioJob(conn, { cwd, runId: "z1" }), /invalid status phase/);
   });
 });

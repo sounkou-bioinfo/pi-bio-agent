@@ -18,12 +18,19 @@ import { recordObservation, observationAsOfKey } from "../duckdb/observations.js
 // (reproducible provenance); the snapshot is written atomically (temp+rename) and read back ENOENT-tolerant only.
 
 const FUTURE = "9999-12-31T23:59:59.999Z"; // sentinel for "the absolute latest row of a slot, regardless of now"
+const PHASES = new Set<JobPhase>(["queued", "running", "waiting", "succeeded", "failed", "cancelled"]);
 const isTerminal = (p: JobPhase): boolean => p === "succeeded" || p === "failed" || p === "cancelled";
+// runId is interpolated into a filesystem path (`<runId>.json`) — it MUST be a safe token (no path separators, no
+// leading dot), or a hostile/typo'd id could traverse outside `.pi/bio-agent/jobs`. Same shape as a run id.
+const RUN_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+const assertSafeRunId = (runId: string): void => {
+  if (typeof runId !== "string" || !RUN_ID_RE.test(runId)) throw new Error(`job-store: unsafe runId '${runId}' (letters/numbers/'.'/'_'/':'/'-', no separators, max 128)`);
+};
 const slotOf = (runId: string): string => `job:${runId}:status`;
 const resultSlotOf = (runId: string): string => `job:${runId}:result`;
 const subjectOf = (runId: string): string => `job:${runId}`;
 const jobsDir = (cwd: string): string => join(cwd, ".pi", "bio-agent", "jobs");
-const jobFile = (cwd: string, runId: string): string => join(jobsDir(cwd), `${runId}.json`);
+const jobFile = (cwd: string, runId: string): string => { assertSafeRunId(runId); return join(jobsDir(cwd), `${runId}.json`); };
 
 export interface JobRecord {
   schema: "pi-bio.job_record.v1";
@@ -62,6 +69,9 @@ async function latestSlotRow(conn: SqlConn, runId: string): Promise<{ phase: Job
   // shape ledgerJobRunner reads, so a status written by either path round-trips without losing progress/message.
   const v = JSON.parse(row.value_json) as unknown;
   const rec = (typeof v === "object" && v !== null ? v : { phase: v }) as { phase?: unknown; message?: string; progress?: JobStatus["progress"] };
+  if (typeof rec.phase !== "string" || !PHASES.has(rec.phase as JobPhase)) {
+    throw new Error(`job-store: job '${runId}' has an invalid status phase ${JSON.stringify(rec.phase)} (corrupt/hostile ledger row)`); // fail closed, don't return a bogus typed phase
+  }
   return { phase: rec.phase as JobPhase, at: row.recorded_at, message: rec.message, progress: rec.progress };
 }
 
@@ -179,6 +189,15 @@ export async function collectAndRecordBioJob(conn: SqlConn, runner: JobRunner, r
   if (!rec) throw new Error(`job-store: no durable record for job '${req.runId}' (submit it first)`);
   const res = await collectBioJob(runner, req.runId);
   if (!res) return null; // not terminal yet — nothing durable to record
+  // ensure the durable STATUS slot is terminal FIRST: ledgerJobRunner.collect gates on terminal status, so a result
+  // recorded while status still says queued/running would be unreachable. Record the terminal phase if the ledger
+  // hasn't got there yet (e.g. the caller collected without polling to terminal).
+  const latest = await latestSlotRow(conn, req.runId);
+  if (!latest || !isTerminal(latest.phase)) {
+    if (latest && !(req.now > latest.at)) throw new Error(`job-store: now '${req.now}' must be strictly after the last status at '${latest.at}' to record the terminal status`);
+    await recordPhase(conn, req.runId, { phase: res.phase, message: res.error }, req.now, req.source ?? "job-store", rec.replayDigest);
+    await persistJob(req.cwd, { ...rec, phase: res.phase, updatedAt: req.now });
+  }
   const envelope: { result?: JobResult["result"]; artifacts?: JobResult["artifacts"]; error?: string } = {};
   if (res.result !== undefined) envelope.result = res.result;
   if (res.artifacts !== undefined) envelope.artifacts = res.artifacts;
