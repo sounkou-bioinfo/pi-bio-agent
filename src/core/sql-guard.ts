@@ -11,14 +11,28 @@
 // default. (See docs/design.md: powerful by default, host-controlled effects, provenance-aware not policy-obsessed.)
 const forbiddenSql = /\b(insert|update|delete|drop|alter|create|attach|detach|copy|pragma|install|load|export|import|call|reset|begin|commit|rollback|vacuum|checkpoint|truncate|merge)\b/i;
 
-// Scan a copy with STRING LITERALS / QUOTED IDENTIFIERS / COMMENTS removed, so a keyword or ';' INSIDE a literal
-// (`SELECT 'drop' AS word`, `SELECT ';' AS c`) is not a false positive. DuckDB escapes quotes by doubling (''/"").
+// Remove STRING LITERALS / QUOTED IDENTIFIERS / COMMENTS so a keyword or ';' INSIDE one (`SELECT 'drop' AS word`,
+// `SELECT ';' AS c`) is not a false positive. A SINGLE left-to-right scan, NOT independent regexes: precedence is
+// context-dependent — a `--` INSIDE a string ('--') is not a comment, and a `'` inside a comment is not a string.
+// Doing comment-strip and literal-strip as separate ordered regexes is exploitable (`SELECT '--'; DROP` would have
+// its real `;`/DROP swallowed as a fake comment). DuckDB escapes quotes by doubling ('' / "").
 function stripLiteralsAndComments(sql: string): string {
-  return sql
-    .replace(/--[^\n]*/g, " ")            // line comments
-    .replace(/\/\*[\s\S]*?\*\//g, " ")    // block comments
-    .replace(/'(?:[^']|'')*'/g, "''")     // single-quoted string literals
-    .replace(/"(?:[^"]|"")*"/g, '""');    // double-quoted identifiers
+  let out = "";
+  for (let i = 0; i < sql.length; ) {
+    const c = sql[i], c2 = sql[i + 1];
+    if (c === "'" || c === '"') {                 // string literal / quoted identifier
+      const q = c; i++;
+      while (i < sql.length) { if (sql[i] === q) { if (sql[i + 1] === q) { i += 2; continue; } i++; break; } i++; }
+      out += " ";
+    } else if (c === "-" && c2 === "-") {          // line comment -> end of line
+      i += 2; while (i < sql.length && sql[i] !== "\n") i++;
+      out += " ";
+    } else if (c === "/" && c2 === "*") {          // block comment -> */
+      i += 2; while (i < sql.length && !(sql[i] === "*" && sql[i + 1] === "/")) i++; i += 2;
+      out += " ";
+    } else { out += c; i++; }
+  }
+  return out;
 }
 
 /** Assert `sql` is a single read-only SELECT/WITH statement; returns it trimmed (sans trailing `;`). Throws otherwise. */

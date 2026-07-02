@@ -151,6 +151,7 @@ export async function persistFailedRun(cwd: string, runId: string, payload: { ru
   await Promise.all([fs.rm(join(dir, "result.json"), { force: true }), fs.rm(join(dir, "replay.json"), { force: true })]);
   const files: { run: string; receipts?: string } = { run: await writeRunFile(dir, "run.json", payload.run) };
   if (opts.serialize !== false) files.receipts = await writeRunFile(dir, "receipts.json", payload.receipts);
+  else await fs.rm(join(dir, "receipts.json"), { force: true }); // lean mode writes none — clear a stale one from a prior run
   return { dir, files };
 }
 

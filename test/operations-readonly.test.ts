@@ -19,6 +19,10 @@ describe("validateReadOnlySelect: the single read-only SQL guard", () => {
     // a REAL write keyword outside a literal still fails closed
     assert.throws(() => validateReadOnlySelect("SELECT 1; DELETE FROM v"), /one statement only/);
     assert.throws(() => validateReadOnlySelect("SELECT 'ok'; DROP TABLE v"), /one statement only/);
+    // NO BYPASS: a comment marker INSIDE a string must not swallow a following real statement (single-pass scan)
+    assert.throws(() => validateReadOnlySelect("SELECT '--'; DROP TABLE t"), /one statement only/);
+    assert.throws(() => validateReadOnlySelect("SELECT '/*' ; DROP TABLE t"), /one statement only/);
+    assert.equal(validateReadOnlySelect("SELECT '--' AS dashes"), "SELECT '--' AS dashes"); // but -- in a single-statement literal is fine
   });
 
   test("fails closed on writes, side effects, and statement stacking", () => {
