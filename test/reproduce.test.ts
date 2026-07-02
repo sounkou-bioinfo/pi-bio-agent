@@ -64,6 +64,29 @@ describe("C2: reproduce() compares deterministic receipt content, not wall-clock
     assert.equal(drift.matched, false, "matched=false when the output content drifted, even with matching receipts");
   });
 
+  test("(#2) compares the observed ENVIRONMENT: env drift is caught even when receipts + result content match", async () => {
+    // A process.compute run's env attestation lives in the receipt's provenance NOTES, which receiptContentDigest
+    // DROPS — so a re-run under a different environment but identical output would falsely 'match' on receipts+result
+    // alone. reproduce recomputes the re-run's observed env and compares it to the pinned observedDigest.
+    const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-repro-env-"));
+    const cas = fsCasStore(await fs.mkdtemp(join(tmpdir(), "pi-bio-cas-")));
+    const out = await runBioQueryFromManifest({ cwd, dbPath: ":memory:", manifestPath: MANIFEST, sql: SQL, cas, runId: "origenv", now: "2026-07-01T00:00:00Z" });
+    assert.equal(out.ok, true);
+    const replay = JSON.parse(await fs.readFile(join((out as { runDir: string }).runDir, "replay.json"), "utf8")) as RunReplaySpec;
+
+    // no env pinned (a pure-SQL run has none): environmentMatched is undefined and does NOT drag matched down
+    const base = await reproduceRun({ cwd, replay, cas });
+    assert.equal(base.matched, true);
+    assert.equal(base.environmentMatched, undefined, "no env pin -> no env check, matched stands on receipts+result");
+
+    // pin an observed env fingerprint the re-run cannot reproduce (this pure-SQL re-run observes NO env): drift.
+    const pinnedEnv: RunReplaySpec = { ...replay, environment: { status: "observed_only", observedDigest: "sha256:" + "a".repeat(64) } };
+    const rep = await reproduceRun({ cwd, replay: pinnedEnv, cas });
+    assert.equal(rep.environmentMatched, false, "the pinned observed env was not reproduced -> env drift");
+    assert.equal(rep.matched, false, "matched=false on env drift even though receipts + result content matched");
+    assert.equal(rep.expectedEnvDigest, "sha256:" + "a".repeat(64));
+  });
+
   test("duckdbConfig reproducibility: replay pins the config DIGEST; reproduce must re-supply a matching config", async () => {
     const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-repro-cfg-"));
     const duckdbConfig = { threads: "2" };

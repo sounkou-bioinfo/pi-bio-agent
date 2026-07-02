@@ -5,7 +5,7 @@ import { RUN_REPLAY_SPEC_SCHEMA, receiptContentDigest, canonicalDigest, type Run
 import type { CasStore } from "../core/cas.js";
 import type { ProcessRunner } from "../core/ports.js";
 import type { FetchLike } from "../duckdb/resolvers/http-table-scan.js";
-import { runBioOperationFromManifest, runBioQueryFromManifest, type RunOperationResponse } from "./run-store.js";
+import { runBioOperationFromManifest, runBioQueryFromManifest, envSummaryFromReceipts, type RunOperationResponse } from "./run-store.js";
 
 // C2 — reproduce(). Given a RunReplaySpec (the durable replay inputs L1's job carries), re-execute it against a
 // FRESH db and compare the produced receipts' DETERMINISTIC content digests to the spec's sourceReceiptDigests.
@@ -40,6 +40,11 @@ export interface ReproduceResult {
   resultMatched?: boolean;
   expectedResultDigest?: string;
   producedResultDigest?: string;
+  /** ENVIRONMENT-content check: the re-run's observed env fingerprint vs the pinned one (process.compute only —
+   *  env lives in provenance notes that the receipt digest drops). undefined = not pinned/not checkable. */
+  environmentMatched?: boolean;
+  expectedEnvDigest?: string;
+  producedEnvDigest?: string;
   /** Set (with a reason) when the run CANNOT be honestly verified — an un-snapshotted live source and no output
    *  content pin. The roadmap's third C2 outcome: not_reproducible, never fake confidence. `matched` is false. */
   notReproducible?: string;
@@ -152,6 +157,15 @@ export async function reproduceRun(req: ReproduceRequest): Promise<ReproduceResu
     if (!producedResultDigest) throw new Error("reproduce: replay pins a resultDigest but the re-run produced none — pass a `cas` so the result content can be verified (fail closed)");
     resultMatched = producedResultDigest === expectedResultDigest;
   }
+  // ENVIRONMENT drift: a process.compute run's environment attestation lives in the receipt's provenance NOTES
+  // (env_observed:/env_status:), which receiptContentDigest DROPS — so a re-run under a DIFFERENT environment
+  // (different tool versions/layers) but identical output would otherwise falsely 'match'. If the replay pinned an
+  // observed env fingerprint, recompute the re-run's and compare: a mismatch is real env drift, not a match. Only
+  // process.compute runs carry an env summary; a pure-SQL run has none on either side, so this is a no-op there.
+  const expectedEnvDigest = replay.environment?.observedDigest;
+  const producedEnvDigest = envSummaryFromReceipts(receipts)?.observedDigest;
+  let environmentMatched: boolean | undefined;
+  if (expectedEnvDigest) environmentMatched = producedEnvDigest === expectedEnvDigest;
   // Roadmap C2 — never fake confidence: if the ONLY basis is receipts (no CAS resultDigest to verify OUTPUT content)
   // AND any source is un-snapshotted/live, the receipt match doesn't prove the output is the same (data.csv could
   // have changed underneath). That is not_reproducible, not a match.
@@ -164,7 +178,9 @@ export async function reproduceRun(req: ReproduceRequest): Promise<ReproduceResu
   }
   return {
     runId: replay.runId, kind: replay.kind, reproduced: true,
-    matched: receiptsMatched && (resultMatched ?? true), // BOTH provenance and (when pinned) output content must match
-    expected, produced, missing, extra, resultMatched, expectedResultDigest, producedResultDigest, runDir: res.runDir,
+    // provenance, (when pinned) output content, AND (when pinned) the observed environment must all match
+    matched: receiptsMatched && (resultMatched ?? true) && (environmentMatched ?? true),
+    expected, produced, missing, extra, resultMatched, expectedResultDigest, producedResultDigest,
+    environmentMatched, expectedEnvDigest, producedEnvDigest, runDir: res.runDir,
   };
 }

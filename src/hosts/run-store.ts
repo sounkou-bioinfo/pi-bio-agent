@@ -292,8 +292,10 @@ function resolvedProcessFacts(manifest: BioManifest, resources: string[]): RunRe
 }
 
 /** The env attestation SUMMARY lifted from the receipts' `environment` provenance entry (process.compute records
- *  it as notes). First process receipt that carries one (walking-skeleton: one process resource). */
-function envSummaryFromReceipts(receipts: ResolutionReceipt[]): EnvAttestationSummary | undefined {
+ *  it as notes). First process receipt that carries one (walking-skeleton: one process resource). Exported so
+ *  reproduce() can recompute the RE-RUN's env summary and compare it to the pinned one (env lives in provenance
+ *  NOTES, which receiptContentDigest drops — so without this check an env-drifted re-run would falsely 'match'). */
+export function envSummaryFromReceipts(receipts: ReadonlyArray<{ provenance: ReadonlyArray<{ source: string; notes?: string[] }> }>): EnvAttestationSummary | undefined {
   for (const r of receipts) {
     const e = r.provenance.find((p) => p.source === "environment");
     const notes = e?.notes ?? [];
