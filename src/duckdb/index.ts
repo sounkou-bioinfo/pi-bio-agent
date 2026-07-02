@@ -1,5 +1,4 @@
 export * from "./extensions.js";
-export * from "./kg-sync.js";
 export * from "./graph-closure.js";
 export * from "./observations.js";
 export * from "./activation.js";

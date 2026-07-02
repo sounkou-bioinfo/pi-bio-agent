@@ -135,8 +135,7 @@ file is a *view*, and a `pi-bio-agent memory list/show/history` CLI reads it. **
 rows → CAS by digest, the `run:<id>` fact references them (`resultDigest`/`sourceReceiptDigests`/`manifestDigest`);
 a content-addressed **ActionCache** (LLVM-style, `src/hosts/action-cache.ts`) maps input CASID → output CASID
 (dedup/memo/reproduce basis). Sharing escalates local file → shared path → ducknng/quack server → CAS, host-gated.
-**Still open:** receipts/replay bytes → CAS + run-files opt-in (`--serialize`); run-as-object-DAG; retire the
-`kg-sync`/`study-sync` SDK modules (the CLI already moved off them).
+**Still open:** receipts/replay bytes → CAS + run-files opt-in (`--serialize`); run-as-object-DAG; `kg-sync`/`study-sync` file-notes→graph modules (removed 2026-07-02).
 Docs are kept honest by **literate generation** (`npm run readme:examples` runs the manifest; `check:examples`
 fails on drift). The items below are **not partial/owed work** and sandboxing/effect-limits are
 the **host's** job, never ours. They are also where the irreducibly **human** parts cluster (judgment, approval,

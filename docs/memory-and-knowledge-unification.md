@@ -59,7 +59,7 @@ memory** (report §3.2.2) made literal — the same transport story the substrat
 time-travel param; `bio_forget` = `forget` (retraction); `bio_walk_memory` + the always-on recall index read the
 store. Skills are temporal too (`bio_create_skill` → `skill:<name>` observations, `src/hosts/skill-store.ts`), and
 `pi-bio-agent memory list/show/history` reads the store from the CLI. **Still open:** run receipts/replay bytes →
-CAS + run-files opt-in; run-as-object-DAG; retiring the now-superseded `kg-sync`/`study-sync` SDK modules.
+CAS + run-files opt-in; run-as-object-DAG; retired the `kg-sync`/`study-sync` file-notes→graph modules (removed 2026-07-02).
 
 ## Where this comes from
 
@@ -294,8 +294,10 @@ a separate file (see below).
   never calls `process.exit`). Surface: `memory list [--as-of <iso>]`, `memory show <slug> [--as-of <iso>]`,
   `memory history <slug>` — reads the ONE temporal store (`.pi/bio-agent/store.duckdb`), as-of by default now.
   The prior `src/cli/notes.ts` (`notes sync/report`, which projected file notes into a separate `graph.duckdb`
-  via `kg-sync`) is superseded and removed; the `kg-sync`/`study-sync` SDK modules remain but are candidates for
-  retirement.
+  via `kg-sync`) is removed, and the `kg-sync` / `study-sync` file-notes→graph modules were **RETIRED (removed
+  2026-07-02)** — memory is now the temporal store, so the file→graph projection they performed is obsolete. The
+  detailed "Implementation" notes below that reference `syncStudyNoteGraph` / `syncProjectStudyNotes` /
+  `kg-sync.ts` / `study-sync.ts` are HISTORICAL design rationale, not current code.
   The executable is `src/cli/bin.ts` (the only file touching real argv/stdout/driver/`process.exit`),
   compiled to `dist/cli/bin.js` and exposed as the `pi-bio-agent` bin via a `tsc` build
   (`tsconfig.build.json`, run by `prepare`/`npm run build`). `src` still ships for Pi; `dist` is added
