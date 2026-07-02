@@ -10,3 +10,12 @@ dist-test/
 README.html
 README_files/
 *_cache/
+# Genomic data artifacts written into the tree by local tooling (htslib indexes, downloaded VCFs).
+# Root-anchored so committed test fixtures under test/fixtures/ are unaffected.
+/*.tbi
+/*.csi
+/*.vcf
+/*.vcf.gz
+/*.bcf
+/*.bam
+/*.bai
