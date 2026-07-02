@@ -60,6 +60,16 @@ export const duckdbFileScanResolver: BioResolverImpl = async (resource, ctx) => 
 
   await ctx.conn.run(`CREATE OR REPLACE TABLE ${table} AS SELECT * FROM ${fn}(?)`, [path]);
 
+  // TOCTOU: the digest was computed BEFORE the scan, so a file changed between hash and scan would falsely pin the
+  // OLD content while the table holds the NEW data — an unsafe reproduce "match" / ActionCache key. Re-hash AFTER the
+  // scan: if the content is unchanged, the pin is verifiably valid; if it changed (or the file became unreadable),
+  // DROP the pin (undefined -> live_source, no memo) so a hit can never serve stale.
+  if (inputDigest !== undefined) {
+    let afterDigest: string | undefined;
+    try { afterDigest = `sha256:${createHash("sha256").update(readFileSync(path)).digest("hex")}`; } catch { afterDigest = undefined; }
+    if (afterDigest !== inputDigest) inputDigest = undefined;
+  }
+
   const sourceUri = path.includes("://") ? path : `file:${path}`; // a remote input is its own URI, not file:
   const output: ResolverOutput = {
     result: { mode: "reference", name: table, pointer: { uri: `table:${table}`, format: "table" } },
@@ -72,6 +82,8 @@ export const duckdbFileScanResolver: BioResolverImpl = async (resource, ctx) => 
     // WITH a content digest is fully reproducible (a changed file is honest drift) — no marker.
     provenance: [{ source: "duckdb.file_scan", retrievedAt: now, ...(inputDigest === undefined ? { notes: ["live_source"] } : {}) }],
   };
-  if (freshness !== undefined) await memoStore(ctx.conn, table, freshness, output);
+  // Only memoize when the content pin held across the scan (inputDigest still set) — a file that changed mid-scan is
+  // live, not stably keyable. (freshness embeds the pre-scan digest, which equals the post-scan one when unchanged.)
+  if (freshness !== undefined && inputDigest !== undefined) await memoStore(ctx.conn, table, freshness, output);
   return output;
 };

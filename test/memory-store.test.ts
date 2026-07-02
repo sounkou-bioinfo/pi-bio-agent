@@ -73,6 +73,12 @@ describe("temporal memory over bio_observations", () => {
     assert.throws(() => normalizeAsOf("2026-01-01T12:00:00"), /timezone/, "a tz-less time is rejected (host-dependent otherwise)");
     assert.throws(() => normalizeAsOf("March 1 2026"), /ISO-8601/);
     assert.throws(() => normalizeAsOf("2026/01/01"), /ISO-8601/);
+    // CALENDAR validation: a well-FORMED but invalid date must be rejected, not silently rolled over by Date.parse
+    assert.throws(() => normalizeAsOf("2026-02-31"), /ISO-8601/, "Feb 31 rejected (would roll to Mar 3)");
+    assert.throws(() => normalizeAsOf("2026-13-01"), /ISO-8601/, "month 13 rejected");
+    assert.throws(() => normalizeAsOf("2026-01-01T25:00:00Z"), /ISO-8601/, "hour 25 rejected");
+    assert.equal(normalizeAsOf("2024-02-29"), "2024-02-29T00:00:00.000Z", "leap day accepted");
+    assert.throws(() => normalizeAsOf("2026-02-29"), /ISO-8601/, "Feb 29 in a non-leap year rejected");
   });
 
   test("citations (sources) are persisted INTO the ledger, so recall/shared memory keep provenance (not just the file view)", async () => {

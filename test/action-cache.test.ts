@@ -221,6 +221,20 @@ describe("ActionCache: input CASID -> output CASID (LLVM CAS ActionCache in the 
     assert.equal(await recallRunResult(store, cas, replay), null, "quoted-identifier SQL is unproven -> not memoized");
   });
 
+  test("HERMETICITY: VOLATILE SQL (random()) is NOT memoized — the input CASID does not determine the output", async () => {
+    const store = await conn();
+    const cas = fsCasStore(await fsp.mkdtemp(join(tmpdir(), "cas-")));
+    const cwd = await fsp.mkdtemp(join(tmpdir(), "pi-bio-vol-"));
+    const manifest = { schema: "pi-bio.manifest.v1", id: "m", version: "0.1.0", title: "m", description: "m", provides: {} };
+    const mpath = join(cwd, "manifest.json");
+    await fsp.writeFile(mpath, JSON.stringify(manifest));
+    const res = await runBioQueryFromManifest({ cwd, dbPath: ":memory:", manifestPath: mpath, sql: "SELECT random() AS r", resources: [], store, author: "agent:A", cas });
+    assert.ok(res.ok, res.ok ? "" : `run failed: ${(res as { error?: unknown }).error}`);
+    if (!res.ok) return;
+    const replay = JSON.parse(await fsp.readFile(join(res.runDir, "replay.json"), "utf8"));
+    assert.equal(await recallRunResult(store, cas, replay), null, "random() is non-deterministic -> not memoized");
+  });
+
   test("HERMETICITY: an ATTACH (or ambient read) in the host INIT SQL makes the run non-hermetic — NOT memoized", async () => {
     const store = await conn();
     const cas = fsCasStore(await fsp.mkdtemp(join(tmpdir(), "cas-")));

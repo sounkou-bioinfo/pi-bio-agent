@@ -265,9 +265,11 @@ file path, and a `note` summary (slug/kind/title/hook/tags).
 ## Memory → graph projection
 
 `remember` (`src/hosts/memory-store.ts`) writes a note's `[[links]]` as edge observations into the ONE
-`bio_observations` log; `materializeBioEdgesAsOf` (`src/duckdb/observations.ts`) folds them into the
-`bio_edges_as_of` closure as of the recall clock; `walkMemoryGraph` (`src/core/study.ts`) does a bounded
-neighbourhood walk over that graph, exposed as the `bio_walk_memory` Pi tool. The projections
+`bio_observations` log. Two consumers of those edges: (1) `materializeBioEdgesAsOf` (`src/duckdb/observations.ts`)
+folds them into the `bio_edges_as_of` SQL closure **as of the recall clock** — the temporal, SQL-walkable graph
+projection; (2) the `bio_walk_memory` Pi tool, which currently does a **pure in-memory** bounded BFS
+(`walkMemoryGraph`, `src/core/study.ts`) over the **current** notes (`listMemory` at now), NOT the as-of SQL closure
+— a walk of `bio_edges_as_of` (time-travelled, SQL) is a deliberate later enhancement. The projections
 (`studyNoteLinkEdges` / `studyNoteNode` / `studyNoteGraph`) stay pure and dangling-tolerant (an edge may
 reference an absent target). The CLI is `src/cli/memory.ts` (`memory list/show/history`, as-of by default),
 compiled via `src/cli/bin.ts` to the `pi-bio-agent` bin.

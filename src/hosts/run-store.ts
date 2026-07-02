@@ -89,6 +89,11 @@ const RUN_DIR_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 // proof would be the fully sound fix — the safe direction here is to prefer NOT memoizing.)
 const AMBIENT_SQL_READ = /\b(from|join)\s+('|[\w$.]+\s*\()|\bread_\w+\s*\(|\b\w*_scan\s*\(|\b(glob|sniff_csv|parquet_metadata|parquet_schema)\s*\(|'(https?|s3|gs|gcs|az|azure|r2|hf|ftp):/i;
 
+// VOLATILE / non-deterministic SQL functions: their output is NOT determined by the input CASID, so a run using one
+// must not be memoized (a hit would serve a stale/wrong value). random/uuid/nextval etc. take (); now() too; the
+// current_* / localtime* forms are keywords (no parens). Fail-closed like the ambient-read denylist.
+const VOLATILE_SQL = /\b(random|uuid|gen_random_uuid|nextval|txid_current|now)\s*\(|\b(current_timestamp|current_date|current_time|localtimestamp|localtime)\b/i;
+
 // Mark an error that occurred while OPENING the run's DuckDB db (create/connect) — BEFORE any resource resolution or
 // process.compute side effect. A host that logs runs into a store can safely RETRY such a failure unlogged (e.g. the
 // run db aliased the log store's file and lock-conflicted); a lock/error surfacing LATER may have already run side
@@ -538,7 +543,7 @@ async function runAndPersist(
       // (`FROM /*x*/ ST_Read(...)`, `FROM "read_csv_auto"(...)`). We won't try to reason through those, so any SQL
       // containing a `/* */` or `--` comment or a `"` double-quoted identifier is treated as NON-hermetic and skipped
       // (fail closed — legitimate simple queries have none). A DuckDB-plan-based proof is the fully-sound future fix.
-      const unproven = (s: string): boolean => AMBIENT_SQL_READ.test(s) || /\/\*|--|"/.test(s) || /\battach\b/i.test(s);
+      const unproven = (s: string): boolean => AMBIENT_SQL_READ.test(s) || VOLATILE_SQL.test(s) || /\/\*|--|"/.test(s) || /\battach\b/i.test(s);
       const hermetic = dbPath === ":memory:" && !unproven(enriched?.sql ?? "") && !(initSql ?? []).some(unproven);
       if (resultDigest && runLog && enriched && !hasLiveSource && hermetic) {
         try {

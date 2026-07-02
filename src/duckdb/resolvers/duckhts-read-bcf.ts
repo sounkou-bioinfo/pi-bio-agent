@@ -77,6 +77,15 @@ export const duckhtsReadBcfResolver: BioResolverImpl = async (resource, ctx) => 
     : `CREATE OR REPLACE TABLE ${table} AS SELECT * FROM read_bcf(?, tidy_format := true)`;
   await ctx.conn.run(sql, region ? [path, region] : [path]);
 
+  // TOCTOU (whole-file read only — a region read is already live_source): the sha256 was taken BEFORE read_bcf
+  // scanned the file, so a change in between would falsely pin the OLD bytes against the NEW data. Re-hash after the
+  // scan; on a mismatch (or now-unreadable) drop the pin (undefined -> live_source) so a hit can't serve stale.
+  if (!region && inputDigest !== undefined) {
+    let after: string | undefined;
+    try { after = `sha256:${createHash("sha256").update(readFileSync(path)).digest("hex")}`; } catch { after = undefined; }
+    if (after !== inputDigest) inputDigest = undefined;
+  }
+
   const sourceUri = path.includes("://") ? path : `file:${path}`; // a remote input is its own URI, not file:
   return {
     result: { mode: "reference", name: table, pointer: { uri: `table:${table}`, format: "table" } },

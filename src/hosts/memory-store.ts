@@ -24,20 +24,31 @@ const CONTENT = "has_content";
 /** A sentinel far-future instant = "now / latest" for as-of reads (lexicographically sorts after any real ISO). */
 export const MEMORY_NOW = "9999-12-31T23:59:59.999Z";
 
-// Strict ISO-8601 / RFC3339 for an as-of instant: a date, optionally with time (T or space) + up to MILLISECOND
-// fraction and a REQUIRED timezone (Z or ±hh:mm) WHEN a time is present. Rejects lenient forms ("March 1 2026") AND
-// a tz-less datetime (JS Date.parse reads it as LOCAL, DuckDB TIMESTAMPTZ as the SESSION zone — divergent time-travel).
-const ISO_INSTANT_RE = /^\d{4}-\d{2}-\d{2}(?:[Tt ]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:[Zz]|[+-]\d{2}:?\d{2}))?$/;
+// Strict ISO-8601 / RFC3339 for an as-of instant (CAPTURING): date (Y-M-D), optionally time (T or space) + up to
+// MILLISECOND fraction and a REQUIRED timezone (Z or ±hh:mm) WHEN a time is present. Rejects lenient forms ("March 1
+// 2026") AND a tz-less datetime (JS Date.parse reads it as LOCAL, DuckDB TIMESTAMPTZ as the SESSION zone — divergent
+// time-travel). Groups: 1=year 2=month 3=day 4=hour 5=min 6=sec.
+const ISO_INSTANT_RE = /^(\d{4})-(\d{2})-(\d{2})(?:[Tt ](\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,3})?)?(?:[Zz]|[+-]\d{2}:?\d{2}))?$/;
 
 /** Validate + normalize an as-of value to a CANONICAL UTC instant (used identically by the CLI and the Pi tools, so
  *  time-travel is host-independent). `undefined` → MEMORY_NOW (now/latest). A date-only value becomes UTC midnight; a
  *  tz-bearing time is converted to UTC. THROWS on an invalid/lenient/tz-less form so callers fail closed. */
 export function normalizeAsOf(asOf: string | undefined): string {
   if (asOf === undefined || asOf === MEMORY_NOW) return MEMORY_NOW;
-  if (!ISO_INSTANT_RE.test(asOf) || Number.isNaN(Date.parse(asOf))) {
-    throw new Error(`--as-of '${asOf}' is not a valid ISO-8601 timestamp with a timezone when a time is given (e.g. 2026-01-01 or 2026-01-01T12:00:00Z)`);
-  }
-  return new Date(asOf).toISOString();
+  const m = ISO_INSTANT_RE.exec(asOf);
+  const invalid = (): never => { throw new Error(`--as-of '${asOf}' is not a valid ISO-8601 timestamp with a timezone when a time is given (e.g. 2026-01-01 or 2026-01-01T12:00:00Z)`); };
+  if (!m) invalid();
+  // Range + CALENDAR validation — the regex only checks shape, and Date.parse SILENTLY rolls over invalid calendar
+  // dates (2026-02-31 -> Mar 3), which would give a wrong time-travel instant. Reject out-of-range fields.
+  const [, y, mo, d, h, mi, s] = m!;
+  const year = +y, month = +mo, day = +d;
+  if (month < 1 || month > 12) invalid();
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate(); // day 0 of next month = last day of THIS month (leap-aware)
+  if (day < 1 || day > daysInMonth) invalid();
+  if (h !== undefined && (+h > 23 || +mi > 59 || (s !== undefined && +s > 59))) invalid();
+  const inst = new Date(asOf);
+  if (Number.isNaN(inst.getTime())) invalid();
+  return inst.toISOString();
 }
 
 export const memorySubjectId = (slug: string): string => `${MEMORY_NS}${slug}`;
