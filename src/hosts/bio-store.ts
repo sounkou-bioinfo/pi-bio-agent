@@ -42,16 +42,18 @@ export async function openBioStore(cwd: string, opts: { path?: string } = {}): P
   const path = opts.path ?? bioStorePath(cwd);
   await fs.mkdir(dirname(path), { recursive: true }); // the store file's OWN parent — works for a custom opts.path too
   const instance = await DuckDBInstance.create(path);
-  const connection = await instance.connect();
   // Fail closed WITHOUT leaking the handle: DuckDB is a process-exclusive writer, so a connection/instance left
-  // open on a schema-creation failure (corrupt/incompatible table, permissions) would LOCK the file store against
-  // every later process. Close what we opened before rethrowing.
+  // open on a failure (a throwing `connect`, a schema-creation error on a corrupt/incompatible table or bad
+  // permissions) would LOCK the file store against every later process. `connect()` is INSIDE the try so a
+  // connect-throw closes the instance too — the connection may not exist yet, so guard it before closing.
+  let connection: Awaited<ReturnType<typeof instance.connect>> | undefined;
   try {
+    connection = await instance.connect();
     const conn = duckdbNodeConn(connection);
     await createBioObservationSchema(conn, { ifNotExists: true });
     return buildStore(conn, connection, instance);
   } catch (err) {
-    connection.closeSync();
+    connection?.closeSync();
     instance.closeSync();
     throw err;
   }

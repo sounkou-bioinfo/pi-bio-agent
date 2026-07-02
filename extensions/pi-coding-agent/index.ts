@@ -353,13 +353,16 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
     }),
     async execute(_id, params: { start?: string; depth?: number }, _signal, _onUpdate, ctx) {
       const root = runtimeStudyRoot(ctx.cwd);
+      // walkMemoryGraph reads slug/kind/title/hook/tags + parses [[links]] from body — all carried by MemoryContent.
+      // The store OPEN/READ stays OUTSIDE the try so an infra failure (locked/corrupt store) PROPAGATES as a real tool
+      // error — consistent with bio_list_memory/bio_recall; only the WALK below turns a bad-input error into data.
+      const mems = await withStore(openStore, ctx.cwd, (conn) => listMemory(conn, MEMORY_NOW));
       try {
-        // walkMemoryGraph reads slug/kind/title/hook/tags + parses [[links]] from body — all carried by MemoryContent.
-        const mems = await withStore(openStore, ctx.cwd, (conn) => listMemory(conn, MEMORY_NOW));
         const graph = walkMemoryGraph(mems as unknown as StudyNote[], { start: params.start, depth: params.depth });
         return text({ root, start: params.start ?? null, depth: params.start ? params.depth ?? 1 : null, nodeCount: graph.nodes.length, edgeCount: graph.edges.length, graph });
       } catch (e) {
-        // Return the error AS DATA so the agent can correct itself (e.g. a malformed start slug) — never swallow it.
+        // Return a WALK error AS DATA so the agent can correct itself (e.g. a malformed/unknown start slug) — but a
+        // store failure is NOT caught here (it propagated above), so infra faults don't masquerade as a clean result.
         return text({ root, start: params.start ?? null, error: (e as Error).message });
       }
     },

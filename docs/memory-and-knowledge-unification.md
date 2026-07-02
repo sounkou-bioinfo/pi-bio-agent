@@ -109,10 +109,10 @@ addressed; unmarked rows are still steps 3–4.
 | write-time truth + verify | `TrustBlock.provenanceClass`, `supersedes` edge (on KG facts, not notes) | `knowledge-graph.ts` |
 | **✓** update-don't-duplicate / delete | was new-uuid-per-write → now upsert-by-slug + `deleteStudyNote` | `pi-project.ts:writeStudyNote` |
 | recall by description match | `scoreStudyNote` / `listStudyNotes` | `pi-project.ts` |
-| promote source -> note -> skill | promotion path | `design.md`, `BioSkillDraft` in `extensions.ts` |
+| promote source -> note -> skill | promotion path | `design.md`, `SkillDef`/`recordSkill` in `skill-store.ts` |
 
-Three representations of "agent memory" — `StudyNote`, `BioSkillDraft`
-(`src/core/extensions.ts`), and the `memory`/`concept` node families in the KG
+Three representations of "agent memory" — `StudyNote`, a skill (`SkillDef`,
+`src/hosts/skill-store.ts`), and the `memory`/`concept` node families in the KG
 (`knowledge-graph.ts:BioNodeFamily`) — none of which share an identity, an index, a link
 model, or a provenance story. A study note cannot link to a skill; a skill draft has no
 hook and no provenance; neither projects into the KG the repo already designed.
@@ -137,13 +137,15 @@ hook and no provenance; neither projects into the KG the repo already designed.
    re-reads every file per call and is never persisted. A materialized index is also the
    natural FTS target that Stage 2 of `refinments.md` already wants.
 
-5. **As-of versioning is a property of *facts*, not of procedural memory.** The memory
-   system warns that recalled units reflect write-time state and must be verified — but the
-   place to encode "this was true on date X, superseded by Y" is `bio_observations` /
-   `TrustBlock` / the `supersedes` *edge*, which already exist. A cheatsheet does not need
-   reanalysis-grade versioning; it needs editing. So notes stay **mutable** (git is their
-   history); `knownAt`/`supersedes` live on KG evidence where they are load-bearing. This
-   is a *subtraction*: do not bolt as-of fields onto every note.
+5. **Memory notes ARE temporal — they live in the same append-only ledger as facts.**
+   (This reverses an earlier draft that argued notes should stay plain-mutable with git as
+   their only history.) A note is a `bio_observations` observation in the `agent:memory:`
+   namespace: `remember` appends a revision that SUPERSEDES the slot (a re-write never
+   destroys the prior text), `forget` tombstones it, `recall(slug, asOf)` reads it as of any
+   time, and `memoryHistory` returns the full trail — the same as-of / history / retraction
+   story facts get, attributed to the authoring agent. This is what makes memory shareable
+   and auditable across agents, not a per-workstation git log. The file view (`MEMORY.md` +
+   note JSON) is a legible EXPORT of the current revision, not the source of truth.
 
 6. **Hygiene is a feature: upsert and delete.** `writeStudyNote` always mints a new uuid
    file, so the store only grows and silently duplicates. "Update-don't-duplicate; delete
@@ -237,8 +239,9 @@ commit to the full `KnowledgeUnit`:
   (same file) does a bounded neighbourhood walk over these edges, run over temporal-store memory
   content by the `bio_walk_memory` Pi tool (see "Memory → graph projection" below).
 
-`studyNoteIndex` now includes `slug`, and `bio_remember` takes an optional `slug`
-and returns the persisted note plus a `created` flag.
+`studyNoteIndex` now includes `slug`, and `bio_remember` takes an optional `slug`;
+it returns the stored subject id (`agent:memory:<slug>`), the `author`, the `materialized`
+file path, and a `note` summary (slug/kind/title/hook/tags).
 
 ## Memory → graph projection
 
@@ -264,7 +267,7 @@ compiled via `src/cli/bin.ts` to the `pi-bio-agent` bin.
 
 - Not a new storage engine: this rides the existing DuckDB store in `design.md`. The
   append-only `bio_observations` ledger (the `agent:memory:` namespace) is the SOURCE OF
-  TRUTH — `bio_remember`/`recall`/`bio-agent memory list` read it, not files. Any note JSON
+  TRUTH — `bio_remember`/`recall`/`pi-bio-agent memory list` read it, not files. Any note JSON
   files are an optional legible EXPORT/view, not authoritative: deleting `store.duckdb` and
   keeping only files loses the memory (there is no re-index-from-files path); editing a file
   does not change what the store returns.

@@ -168,7 +168,16 @@ export async function observationAsOfKey(conn: SqlConn, statementKey: string, t:
  *  slot's current latest revision so "latest wins" is deterministic even when two writes collide in one millisecond
  *  (the equal-timestamp tiebreak is hash-arbitrary observation_id). Also fail closed if the write would land at/after
  *  the reserved far-future `sentinel` (default as-of reads use it, so a write there is invisible / can overflow the
- *  year on the +1ms advance). Append-only history is preserved — the advance only nudges a colliding write 1ms. */
+ *  year on the +1ms advance). Append-only history is preserved — the advance only nudges a colliding write 1ms.
+ *
+ *  ATOMICITY / CONCURRENCY: this is a read-then-write, so it is deterministic only when writes to a given slot are
+ *  SERIALIZED. Cross-PROCESS writers already are — DuckDB's file lock is a cross-process exclusive writer (a second
+ *  process can't open the store for write). Cross-HOST writes go through ducknng RPC, where the native-DuckDB server
+ *  serializes them. The gap is IN-PROCESS: DuckDB does NOT exclude same-process opens (two `openBioStore` handles to
+ *  one file coexist), so two concurrent callers could each read the slot's latest, both compute the same +1ms, and
+ *  collide on the hash-arbitrary observation_id tiebreak. Callers that may issue concurrent same-slot writes in one
+ *  process must serialize per statement_key (an in-process per-slot lock — the planned `recordMonotonicObservation`
+ *  wrapper); the +1ms advance alone only disambiguates SEQUENTIAL writes a coarse clock stamped at the same ms. */
 export async function monotonicRecordedAt(conn: SqlConn, statementKey: string, now: string, sentinel: string): Promise<string> {
   const latest = await observationAsOfKey(conn, statementKey, sentinel);
   const latestMs = latest ? Date.parse(latest.recorded_at) : NaN;
