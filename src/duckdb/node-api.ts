@@ -3,7 +3,7 @@ import type { SqlConn } from "../core/ports.js";
 
 /**
  * Adapt a live `@duckdb/node-api` connection to the `SqlConn` execution port — the one DuckDB adapter, used
- * by the operation runner and the KG sync alike. This file's only coupling to the driver is type-level (the
+ * by the operation runner and the temporal observation/graph store alike. This file's only coupling to the driver is type-level (the
  * host creates and owns the `DuckDBInstance`/connection), so the rest of the package stays driver-agnostic
  * and the adapter logic remains testable through a fake port.
  */

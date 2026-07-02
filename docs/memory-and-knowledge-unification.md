@@ -37,8 +37,11 @@ unified-data-model bet instead of sitting beside it as flat last-write-wins file
 **ONE store, not a `memory.duckdb`.** Facts, jobs, activation, and memory are all rows in the **same
 `bio_observations` table in the same DuckDB** as the graph (`src/hosts/bio-store.ts` `openBioStore`). A separate
 memory database would re-fragment the ledger and break the single `entailed_edge` closure that walks
-**memory → ontology → fact** together. Tested: a memory note and a `gene→disease` fact coexist in one store and
-one graph closure crosses both namespaces.
+**observation-backed** memory, ontology, and fact edges together. Tested: a memory note and a `gene→disease` fact
+coexist in one store and one graph closure crosses both namespaces. (`materializeBioEdgesAsOf` projects the
+as-of observation edges into `bio_edges_as_of`, so ontology terms *ingested as statements* join the same closure;
+the atemporal compiled `bio_edges` navigation graph is a separate closure source, not auto-unioned into the as-of
+projection.)
 
 **Sharing is a host-chosen boundary** (`openBioStore` is the seam — the library records; the host decides where
 the store lives). Because every memory row carries its **author** (`source`) and an **as-of** time, a *shared*

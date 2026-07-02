@@ -88,7 +88,7 @@ async function openRunLog(open: OpenStore, cwd: string, dbPath: string): Promise
   // (1) covers the DEFAULT local-file store path. A host that injects a CUSTOM file-backed openStore must not run
   // queries against that same file (we can't see the injected store's path here); a server-backed store (the
   // intended concurrency answer) has no such conflict. `open()` throwing on a lock is still caught below.
-  if (runDb && runDb === bioStorePath(cwd)) return undefined; // (1) the run uses the store file itself
+  if (runDb && runDb === resolve(bioStorePath(cwd))) return undefined; // (1) the run uses the store file itself — resolve() both sides (bioStorePath(cwd) is relative when cwd is; runDb is already absolute), else a relative cwd misses this guard and self-locks
   // (2) tryOpen returns undefined on a lock conflict (a concurrent agent holds it); a real error also degrades
   // here because run-logging is best-effort and must never fail the query.
   return (await tryOpen(open, cwd).catch(() => undefined)) ?? undefined;
@@ -346,7 +346,7 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
   pi.registerTool({
     name: "bio_walk_memory",
     label: "Walk bio memory graph",
-    description: "Walk the MEMORY GRAPH: each memory note is a node (memory:<slug>); its [[slug]] and typed links are edges. With no start, returns the whole memory graph (nodes + edges) so you grasp structure at a glance INSTEAD of reading every note (or re-reading the corpus). With a start slug + depth, returns that note's neighborhood (BFS out N hops, links followed both ways). Memory is a graph, not a flat list — studying is only ONE way it gets populated.",
+    description: "Walk the MEMORY GRAPH: each memory note is a node (memory:<slug>); its [[slug]] wikilinks (parsed from the note body) are edges. With no start, returns the whole memory graph (nodes + edges) so you grasp structure at a glance INSTEAD of reading every note (or re-reading the corpus). With a start slug + depth, returns that note's neighborhood (BFS out N hops, links followed both ways). Memory is a graph, not a flat list — studying is only ONE way it gets populated.",
     parameters: Type.Object({
       start: Type.Optional(Type.String({ description: "Start note slug; omit for the whole graph." })),
       depth: Type.Optional(Type.Number({ description: "Hops to walk out from start (default 1)." })),

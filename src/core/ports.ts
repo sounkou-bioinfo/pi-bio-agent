@@ -36,7 +36,7 @@ import type { EnvDescriptor } from "./reproducibility.js";
 /**
  * The execution-backend port — the single seam the package speaks to data through, never a concrete driver.
  * A DuckDB connection is structurally one. Used identically by the operation runner, schema discovery, and
- * the KG sync, so a fake in-memory port exercises all three in tests.
+ * the temporal observation/graph store, so a fake in-memory port exercises all three in tests.
  */
 export interface SqlConn {
   all<T = Record<string, unknown>>(sql: string, params?: readonly unknown[]): Promise<T[]>;

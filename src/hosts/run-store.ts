@@ -82,7 +82,7 @@ const RUN_DIR_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 /** Resolve a run's directory, refusing a runId that could escape runsRoot. Centralized so every persistence
  *  path (and the host runner) is path-safe, including the exported persist* helpers called directly. */
 function runDir(cwd: string, runId: string): string {
-  if (!RUN_DIR_ID_RE.test(runId)) throw new Error("runId must contain only [A-Za-z0-9._-] (no path separators)");
+  if (!RUN_DIR_ID_RE.test(runId)) throw new Error("runId must start with a letter/number and contain only [A-Za-z0-9._:-] (no path separators)");
   return join(runsRoot(cwd), runId);
 }
 
@@ -429,6 +429,11 @@ async function runAndPersist(
       // result/receipts/replay/runObject bytes.
       if (cas && (resultDigest || receiptsDigest || replayDigest || runObjectDigest)) {
         await writeRunFile(persisted.dir, "cas-refs.json", { schema: "pi-bio.cas_refs.v1", result: resultDigest, receipts: receiptsDigest, replay: replayDigest, runObject: runObjectDigest });
+      } else {
+        // RUNID REUSE: a prior CAS run at this same runId wrote a cas-refs.json; this run writes none (no cas), so
+        // clear the stale one — else the node-local GC roots its dead digests (keeping swept-able bytes alive) and
+        // the run dir advertises refs that don't belong to the current run.
+        await fs.rm(join(persisted.dir, "cas-refs.json"), { force: true });
       }
       // Datomic + CAS: record the run as a fact in the ONE store, referencing content by digest (bytes stay outside).
       await recordRun(runLog, now, { runId, identity, kind, status: run.status, error: undefined, dir: persisted.dir, replay, enriched, resultDigest, receiptsDigest, replayDigest, runObjectDigest });
@@ -464,6 +469,8 @@ async function runAndPersist(
         // and references them (via the run:<id> fact / the returned casRefs). Root them here too.
         if (cas && (receiptsDigest || replayDigest)) {
           await writeRunFile(persisted.dir, "cas-refs.json", { schema: "pi-bio.cas_refs.v1", receipts: receiptsDigest, replay: replayDigest });
+        } else {
+          await fs.rm(join(persisted.dir, "cas-refs.json"), { force: true }); // reused runId: clear a prior CAS run's stale cas-refs.json (see the success path)
         }
         await recordRun(runLog, now, { runId, identity, kind, status: error.run.status, error: error.message, dir: persisted.dir, replay, enriched, receiptsDigest, replayDigest });
         const casRefs = cas ? { receipts: receiptsDigest, replay: replayDigest } : undefined;
@@ -484,7 +491,7 @@ async function runAndPersist(
  */
 export async function runBioOperationFromManifest(req: RunOperationRequest): Promise<RunOperationResponse> {
   if (req.runId !== undefined && !RUN_DIR_ID_RE.test(req.runId)) {
-    throw new Error("runId must start with a letter/number and contain only [A-Za-z0-9._-] (no path traversal)"); // SAME regex as persistRun -> fail BEFORE effects, not after
+    throw new Error("runId must start with a letter/number and contain only [A-Za-z0-9._:-] (no path traversal)"); // SAME regex as persistRun -> fail BEFORE effects, not after
   }
   const { registry, raw, manifest, manifestDigest } = await prepareRegistry(req);
   const op = registry.getOperation(req.operationId);
@@ -552,7 +559,7 @@ export interface RunQueryRequest {
  */
 export async function runBioQueryFromManifest(req: RunQueryRequest): Promise<RunOperationResponse> {
   if (req.runId !== undefined && !RUN_DIR_ID_RE.test(req.runId)) {
-    throw new Error("runId must start with a letter/number and contain only [A-Za-z0-9._-] (no path traversal)"); // SAME regex as persistRun -> fail BEFORE effects, not after
+    throw new Error("runId must start with a letter/number and contain only [A-Za-z0-9._:-] (no path traversal)"); // SAME regex as persistRun -> fail BEFORE effects, not after
   }
   const { registry, manifest, raw, manifestDigest } = await prepareRegistry(req);
   const resources = req.resources ?? (manifest.provides?.resources ?? []).map((r) => r.id);

@@ -163,6 +163,20 @@ describe("run-observations: ad-hoc SQL folds into the ONE store as an as-of, att
     assert.equal(await cas.has({ algorithm: "sha256", digest: a.casRefs!.runObject!.slice(7) }), true);
   });
 
+  test("runId REUSE: a re-run WITHOUT a cas clears the prior CAS run's stale cas-refs.json (no stale GC roots / advertised refs)", async () => {
+    const cwd = await fsp.mkdtemp(join(tmpdir(), "reuse-"));
+    const cas = fsCasStore(await fsp.mkdtemp(join(tmpdir(), "cas-")));
+    const mp = resolve(process.cwd(), "examples/variant-counts/manifest.json");
+    // run 1: WITH a cas -> writes cas-refs.json
+    const r1 = await runBioQueryFromManifest({ cwd, dbPath: ":memory:", manifestPath: mp, sql: "SELECT count(*) AS n FROM variants", runId: "reuse", cas });
+    assert.ok(r1.ok);
+    assert.ok((await fsp.readdir(r1.runDir)).includes("cas-refs.json"), "the CAS run wrote cas-refs.json");
+    // run 2: SAME runId, NO cas -> the stale cas-refs.json must be cleared, not left to root dead digests
+    const r2 = await runBioQueryFromManifest({ cwd, dbPath: ":memory:", manifestPath: mp, sql: "SELECT count(*) AS n FROM variants", runId: "reuse" });
+    assert.ok(r2.ok);
+    assert.equal((await fsp.readdir(r2.runDir)).includes("cas-refs.json"), false, "the reused runId's non-CAS re-run cleared the prior run's stale cas-refs.json");
+  });
+
   test("DATA-LOSS: GC roots from LIVE run:<id> ledger facts — pruning the run DIR must not strand ledger-referenced CAS bytes", async () => {
     const store = await conn();
     const cas = fsCasStore(await fsp.mkdtemp(join(tmpdir(), "cas-")));

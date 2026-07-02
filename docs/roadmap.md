@@ -129,7 +129,8 @@ branches + the volatile-scalar `ncurl` fix → `ncurl-retry`'s SQL-native recurs
 **append-only, as-of, attributed** observations in ONE `bio_observations` store (`openBioStore`, `src/hosts/bio-store.ts`)
 — `bio_observations` IS a Datomic-style immutable time-indexed fact log. Memory ops: `remember`/`recall(asOf)`/
 `memoryHistory`/`forget` (tombstone retraction); a re-write supersedes but keeps the prior revision; `[[links]]`
-project into `bio_edges_as_of` (one closure crosses memory→ontology→fact). The agent's tools use it
+project into `bio_edges_as_of` (one as-of closure over observation-backed edges crosses memory, fact, and
+ontology-ingested-as-statements; the atemporal compiled `bio_edges` graph is a separate closure source). The agent's tools use it
 (`bio_remember`/`bio_recall`/`bio_list_memory`/`bio_forget`/`bio_walk_memory`, `bio_create_skill` temporal), a legible
 file is a *view*, and a `pi-bio-agent memory list/show/history` CLI reads it. **When the host supplies a `cas`, CAS
 bytes stay OUTSIDE the DB**: result rows, the full receipts blob, and the replay bundle → CAS by digest and the
