@@ -387,6 +387,10 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
   };
 }
 
-// Default entrypoint: NO network injected — http.get stays unbound and every networked manifest fails closed.
-// Grant network by loading the explicit networked entrypoint: `pi -e extensions/pi-coding-agent/index-networked.ts`.
+// Default entrypoint: NO fetch injected — the http.get resolver stays unbound, so every http.get manifest fails
+// closed. Grant network by loading the explicit networked entrypoint: `pi -e extensions/pi-coding-agent/index-networked.ts`.
+// CAVEAT (not a fetch gate): DuckDB-level remote reads — httpfs (`read_csv_auto('https://…')`, a remote file_scan
+// `path`) or a host-installed network extension — can still egress via SQL without an injected fetch. That is the
+// host's sandbox residue, NOT something the library gates (a denylist can't be complete); a strict-no-egress host
+// must not provision network extensions/httpfs into a shared DuckDB home. See examples/connectors/README.md + sql-guard.ts.
 export default createBioExtension();
