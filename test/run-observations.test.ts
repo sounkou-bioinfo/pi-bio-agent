@@ -99,6 +99,24 @@ describe("run-observations: ad-hoc SQL folds into the ONE store as an as-of, att
     assert.equal(v.replayDigest, res.casRefs.replay);
   });
 
+  test("DATA-LOSS: a FAILED lean+CAS run also writes cas-refs.json so GC doesn't sweep its receipts/replay bytes", async () => {
+    const store = await conn();
+    const cas = fsCasStore(await fsp.mkdtemp(join(tmpdir(), "cas-")));
+    // a runtime failure (unknown column) under serialize:false + CAS — receipts/replay bytes go to CAS, no JSON files
+    const res = await runBioQueryFromManifest({ cwd: process.cwd(), dbPath: ":memory:", manifestPath: "examples/variant-counts/manifest.json", sql: "SELECT nope FROM variants", store, author: "agent:A", cas, serialize: false });
+    assert.equal(res.ok, false, "the bad SQL fails at runtime");
+    // the failed run's dir carries cas-refs.json (the GC root) even though there's no receipts.json in lean mode
+    assert.ok((await fsp.readdir(res.runDir)).includes("cas-refs.json"), "a failed lean run roots its CAS bytes in cas-refs.json");
+    assert.ok(res.casRefs && res.casRefs.receipts && res.casRefs.replay);
+
+    const cwdOfRun = res.runDir.slice(0, res.runDir.indexOf("/.pi/"));
+    const casRoot = (cas as unknown as { pathFor: (a: { algorithm: string; digest: string }) => string }).pathFor({ algorithm: "sha256", digest: "a".repeat(64) }).replace(/\/sha256\/.*$/, "");
+    await collectGarbage(cwdOfRun, { casRoot, minAgeMs: 0 });
+    for (const ref of [res.casRefs.receipts, res.casRefs.replay]) {
+      assert.equal(await cas.has({ algorithm: "sha256", digest: ref!.slice(7) }), true, "the failed run's CAS bytes survived GC (cas-refs.json rooted them)");
+    }
+  });
+
   test("run-as-object-DAG: two identical runs share one runObjectDigest (CAS object root — dedup by hash)", async () => {
     const store = await conn();
     const cas = fsCasStore(await fsp.mkdtemp(join(tmpdir(), "cas-")));

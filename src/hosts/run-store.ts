@@ -428,6 +428,12 @@ async function runAndPersist(
         if (enriched && serialize !== false) await writeRunFile(persisted.dir, "replay.json", enriched); // a failed run is replayable too
         const receiptsDigest = await putCas(error.receipts);
         const replayDigest = enriched ? await putCas(enriched) : undefined;
+        // SAME GC root as the success path: a lean failed run writes NO receipts.json, so without a cas-refs.json the
+        // node-local sweep would delete this failed run's receipts/replay CAS bytes even though the run dir survives
+        // and references them (via the run:<id> fact / the returned casRefs). Root them here too.
+        if (cas && (receiptsDigest || replayDigest)) {
+          await writeRunFile(persisted.dir, "cas-refs.json", { schema: "pi-bio.cas_refs.v1", receipts: receiptsDigest, replay: replayDigest });
+        }
         await recordRun(runLog, now, { runId, identity, status: error.run.status, error: error.message, dir: persisted.dir, replay, enriched, receiptsDigest, replayDigest });
         const casRefs = cas ? { receipts: receiptsDigest, replay: replayDigest } : undefined;
         return { ok: false, runId, operationId: identity, status: error.run.status, error: error.message, casRefs, runDir: persisted.dir };
