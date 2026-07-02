@@ -36,9 +36,8 @@ Suggested stable views:
 ```sql
 bio_sources
 bio_artifacts
-bio_nodes
-bio_edges
-bio_observations
+bio_observations       -- THE append-only temporal log (nodes are just ids referenced by rows)
+bio_edges_as_of        -- the compiled navigation graph, materialized from edge-like observations as of t
 bio_intervals
 bio_variants
 bio_features

@@ -47,9 +47,9 @@ that structure. The two are one bet seen from two sides:
 
 - **Study produces graph.** The durable residue of an agent studying a corpus is graph structure —
   concept nodes, note-links, ontology mappings, provenance edges — not prose alone (a note's prose
-  `body` stays, but it hangs on that structure). That residue is what `studyNoteGraph` projects into
-  `bio_nodes`/`bio_edges`.
-- **Graph makes study cheap.** A queryable map (`memory:<slug>` nodes + edges, joined to ontology and
+  `body` stays, but it hangs on that structure). That residue is what `remember` records as edge
+  observations in the one `bio_observations` log, projected into the `bio_edges_as_of` closure.
+- **Graph makes study cheap.** A queryable map (`memory:<slug>` subjects + edges, joined to ontology and
   KG facts) is consulted *before* spending expensive tool/inference budget — the cost-curve win the
   article measures.
 

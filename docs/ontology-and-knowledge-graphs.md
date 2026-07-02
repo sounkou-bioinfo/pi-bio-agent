@@ -19,12 +19,13 @@ graph-shaped: ontologies (`term —is_a→ term`), entities and relations (`vari
 (`fact —derived_from→ fact`), and reanalysis (as-of edges). The domain is graph-first, with tabular and
 document views over it — not the other way round.
 
-So everything that can be a fact, a concept, or a relationship lives in the **same** `bio_nodes`/
-`bio_edges` (plus ontology tables), with trust/provenance fields available on every node and edge. Ontology terms, KG
-facts, observations, artifacts — and the agent's own study notes (`memory:<slug>` nodes, note-links as
-edges) — are all one graph, queried the same way. This is *why* `studyNoteGraph` projects notes into
-`bio_edges` instead of a separate notes index: **memory is a node family in the one graph, not a
-parallel system.** The "memory and KG stop being two systems" point in
+So everything that can be a fact, a concept, or a relationship lives in the **same** append-only
+`bio_observations` log (plus ontology tables), with trust/provenance fields on every row; edge-like rows
+project into the materialized `bio_edges_as_of` closure that graph walks run over. Ontology terms, KG facts,
+observations, artifacts — and the agent's own study notes (`memory:<slug>` subjects, note-links as edge
+observations) — are all one graph, queried the same way. This is *why* `remember` writes note-links as edge
+observations (projected into `bio_edges_as_of`) instead of a separate notes index: **memory is a subject
+family in the one log, not a parallel system.** The "memory and KG stop being two systems" point in
 [`memory-and-knowledge-unification.md`](./memory-and-knowledge-unification.md) is the local symptom of
 this global bet; the study/[machine-studying](./machine-studying-lineage.md) angle is one consumer of
 the substrate, not its foundation.
@@ -74,12 +75,14 @@ The important principle: labels are not semantics. A domain phrase becomes usefu
 The KG is a typed graph over facts, artifacts, concepts, and evidence. A simple SQL contract is:
 
 ```sql
-bio_nodes(node_id, family, type, label, description, attrs JSON, trust JSON)
-bio_edges(from_id, to_id, predicate, attrs JSON, trust JSON)   -- atemporal, UNIQUE(from_id,to_id,predicate): the compiled graph
--- bio_observations is the APPEND-ONLY TEMPORAL statement log (Phase 4, BUILT — src/duckdb/observations.ts).
+-- THE store: one APPEND-ONLY TEMPORAL statement log (BUILT — src/duckdb/observations.ts). There is NO separate
+-- authored node/edge table — a node is just an id referenced by rows; re-assertion is a new row, never a mutation.
 -- statement_key = the state SLOT a later row supersedes; a row is edge-like (object_id) or scalar (value_json):
 bio_observations(observation_id, statement_key, subject_id, predicate, object_id, value_json, recorded_at, valid_from, valid_to, source, digest, attrs JSON, trust JSON)
 bio_artifacts(node_id, path, format, role, digest, attrs JSON)
+-- the COMPILED navigation graph, materialized by materializeBioEdgesAsOf(conn, t): edge-like observations,
+-- latest-per-statement_key as of t, over which the entailed_edge closure runs.
+bio_edges_as_of(from_id, to_id, predicate, attrs JSON, trust JSON)
 ```
 
 `observationsAsOf(t)` returns the latest row per `statement_key` (recorded_at ≤ t, valid interval contains t);

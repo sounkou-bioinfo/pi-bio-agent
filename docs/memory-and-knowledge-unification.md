@@ -104,7 +104,7 @@ addressed; unmarked rows are still steps 3–4.
 | **✓** `description` (retrieval hook) | `StudyNote.hook` (now required, validated) | `study.ts:validateStudyNote` |
 | `metadata.type` (role taxonomy) | `StudyArtifactKind` (form taxonomy) | `study.ts` |
 | **✓** loaded `MEMORY.md` index | was `studyNoteIndex()` per call → now generated `INDEX.md` | `pi-project.ts:writeStudyIndex` |
-| `[[name]]` wikilinks | `bio_edges` / KG `derived_from`/`about` | `src/core/knowledge-graph.ts` |
+| `[[name]]` wikilinks | edge observations → `bio_edges_as_of` closure | `memory-store.ts` / `observations.ts` |
 | body Why/How-to-apply | `StudyNote.body` (unstructured) | `study.ts` |
 | write-time truth + verify | `TrustBlock.provenanceClass`, `supersedes` edge (on KG facts, not notes) | `knowledge-graph.ts` |
 | **✓** update-don't-duplicate / delete | was new-uuid-per-write → now upsert-by-slug + `deleteStudyNote` | `pi-project.ts:writeStudyNote` |
@@ -128,8 +128,9 @@ hook and no provenance; neither projects into the KG the repo already designed.
    kebab-slug `name` is what makes `[[links]]` and dedup possible at all.
 
 3. **Links are first-class, and they are the bridge to the KG.** `[[name]]` is exactly a
-   `bio_edge`. If study-note links projected into `bio_edges` with `family = memory`,
-   memory and knowledge graph stop being two systems.
+   memory edge — and this is now realized, not hypothetical: `remember` writes each link as an
+   edge observation and `materializeBioEdgesAsOf` folds them into the `bio_edges_as_of` closure,
+   so memory and knowledge graph are one system walked by the same SemanticSQL closure.
 
 4. **The index is a materialized, loaded artifact — not a recompute.** `MEMORY.md` is
    durable, human-editable, and the only thing always in context. `studyNoteIndex()`
@@ -232,104 +233,28 @@ commit to the full `KnowledgeUnit`:
 - **Note → graph projection (step 3, completion).** `studyNoteNode` projects a note into a
   `memory`-family `BioGraphNode` (hook → description), and `studyNoteGraph` folds a note set
   into a `BioGraphSnapshot` (`memory` nodes + their link edges) — `src/core/study.ts`. Pure,
-  dangling-tolerant (edges may reference target ids absent from `nodes`); a later **effectful**
-  KG-ingest adapter (a new opt-in surface, separately reviewed) decides whether to materialize
-  stub nodes and write into `bio_nodes`/`bio_edges`.
+  dangling-tolerant (edges may reference target ids absent from `nodes`); `walkMemoryGraph`
+  (same file) does a bounded neighbourhood walk over these edges, run over temporal-store memory
+  content by the `bio_walk_memory` Pi tool (see "Memory → graph projection" below).
 
 `studyNoteIndex` now includes `slug`, and `bio_remember` takes an optional `slug`
 and returns the persisted note plus a `created` flag.
 
-## KG-ingest adapter (RETIRED 2026-07-02 — historical design rationale, not current code)
+## Memory → graph projection (current)
 
-(HISTORICAL — `kg-sync.ts` / `study-sync.ts` were REMOVED 2026-07-02; memory is now the temporal store. The
-following describes the retired file-notes→graph design.) The pure projection (`studyNoteGraph`) handed off to
-`syncStudyNoteGraph` in `src/duckdb/kg-sync.ts`. It was the first **effectful** surface, kept policy-explicit per
-`design.md`. The sync wrote through the one execution port, `SqlConn` (`all`/`run`, declared in
-`src/core/ports.ts` and shared with the operation runner), so the sync logic stays testable (fake
-port) and injectable (a host passes its own connection); the concrete `@duckdb/node-api` binding is
-a separate file (see below).
+The memory→graph path is the **temporal store**, not an effectful file sync. `remember`
+(`src/hosts/memory-store.ts`) writes a note's `[[links]]` as edge observations into the ONE `bio_observations`
+log; `materializeBioEdgesAsOf` (`src/duckdb/observations.ts`) folds them into the `bio_edges_as_of` closure as of
+the recall clock; `walkMemoryGraph` (`src/core/study.ts`) does a bounded neighbourhood walk over that graph,
+exposed as the `bio_walk_memory` Pi tool. The projections (`studyNoteLinkEdges` / `studyNoteNode` /
+`studyNoteGraph`) stay pure and dangling-tolerant (an edge may reference an absent target).
 
-- **Ownership scope (exact).** It owns, and only ever deletes:
-  - `bio_nodes WHERE family = 'memory'`
-  - `bio_edges WHERE from_id LIKE 'memory:%'`
-  It does **not** own external edges pointing *into* memory nodes (`to_id` memory, `from_id`
-  elsewhere), so a re-sync never tramples future non-memory relationships.
-- **Fails closed on scope.** It accepts a generic `BioGraphSnapshot` but refuses (throws,
-  even in dry-run) any node that is not `family: "memory"` with a **strict `memory:<slug>`
-  id** (prefix alone is not enough — `memory:`, `memory:Bad Slug`, `memory:../x` are
-  rejected), or any edge whose `from` is not such a memory node — so it can never write
-  outside what it owns.
-- **Fails closed on duplicates.** A duplicate node id, or a duplicate edge by
-  `(from, to, predicate)`, throws. A normal file-backed note set does not emit duplicates, so
-  one reaching the adapter is a caller/input bug — surfaced here rather than silently deduped
-  (which would skew the insert counts) or left to a future constraint rollback. Same endpoints
-  with a different predicate are distinct, not duplicates.
-- **Schema DDL helper.** `createBioGraphSchema(conn, { ifNotExists })` creates `bio_nodes`/
-  `bio_edges` through the same port, mirroring the duplicate policy as constraints
-  (`node_id PRIMARY KEY`, `UNIQUE (from_id, to_id, predicate)`) and adding indexes for the
-  scans/join the sync runs (`family`, `from_id`, `to_id`). **No foreign keys** — dangling link
-  targets are allowed, so an edge may reference an absent node id.
-- **Concrete DuckDB binding.** `duckdbNodeConn(connection)` (`src/duckdb/node-api.ts`) adapts a
-  live `@duckdb/node-api` connection to `SqlConn`. **The core and sync logic stay
-  driver-agnostic** (`node-api.ts` imports the driver only as a *type*; the host creates and owns
-  the `DuckDBInstance`/connection); the concrete binding, and the package, depend on
-  `@duckdb/node-api` as a direct dependency — DuckDB is a first-class substrate here. The port
-  still lets a CLI/Pi host inject its own connection. Real in-memory DuckDB tests (explicit
-  construction, no ambient activation) exercise the actual dialect: round-trip, idempotent
-  re-sync, persisted dangling edges, the `UNIQUE` constraint, and the external-inbound refusal.
-- **Read-only report.** `reportStudyNoteGraph(conn)` returns memory node/edge counts plus the full
-  rows for the two actionable problem sets — persisted **dangling** links (memory-origin edges with
-  no target node) and **external inbound** edges (which would block a write) — so an agent can fix
-  graph issues before syncing. No writes, no transaction. Totals (including exact dangling /
-  external-inbound counts) are always returned; the fixable problem rows come back capped at an
-  optional `{ limit }` (progressive disclosure: summarize totals, sample the rows).
-- **Project helper.** `syncProjectStudyNotes(conn, cwd, { dryRun, allowWrite, createSchema })`
-  (`src/hosts/study-sync.ts`) is the one call that ties the file layer to the graph layer:
-  `readStudyNotes → studyNoteGraph → (optional createBioGraphSchema) → syncStudyNoteGraph`. Explicit
-  args only; nothing from ambient process state. **Two independent effect axes:** `createSchema`
-  controls schema/index DDL — idempotent, and it **runs even under `dryRun`**; `dryRun`/`allowWrite`
-  control the memory-subgraph *row* sync (dry-run by default). A dry run with `createSchema: true`
-  still writes the schema; for a run that performs **no database writes**, leave `createSchema` false
-  (the schema must already exist) — note a dry run still *reads* (it SELECTs counts).
-- **CLI.** `src/cli/memory.ts` — `mainMemory(argv, { cwd, out, err })` (injected sinks, returns an exit code,
-  never calls `process.exit`). Surface: `memory list [--as-of <iso>]`, `memory show <slug> [--as-of <iso>]`,
-  `memory history <slug>` — reads the ONE temporal store (`.pi/bio-agent/store.duckdb`), as-of by default now.
-  The prior `src/cli/notes.ts` (`notes sync/report`, which projected file notes into a separate `graph.duckdb`
-  via `kg-sync`) is removed, and the `kg-sync` / `study-sync` file-notes→graph modules were **RETIRED (removed
-  2026-07-02)** — memory is now the temporal store, so the file→graph projection they performed is obsolete. The
-  detailed "Implementation" notes below that reference `syncStudyNoteGraph` / `syncProjectStudyNotes` /
-  `kg-sync.ts` / `study-sync.ts` are HISTORICAL design rationale, not current code.
-  The executable is `src/cli/bin.ts` (the only file touching real argv/stdout/driver/`process.exit`),
-  compiled to `dist/cli/bin.js` and exposed as the `pi-bio-agent` bin via a `tsc` build
-  (`tsconfig.build.json`, run by `prepare`/`npm run build`). `src` still ships for Pi; `dist` is added
-  for the bin — not committed, built on pack/install. Verified by running the compiled binary against a
-  real DuckDB file, plus unit tests against in-memory DuckDB.
-- **Refuses to orphan non-owned edges.** A non-owned edge (origin not `memory:`) pointing at
-  a node in the **delete set** (`family='memory'`, found by joining `to_id` to those rows —
-  not a `to_id` prefix match, so the guard covers exactly what gets deleted) would be dangled
-  or broken by the delete-then-reinsert under future FK constraints. So the write **fails
-  closed while any exist**: dry-run reports `externalInboundEdges`, and the write runs that
-  check **inside the transaction** (so it can't drift between check and delete) and rolls back
-  without touching owned rows when the count is > 0.
-- **FK-safe ordering.** Within the transaction: delete memory-origin edges, then memory
-  nodes; insert nodes, then edges.
-- **Dangling targets:** not materialized as stub nodes; counted in the result
-  (`danglingEdges`) and surfaced as future-work markers, mirroring dangling `[[wikilinks]]`.
-- **Sync semantics:** full re-sync of the memory subgraph in **one transaction** (delete the
-  owned subgraph, insert the projected set; rollback on any failure). Files are the source of
-  truth; DuckDB is an index/cache.
-- **Effect contract:** writes only the memory subgraph; no network; no arbitrary SQL (fixed,
-  parameterized statements); transaction required; **dry-run by default**, writing needs
-  `{ dryRun: false, allowWrite: true }`; result returns delete/insert/dangling/external-inbound
-  counts. No Pi tool yet — only when a workflow needs it.
-
-### Global KG edge policy
-
-`createBioGraphSchema` creates the **global** `bio_nodes`/`bio_edges` tables, not memory-only ones, so
-its constraints are KG-wide decisions: **one edge per `(from, to, predicate)`**. Multiple evidences for
-the same relationship aggregate inside the edge's `trust` block (`TrustBlock.evidence[]`), not as
-parallel rows — consistent with the existing typed model. If parallel evidence edges with the same
-triple are ever needed, the `UNIQUE` constraint must be revisited.
+The earlier **effectful file-notes→graph sync was removed 2026-07-02**: `kg-sync.ts` / `study-sync.ts`
+(`syncStudyNoteGraph`, `syncProjectStudyNotes`, `reportStudyNoteGraph`), the standalone `createBioGraphSchema`
+with its separate `bio_nodes` / `bio_edges` tables, and the `notes sync/report` CLI. It projected file notes into
+a separate `graph.duckdb`; the temporal store makes that obsolete — one immutable log, one materialized
+closure, with attribution and as-of built in. The current CLI is `src/cli/memory.ts`
+(`memory list/show/history`, as-of by default), compiled via `src/cli/bin.ts` to the `pi-bio-agent` bin.
 
 ## Still to do (step 4)
 
@@ -338,8 +263,8 @@ triple are ever needed, the `UNIQUE` constraint must be revisited.
   `BioSkillDraft` thin views over it; a skill is `form: "skill"` rendered to `SKILL.md`
   with `/reload` still the activation boundary. Add the promotion lint (lesson 8: a note
   whose body is a schema or API client should become an operation spec, not a note). Do
-  this only once a second real consumer (e.g. a KG-ingest path that writes
-  `studyNoteLinkEdges` into `bio_edges`) actually shares the core.
+  this only once a second real consumer (e.g. a path that materializes
+  `studyNoteLinkEdges` into the temporal store's `bio_edges_as_of` closure) actually shares the core.
 
 ## Non-goals
 
