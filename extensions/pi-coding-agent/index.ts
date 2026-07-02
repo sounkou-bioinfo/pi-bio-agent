@@ -6,7 +6,7 @@ import { deriveStudyPlan, normalizeStudySlug, walkMemoryGraph, type StudyArtifac
 import { deleteStudyNote, makeStudyNote, runtimeSkillRoot, runtimeStudyRoot, writeProjectSkill, writeStudyNote } from "../../src/hosts/pi-project.js";
 import { defaultDuckDbExtensionCatalog, findDuckDbExtensions } from "../../src/duckdb/extensions.js";
 import { describeBioManifestFromPath, runBioOperationFromManifest, runBioQueryFromManifest } from "../../src/hosts/run-store.js";
-import { bioStorePath, openBioStore, type BioStore } from "../../src/hosts/bio-store.js";
+import { bioStorePath, isBioStoreLocked, openBioStore, type BioStore } from "../../src/hosts/bio-store.js";
 import { isAbsolute, resolve } from "node:path";
 import { forget, listMemory, recall, remember, memorySubjectId, MEMORY_NOW, type MemoryContent } from "../../src/hosts/memory-store.js";
 import { recordSkill, skillSubjectId } from "../../src/hosts/skill-store.js";
@@ -59,13 +59,18 @@ const BIO_ORIENTATION = [
 // that makes a MEMORY.md-style index useful. Bounded to keep the token cost small; failures are swallowed (an
 // index is a convenience, never a hard dependency).
 async function memoryIndexBlock(open: OpenStore, cwd: string): Promise<string> {
+  // tryOpen → undefined when a concurrent agent holds the store (degrade to no index, never break the turn).
+  const store = await tryOpen(open, cwd).catch(() => undefined);
+  if (!store) return "";
   try {
-    const mems = await withStore(open, cwd, (conn) => listMemory(conn, MEMORY_NOW));
+    const mems = await listMemory(store.conn, MEMORY_NOW);
     if (mems.length === 0) return "";
     const lines = mems.slice(0, 30).map((m) => `- ${m.slug} — ${m.hook}${m.author ? ` (${m.author})` : ""}`);
     return `\n\n[memory index] Your current memory (recall with bio_recall / bio_walk_memory before re-deriving):\n${lines.join("\n")}`;
   } catch {
     return "";
+  } finally {
+    store.close();
   }
 }
 
@@ -81,11 +86,9 @@ async function openRunLog(open: OpenStore, cwd: string, dbPath: string): Promise
   // queries against that same file (we can't see the injected store's path here); a server-backed store (the
   // intended concurrency answer) has no such conflict. `open()` throwing on a lock is still caught below.
   if (runDb && runDb === bioStorePath(cwd)) return undefined; // (1) the run uses the store file itself
-  try {
-    return await open(cwd);
-  } catch {
-    return undefined; // (2) store unavailable — log is best-effort
-  }
+  // (2) tryOpen returns undefined on a lock conflict (a concurrent agent holds it); a real error also degrades
+  // here because run-logging is best-effort and must never fail the query.
+  return (await tryOpen(open, cwd).catch(() => undefined)) ?? undefined;
 }
 
 // open → use → close the ONE store for a memory operation (the store is the source of truth; a re-write here
@@ -96,6 +99,18 @@ async function withStore<T>(open: OpenStore, cwd: string, fn: (conn: SqlConn) =>
     return await fn(store.conn);
   } finally {
     store.close();
+  }
+}
+
+// Best-effort open that DOES NOT throw on the expected contention: another process holding the file store's write
+// lock returns undefined (the caller degrades). A REAL error (corruption/permissions) still throws — not hidden.
+// A server-backed injected store never hits the lock path. This is the explicit non-throwing variant.
+async function tryOpen(open: OpenStore, cwd: string): Promise<BioStore | undefined> {
+  try {
+    return await open(cwd);
+  } catch (e) {
+    if (isBioStoreLocked(e)) return undefined;
+    throw e;
   }
 }
 

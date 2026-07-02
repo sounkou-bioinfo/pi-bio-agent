@@ -46,3 +46,17 @@ describe("bio-store: ONE store for memory + facts + graph (not a separate memory
     assert.ok(bioStorePath(await tmp()).endsWith(join(".pi", "bio-agent", "store.duckdb")));
   });
 });
+
+import { isBioStoreLocked, tryOpenBioStore } from "../src/hosts/bio-store.js";
+
+describe("non-throwing store open (concurrency degradation)", () => {
+  test("isBioStoreLocked recognizes DuckDB lock-conflict messages, not unrelated errors", () => {
+    assert.equal(isBioStoreLocked(new Error("IO Error: Could not set lock on file X: Conflicting lock")), true);
+    assert.equal(isBioStoreLocked(new Error("some other failure")), false);
+  });
+  test("tryOpenBioStore opens normally when free (returns a store, not null)", async () => {
+    const store = await tryOpenBioStore(await fs.mkdtemp(join(tmpdir(), "trystore-")));
+    assert.ok(store);
+    store.close();
+  });
+});

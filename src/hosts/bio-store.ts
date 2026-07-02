@@ -53,3 +53,31 @@ export async function openBioStore(cwd: string, opts: { path?: string } = {}): P
     },
   };
 }
+
+/** True iff `err` is DuckDB refusing to open the local-file store because ANOTHER PROCESS holds the write lock
+ *  (DuckDB is a process-exclusive writer). This is the EXPECTED contention between concurrent agents on the
+ *  file store — distinct from a real failure (corruption, permissions, disk). Server-backed stores never raise it. */
+export function isBioStoreLocked(err: unknown): boolean {
+  const m = err instanceof Error ? err.message : String(err);
+  return /Could not set lock|Conflicting lock|lock on file/i.test(m);
+}
+
+/**
+ * Non-throwing open for BEST-EFFORT readers/loggers (the recall index, the run-log): returns null when another
+ * process holds the file store's write lock, so a concurrent agent DEGRADES instead of failing. A REAL error
+ * (corruption/permissions/disk) still throws — it must not be silently swallowed.
+ *
+ * The three access modes, documented in one place:
+ * - `openBioStore` — the OWNER's open; throws on a lock conflict (a memory WRITE must not be silently dropped).
+ * - `tryOpenBioStore` — a best-effort open; a lock conflict returns null (the caller degrades), real errors throw.
+ * - a SERVER-backed store (host injects via the extension's `openStore` seam — ducknng `run_rpc` / quack) — the
+ *   correct answer for genuine concurrency: one server is the single writer, many clients connect, no file lock.
+ */
+export async function tryOpenBioStore(cwd: string, opts: { path?: string } = {}): Promise<BioStore | null> {
+  try {
+    return await openBioStore(cwd, opts);
+  } catch (err) {
+    if (isBioStoreLocked(err)) return null;
+    throw err;
+  }
+}
