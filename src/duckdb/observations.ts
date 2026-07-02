@@ -69,6 +69,12 @@ export async function recordObservation(conn: SqlConn, obs: BioObservationInput)
   if (!obs.statementKey || !obs.subjectId || !obs.predicate || !obs.recordedAt) {
     throw new Error("recordObservation: statementKey, subjectId, predicate, recordedAt are all required");
   }
+  // FAIL CLOSED on an unparseable time: every as-of/history query casts recorded_at/valid_from/valid_to to
+  // TIMESTAMPTZ, so ONE row with a bad string (e.g. "not-a-time") would make those whole-table scans throw and
+  // break UNRELATED reads. Reject at write instead of poisoning the store.
+  for (const [field, val] of [["recordedAt", obs.recordedAt], ["validFrom", obs.validFrom], ["validTo", obs.validTo]] as const) {
+    if (val != null && Number.isNaN(Date.parse(val))) throw new Error(`recordObservation: ${field} '${val}' is not a valid timestamp (it would poison as-of/history TIMESTAMPTZ casts)`);
+  }
   const id = obs.observationId ?? observationId(obs);
   await conn.run(
     `INSERT INTO ${TABLE} (observation_id, statement_key, subject_id, predicate, object_id, value_json, recorded_at, valid_from, valid_to, source, digest, attrs, trust)

@@ -29,6 +29,15 @@ describe("bio_observations: temporal provenance statements, as-of latest-per-sta
     assert.equal(JSON.parse(cur!.value_json!), "correct-latest", "the temporally-latest row wins, not the lexicographically-largest");
   });
 
+  test("FAIL CLOSED: an unparseable recordedAt/validFrom/validTo is rejected at write, so it can't poison as-of casts", async () => {
+    const c = await newConn();
+    await assert.rejects(() => recordObservation(c, { statementKey: "k", subjectId: "x", predicate: "p", value: 1, recordedAt: "not-a-time" }), /not a valid timestamp/);
+    await assert.rejects(() => recordObservation(c, { statementKey: "k", subjectId: "x", predicate: "p", value: 1, recordedAt: "2026-01-01T00:00:00Z", validTo: "garbage" }), /not a valid timestamp/);
+    // and a whole-table as-of scan still works (nothing bad got in)
+    await recordObservation(c, { statementKey: "k", subjectId: "x", predicate: "p", value: "ok", recordedAt: "2026-01-01T00:00:00Z" });
+    assert.equal((await observationsAsOf(c, "2026-06-01T00:00:00Z")).length, 1);
+  });
+
 
   test("supersession across a CHANGING OBJECT (the activation case partition-by-triple would break)", async () => {
     const c = await newConn();
