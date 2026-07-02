@@ -482,24 +482,28 @@ async function runAndPersist(
       const runObjectDigest = cas && enriched && resultDigest
         ? await putCas({ schema: "pi-bio.run_object.v1", data: { kind, identity, status: run.status }, refs: { input: actionInputDigest(enriched), result: resultDigest } })
         : undefined;
-      // Files are the legible VIEW (default). result.json/receipts.json/replay.json are skipped in lean mode
-      // (serialize:false); run.json is always written — and in lean mode its output artifact points at the CAS URI,
-      // not the unwritten result.json. (Now safe: the CAS bytes above are already durable before this deletes them.)
-      const runForFiles = serialize === false && resultDigest ? retargetResultArtifactToCas(run, runId, `cas:${resultDigest}`) : run;
-      const persisted = await persistRun(cwd, runId, { run: runForFiles, result, receipts }, { serialize, casBacked: cas !== undefined });
-      if (enriched && serialize !== false) await writeRunFile(persisted.dir, "replay.json", enriched);
-      // GC ROOT for lean mode: the node-local collectGarbage roots CAS by scanning surviving run files, but a lean
-      // run writes NO receipts.json — so write a tiny cas-refs.json listing THIS run's CAS digests (always, when a
-      // cas is present; harmless when the JSON files also exist), or the sweep would delete a lean run's live
-      // result/receipts/replay/runObject bytes.
+      // GC ROOT for lean mode, written BEFORE persistRun deletes stale JSON: the node-local collectGarbage roots CAS
+      // by scanning surviving run files, but a lean run writes NO receipts.json — so cas-refs.json lists THIS run's
+      // CAS digests. It MUST exist before persistRun clears the stale receipts.json/replay.json, or a crash in that
+      // gap would leave the lean run's bytes in CAS but UNROOTED (GC-sweepable). persistRun does not touch
+      // cas-refs.json, so writing it first is safe. (Runs are still also rooted by the run:<id> ledger fact when a
+      // store is passed; this is the file-based root for the no-store case.)
+      const dir = runDir(cwd, runId);
+      await fs.mkdir(dir, { recursive: true });
       if (cas && (resultDigest || receiptsDigest || replayDigest || runObjectDigest)) {
-        await writeRunFile(persisted.dir, "cas-refs.json", { schema: "pi-bio.cas_refs.v1", result: resultDigest, receipts: receiptsDigest, replay: replayDigest, runObject: runObjectDigest });
+        await writeRunFile(dir, "cas-refs.json", { schema: "pi-bio.cas_refs.v1", result: resultDigest, receipts: receiptsDigest, replay: replayDigest, runObject: runObjectDigest });
       } else {
         // RUNID REUSE: a prior CAS run at this same runId wrote a cas-refs.json; this run writes none (no cas), so
         // clear the stale one — else the node-local GC roots its dead digests (keeping swept-able bytes alive) and
         // the run dir advertises refs that don't belong to the current run.
-        await fs.rm(join(persisted.dir, "cas-refs.json"), { force: true });
+        await fs.rm(join(dir, "cas-refs.json"), { force: true });
       }
+      // Files are the legible VIEW (default). result.json/receipts.json/replay.json are skipped in lean mode
+      // (serialize:false); run.json is always written — and in lean mode its output artifact points at the CAS URI,
+      // not the unwritten result.json. (Safe: the CAS bytes are durable AND rooted by cas-refs.json before this deletes them.)
+      const runForFiles = serialize === false && resultDigest ? retargetResultArtifactToCas(run, runId, `cas:${resultDigest}`) : run;
+      const persisted = await persistRun(cwd, runId, { run: runForFiles, result, receipts }, { serialize, casBacked: cas !== undefined });
+      if (enriched && serialize !== false) await writeRunFile(persisted.dir, "replay.json", enriched);
       // COMPLETION time (not run start): the ledger fact + memo record when the run FINISHED, so a long run isn't
       // visible as succeeded before it actually completed. Injected `now` (tests) collapses this to the fixed value.
       const completedAt = injectedNow ?? systemClock();
@@ -519,8 +523,12 @@ async function runAndPersist(
       // a file DB or read a file — its DIGEST is pinned, but the same init SQL over CHANGED external data would reuse
       // the key. Require :memory: AND no ambient read in the run SQL AND none in the init SQL (nor an ATTACH); else
       // skip the memo (fail safe: a skipped memo re-runs, a wrong memo serves stale).
-      const initAmbient = (initSql ?? []).some((s) => AMBIENT_SQL_READ.test(s) || /\battach\b/i.test(s));
-      const hermetic = dbPath === ":memory:" && !AMBIENT_SQL_READ.test(enriched?.sql ?? "") && !initAmbient;
+      // The AMBIENT_SQL_READ denylist can be EVADED by a comment or a quoted identifier hiding a table function
+      // (`FROM /*x*/ ST_Read(...)`, `FROM "read_csv_auto"(...)`). We won't try to reason through those, so any SQL
+      // containing a `/* */` or `--` comment or a `"` double-quoted identifier is treated as NON-hermetic and skipped
+      // (fail closed — legitimate simple queries have none). A DuckDB-plan-based proof is the fully-sound future fix.
+      const unproven = (s: string): boolean => AMBIENT_SQL_READ.test(s) || /\/\*|--|"/.test(s) || /\battach\b/i.test(s);
+      const hermetic = dbPath === ":memory:" && !unproven(enriched?.sql ?? "") && !(initSql ?? []).some(unproven);
       if (resultDigest && runLog && enriched && !hasLiveSource && hermetic) {
         try {
           // key on the ENRICHED replay so the action key is CONTENT-addressed (includes sourceReceiptDigests) —
@@ -541,16 +549,17 @@ async function runAndPersist(
         // persistFailedRun deletes/skips the JSON files, so a crash/failed-put can't strand the provenance bytes.
         const receiptsDigest = await putCas(error.receipts);
         const replayDigest = enriched ? await putCas(enriched) : undefined;
+        // Root the failed run's CAS bytes in cas-refs.json BEFORE persistFailedRun deletes stale JSON (same crash
+        // window as the success path). persistFailedRun does not touch cas-refs.json, so writing it first is safe.
+        const dir = runDir(cwd, runId);
+        await fs.mkdir(dir, { recursive: true });
+        if (cas && (receiptsDigest || replayDigest)) {
+          await writeRunFile(dir, "cas-refs.json", { schema: "pi-bio.cas_refs.v1", receipts: receiptsDigest, replay: replayDigest });
+        } else {
+          await fs.rm(join(dir, "cas-refs.json"), { force: true }); // reused runId: clear a prior CAS run's stale cas-refs.json (see the success path)
+        }
         const persisted = await persistFailedRun(cwd, runId, { run: error.run, receipts: error.receipts }, { serialize, casBacked: cas !== undefined });
         if (enriched && serialize !== false) await writeRunFile(persisted.dir, "replay.json", enriched); // a failed run is replayable too
-        // SAME GC root as the success path: a lean failed run writes NO receipts.json, so without a cas-refs.json the
-        // node-local sweep would delete this failed run's receipts/replay CAS bytes even though the run dir survives
-        // and references them (via the run:<id> fact / the returned casRefs). Root them here too.
-        if (cas && (receiptsDigest || replayDigest)) {
-          await writeRunFile(persisted.dir, "cas-refs.json", { schema: "pi-bio.cas_refs.v1", receipts: receiptsDigest, replay: replayDigest });
-        } else {
-          await fs.rm(join(persisted.dir, "cas-refs.json"), { force: true }); // reused runId: clear a prior CAS run's stale cas-refs.json (see the success path)
-        }
         const failedAt = injectedNow ?? systemClock(); // FAILURE time, not run start (see the success path)
         await recordRun(runLog, failedAt, { runId, identity, kind, status: error.run.status, error: error.message, dir: persisted.dir, replay, enriched, receiptsDigest, replayDigest });
         const casRefs = cas ? { receipts: receiptsDigest, replay: replayDigest } : undefined;

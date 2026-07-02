@@ -189,6 +189,19 @@ describe("ActionCache: input CASID -> output CASID (LLVM CAS ActionCache in the 
     assert.equal(await recallRunResult(store, cas, replay), null, "inline read_csv_auto is non-hermetic -> not memoized -> recall MISS");
   });
 
+  test("HERMETICITY: SQL with a quoted identifier / comment is treated as UNPROVEN — NOT memoized (denylist could be evaded there)", async () => {
+    const store = await conn();
+    const cas = fsCasStore(await fsp.mkdtemp(join(tmpdir(), "cas-")));
+    // a double-quoted identifier (or a comment) could hide a table function from the denylist (FROM "read_csv_auto"(...)),
+    // so we won't try to reason through it — any SQL containing one is non-hermetic (fail closed). This is a plain
+    // count with a quoted alias: it runs fine but must NOT be memoized.
+    const res = await runBioQueryFromManifest({ cwd: process.cwd(), dbPath: ":memory:", manifestPath: "examples/variant-counts/manifest.json", sql: 'SELECT count(*) AS "n" FROM variants', store, author: "agent:A", cas });
+    assert.ok(res.ok, res.ok ? "" : `run failed: ${(res as { error?: unknown }).error}`);
+    if (!res.ok) return;
+    const replay = JSON.parse(await fsp.readFile(join(res.runDir, "replay.json"), "utf8"));
+    assert.equal(await recallRunResult(store, cas, replay), null, "quoted-identifier SQL is unproven -> not memoized");
+  });
+
   test("HERMETICITY: an ATTACH (or ambient read) in the host INIT SQL makes the run non-hermetic — NOT memoized", async () => {
     const store = await conn();
     const cas = fsCasStore(await fsp.mkdtemp(join(tmpdir(), "cas-")));
