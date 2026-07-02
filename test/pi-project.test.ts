@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, test } from "node:test";
@@ -101,5 +101,13 @@ describe("Pi project host helpers", () => {
     assert.equal(await deleteStudyNote(cwd, "vep-cache"), true);
     assert.equal((await readStudyNotes(cwd)).length, 0);
     assert.equal(await deleteStudyNote(cwd, "vep-cache"), false);
+  });
+
+  test("deleteStudyNote SURFACES a non-ENOENT failure (not swallowed as a benign miss)", async () => {
+    const cwd = await tempProject();
+    // put a DIRECTORY where the note file would be — unlink() then fails with EISDIR/EPERM (NOT ENOENT), which must
+    // propagate rather than be swallowed as `false` (a swallowed error would let bio_forget report a clean delete).
+    await mkdir(join(runtimeStudyRoot(cwd), "blocked.json"), { recursive: true });
+    await assert.rejects(() => deleteStudyNote(cwd, "blocked"), /EISDIR|EPERM|EEXIST|directory|not permitted/i);
   });
 });

@@ -142,10 +142,11 @@ hook and no provenance; neither projects into the KG the repo already designed.
    so memory and knowledge graph are one system walked by the same SemanticSQL closure.
 
 4. **The index is a materialized, loaded artifact — not a recompute.** Now realized: the
-   `bio_observations` store is the source of truth, the note JSON files are a legible view, and
-   a generated `INDEX.md` (derived from them via `renderStudyIndex`) is the loaded map —
-   replacing the old `studyNoteIndex()` that re-read every file per call and was never persisted.
-   A materialized index is also the natural FTS target that Stage 2 of `refinments.md` wants.
+   `bio_observations` store is the source of truth. The **loaded** memory index (the always-in-context
+   map the extension injects) is built from `listMemory()` over the store — not from a file; the note
+   JSON files and the generated `INDEX.md` (`renderStudyIndex`) are legible file-view caches derived
+   from it. This replaces the old `studyNoteIndex()` that re-read every file per call and was never
+   persisted. A store-backed index is also the natural FTS target that Stage 2 of `refinments.md` wants.
 
 5. **Memory notes ARE temporal — they live in the same append-only ledger as facts.**
    (This reverses an earlier draft that argued notes should stay plain-mutable with git as

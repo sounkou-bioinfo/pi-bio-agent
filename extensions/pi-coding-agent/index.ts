@@ -418,8 +418,17 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
       // ledger tombstone and the file deletion hit the SAME key — a raw/cased slug otherwise tombstones a phantom.
       const slug = normalizeStudySlug(params.slug);
       await withStore(openStore, ctx.cwd, (conn) => forget(conn, slug, systemClock(), author));
-      await deleteStudyNote(ctx.cwd, slug); // remove the legible file view too (the ledger keeps the history)
-      return text({ forgotten: true, slug, note: "temporal retraction — recall as-of an earlier time still sees it" });
+      // The LEDGER retraction (above) is the truth and has succeeded — `forgotten: true` is honest. Removing the
+      // legible file view is best-effort cleanup: a REAL failure (permissions/IO) now THROWS out of deleteStudyNote
+      // (ENOENT is a benign no-op), so surface it as data rather than falsely reporting a clean delete of a stale view.
+      let fileRemoved = false;
+      let fileWarning: string | undefined;
+      try {
+        fileRemoved = await deleteStudyNote(ctx.cwd, slug);
+      } catch (e) {
+        fileWarning = `file-view cleanup failed: ${(e as Error).message} — the ledger retraction succeeded, but the .json/INDEX view is stale`;
+      }
+      return text({ forgotten: true, slug, fileRemoved, ...(fileWarning ? { warning: fileWarning } : {}), note: "temporal retraction — recall as-of an earlier time still sees it" });
     },
   });
   };

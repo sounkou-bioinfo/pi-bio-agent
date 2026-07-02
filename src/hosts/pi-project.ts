@@ -185,8 +185,12 @@ export async function deleteStudyNote(cwd: string, slug: string): Promise<boolea
   const path = join(runtimeStudyRoot(cwd), `${safeSlug}.json`);
   try {
     await fs.unlink(path);
-  } catch {
-    return false;
+  } catch (e) {
+    // ENOENT = already gone: a no-op success, not an error (keep the index coherent, return false = "wasn't there").
+    // Any OTHER failure (permissions/IO) is REAL and must SURFACE — swallowing it as `false` would let a caller
+    // report a clean delete while the file/INDEX view is actually stale.
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") { await writeStudyIndex(cwd); return false; }
+    throw e;
   }
   await writeStudyIndex(cwd);
   return true;

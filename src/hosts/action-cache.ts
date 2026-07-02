@@ -33,6 +33,13 @@ function canonicalize(v: unknown): unknown {
   // recurse; number/boolean/null stay native (already JSON-distinct).
   if (typeof v === "bigint") return { __t: "bigint", v: v.toString() };
   if (typeof v === "string") return { __t: "string", v };
+  // Non-finite numbers (NaN/±Infinity) would be coerced to `null` by JSON.stringify — colliding NaN, Infinity, and a
+  // real null under one key. Tag them (finite numbers stay native, already JSON-distinct).
+  if (typeof v === "number") return Number.isFinite(v) ? v : { __t: "number", v: String(v) };
+  // `undefined` as an object field is DROPPED by JSON.stringify, so {a:undefined,b:1} would collide with {b:1}. Tag it.
+  if (v === undefined) return { __t: "undefined" };
+  // functions/symbols aren't JSON values and would silently vanish/mis-encode — a non-JSON input must fail closed.
+  if (typeof v === "function" || typeof v === "symbol") throw new Error(`actionInputDigest: replay contains a ${typeof v}; inputs must be JSON-serializable values`);
   if (Array.isArray(v)) return v.map(canonicalize);
   if (v && typeof v === "object") {
     // Plain objects only. A non-plain object (Date, Map, class instance) has no meaningful own-key projection here —

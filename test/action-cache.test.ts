@@ -76,6 +76,13 @@ describe("ActionCache: input CASID -> output CASID (LLVM CAS ActionCache in the 
     // a string that mimics an old naive tag must NOT collide with any bigint (the injective-typing regression guard)
     assert.notEqual(actionInputDigest({ ...base, bindings: { n: "__bigint__:5" } }), actionInputDigest({ ...base, bindings: { n: 5n } }), "a string that looks like a bigint tag is still keyed apart");
     assert.throws(() => actionInputDigest({ ...base, bindings: { d: new Date() } }), /non-plain object/, "a Date (or other non-plain object) fails closed rather than mis-keying");
+    // non-JSON PRIMITIVES: NaN/Infinity would both become JSON null (colliding with each other + a real null); an
+    // undefined field would be dropped (colliding with a missing key); a function would silently vanish.
+    const nan = actionInputDigest({ ...base, bindings: { n: NaN } });
+    assert.notEqual(nan, actionInputDigest({ ...base, bindings: { n: Infinity } }), "NaN and Infinity are keyed apart");
+    assert.notEqual(nan, actionInputDigest({ ...base, bindings: { n: null } }), "NaN and null are keyed apart");
+    assert.notEqual(actionInputDigest({ ...base, bindings: { a: undefined, b: 1 } }), actionInputDigest({ ...base, bindings: { b: 1 } }), "an undefined field is not dropped (distinct from a missing key)");
+    assert.throws(() => actionInputDigest({ ...base, bindings: { f: () => 1 } }), /function/, "a function binding fails closed");
   });
 
   test("content-addressed: a changed source (different sourceReceiptDigests) yields a DIFFERENT key — no stale dedup", () => {
