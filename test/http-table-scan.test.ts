@@ -51,13 +51,14 @@ describe("http.get: one generic HTTP resolver (injected fetch, no ambient networ
     await assert.rejects(() => httpTableResolver(okJson([]))(resource({ url: "https://x/y", table: "t", format: "xml" }), { conn, now: "t" }), /unknown format/);
   });
 
-  test("SECURITY: an auth-bearing header in a manifest is refused (secrets are host-owned, injected via withAuth)", async () => {
+  test("SECURITY: only allowlisted non-secret headers pass; any other (incl. non-obvious auth) is refused", async () => {
     const conn = await memoryConn();
-    for (const headers of [{ Authorization: "Bearer secret" }, { "X-API-Key": "k" }, { Cookie: "s=1" }, { "x-auth-token": "t" }]) {
-      await assert.rejects(() => httpTableResolver(okJson([]))(resource({ url: "https://x/y", table: "t", headers }), { conn, now: "t" }), /must not be set in a manifest/);
+    // the small-denylist gaps the allowlist closes: Private-Token / Ocp-Apim-* / a custom X-*-Auth all refused
+    for (const headers of [{ Authorization: "Bearer s" }, { "X-API-Key": "k" }, { Cookie: "s=1" }, { "Private-Token": "p" }, { "Ocp-Apim-Subscription-Key": "o" }, { "X-Company-Auth": "z" }]) {
+      await assert.rejects(() => httpTableResolver(okJson([]))(resource({ url: "https://x/y", table: "t", headers }), { conn, now: "t" }), /not allowed from a manifest/);
     }
-    // a non-secret header (Accept) is fine
-    await httpTableResolver(okJson([]))(resource({ url: "https://x/y", table: "t", headers: { Accept: "application/json" } }), { conn, now: "t" });
+    // allowlisted non-secret headers pass
+    await httpTableResolver(okJson([]))(resource({ url: "https://x/y", table: "t", headers: { Accept: "application/json", "Content-Type": "application/json" } }), { conn, now: "t" });
   });
 
   test("conditional GET: a 304 to the stored ETag replays the cached receipt (no re-download / re-materialize)", async () => {

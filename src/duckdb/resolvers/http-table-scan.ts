@@ -50,11 +50,13 @@ export function httpTableResolver(fetchImpl: FetchLike): BioResolverImpl {
     const reader = READERS[format];
     if (!reader) throw new Error(`http resolver: unknown format '${format}' (expected json, ndjson, or csv)`);
     const headers = (p.headers && typeof p.headers === "object" ? p.headers : {}) as Record<string, string>;
-    // SECURITY: a manifest is agent-authorable DATA, so it must not carry SECRETS. Refuse auth-bearing headers from
-    // manifest params — auth is host-owned, injected via a fetch policy (withAuth), never a manifest field.
-    const RESERVED_AUTH_HEADERS = new Set(["authorization", "cookie", "proxy-authorization", "x-api-key", "api-key", "x-auth-token"]);
+    // SECURITY: a manifest is agent-authorable DATA, so it must not carry SECRETS. Use an ALLOWLIST of clearly
+    // non-secret headers (a denylist can never be complete — Private-Token, Ocp-Apim-Subscription-Key, X-Foo-Auth,
+    // … would slip through). Anything else — including any auth/custom header that might bear a secret — is refused
+    // and must be injected by a host fetch policy (withAuth). Fail closed.
+    const SAFE_MANIFEST_HEADERS = new Set(["accept", "accept-language", "accept-encoding", "content-type", "content-language", "user-agent", "referer", "if-none-match", "if-modified-since", "cache-control"]);
     for (const name of Object.keys(headers)) {
-      if (RESERVED_AUTH_HEADERS.has(name.toLowerCase())) throw new Error(`http.get: '${name}' must not be set in a manifest — secrets are host-owned; inject auth with a host fetch policy (withAuth), not manifest params`);
+      if (!SAFE_MANIFEST_HEADERS.has(name.toLowerCase())) throw new Error(`http.get: header '${name}' is not allowed from a manifest — a manifest must not carry secrets. Only non-secret headers (Accept, Content-Type, …) are permitted; inject auth/custom headers via a host fetch policy (withAuth).`);
     }
     // This resolver materializes a response BODY into a table, so it allows the BODY-RETURNING READ methods:
     // GET, or POST as a QUERY (a body that READS — VEP batch, GraphQL). PUT/DELETE/PATCH (mutations) are refused.

@@ -199,6 +199,15 @@ describe("job durability: rich status is not lost + the ledger timestamp wins + 
     assert.match(collected!.error!, /boom in the worker/, "the error survived the runner (in-memory put it in collect, not status)");
   });
 
+  test("collectAndRecordBioJob refuses a result timestamped BEFORE the terminal status (no out-of-order as-of history)", async () => {
+    const { conn, cwd, clock } = await setup();
+    const local = inMemoryJobRunner({ clock, execute: async () => ({ result: { ok: true } }) });
+    await submitBioJob(conn, local, { cwd, runId: "ord", replay: replay("ord"), now: "2026-07-01T00:00:01Z" });
+    await local.settle("ord");
+    await pollBioJob(conn, local, { cwd, runId: "ord", now: "2026-07-01T00:00:10Z" }); // terminal status @ T10
+    await assert.rejects(() => collectAndRecordBioJob(conn, local, { cwd, runId: "ord", now: "2026-07-01T00:00:05Z" }), /predates its status/);
+  });
+
   test("collectAndRecordBioJob fails closed without a durable record", async () => {
     const { conn, cwd, clock } = await setup();
     const local = inMemoryJobRunner({ clock, execute: async () => ({}) });

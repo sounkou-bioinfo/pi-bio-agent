@@ -222,6 +222,11 @@ export async function collectAndRecordBioJob(conn: SqlConn, runner: JobRunner, r
   }
   // TAG the envelope so the reader can never mistake a bare result value (which may itself be an object with a
   // `result`/`error` key) for an envelope — the schema marker is the unambiguous discriminator.
+  // the result must not predate its own terminal STATUS in as-of history: if the ledger is already terminal,
+  // req.now must be at-or-after that terminal time (else a result would be visible before the status that produced
+  // it). `latest` is re-read here because the block above may have just recorded the terminal status.
+  const terminal = await latestSlotRow(conn, req.runId);
+  if (terminal && isTerminal(terminal.phase) && req.now < terminal.at) throw new Error(`job-store: result 'now' ${req.now} is before the terminal status at ${terminal.at} — refusing to record a result that predates its status`);
   const envelope: { schema: "pi-bio.job_result.v1"; result?: JobResult["result"]; artifacts?: JobResult["artifacts"]; error?: string } = { schema: "pi-bio.job_result.v1" };
   if (res.result !== undefined) envelope.result = res.result;
   if (res.artifacts !== undefined) envelope.artifacts = res.artifacts;

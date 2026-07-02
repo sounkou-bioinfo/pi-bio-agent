@@ -48,6 +48,7 @@ const FILE_PATH_RESOLVERS = new Set(["duckdb.file_scan", "duckhts.read_bcf"]);
 function resolveResourcePaths(manifest: BioManifest, manifestDir: string): BioManifest {
   const resources = (manifest.provides?.resources ?? []).map((res) => {
     if (!res || typeof res !== "object") return res; // non-object element — leave it for validateBioManifest to reject cleanly (don't TypeError here)
+    if (!res.params || typeof res.params !== "object") return res; // missing/malformed params — validation rejects it; don't TypeError on res.params.command/.path
     // process.compute: a script SHIPS WITH the manifest, referenced "./compute.R" — resolve such relative
     // command entries against the manifest dir (absolute paths and bare executable names are left untouched).
     if (res.resolver === PROCESS_RESOLVER) {
