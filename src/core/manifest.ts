@@ -152,6 +152,10 @@ function deepFreeze<T>(value: T): T {
 // smuggled `reportKind`, `requiredColumns`, `columnRoles`, `mapper`, or `client` key is rejected here instead
 // of riding along as inert JSON that a future reader might honor. Opacity is allowed in exactly two places:
 // `resource.params` (opaque to core, handed to the resolver) and JSON Schemas (`inputSchema`/`outputSchema`).
+/** True for anything that is NOT a non-empty string — a required-metadata check that fails closed on a non-string
+ *  scalar (e.g. a numeric `title`) instead of TypeError-ing on `.trim()`. */
+const blankStr = (x: unknown): boolean => typeof x !== "string" || x.trim() === "";
+
 function rejectUnknownKeys(obj: unknown, allowed: readonly string[], label: string, errors: string[]): void {
   if (!obj || typeof obj !== "object" || Array.isArray(obj)) return; // wrong-type is reported by the field checks
   for (const k of Object.keys(obj as Record<string, unknown>)) {
@@ -203,7 +207,9 @@ export function validateBioManifest(manifest: BioManifest): string[] {
 
   const resolverIds = new Set(resolvers.map((r) => r.id));
   for (const r of resolvers) {
-    if (!r.title?.trim() || !r.description?.trim() || !r.version?.trim()) errors.push(`resolver '${r.id}' requires title, description, version`);
+    // typeof guard, not `?.trim()`: a non-string truthy scalar (e.g. "title": 42) would TypeError on .trim() and
+    // CRASH validation (bio_describe_model) instead of returning { valid:false } — fail closed with a clear error.
+    if (blankStr(r.title) || blankStr(r.description) || blankStr(r.version)) errors.push(`resolver '${r.id}' requires string title, description, version`);
     if (!r.output?.mode) errors.push(`resolver '${r.id}' requires output.mode`);
     rejectUnknownKeys(r, ["id", "version", "title", "description", "output", "temporal"], `resolver '${r.id}'`, errors);
     rejectUnknownKeys(r.output, ["mode", "mediaType", "schemaRef"], `resolver '${r.id}'.output`, errors);
@@ -217,12 +223,12 @@ export function validateBioManifest(manifest: BioManifest): string[] {
     rejectUnknownKeys(res, ["id", "title", "kind", "resolver", "params", "schemaRef"], `resource '${res.id}'`, errors);
   }
   for (const ts of termSets) {
-    if (!ts.title?.trim()) errors.push(`termSet '${ts.id}' requires a title`);
+    if (blankStr(ts.title)) errors.push(`termSet '${ts.id}' requires a string title`);
     rejectUnknownKeys(ts, ["id", "title", "ordered", "members"], `termSet '${ts.id}'`, errors);
-    // Fail closed, not with a TypeError: `?? []` guards null/undefined but NOT a present-but-non-array `members`
-    // (e.g. `members: {}`), which would make `for…of` throw and crash bio_describe_model instead of returning
-    // { valid:false, errors:[…] }. Report the shape error and skip member iteration.
-    if (ts.members !== undefined && !Array.isArray(ts.members)) { errors.push(`termSet '${ts.id}' members must be an array`); continue; }
+    // `members` is REQUIRED (an array): a termSet with no members is a meaningless candidate set, and downstream
+    // grounding (judgment.ts) / ordered-scale projection (scales.ts) assume it exists — a MISSING or non-array
+    // members would validate here yet TypeError there. Fail closed at admission and skip member iteration.
+    if (!Array.isArray(ts.members)) { errors.push(`termSet '${ts.id}' requires a members array`); continue; }
     const seenMembers = new Set<string>();
     for (const m of ts.members ?? []) {
       if (!m || typeof m !== "object") { errors.push(`termSet '${ts.id}' has a non-object member`); continue; } // fail closed: a null/scalar member would TypeError on m.id

@@ -116,13 +116,20 @@ describe("validateBioManifest: fail closed", () => {
 
   test("rejects term sets with an untitled set, empty member id, or duplicate member id", () => {
     const ts = (members: Array<{ id: string; label?: string }>, title = "T") => baseManifest({ termSets: [{ id: "ts1", title, members }] });
-    assert.ok(validateBioManifest(ts([{ id: "A:1" }], "")).some((e) => e.includes("requires a title")));
+    assert.ok(validateBioManifest(ts([{ id: "A:1" }], "")).some((e) => e.includes("requires a string title")));
     assert.ok(validateBioManifest(ts([{ id: "" }])).some((e) => e.includes("empty id")));
     assert.ok(validateBioManifest(ts([{ id: "A:1" }, { id: "A:1" }])).some((e) => e.includes("duplicate member id 'A:1'")));
     assert.deepEqual(validateBioManifest(ts([{ id: "A:1" }, { id: "A:2" }])), []);
     // a present-but-non-array `members` (e.g. {}) returns a shape error, NOT a TypeError from for…of (fail closed)
     assert.doesNotThrow(() => validateBioManifest(baseManifest({ termSets: [{ id: "ts1", title: "T", members: {} }] } as never)));
-    assert.ok(validateBioManifest(baseManifest({ termSets: [{ id: "ts1", title: "T", members: {} }] } as never)).some((e) => /members must be an array/.test(e)));
+    assert.ok(validateBioManifest(baseManifest({ termSets: [{ id: "ts1", title: "T", members: {} }] } as never)).some((e) => /requires a members array/.test(e)));
+    // a MISSING members (undefined) is also rejected now — required, not optional (downstream grounding assumes it)
+    assert.ok(validateBioManifest(baseManifest({ termSets: [{ id: "ts1", title: "T" }] } as never)).some((e) => /requires a members array/.test(e)));
+    // a NON-STRING title (e.g. 42) is a validation error, NOT a TypeError on .trim() (fail closed for describe)
+    assert.doesNotThrow(() => validateBioManifest(baseManifest({ termSets: [{ id: "ts1", title: 42, members: [{ id: "A:1" }] }] } as never)));
+    assert.ok(validateBioManifest(baseManifest({ termSets: [{ id: "ts1", title: 42, members: [{ id: "A:1" }] }] } as never)).some((e) => /requires a string title/.test(e)));
+    assert.doesNotThrow(() => validateBioManifest(baseManifest({ resolvers: [{ id: "r", version: 1, title: "T", description: "d", output: { mode: "table" } }] } as never)));
+    assert.ok(validateBioManifest(baseManifest({ resolvers: [{ id: "r", version: 1, title: "T", description: "d", output: { mode: "table" } }] } as never)).some((e) => /requires string title/.test(e)));
     // a null/scalar ELEMENT inside members is reported, not a TypeError on m.id (incl. an ordered scale that reads m.rank)
     assert.doesNotThrow(() => validateBioManifest(baseManifest({ termSets: [{ id: "ts1", title: "T", ordered: true, members: [null] }] } as never)));
     assert.ok(validateBioManifest(baseManifest({ termSets: [{ id: "ts1", title: "T", members: [null] }] } as never)).some((e) => /non-object member/.test(e)));

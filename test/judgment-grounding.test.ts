@@ -71,6 +71,17 @@ describe("typed judgment: ground free text to a registered candidate term set", 
     assert.throws(() => decideGrounding({ chosen: null, confidence: Number.NaN }, ts), /confidence.*\[0, 1\]/);
   });
 
+  test("rejects a malformed minConfidence THRESHOLD (NaN silently grounds; negative/>1 changes semantics)", async () => {
+    const ts = candidates.provides.termSets![0]!;
+    const good = { chosen: "MONDO:0004975", confidence: 0.9 };
+    assert.throws(() => decideGrounding(good, ts, { minConfidence: Number.NaN }), /minConfidence.*\[0, 1\]/);
+    assert.throws(() => decideGrounding(good, ts, { minConfidence: -0.1 }), /minConfidence.*\[0, 1\]/);
+    assert.throws(() => decideGrounding(good, ts, { minConfidence: 2 }), /minConfidence.*\[0, 1\]/);
+    // a valid threshold still gates normally
+    assert.equal(decideGrounding(good, ts, { minConfidence: 0.95 }).status, "abstained");
+    assert.equal(decideGrounding(good, ts, { minConfidence: 0.5 }).status, "grounded");
+  });
+
   test("the judgment is deterministic for a fixed proposal", async () => {
     const judge = judgeReturning({ chosen: "MONDO:0004975", confidence: 0.8 });
     assert.deepEqual(await run(registry(), judge), await run(registry(), judge));

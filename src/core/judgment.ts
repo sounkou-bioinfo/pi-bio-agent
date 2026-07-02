@@ -51,6 +51,11 @@ export function decideGrounding(
   if (proposal.confidence !== undefined && (typeof proposal.confidence !== "number" || !Number.isFinite(proposal.confidence) || proposal.confidence < 0 || proposal.confidence > 1)) {
     throw new JudgeContractError("judge proposal 'confidence', if present, must be a finite number in [0, 1]");
   }
+  // The THRESHOLD must be validated too, not just the proposal: a NaN minConfidence makes `confidence < NaN` always
+  // false, silently grounding candidates that should be gated; a negative / >1 threshold silently changes semantics.
+  if (opts.minConfidence !== undefined && (typeof opts.minConfidence !== "number" || !Number.isFinite(opts.minConfidence) || opts.minConfidence < 0 || opts.minConfidence > 1)) {
+    throw new JudgeContractError("decideGrounding opts.minConfidence, if present, must be a finite number in [0, 1]");
+  }
   const common = { evidence: proposal.evidence, confidence: proposal.confidence };
   if (proposal.chosen === null || proposal.chosen === undefined) return { status: "abstained", chosen: null, ...common };
   const match = termSet.members.find((m) => m.id === proposal.chosen);
