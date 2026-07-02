@@ -23,6 +23,20 @@ export const MEMORY_NOW = "9999-12-31T23:59:59.999Z";
 
 export const memorySubjectId = (slug: string): string => `${MEMORY_NS}${slug}`;
 
+// The memory store is a STATE MACHINE over a slug's CURRENT content (remember/forget change which revision is
+// "latest"). The observation store's equal-timestamp tiebreak is hash-arbitrary (observations.ts: observation_id
+// DESC), so a same-millisecond remember→forget (systemClock() has ms resolution — two rapid tool calls collide)
+// would resolve by hash, NOT operation order: recall(now) could return the content OR the tombstone at random.
+// The store's contract is that state-mutating producers use a strictly-monotonic recordedAt; enforce it here by
+// advancing `now` to strictly after the slug's current latest revision. Append-only history is preserved (the
+// advance only moves a colliding write 1ms forward — earlier revisions keep their real timestamps).
+async function monotonicNow(conn: SqlConn, subject: string, now: string): Promise<string> {
+  const latest = await observationAsOfKey(conn, subject, MEMORY_NOW);
+  if (!latest) return now;
+  const latestMs = Date.parse(latest.recorded_at), nowMs = Date.parse(now);
+  return Number.isFinite(latestMs) && Number.isFinite(nowMs) && nowMs <= latestMs ? new Date(latestMs + 1).toISOString() : now;
+}
+
 export interface MemoryContent {
   slug: string;
   kind: string;
@@ -45,9 +59,10 @@ export async function ensureMemorySchema(conn: SqlConn): Promise<void> {
  * re-write SUPERSEDES the slot's current content (by subject+predicate) yet every prior revision is retained for
  * as-of + history. `now` is the recordedAt instant.
  */
-export async function remember(conn: SqlConn, note: MemoryContent, now: string, author?: string): Promise<void> {
+export async function remember(conn: SqlConn, note: MemoryContent, wallNow: string, author?: string): Promise<void> {
   await ensureMemorySchema(conn);
   const subject = memorySubjectId(note.slug);
+  const now = await monotonicNow(conn, subject, wallNow); // strictly after the slug's current revision (deterministic latest-wins)
   // `source` = the authoring agent. It is part of observation IDENTITY, so two agents remembering the same slug
   // are two attributed rows (both retained); the latest by recorded_at is "current". This is what makes shared
   // cross-agent memory trustworthy — you always know WHO said it.
@@ -114,9 +129,10 @@ export async function listMemory(conn: SqlConn, asOf: string = MEMORY_NOW): Prom
  * forgot) so recall(now) is null and listMemory omits it, while recall(as-of an earlier time) still sees the old
  * content. Memory changes are never lost.
  */
-export async function forget(conn: SqlConn, slug: string, now: string, author?: string): Promise<void> {
+export async function forget(conn: SqlConn, slug: string, wallNow: string, author?: string): Promise<void> {
   await ensureMemorySchema(conn);
   const subject = memorySubjectId(slug);
+  const now = await monotonicNow(conn, subject, wallNow); // strictly after the current content so a same-ms remember→forget deterministically forgets
   await recordObservation(conn, { statementKey: subject, subjectId: subject, predicate: CONTENT, recordedAt: now, source: author });
   // Also retract the note's link edges — otherwise they linger in bio_edges_as_of as phantom edges out of a
   // forgotten node (the same reconciliation remember() does when a link is dropped).

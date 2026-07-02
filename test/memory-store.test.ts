@@ -41,6 +41,22 @@ describe("temporal memory over bio_observations", () => {
     assert.deepEqual((await listMemory(c, T1)).map((m) => m.slug), ["temp"]); // present as of t1
   });
 
+  test("same-millisecond remember→forget deterministically FORGETS (monotonic recordedAt, not hash-arbitrary)", async () => {
+    // Two rapid tool calls can share a systemClock() millisecond. The observation store's equal-timestamp tiebreak
+    // is hash-arbitrary, so without a monotonic clock the winner would be random. The memory store advances the
+    // second write to strictly after the first, so the LATER operation wins — every time.
+    const c = await conn();
+    const SAME = "2026-01-01T00:00:03Z";
+    await remember(c, note("flip", "content"), SAME);
+    await forget(c, "flip", SAME);
+    assert.equal(await recall(c, "flip"), null, "the forget (later op) wins deterministically despite the identical wall-clock time");
+    // and the inverse order re-remembers deterministically
+    await remember(c, note("flip", "back"), SAME);
+    assert.equal((await recall(c, "flip"))?.body, "back");
+    // history retains all three revisions (append-only: the monotonic advance never destroys a prior row)
+    assert.deepEqual((await memoryHistory(c, "flip")).map((r) => r.content?.body ?? "∅"), ["content", "∅", "back"]);
+  });
+
   test("shared memory is attributed: two agents on one slug -> both retained, current shows the latest author", async () => {
     const c = await conn();
     await remember(c, note("risk", "A's view"), T1, "agent:A");
