@@ -27,15 +27,17 @@ clinical team ([`bioconnect-flagship`](../docs/roadmap.md), study synthesis 2026
 
 ## The staged workflow, mapped to primitives
 
-Each stage names the `pi-bio-agent` primitive it uses and whether it is a **manifest** the app composes (no library
-change), an **app producer** (host code the app owns), or a **library build** (a new capability the library adds).
+Each stage names the `pi-bio-agent` primitive it uses and whether it is a **manifest** the app composes, an **app
+producer** (host code the app owns), or the substrate's existing **record + gate**. There is no "library build"
+column: on re-examination every stage composes primitives we already ship (see
+[`refinments.md`](./refinments.md#bioconnect-does-the-library-need-anything-new-2026-07-03-re-examined)).
 
 | # | Stage | Primitive | Where it lives |
 |---|---|---|---|
 | 1 | Case structuring (singleton vs multiplex/family) | SQL views over ingested tables | app manifest |
 | 2 | Batch annotation on UNIQUE SNV/CNV keys | `ncurl_table` (GeneBe, with fanout + backoff) **or** `process.compute` (VEP CLI) | app manifest |
-| 3 | HPO extraction harness (4 modes) | grounding: deterministic-first + abstaining model | **library build** |
-| 4 | Gene prioritization over Monarch KG | `bio_edges` + `entailed_edge`, remote `ATTACH monarch-kg.duckdb`, duckpgq paths | app manifest (uses build #4) |
+| 3 | HPO extraction harness (4 modes) | `decideGrounding` (deterministic-first + abstaining model) + the judge port + the agent loop | app manifest |
+| 4 | Gene prioritization over Monarch KG | `bio_edges` + `entailed_edge`, remote `ATTACH monarch-kg.duckdb`, duckpgq paths | app manifest |
 | 5 | Deterministic variant scoring | SQL over annotation columns (REVEL/AlphaMissense/SpliceAI/CADD) | app manifest |
 | 6 | Deterministic inheritance scoring | SQL over genotypes + family structure | app manifest |
 | 7 | Combined baseline score, calibrated on ClinVar/known-solved | SQL combine + a calibration producer | app producer |
@@ -43,27 +45,30 @@ change), an **app producer** (host code the app owns), or a **library build** (a
 | 9 | Family-aware interpretation (multiplex) | SQL aggregations over the family variant view | app manifest |
 | 10 | Optional agentic synthesis / rerank on the reduced set | recorded-and-gated judgment (Phase 4) | library (record + gate) |
 
-**Six stages are a manifest away** (1, 2, 4, 5, 6, 9). The judgment stages (3's adjudication, 8, 10) are
-**recorded and gated, never computed by the substrate**. What the library must add is small.
+Six stages are a manifest (1, 2, 4, 5, 6, 9), two are app producers (7, 8), and the judgment stages (3's
+adjudication, 10) are **recorded and gated, never computed by the substrate**.
 
-## What the library builds (ranked by immanence)
+## What the library needs: essentially nothing
 
-Each abstracts at least two things that already exist, so it reveals a real general, not an imagined one.
+The first draft of this spec named three "library builds." Re-examined against the anti-idealist rule, none is a
+new primitive — each is a composition of things already shipped, so it stays app-side:
 
-1. **HPO grounding harness** (highest). Abstracts `decideGrounding` (`src/core/judgment.ts`) + the `ols4-grounding`
-   `ncurl_table` manifest. Today grounding is one projection-then-judgment path; the four BioConnect modes
-   (tool-only, model-only, candidates→model, model→tools→model) generalize it. Named consumer, and it *closes
-   grounding*. The `model→tools→model` mode is a real agentic loop beyond the current single-shot judge: the new logic.
-2. **Monarch-KG manifest / connector** (medium). Abstracts SemanticSQL statements→`bio_edges` ingest + the
-   `sql_materialize` resolved-resource pattern. New surface: remote `ATTACH` of `monarch-kg.duckdb` and a
-   biolink→predicate projection. Prototype on a locus extract first; remote ATTACH stresses the graph-at-scale hedge.
-3. **Ledger → training-dataset exporter** (lowest, external consumer). Abstracts the `coloc-record` producer +
-   rare-high-impact receipts + Phase-4 approval rows. Emits fine-tune-ready, contested-flagged (input, judgment)
-   rows. See "the judgment data plane" below.
+1. **HPO grounding "harness"** is not a build. `decideGrounding` (`src/core/judgment.ts`) already IS the
+   candidates→model mode (deterministic match → abstaining model, no invented CURIE); deterministic-only is the SQL,
+   model-only is the judge port, model→tools→model is the agent's own tool loop. A 4-mode harness is a mode selector
+   over `decideGrounding` + the agent — a manifest, not a primitive. Add a thin `bio_ground` convenience only if ≥2
+   real HPO/gene uses prove the pattern repetitive.
+2. **Monarch-KG projection** is not a build — it is pure SQL, PROVEN in `scripts/foreign-graph-closure.mjs`: `ATTACH`
+   read-only + a `subject/predicate/object → from_id/predicate/to_id` SELECT + the existing `materializeEntailedEdges`
+   (which already takes any source table). A manifest, zero new code. Open hedge: full-KG closure *performance* at scale.
+3. **Ledger → training dataset** is not a build — a `SELECT`/view over `bio_observations` joined to the Phase-4
+   approval slots (contested = a `WHERE` over decisions), with a documented dataset schema.
 
-Everything else (calibration weights, ACMG-points curation, scoring rules, the case-analysis agent and its tools)
-is **app code**: manifests, `src/producers/`-style modules, and a thin agent over prepared DuckDB views. The
-library does not learn a domain.
+So BioConnect is a **manifest pack + producers + a thin case-analysis agent** over the existing library, which
+validates the bet: the substrate absorbed a real clinical workflow with ~zero new primitives. The one
+library-adjacent scrap is a field, not an abstraction: let a resolver receipt carry `license` + de-id status next to
+`source`/`version`. Everything else (calibration weights, ACMG points, scoring rules, the agent and its tools) is
+app code. The library does not learn a domain.
 
 ## Production and reproducibility (the regulatory-fit argument)
 
@@ -122,9 +127,10 @@ quality.
 
 - The library produces the *dataset*, not the trained model; do not claim it "closes over fine-tuning," only the
   data plane. Weight-update studying is out of scope ([`machine-studying-lineage`](./machine-studying-lineage.md)).
-- `model→tools→model` HPO adjudication is a genuine agentic loop; it is the real new logic in build #1.
-- Remote Monarch ATTACH stresses the closure-at-scale hedge; prove it on a locus extract before claiming graph-walk
-  performance over the full KG.
+- `model→tools→model` HPO adjudication is a genuine agentic loop, but the agent already does that with the grounding
+  tools; it is app behavior, not a library primitive.
+- Remote Monarch ATTACH is proven on a locus extract (`scripts/foreign-graph-closure.mjs`); only full-KG closure
+  *performance* at scale is unproven.
 - Calibration and ACMG points encode human curatorial judgment (authored rules, not derivable); they are app
   producers with tests, and the receipt records which ruleset/version ran.
 - The "small model beats frontier" result is domain-contingent (financial taste has no external truth). Clinical
@@ -133,6 +139,6 @@ quality.
 ## The bet, at product scale
 
 pi-bio-agent stays a lean substrate. BioConnect is the host that brings the backend: a manifest pack, a few
-producers, a thin case-analysis agent, and one new library capability (the grounding harness). If it runs a real
+producers, and a thin case-analysis agent, with **zero new library primitives**. If it runs a real
 case end to end under the gates, with the annotation source and every tool/DB/API version in the receipt and the
 model's judgment recorded and signed off, the substrate has done its job: the application is composed, not coded.
