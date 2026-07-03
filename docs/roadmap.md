@@ -144,11 +144,12 @@ approval gate): the substrate provides the rails, the sign-off is hosted, not co
 - **4.0. Temporal provenance store. BUILT.** `bio_observations` keyed by `statement_key`; `asOf(t)` =
   latest row per key; rollback = append a row pointing at an older version. Edge-like rows project into
   `bio_edges_as_of(t)` with `entailed_edge` closure.
-- **4.1. Record a real judgment. MAPPING BUILT + TESTED; production wiring owed.** The coloc→judgment
-  mapping is proven in test. The recorder is GENERIC (`recordObservation`): coloc is one producer, not
-  a shape the substrate bends toward. **Owed (the Phase-1 recorder leftover):** wiring the recorder into
-  the production `examples/coloc` run itself, sequenced behind the coloc flagship. (This is distinct from
-  the shared-store concurrency residue, which is now closed — see `docs/concurrency.md`.)
+- **4.1. Record a real judgment. BUILT.** The production `examples/coloc` run records its per-tissue
+  posteriors as time-versioned KG facts: `runColocRecord` (`src/producers/coloc-record.ts`) runs the
+  manifest, parses the posteriors, and records EVERY one as a scalar observation plus the thresholded
+  PP.H4 > t call as an edge into `bio_edges_as_of`. The mapping is defined ONCE (shared by the example
+  CLI `examples/coloc/record.mjs` and the test) and leans only on the GENERIC `recordObservation`: coloc
+  is one PRODUCER, not a shape the substrate bends toward — no `PP.Hk` logic in `src/core`.
 - **4.2. Activate/rollback state machine. BUILT.** Current active version is latest-as-of; rollback
   appends the prior version (never mutates).
 - **4.3: declare → validate → test → record → activate happy path. BUILT.** Validate → run the

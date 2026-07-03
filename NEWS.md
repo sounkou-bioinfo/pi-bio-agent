@@ -58,5 +58,10 @@ is the plan of record; [`docs/refinments.md`](docs/refinments.md) tracks open it
 
 ## Governance
 
+- **Coloc records its judgment (roadmap 4.1).** The production `examples/coloc` run now records its
+  per-tissue `coloc.abf` posteriors as time-versioned KG facts: every posterior a scalar observation and
+  the thresholded PP.H4 call an edge into `bio_edges_as_of`. The mapping lives once in
+  `src/producers/coloc-record.ts` (shared by the example CLI `examples/coloc/record.mjs` and the test) and
+  uses only the generic `recordObservation` — coloc is one producer, no `PP.Hk` logic in `src/core`.
 - Durable `declare → validate → test → record → activate → rollback` with a park + resume
   approval gate; the human or policy sign-off is hosted, not computed.

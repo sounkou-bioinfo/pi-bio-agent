@@ -64,8 +64,11 @@ them into a real *in-flagship* consumer — it is **one flagship, not three rema
 - **per-tissue fan-out** over real GTEx eQTL tissues = the partition+map DAG (`runPipeline`);
 - **PLINK2 reference LD** + **SuSiE/HyPrColoc** = richer COMPUTE process ops (these need LD);
 - a multi-output, long-running coloc run = the first real consumer of the **`process` artifact transport**
-  (file outputs → CAS);
-- recording each locus's posteriors as **time-versioned, provenance-bearing KG facts** = Phase-4 `record`.
+  (file outputs → CAS).
 
-So coloc is the flagship that puts the already-built artifact transport and judgment-recording to work as a real
-end-to-end consumer — turning standalone primitives into a driven research pipeline.
+Recording each locus's posteriors as **time-versioned, provenance-bearing KG facts** (Phase-4 `record`) is now
+**built**: `node examples/coloc/record.mjs` runs this manifest and records every posterior as a scalar observation
+plus the thresholded `PP.H4 > 0.8` call as an edge (`tissue —shares_causal_variant_with→ gwas_locus`) into
+`bio_edges_as_of`. The mapping lives once in `src/producers/coloc-record.ts` — coloc is one producer, using only
+the generic `recordObservation`. So coloc puts the artifact transport and judgment-recording to work as a real
+end-to-end consumer, turning standalone primitives into a driven research pipeline.

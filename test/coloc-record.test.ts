@@ -7,43 +7,16 @@ import { join, resolve } from "node:path";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { duckdbNodeConn } from "../src/duckdb/node-api.js";
 import type { SqlConn } from "../src/core/ports.js";
-import { createBioObservationSchema, recordObservation, observationsAsOf, materializeBioEdgesAsOf } from "../src/duckdb/observations.js";
-import { runBioQueryFromManifest } from "../src/hosts/run-store.js";
+import { createBioObservationSchema, observationsAsOf, materializeBioEdgesAsOf } from "../src/duckdb/observations.js";
 import { nodeProcessRunner } from "../src/process/node-process-runner.js";
+import { recordColocObservations, runColocRecord, type ColocRow } from "../src/producers/coloc-record.js";
 
 // Phase 4.1: coloc is the first real PRODUCER of recorded judgments. The result of a DATA+COMPUTE run (per-tissue
 // coloc.abf posteriors) becomes time-versioned KG facts: EVERY posterior as a SCALAR observation (so PP.H0–H3 are
 // not hidden), plus the thresholded biological conclusion (PP.H4 > t) as an EDGE-like observation that projects
-// into bio_edges_as_of. The mapping is coloc-specific so it stays in the test, not in src/.
-
-type ColocRow = { tissue: string; hypothesis: string; posterior: number };
-
-async function recordColocObservations(conn: SqlConn, rows: ColocRow[], o: { locusId: string; runId: string; resultDigest: string; recordedAt: string; threshold?: number }): Promise<void> {
-  const threshold = o.threshold ?? 0.8;
-  for (const r of rows) {
-    await recordObservation(conn, {
-      statementKey: `coloc:${o.locusId}:${r.tissue}:${r.hypothesis}`,
-      subjectId: `coloc:${o.locusId}:${r.tissue}`, predicate: `coloc:posterior:${r.hypothesis}`,
-      value: r.posterior, recordedAt: o.recordedAt, source: o.runId, digest: o.resultDigest,
-      attrs: { tissue: r.tissue, hypothesis: r.hypothesis, locusId: o.locusId },
-      trust: { provenanceClass: "computed", confidence: r.posterior, producer: "coloc.abf" },
-    });
-  }
-  // the biological CALL — only when PP.H4 crosses the threshold — as an edge-like statement. NOTE: the threshold
-  // is part of the call's IDENTITY; observation_id excludes attrs, so if the rule changes independently of the
-  // result, fold the rule into source/digest (here the result digest changes per run, so it's covered).
-  const h4 = new Map(rows.filter((r) => r.hypothesis === "PP.H4").map((r) => [r.tissue, r.posterior]));
-  for (const [tissue, pp] of h4) {
-    if (pp <= threshold) continue;
-    await recordObservation(conn, {
-      statementKey: `coloc:${o.locusId}:${tissue}:shared-causal-call`,
-      subjectId: `tissue:${tissue}`, predicate: "coloc:shares_causal_variant_with", objectId: `gwas_locus:${o.locusId}`,
-      recordedAt: o.recordedAt, source: o.runId, digest: o.resultDigest,
-      attrs: { pp_h4: pp, threshold, hypothesis: "PP.H4" },
-      trust: { provenanceClass: "computed", confidence: pp, producer: "coloc.abf" },
-    });
-  }
-}
+// into bio_edges_as_of. The mapping + the production pipeline live ONCE in src/producers/coloc-record.ts — coloc
+// is ONE producer, not a shape src/core bends toward — and are imported here so the test and the example CLI
+// exercise the SAME recorder.
 
 async function obsConn(): Promise<SqlConn> {
   const c = duckdbNodeConn(await (await DuckDBInstance.create(":memory:")).connect());
@@ -95,20 +68,19 @@ const rOk = (() => {
 })();
 
 describe("Phase 4.1b: the REAL coloc run records its judgment (integration)", { skip: rOk ? false : "Rscript + R 'nanoarrow' not available" }, () => {
-  test("run examples/coloc, then record its posteriors -> Whole_Blood colocalizes as a KG fact", async () => {
+  test("the production runColocRecord pipeline runs examples/coloc and records Whole_Blood colocalizing as a KG fact", async () => {
     const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-coloc-rec-"));
-    const out = await runBioQueryFromManifest({
-      cwd, dbPath: ":memory:", manifestPath: resolve(process.cwd(), "examples", "coloc", "manifest.json"),
-      sql: "SELECT tissue, hypothesis, posterior FROM coloc_result",
-      process: { runner: nodeProcessRunner() }, duckdbInitSql: ["INSTALL nanoarrow FROM community", "LOAD nanoarrow"],
-      runId: "coloc-rec", now: "T1",
-    });
-    assert.equal(out.ok, true, out.ok ? "" : `coloc run failed: ${(out as { error?: unknown }).error}`);
-    if (!out.ok) return;
-    const rows = (JSON.parse(await fs.readFile(join(out.runDir, "result.json"), "utf8")) as { rows: ColocRow[] }).rows;
-
     const c = await obsConn();
-    await recordColocObservations(c, rows, { locusId: "gwas1", runId: out.runId, resultDigest: "sha256:run", recordedAt: NOW });
+    // drive the SAME production pipeline the example CLI (examples/coloc/record.mjs) calls — run the manifest,
+    // parse the posteriors, record them — not a duplicated inline copy.
+    const res = await runColocRecord({
+      cwd, manifestPath: resolve(process.cwd(), "examples", "coloc", "manifest.json"),
+      store: c, processRunner: nodeProcessRunner(), locusId: "gwas1", runId: "coloc-rec", recordedAt: NOW, now: "T1",
+    });
+    assert.equal(res.ok, true, res.ok ? "" : `coloc run failed: ${res.error}`);
+    if (!res.ok) return;
+    assert.ok(res.recorded > 0, "the production run recorded posteriors");
+
     const asof = await observationsAsOf(c, NOW);
     const wbH4 = asof.find((r) => r.statement_key === "coloc:gwas1:Whole_Blood:PP.H4");
     assert.ok(wbH4 && Number(JSON.parse(wbH4.value_json!)) > 0.8, "the real coloc run recorded a high PP.H4 for Whole_Blood");
