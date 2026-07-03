@@ -28,8 +28,12 @@ the library.
    statements→`bio_edges` ingest + `entailed_edge` closure + the `sql_materialize` resolved-resource pattern. The
    general: any foreign edge table (a remote DuckDB KG such as Monarch/biolink, `ATTACH`ed read-only) projects into
    `bio_edges_as_of` through a subject/predicate/object/label column map, so the SAME closure walks it. Instantiate a
-   generic foreign-graph→edges projection; Monarch is one manifest over it. Prove closure on a locus extract before
-   claiming graph-walk at full-KG scale.
+   generic foreign-graph→edges projection; Monarch is one manifest over it. **PROVEN**
+   (`scripts/foreign-graph-closure.mjs`): a Monarch-shaped external `.duckdb`, ATTACHed read-only and projected by
+   column map, is walked by the real `materializeEntailedEdges` closure — it derives the 2-hop subsumption and the
+   gene→has_phenotype→ancestor walk; and the real remote `monarch-kg.duckdb` ATTACHes over httpfs with
+   subject/predicate/object present. Still the hedge, not yet proven: full-KG closure *performance* at scale (the
+   proof is on a locus extract, as intended).
 3. **The `bio_observations` ledger is a training corpus; the exporter is a projection over it.** Latent in the
    `coloc-record` producer ((input, judgment) rows) + rare-high-impact receipts (what was excluded and why) +
    Phase-4 approval rows (contested/decided). The general: recorded judgments + inputs + a contested/approved flag +
