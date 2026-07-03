@@ -9,6 +9,38 @@ tags: [refinements, open-issues, worklog]
 
 Open design issues and cleanup targets. Keep this file focused on what still needs sharpening before the abstractions harden.
 
+## Immanent library abstractions from the BioConnect flagship (2026-07-03)
+
+Three generals the BioConnect clinical workflow ([`bioconnect-application.md`](./bioconnect-application.md)) reveals
+as already latent in the library. Each is stated as the abstraction plus the ≥2 shipped instances it abstracts, per
+the immanent rule in [`design.md`](./design.md#core-boundary) (name the things already built, not the future ones it
+might serve). App-specific bits (scoring weights, ACMG points, calibration) stay in the app; these three belong to
+the library.
+
+1. **Grounding is a resolve-then-adjudicate HARNESS with modes, not one projection.** Latent in `decideGrounding`
+   (`src/core/judgment.ts`: deterministic-first + abstaining model) + the `ols4-grounding` ncurl manifest
+   (metacurator disambiguate) + coloc's PP.H4-threshold → judgment. The general: grounding = generate candidates
+   (deterministic/tool), then adjudicate in one of four modes { deterministic-only, model-only, candidates→model
+   keep/drop, model→tools→model loop }, adjudication RECORDED + GATED. Instantiate a `bio_ground` primitive taking a
+   candidate source + a mode; the `model→tools→model` loop is the only genuinely new logic. Closes grounding,
+   keystone of the flagship. HIGHEST.
+2. **An external SQL graph is a `bio_edges` source via ATTACH + a predicate projection.** Latent in SemanticSQL
+   statements→`bio_edges` ingest + `entailed_edge` closure + the `sql_materialize` resolved-resource pattern. The
+   general: any foreign edge table (a remote DuckDB KG such as Monarch/biolink, `ATTACH`ed read-only) projects into
+   `bio_edges_as_of` through a subject/predicate/object/label column map, so the SAME closure walks it. Instantiate a
+   generic foreign-graph→edges projection; Monarch is one manifest over it. Prove closure on a locus extract before
+   claiming graph-walk at full-KG scale.
+3. **The `bio_observations` ledger is a training corpus; the exporter is a projection over it.** Latent in the
+   `coloc-record` producer ((input, judgment) rows) + rare-high-impact receipts (what was excluded and why) +
+   Phase-4 approval rows (contested/decided). The general: recorded judgments + inputs + a contested/approved flag +
+   provenance are a queryable (x, y) dataset; exporting is a stable-schema SQL view, not a new pipeline. Instantiate
+   a `bio_observations`→dataset projection emitting fine-tune-ready, contested-flagged rows. The data plane a
+   differentiated-intelligence fine-tune consumes; we own it, not the training loop.
+
+Not an abstraction (stays app/host): unique-key dedup (a SQL `DISTINCT` idiom); scoring weights + ACMG points +
+calibration (authored rules, app producers with tests); PII de-id + license gating (host port decorators, though
+the receipt should carry `source`/`version` + license + de-id status so the host can gate on provenance).
+
 ## Naming and layering
 
 - The manifest (`BioManifest`) is the user-facing contract; keep transport details out of it.
