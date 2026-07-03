@@ -9,41 +9,35 @@ tags: [refinements, open-issues, worklog]
 
 Open design issues and cleanup targets. Keep this file focused on what still needs sharpening before the abstractions harden.
 
-## Immanent library abstractions from the BioConnect flagship (2026-07-03)
+## BioConnect: does the library need anything new? (2026-07-03, re-examined)
 
-Three generals the BioConnect clinical workflow ([`bioconnect-application.md`](./bioconnect-application.md)) reveals
-as already latent in the library. Each is stated as the abstraction plus the ≥2 shipped instances it abstracts, per
-the immanent rule in [`design.md`](./design.md#core-boundary) (name the things already built, not the future ones it
-might serve). App-specific bits (scoring weights, ACMG points, calibration) stay in the app; these three belong to
-the library.
+First pass named three "immanent library builds" for the BioConnect flagship
+([`bioconnect-application.md`](./bioconnect-application.md)). Applying our own anti-idealist rule
+([`design.md`](./design.md#core-boundary)) honestly, **none is a necessary library primitive** — each is a
+manifestation/composition of primitives we already ship. The stronger, correct finding: BioConnect is a **manifest
+pack + producers + an agent over the EXISTING library**, needing ~zero new library code. That validates the bet
+harder than a "build" would. Add a thin convenience only when ≥2 real uses demand it, never before.
 
-1. **Grounding is a resolve-then-adjudicate HARNESS with modes, not one projection.** Latent in `decideGrounding`
-   (`src/core/judgment.ts`: deterministic-first + abstaining model) + the `ols4-grounding` ncurl manifest
-   (metacurator disambiguate) + coloc's PP.H4-threshold → judgment. The general: grounding = generate candidates
-   (deterministic/tool), then adjudicate in one of four modes { deterministic-only, model-only, candidates→model
-   keep/drop, model→tools→model loop }, adjudication RECORDED + GATED. Instantiate a `bio_ground` primitive taking a
-   candidate source + a mode; the `model→tools→model` loop is the only genuinely new logic. Closes grounding,
-   keystone of the flagship. HIGHEST.
-2. **An external SQL graph is a `bio_edges` source via ATTACH + a predicate projection.** Latent in SemanticSQL
-   statements→`bio_edges` ingest + `entailed_edge` closure + the `sql_materialize` resolved-resource pattern. The
-   general: any foreign edge table (a remote DuckDB KG such as Monarch/biolink, `ATTACH`ed read-only) projects into
-   `bio_edges_as_of` through a subject/predicate/object/label column map, so the SAME closure walks it. Instantiate a
-   generic foreign-graph→edges projection; Monarch is one manifest over it. **PROVEN**
-   (`scripts/foreign-graph-closure.mjs`): a Monarch-shaped external `.duckdb`, ATTACHed read-only and projected by
-   column map, is walked by the real `materializeEntailedEdges` closure — it derives the 2-hop subsumption and the
-   gene→has_phenotype→ancestor walk; and the real remote `monarch-kg.duckdb` ATTACHes over httpfs with
-   subject/predicate/object present. Still the hedge, not yet proven: full-KG closure *performance* at scale (the
-   proof is on a locus extract, as intended).
-3. **The `bio_observations` ledger is a training corpus; the exporter is a projection over it.** Latent in the
-   `coloc-record` producer ((input, judgment) rows) + rare-high-impact receipts (what was excluded and why) +
-   Phase-4 approval rows (contested/decided). The general: recorded judgments + inputs + a contested/approved flag +
-   provenance are a queryable (x, y) dataset; exporting is a stable-schema SQL view, not a new pipeline. Instantiate
-   a `bio_observations`→dataset projection emitting fine-tune-ready, contested-flagged rows. The data plane a
-   differentiated-intelligence fine-tune consumes; we own it, not the training loop.
+1. **Grounding "harness with modes" — NOT a build.** `decideGrounding` (`src/core/judgment.ts`) ALREADY is the
+   candidates→model mode (deterministic match → abstaining model, no invented CURIE, recorded + gated). The others
+   are endpoints: deterministic-only = the SQL grounding; model-only = the judge port; model→tools→model = the
+   agent's own tool loop. A "4-mode harness" is a mode selector over `decideGrounding` + the agent — config and a
+   manifest, not a primitive. (If, after ≥2 real HPO/gene uses, hand-rolling the resolve→adjudicate pattern proves
+   repetitive, a thin `bio_ground` tool is justified THEN.)
+2. **External graph → `bio_edges` — NOT a build. PROVEN to be pure SQL** (`scripts/foreign-graph-closure.mjs`):
+   `ATTACH` read-only + a `subject/predicate/object → from_id/predicate/to_id` SELECT + the EXISTING
+   `materializeEntailedEdges` (which already takes any source table). The script's closure derives the 2-hop
+   subsumption and the gene→has_phenotype→ancestor walk; the real remote `monarch-kg.duckdb` ATTACHes over httpfs
+   and is biolink-shaped. It is a manifest, zero new library code. Only the hedge remains open: full-KG closure
+   *performance* at scale (the proof is a locus extract, as intended).
+3. **Ledger → training dataset — NOT a build.** A `SELECT`/view over `bio_observations` joined to the Phase-4
+   approval slots (contested = a `WHERE` over decisions), producing a stable dataset schema. A documented query, not
+   a new pipeline. The data plane a differentiated-intelligence fine-tune consumes; we own it, not the training loop.
 
-Not an abstraction (stays app/host): unique-key dedup (a SQL `DISTINCT` idiom); scoring weights + ACMG points +
-calibration (authored rules, app producers with tests); PII de-id + license gating (host port decorators, though
-the receipt should carry `source`/`version` + license + de-id status so the host can gate on provenance).
+Also app/host, not library: unique-key dedup (a SQL `DISTINCT` idiom); scoring weights + ACMG points + calibration
+(authored rules, app producers with tests); PII de-id + license gating (host port decorators — the one small
+library-adjacent item is letting the resolver receipt carry `license` + de-id status alongside `source`/`version`,
+so the host can gate on provenance). Net: the library's BioConnect to-do is essentially empty; the work is app-side.
 
 ## Naming and layering
 
