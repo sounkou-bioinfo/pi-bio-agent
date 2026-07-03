@@ -16,6 +16,20 @@
       ]
     },
     {
+      "slug": "bioconnect-application",
+      "path": "docs/bioconnect-application.md",
+      "type": "Proposal",
+      "title": "BioConnect: an end-to-end clinical-genomics application on pi-bio-agent",
+      "description": "The flagship APPLICATION product that consumes pi-bio-agent as a library: staged, deterministic-first variant analysis (case structuring, annotation, HPO, prioritization, scoring, ACMG, family-aware interpretation) with recorded-and-gated judgment. Read before scoping the application or a paper.",
+      "tags": [
+        "flagship",
+        "application",
+        "clinical-genomics",
+        "product",
+        "reproducibility"
+      ]
+    },
+    {
       "slug": "memory-and-knowledge-unification",
       "path": "docs/memory-and-knowledge-unification.md",
       "type": "Proposal",
