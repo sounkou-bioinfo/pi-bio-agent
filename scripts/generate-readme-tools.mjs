@@ -16,7 +16,7 @@ if (tools.length === 0) {
   console.error("generate-readme-tools: found no registerTool({ name, label }) in " + SRC);
   process.exit(1);
 }
-const block = `${BEGIN}\n${tools.map((t) => `- \`${t.name}\` — ${t.label}`).join("\n")}\n${END}`;
+const block = `${BEGIN}\n\n${tools.map((t) => `- \`${t.name}\` — ${t.label}`).join("\n")}\n\n${END}`;
 const re = new RegExp(`${BEGIN.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[\\s\\S]*?${END}`);
 
 let stale = false;

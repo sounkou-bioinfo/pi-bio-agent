@@ -28,11 +28,11 @@ pi --model gpt-5.3-codex-spark -e extensions/pi-coding-agent/index.ts -p \
   "short table."
 ```
 
-> | Consequence | \# Variants |
-> |-------------|-------------|
-> | missense    | 2           |
-> | stop_gained | 2           |
-> | synonymous  | 1           |
+> | consequence | variant_count |
+> |-------------|--------------:|
+> | missense    |             2 |
+> | stop_gained |             2 |
+> | synonymous  |             1 |
 
 The agent discovers the schema and composes the `GROUP BY`; the answer
 is not canned.
@@ -140,31 +140,44 @@ pi --model gpt-5.3-codex-spark -e extensions/pi-coding-agent/index.ts -p \
   "rows."
 ```
 
-> Using `examples/connectors/clinvar-region.json`, I ran:
+> Used `examples/connectors/clinvar-region.json` (ClinVar TP53-region
+> resource) with this SQL:
 >
 > ``` sql
+> WITH exploded AS (
+>   SELECT DISTINCT
+>     CHROM, POS, REF, ALT,
+>     significance
+>   FROM clinvar
+>   CROSS JOIN UNNEST(INFO_CLNSIG) AS t(significance)
+> )
 > SELECT
->   COALESCE(sig, 'NA') AS clinical_significance,
+>   significance AS clinical_significance,
 >   COUNT(*) AS variant_count
-> FROM clinvar,
-> UNNEST(INFO_CLNSIG) AS u(sig)
+> FROM exploded
 > GROUP BY clinical_significance
 > ORDER BY variant_count DESC
-> LIMIT 5;
+> LIMIT 10;
 > ```
 >
-> **Top 5 rows:**
+> Top rows:
 >
 > | clinical_significance                        | variant_count |
 > |----------------------------------------------|--------------:|
-> | Pathogenic                                   |          3593 |
-> | Conflicting_classifications_of_pathogenicity |          2918 |
-> | Likely_benign                                |          2891 |
-> | Uncertain_significance                       |          2445 |
+> | Pathogenic                                   |         3,593 |
+> | Conflicting_classifications_of_pathogenicity |         2,918 |
+> | Likely_benign                                |         2,891 |
+> | Uncertain_significance                       |         2,445 |
 > | Benign                                       |           704 |
+> | Likely_pathogenic                            |           263 |
+> | Pathogenic/Likely_pathogenic                 |           226 |
+> | Benign/Likely_benign                         |            94 |
+> | not_provided                                 |            49 |
+> | no_classification_for_the_single_variant     |             2 |
+> | no_classifications_from_unflagged_records    |             1 |
 >
-> If you want the full breakdown of all clinical significance
-> categories, I can paste that too (it’s 10 categories total).
+> (That is the full set of significance buckets in this region; shown
+> here as top/bottom rows together in order.)
 
 The **same query with no agent**, the deterministic CLI path for scripts
 and CI. Identical numbers, no model in the loop:
@@ -257,7 +270,7 @@ pi-bio-agent query examples/run-ledger/manifest.json \
     {
       "tool": "ad-hoc.query",
       "status": "succeeded",
-      "n": 7
+      "n": 5
     }
   ]
 }
@@ -334,16 +347,13 @@ pi --model gpt-5.3-codex-spark -e extensions/pi-coding-agent/index-compute.ts -p
   "produced: its name and byte size."
 ```
 
-> Done — I ran:
+> Ran `bio_query` on `examples/compute-artifacts/manifest.json` with
+> `SELECT * FROM summary` (resolving `values` and `summary`).
 >
-> `bio_query(dbPath=":memory:", manifestPath="examples/compute-artifacts/manifest.json", sql="SELECT * FROM summary")`
+> The `summary` compute run produced these artifacts:
 >
-> Run: `query-<run>`
->
-> Output artifacts captured by the `compute.run` resolver:
->
-> - `rows_csv` (`rows.csv`) — **14 bytes**
-> - `report` (`report.txt`) — **37 bytes**
+> - `rows_csv` (path: `rows.csv`, table): **14 bytes**
+> - `report` (path: `report.txt`, file): **37 bytes**
 
 Then a *separate*, read-only reader agent discovers those artifacts
 through the run graph, follows the content address into CAS, and reads
@@ -359,26 +369,30 @@ pi --model gpt-5.3-codex-spark -e extensions/pi-coding-agent/index.ts -p \
   "the report says."
 ```
 
-> Most recent run: `query-<run>` Run file:
-> `.pi/bio-agent/runs/query-<run>/run.json`
+> I checked `.pi/bio-agent/runs/` and the most recent run is:
 >
-> Artifacts found:
+> - **Run dir:** `.pi/bio-agent/runs/query-<run>`
+> - **Run file:** `.pi/bio-agent/runs/query-<run>/run.json`
 >
-> - `result.json` (path: `runs/query-<run>/result.json`) — output
->   artifact listed in `run.json` (run record does not include byte
->   size)
-> - `rows_csv` (artifact `rows.csv`) — `size: 14` bytes
-> - `report` (artifact `report.txt`) — `size: 37` bytes, digest
->   `sha256:d352a4705f21c9cb6939f924a60041c6e9c9da59897e220e353a88841752911a`
+> From that run’s records:
 >
-> Report content (read via
-> `.pi/bio-agent/cas/sha256/d352a4705f21c9cb6939f924a60041c6e9c9da59897e220e353a88841752911a`):
+> - `rows_csv` — **14 bytes**
+>   (`sha256:ce1d093f3a0b68e60b17e7953ce95317fadda2e7f683ea5cc9caee6bbe2ae1c4`,
+>   table artifact)
+> - `report` — **37 bytes**
+>   (`sha256:d352a4705f21c9cb6939f924a60041c6e9c9da59897e220e353a88841752911a`,
+>   file artifact)
+> - (run output artifact also listed in `run.json`:
+>   `runs/query-<run>/result.json`)
 >
-> ``` text
-> # summarize report
-> rows: 5
-> mean_x: 3
-> ```
+> Following the report content address: - **Path:**
+> `.pi/bio-agent/cas/sha256/d352a4705f21c9cb6939f924a60041c6e9c9da59897e220e353a88841752911a`
+>
+> The report says exactly:
+>
+>     # summarize report
+>     rows: 5
+>     mean_x: 3
 
 **A database connector is a manifest, not a client.** The “60+ connected
 databases” a hosted workbench advertises are, here, one file each:
@@ -459,6 +473,7 @@ substrate. This list is generated from the extension’s `registerTool()`
 calls (`npm run readme:tools`); `npm run check` fails if it drifts.
 
 <!-- BEGIN GENERATED:tools (scripts/generate-readme-tools.mjs — do not edit by hand) -->
+
 - `bio_describe_model` — Describe Pi Bio model
 - `bio_run_operation` — Run a bio operation
 - `bio_query` — Run an ad-hoc bio query
@@ -473,6 +488,7 @@ calls (`npm run readme:tools`); `npm run check` fails if it drifts.
 - `bio_walk_memory` — Walk bio memory graph
 - `bio_recall` — Recall memory note
 - `bio_forget` — Forget memory note
+
 <!-- END GENERATED:tools -->
 
 Project-local skills and the memory store live under `.pi/bio-agent/` in
