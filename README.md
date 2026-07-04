@@ -28,11 +28,11 @@ pi --model gpt-5.3-codex-spark -e extensions/pi-coding-agent/index.ts -p \
   "short table."
 ```
 
-> | consequence | variant_count |
-> |-------------|--------------:|
-> | missense    |             2 |
-> | stop_gained |             2 |
-> | synonymous  |             1 |
+> | Consequence | \# Variants |
+> |-------------|-------------|
+> | missense    | 2           |
+> | stop_gained | 2           |
+> | synonymous  | 1           |
 
 The agent discovers the schema and composes the `GROUP BY`; the answer
 is not canned.
@@ -101,7 +101,7 @@ DuckDB:
 |------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | **Data**               | `duckdb.sql_materialize`: any read-only query over everything DuckDB reaches (local files, object stores, other DBs, lakes). A new format is a DuckDB *extension*, not new code: VCF/BAM ([`duckhts`](https://duckdb.org/community_extensions/extensions/duckhts)), single-cell ([`anndata`](https://duckdb.org/community_extensions/extensions/anndata)), [`duckdb_zarr`](https://duckdb.org/community_extensions/extensions/duckdb_zarr), [`plinking_duck`](https://duckdb.org/community_extensions/extensions/plinking_duck), even HTML or git history. |
 | **Network**            | `ducknng_ncurl_table`: an HTTP endpoint *is* a table function, URL/headers/body composed in SQL and JSON parsed into columns, no TypeScript. Plus `ducknng_run_rpc` (a live DB many processes write through) and NNG worker pools (push/pull, pub/sub, survey). `http.get` is the fallback where a build lacks ducknng.                                                                                                                                                                                                                                    |
-| **Compute**            | `process.compute`: what SQL is poor at (an `lm()` fit, a model) runs out-of-process over Arrow IPC. Only the data contract is SQL/Arrow; the computation is a contained child, not FFI.                                                                                                                                                                                                                                                                                                                                                                    |
+| **Compute**            | `compute.run`: what SQL is poor at (an `lm()` fit, a model) runs out-of-process over Arrow IPC. Only the data contract is SQL/Arrow; the computation is a contained child, not FFI.                                                                                                                                                                                                                                                                                                                                                                        |
 | **Knowledge + memory** | one SemanticSQL graph (`bio_edges` + its `entailed_edge` closure), so subsumption and graph-walks are one indexed join. Grounding runs deterministically first, abstains below threshold, and never invents a CURIE. Memory is *study notes* projected into the same graph, not prompt-only context that becomes stale.                                                                                                                                                                                                                                    |
 
 **The spine.** Facts, memory, `job:<id>:status`, and runs are not
@@ -115,7 +115,7 @@ the one irreducible human-or-model judgment, it never computes it.
 
 **The boundary.** Capability resolvers are host-injected and **fail
 closed** when unbound: no `fetch` means `http.get` is off, no
-`ProcessRunner` means `process.compute` is off. The substrate enforces
+`ComputeRunner` means `compute.run` is off. The substrate enforces
 statement class (read-only, no DDL), manifest shape, and receipt
 integrity, but it is *not* a network or filesystem sandbox. **The
 library records what ran; the host decides what may run.** The [design
@@ -140,31 +140,31 @@ pi --model gpt-5.3-codex-spark -e extensions/pi-coding-agent/index.ts -p \
   "rows."
 ```
 
-> Used `examples/connectors/clinvar-region.json` and ran this SQL:
+> Using `examples/connectors/clinvar-region.json`, I ran:
 >
 > ``` sql
 > SELECT
->   COALESCE(t.clinical_significance, 'missing') AS clinical_significance,
+>   COALESCE(sig, 'NA') AS clinical_significance,
 >   COUNT(*) AS variant_count
-> FROM clinvar AS c
-> LEFT JOIN UNNEST(c.INFO_CLNSIG) AS t(clinical_significance) ON TRUE
-> WHERE c.POS BETWEEN 43044295 AND 43125483
+> FROM clinvar,
+> UNNEST(INFO_CLNSIG) AS u(sig)
 > GROUP BY clinical_significance
-> ORDER BY variant_count DESC, clinical_significance;
+> ORDER BY variant_count DESC
+> LIMIT 5;
 > ```
 >
-> Top rows:
+> **Top 5 rows:**
 >
 > | clinical_significance                        | variant_count |
 > |----------------------------------------------|--------------:|
-> | Pathogenic                                   |          3590 |
+> | Pathogenic                                   |          3593 |
 > | Conflicting_classifications_of_pathogenicity |          2918 |
 > | Likely_benign                                |          2891 |
 > | Uncertain_significance                       |          2445 |
 > | Benign                                       |           704 |
 >
-> (There are additional categories below these; I can list the full
-> breakdown if you want.)
+> If you want the full breakdown of all clinical significance
+> categories, I can paste that too (it’s 10 categories total).
 
 The **same query with no agent**, the deterministic CLI path for scripts
 and CI. Identical numbers, no model in the loop:
@@ -246,7 +246,7 @@ pi-bio-agent query examples/run-ledger/manifest.json \
   "ok": true,
   "runId": "query-<run>",
   "status": "succeeded",
-  "rowCount": 2,
+  "rowCount": 1,
   "artifacts": {
     "run": ".pi/bio-agent/runs/query-<run>/run.json",
     "result": ".pi/bio-agent/runs/query-<run>/result.json",
@@ -257,12 +257,7 @@ pi-bio-agent query examples/run-ledger/manifest.json \
     {
       "tool": "ad-hoc.query",
       "status": "succeeded",
-      "n": 12
-    },
-    {
-      "tool": "ad-hoc.query",
-      "status": "failed",
-      "n": 1
+      "n": 7
     }
   ]
 }
@@ -332,20 +327,23 @@ out-of-process R compute and captures the file outputs:
 
 ``` sh
 pi --model gpt-5.3-codex-spark -e extensions/pi-coding-agent/index-compute.ts -p \
-  "Using examples/process-artifacts/manifest.json, run " \
+  "Using examples/compute-artifacts/manifest.json, run " \
   "bio_query with SQL 'SELECT * FROM summary' (resolving " \
   "the 'summary' resource runs the R compute and captures " \
   "its file outputs). Report each output artifact the run " \
   "produced: its name and byte size."
 ```
 
-> Run completed as `query-<run>`.
+> Done — I ran:
 >
-> Output artifacts from the `summary` resource (`process.compute`), with
-> byte sizes:
+> `bio_query(dbPath=":memory:", manifestPath="examples/compute-artifacts/manifest.json", sql="SELECT * FROM summary")`
 >
-> - `rows_csv`: **14 bytes**
-> - `report`: **37 bytes**
+> Run: `query-<run>`
+>
+> Output artifacts captured by the `compute.run` resolver:
+>
+> - `rows_csv` (`rows.csv`) — **14 bytes**
+> - `report` (`report.txt`) — **37 bytes**
 
 Then a *separate*, read-only reader agent discovers those artifacts
 through the run graph, follows the content address into CAS, and reads
@@ -361,22 +359,19 @@ pi --model gpt-5.3-codex-spark -e extensions/pi-coding-agent/index.ts -p \
   "the report says."
 ```
 
-> Most recent run is:
+> Most recent run: `query-<run>` Run file:
+> `.pi/bio-agent/runs/query-<run>/run.json`
 >
-> - `.pi/bio-agent/runs/query-<run>/run.json`
+> Artifacts found:
 >
-> Artifacts and sizes found from that run:
+> - `result.json` (path: `runs/query-<run>/result.json`) — output
+>   artifact listed in `run.json` (run record does not include byte
+>   size)
+> - `rows_csv` (artifact `rows.csv`) — `size: 14` bytes
+> - `report` (artifact `report.txt`) — `size: 37` bytes, digest
+>   `sha256:d352a4705f21c9cb6939f924a60041c6e9c9da59897e220e353a88841752911a`
 >
-> - `rows_csv` (from `process.compute`, file `rows.csv`) — **14 bytes**
->   - Digest:
->     `sha256:ce1d093f3a0b68e60b17e7953ce95317fadda2e7f683ea5cc9caee6bbe2ae1c4`
-> - `report` (from `process.compute`, file `report.txt`) — **37 bytes**
->   - Digest:
->     `sha256:d352a4705f21c9cb6939f924a60041c6e9c9da59897e220e353a88841752911a`
-> - Run output artifact listed in `run.json`:
->   `runs/query-<run>/result.json` (size not stored in run metadata)
->
-> Report bytes (read via content-addressed path
+> Report content (read via
 > `.pi/bio-agent/cas/sha256/d352a4705f21c9cb6939f924a60041c6e9c9da59897e220e353a88841752911a`):
 >
 > ``` text
@@ -488,8 +483,8 @@ the current project.
 The substrate is provider-agnostic; you do not need Pi to use it.
 `query` and `run` execute a manifest through the **same** host functions
 the Pi extension uses, and both are fail-closed by default (the
-`http.get` fetch and the `process.compute` runner stay unbound unless
-the host injects them). Results print as JSON; a failed run exits `1`, a
+`http.get` fetch and the `compute.run` runner stay unbound unless the
+host injects them). Results print as JSON; a failed run exits `1`, a
 usage error exits `2`.
 
 ``` sh
@@ -521,7 +516,7 @@ const out = await runBioQueryFromManifest({
 ```
 
 Host effects are injected by composition (a `fetch` for `http.get`, a
-`ProcessRunner` for `process.compute`, a `JobDispatch` for a distributed
+`ComputeRunner` for `compute.run`, a `JobDispatch` for a distributed
 `JobRunner`), and each **fails closed** when unbound. The bin compiles
 to `dist/` via `npm run build`; the package also ships `src` for Pi to
 consume directly.

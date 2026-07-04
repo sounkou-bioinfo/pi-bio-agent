@@ -24,11 +24,14 @@ operations, skills, and study notes compose those primitives for particular work
      `ncurl_table` (HTTP is a table function), `run_rpc` (a live shared mutable DB many processes write through),
      and NNG topologies (pub/sub, push/pull, survey, bus, pair). ducknng is the DuckDB extension that carries the
      network/RPC/topology leg.
-   - **Compute (code execution)**: code SQL is poor at (an `lm()` fit, an R/Python/Go tool) runs **out-of-process over Arrow IPC** (`process.compute`); only the data contract is SQL/Arrow, the computation is a contained child. The payload contract and lifecycle contract are layered: local immediate execution and durable async jobs share replay/receipt semantics.
+   - **Compute (code execution)**: code SQL is poor at (an `lm()` fit, an R/Python/Go tool) runs through an
+     async `ComputeRunner`; `compute.run` is the current manifest resolver that materializes a compute value back
+     into DuckDB tables/artifacts over Arrow/file boundaries. Local child processes, NNG workers, schedulers,
+     durable queues, and stateful sessions are implementations of one `submit/status/collect/cancel` lifecycle.
    - **Knowledge + memory**: ontologies and our own KG share one shape (`bio_edges` + `entailed_edge` closure, from SemanticSQL); grounding is deterministic-SQL-first with fail-closed model fallback. **Memory is machine studying**: the agent studies a corpus before a task is known and retains expertise as *study notes* projected into the KG: data it queries, distinct from *skills* (activated behavior) and *facts* (measured, tool-derived).
 
 3. **The discipline that keeps the bet honest.** Interfaces are the contract for in-process code; DI injects host
-   **effects** (SQL conn, fetch, ProcessRunner, CAS), which **fail closed** when unbound. Identity is a **digest**;
+   **effects** (SQL conn, fetch, ComputeRunner, CAS), which **fail closed** when unbound. Identity is a **digest**;
    a human `version` is only a label; a `schema`/`.v1` tag lives only where bytes cross a real serialization/IPC
    boundary, never on every nested value. Manifests pass a **strict allowlist** so removed surface cannot ride
    back as inert keys. The **judgment / approval decision** (model or human) is the one irreducible boundary: the
@@ -92,11 +95,16 @@ the related code.
   validator such as ETag or from an explicit snapshot policy. Range readers and DuckDB-owned remote I/O do not
   become whole-object CAS just because they are reproducible enough for a receipt. See `src/core/cas.ts`,
   `test/http-cas-reuse.test.ts`, and the CAS section in `docs/refinments.md`.
-- **Process payload and job lifecycle are layered.** `process.compute` defines the Arrow/file-artifact boundary
-  for one execution; `JobRunner` defines submit/status/collect/cancel over the ledger. Local immediate execution
-  should still be shape-compatible with the durable async path. See `src/core/jobs.ts`,
-  `src/duckdb/resolvers/process-compute.ts`, `examples/process-compute/`, `examples/process-artifacts/`, and
-  `scripts/nng-job-runner.mjs`.
+- **Compute and durable jobs share one async shape.** `AsyncRunner` is the primitive: `submit` returns a handle,
+  `status` is non-blocking, `collect` waits for the value, and `cancel` is best-effort. `ComputeRunner` is the
+  compute specialization; the durable run queue is the replay/run specialization. Queue rows and leases coordinate
+  mutable work; recorded wakeup/checkpoint observations are durable state; raw transport wakeups are optional
+  carriers unless a backend gives them durable stream semantics. Step checkpoints are the resume primitive: code
+  outside a step may replay after a crash, compaction, or lease expiry, while a completed step result is read back
+  and not re-executed. Receipts, replay specs, CAS result/artifact
+  digests, and `bio_observations` prove what happened. See `src/core/ports.ts`, `src/core/jobs.ts`,
+  `src/hosts/job-queue.ts`, `test/absurd-queue-push-dogfood.test.ts`, `src/duckdb/resolvers/compute-run.ts`,
+  `examples/compute-run/`, and `examples/compute-artifacts/`.
 
 ## Main boundary
 
@@ -121,7 +129,7 @@ Execution adapters
              and NNG topologies (pub/sub, push/pull, survey, bus, pair) — the
              DuckDB extension that makes network/distributed/multi-agent coordination SQL-native
   duckhts    HTS readers (VCF/BCF, BAM/CRAM, BED/GFF, tabix) as SQL table functions
-  process    out-of-process R / Python / Go / shell over Arrow IPC (the compute pillar)
+  compute    out-of-process R / Python / Go / shell over Arrow IPC (the compute pillar)
   http.get   TS resolver + injected fetch — the fallback where a DuckDB build has no ducknng
 
 Storage/index adapters
@@ -188,7 +196,7 @@ strict "no external I/O / CAS-snapshot-first" profile is an **optional host poli
 
 When a downstream application needs a real VM boundary, keep it downstream: the host can run Pi, worker
 processes, or stateful tools inside a Gondolin-style microVM and inject only the ports that application authorizes
-(`fetch`, `SqlConn`, `ProcessRunner`, CAS, and the ledger). That strengthens effect isolation without changing
+(`fetch`, `SqlConn`, `ComputeRunner`, CAS, and the ledger). That strengthens effect isolation without changing
 manifest semantics or pretending SQL validation is a sandbox.
 
 **The host-control surface is the injected ports, not a separate hook framework.** Pi-agent-core makes
@@ -267,7 +275,7 @@ enabled by default (local, no ambient capability):
 
 fails closed unless the host explicitly injects the capability:
   network (the `fetch` port — http.get; default entrypoint injects none)
-  out-of-process code runtime (`process.compute` — the ProcessRunner grant)
+  out-of-process code runtime (`compute.run` — the ComputeRunner grant)
   extension INSTALL + egress config on the connection (host-owned `duckdbInitSql`
     / `duckdbConfig`, never an agent tool param)
   protected session bindings (`protectedSessionBindings` / `protectedSessionVariables`,
@@ -277,7 +285,7 @@ fails closed unless the host explicitly injects the capability:
 
 Precise on extension loading: the host-owned `duckdbInitSql`/`duckdbConfig` (connection bootstrap,
 never an agent tool param) is where a host runs `INSTALL`/`LOAD`. A *manifest* may ALSO request a
-`LOAD` via `params.extensions` (both `duckdb.sql_materialize` and `process.compute`), but it is
+`LOAD` via `params.extensions` (both `duckdb.sql_materialize` and `compute.run`), but it is
 **LOAD-only and fails closed** if the host has not already provisioned that extension, so it grants no
 new capability the host didn't install. Whether an agent can author such a manifest is the host's
 call. And DuckDB's *own* reachability (httpfs / replacement scans / htslib) once an extension IS
@@ -318,10 +326,10 @@ BioOperationSpec
 
 The thin description is still valuable when it encodes identifier namespaces, provenance expectations, versioning, cache policy, query limits, and whether patient-specific data may be sent. It should not become hand-written client sprawl.
 
-## Execution beyond SQL: shell, R, and workflows as process operations
+## Execution beyond SQL: shell, R, and workflows as compute operations
 
 A `duckdb.sql` operation is one transport. Long-running external work, a shell command, an `Rscript`, a Nextflow/Snakemake pipeline, an alignment or a variant caller, enters the **same way the question always
-does: as data, not a new TypeScript client.** A *process operation* declares a **command + inputs + declared
+does: as data, not a new TypeScript client.** A *compute operation* declares a **command + inputs + declared
 outputs + tool/version**; a host-bound **executor** runs it; the result is **artifacts** (files → CAS), a
 streamed run record, and a receipt, not rows. Those artifacts re-enter as resolved resources for a downstream
 `file_scan` / `sql_materialize` → SQL operation, so a pipeline is just `op → artifact → resource → op`: the
@@ -344,39 +352,41 @@ Three things keep this consistent with the rest of the substrate:
   `BioRunStatus`/`BioRunEventType` stay closed because the state machine branches on them. `BioRunRecord` streams
   `started → progress → checkpoint → completed/failed`. A six-hour job is a `background`/`batch` run whose record
   accrues progress + checkpoints and ends in output artifacts.
-- **Out-of-process compute is built: table, file, and files-only outputs.** The `process.compute` resolver
-  (`src/duckdb/resolvers/process-compute.ts`) + the injected `ProcessRunner` port
-  (`src/process/node-process-runner.ts`) run an out-of-process child (R/Python/Go/shell) over Arrow IPC with a
+- **Async compute is built for table, file, and files-only outputs.** The `compute.run` resolver
+  (`src/duckdb/resolvers/compute-run.ts`) + the injected `ComputeRunner` port
+  (`src/process/node-compute-runner.ts`) submit compute work, collect its value, and materialize it back into
+  DuckDB. The local implementation runs an out-of-process child (R/Python/Go/shell) over Arrow IPC with a
   script-bytes provenance digest, detached process-group kill on timeout/abort, and fail-closed-without-runner.
   Three output shapes exist: a **table** read back from the child's Arrow IPC (DuckDB → Arrow → child → Arrow →
-  table, `examples/process-compute`); declared **file outputs** captured content-addressed into **CAS**
+  table, `examples/compute-run`); declared **file outputs** captured content-addressed into **CAS**
   (`resultTable: "artifacts"` + `captureDeclaredOutputsToCas` in `src/duckdb/artifact-capture.ts`: relative-path-only, symlink/non-regular-file rejecting, realpath-confined to the work dir, byte-capped,
-  fail-closed-without-CAS; `examples/process-artifacts`); and the **files-only** case where the resource's table
-  is the captured-artifacts listing (`examples/process-files-only`). What is still missing is only the
+  fail-closed-without-CAS; `examples/compute-artifacts`); and the **files-only** case where the resource's table
+  is the captured-artifacts listing (`examples/compute-files-only`). What is still missing is only the
   *operation-level* executor: a `process` **BioOperationTransport** (the OPERATION transport is still
   `duckdb.sql` only, `BioOperationTransport = "duckdb.sql"`), the argv-in-a-run-dir path for the six-hour batch /
   Nextflow-Snakemake case. The compute pillar's resolver path, table AND file artifacts, exists; the
   operation-transport wrapper does not.
 
-  This is a payload boundary, not a separate synchronous compute world. A host may run it immediately for a small
-  local call, or dispatch the same replayable work through `JobRunner` so status and result live in the ledger. New
-  compute transports should preserve that layering instead of creating different semantics for long-running work.
+  This is a materialization boundary over the async compute primitive, not a separate synchronous compute world. A
+  host may run it through a local child process, an NNG worker, a scheduler, or an Absurd-style queue backend. The
+  handle/status/claim tables are mutable coordination; the replay spec, receipts, CAS result/artifact digests, and
+  run observations are what make the finished work auditable and reproducible.
 
-**One general backend, not a backend zoo.** When the first executor is built, it is `process` (run an argv
+**One general backend, not a backend zoo.** The local implementation is an argv-running compute backend (run a
 command in a run dir, capture stdout/stderr/exit, register declared outputs as artifacts). `Rscript`,
-`python`, `nextflow`, `snakemake` are **argv presets over `process`** (`["Rscript", script, …]`,
+`python`, `nextflow`, `snakemake` are **argv presets over local compute** (`["Rscript", script, …]`,
 `["nextflow", "run", …]`), *not* separate transports: exactly as `duckdb.sql_materialize` subsumed the
 reader resolvers rather than spawning one per format. One backend per tool (`runDeseq2()`, `runGatk()`,
 `runNextflowRnaseq()`) would recreate the skill/API sprawl the substrate exists to avoid; the tool-specific
 part stays **manifest data** (command template, inputs, expected outputs, version probes, post-load SQL,
-fixtures). A genuinely new *transport* (beyond `duckdb.sql` and `process`) is earned only when execution needs
-semantics `process` cannot express: polling/resume/cancel of a remote job, and even then proven against ≥2
-instances, not imagined.
+fixtures). A genuinely new implementation is earned only when execution needs semantics local argv cannot
+express: remote workers, queue checkpoints, stateful sessions, or scheduler-native cancellation; it must still fit
+the `AsyncRunner` lifecycle unless a concrete second primitive is proven.
 
 **Discipline: do not build the transport ahead idealistically.** Speculative non-SQL transports were already
 deleted once (http/graphql/mcp/local with no runner). The out-of-process case, table AND file artifacts, is now
-served by the `process.compute` RESOLVER (above); the OPERATION-level `BioOperationTransport` stays `duckdb.sql`
-until a real pipeline forces a `process` **transport** (a Snakemake/Nextflow step or a DESeq2 run driven as an
+served by the `compute.run` RESOLVER (above); the OPERATION-level `BioOperationTransport` stays `duckdb.sql`
+until a real pipeline forces a compute-backed operation transport (a Snakemake/Nextflow step or a DESeq2 run driven as an
 *operation*, not a resolved resource). A full `BioExecutionSpec` (a backend enum,
 `container`/`env`/`resources`/`effects`/`capture` fields) is the *sketch of the destination*, not core surface: add fields when an executor consumes them. CAS-of-bytes itself is **built** (`src/core/cas.ts` + `src/hosts/fs-cas.ts`,
 proven by `http.get` byte-reuse across DBs in `test/http-cas-reuse.test.ts`), and the FILE-outputs-into-CAS wiring
@@ -501,7 +511,7 @@ Every table the operation SQL sees is one of two kinds, and the distinction *is*
 The operation SQL does not care which it queries: that is the point. This is a real distinction *immanent in
 what we built* (two derived tables already exist), and it earns documentation, not a `Projection` framework:
 the two derivations share a lifecycle (runner materializes them, idempotent) but not a computation (recursive
-closure vs flat rank insert), so unifying them in code would be the idealist move. (A process operation's
+closure vs flat rank insert), so unifying them in code would be the idealist move. (A compute operation's
 **output artifact** is a third kind, *produced*, CAS-addressed, which re-enters as a *resolved* resource
 downstream.)
 

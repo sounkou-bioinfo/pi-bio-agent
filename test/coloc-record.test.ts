@@ -8,7 +8,7 @@ import { DuckDBInstance } from "@duckdb/node-api";
 import { duckdbNodeConn } from "../src/duckdb/node-api.js";
 import type { SqlConn } from "../src/core/ports.js";
 import { createBioObservationSchema, observationsAsOf, materializeBioEdgesAsOf } from "../src/duckdb/observations.js";
-import { nodeProcessRunner } from "../src/process/node-process-runner.js";
+import { nodeComputeRunner } from "../src/process/node-compute-runner.js";
 import { recordColocObservations, runColocRecord, type ColocRow } from "../src/producers/coloc-record.js";
 
 // Phase 4.1: coloc is the first real PRODUCER of recorded judgments. The result of a DATA+COMPUTE run (per-tissue
@@ -75,7 +75,7 @@ describe("Phase 4.1b: the REAL coloc run records its judgment (integration)", { 
     // parse the posteriors, record them — not a duplicated inline copy.
     const res = await runColocRecord({
       cwd, manifestPath: resolve(process.cwd(), "examples", "coloc", "manifest.json"),
-      store: c, processRunner: nodeProcessRunner(), locusId: "gwas1", runId: "coloc-rec", recordedAt: NOW, now: "T1",
+      store: c, computeRunner: nodeComputeRunner(), locusId: "gwas1", runId: "coloc-rec", recordedAt: NOW, now: "T1",
     });
     assert.equal(res.ok, true, res.ok ? "" : `coloc run failed: ${res.error}`);
     if (!res.ok) return;

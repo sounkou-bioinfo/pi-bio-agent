@@ -6,7 +6,7 @@ import { join, resolve } from "node:path";
 import { runBioOperationFromManifest, runBioQueryFromManifest } from "../src/hosts/run-store.js";
 import { reproduceRun } from "../src/hosts/reproduce.js";
 import { fsCasStore } from "../src/hosts/fs-cas.js";
-import { nodeProcessRunner } from "../src/process/node-process-runner.js";
+import { nodeComputeRunner } from "../src/process/node-compute-runner.js";
 import type { RunReplaySpec } from "../src/core/reproducibility.js";
 
 // C2 — reproduce(): re-execute a RunReplaySpec against a fresh db and compare the produced receipts' DETERMINISTIC
@@ -65,7 +65,7 @@ describe("C2: reproduce() compares deterministic receipt content, not wall-clock
   });
 
   test("(#2) compares the observed ENVIRONMENT: env drift is caught even when receipts + result content match", async () => {
-    // A process.compute run's env attestation lives in the receipt's provenance NOTES, which receiptContentDigest
+    // A compute.run run's env attestation lives in the receipt's provenance NOTES, which receiptContentDigest
     // DROPS — so a re-run under a different environment but identical output would falsely 'match' on receipts+result
     // alone. reproduce recomputes the re-run's observed env and compares it to the pinned observedDigest.
     const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-repro-env-"));
@@ -191,20 +191,20 @@ describe("C2: reproduce() compares deterministic receipt content, not wall-clock
     assert.match(rep.notReproducible ?? "", /un-snapshotted live source/, "honest: not_reproducible with a reason");
   });
 
-  test("(#2) a process.compute run declares live_source so reproduce won't fake-match it without a CAS output pin", async () => {
-    // process.compute receipts pin command/input/env but NOT the output table's content, and a script can be
+  test("(#2) a compute.run run declares live_source so reproduce won't fake-match it without a CAS output pin", async () => {
+    // compute.run receipts pin command/input/env but NOT the output table's content, and a script can be
     // non-deterministic — so its provenance carries the `live_source` marker (same mechanism as sql_materialize),
     // which drives reproduce's not_reproducible verdict (proven end-to-end by the sql_materialize test above). Here
     // we assert the marker IS emitted. (files-only needs a CAS for its artifacts, so this run has one — but the
     // marker is what matters; the reproduce LOGIC over the marker is already covered.)
     const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-repro-proc-"));
     const cas = fsCasStore(await fs.mkdtemp(join(tmpdir(), "pi-bio-cas-")));
-    const FILES_ONLY = resolve(process.cwd(), "examples", "process-files-only", "manifest.json");
-    const out = await runBioQueryFromManifest({ cwd, dbPath: ":memory:", manifestPath: FILES_ONLY, sql: "SELECT name FROM tracks ORDER BY name", process: { runner: nodeProcessRunner() }, cas, runId: "proc1", now: "2026-07-01T00:00:00Z" });
+    const FILES_ONLY = resolve(process.cwd(), "examples", "compute-files-only", "manifest.json");
+    const out = await runBioQueryFromManifest({ cwd, dbPath: ":memory:", manifestPath: FILES_ONLY, sql: "SELECT name FROM tracks ORDER BY name", compute: { runner: nodeComputeRunner() }, cas, runId: "proc1", now: "2026-07-01T00:00:00Z" });
     assert.equal(out.ok, true, out.ok ? "" : `run failed: ${(out as { error?: unknown }).error}`);
     const receipts = JSON.parse(await fs.readFile(join((out as { runDir: string }).runDir, "receipts.json"), "utf8")) as Array<{ provenance: Array<{ source: string; notes?: string[] }> }>;
-    const proc = receipts.flatMap((r) => r.provenance).find((p) => p.source === "process.compute");
-    assert.ok(proc?.notes?.includes("live_source"), "process.compute provenance marks live_source (output not content-pinned)");
+    const proc = receipts.flatMap((r) => r.provenance).find((p) => p.source === "compute.run");
+    assert.ok(proc?.notes?.includes("live_source"), "compute.run provenance marks live_source (output not content-pinned)");
   });
 
   test("a near-max-length original runId still reproduces — the derived 'reproduce-…' id is bounded to the 128-char limit", async () => {

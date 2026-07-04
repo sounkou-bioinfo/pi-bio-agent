@@ -124,7 +124,7 @@ describe("cli: query/run over a manifest (provider-agnostic entry point)", () =>
 
 describe("sdk: the package entry point re-exports the substrate surface", () => {
   test("the key host + core symbols are importable from the top-level index", () => {
-    for (const name of ["runBioQueryFromManifest", "runBioOperationFromManifest", "validateBioManifest", "createBioRegistry", "fsCasStore", "duckdbNodeConn", "processComputeResolver"]) {
+    for (const name of ["runBioQueryFromManifest", "runBioOperationFromManifest", "validateBioManifest", "createBioRegistry", "fsCasStore", "duckdbNodeConn", "computeRunResolver"]) {
       assert.equal(typeof (sdk as Record<string, unknown>)[name], "function", `${name} exported from the SDK entry`);
     }
   });

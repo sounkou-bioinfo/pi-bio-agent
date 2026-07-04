@@ -5,12 +5,12 @@ import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { runBioQueryFromManifest } from "../src/hosts/run-store.js";
-import { nodeProcessRunner } from "../src/process/node-process-runner.js";
+import { nodeComputeRunner } from "../src/process/node-compute-runner.js";
 
 // The COMPUTE pillar end to end: a manifest hands a DuckDB table to an OUT-OF-PROCESS R computation (lm) over
 // Arrow IPC and reads the result back as a table â€” through the real host runner + a real spawned Rscript. No
-// mock: nodeProcessRunner actually spawns R. Gated on R + the R `arrow` package being present.
-const MANIFEST = resolve(process.cwd(), "examples", "process-compute", "manifest.json");
+// mock: nodeComputeRunner actually spawns R. Gated on R + the R `arrow` package being present.
+const MANIFEST = resolve(process.cwd(), "examples", "compute-run", "manifest.json");
 const PROVISION = ["INSTALL nanoarrow FROM community", "LOAD nanoarrow"]; // nanoarrow = the Arrow-IPC codec
 
 const rArrowAvailable = (() => {
@@ -26,7 +26,7 @@ describe("example: out-of-process compute (R lm over Arrow IPC) is a manifest â€
     const out = await runBioQueryFromManifest({
       cwd, dbPath: ":memory:", manifestPath: MANIFEST,
       sql: "SELECT n, slope, intercept, r_squared FROM lm_fit",
-      process: { runner: nodeProcessRunner() }, // host GRANTS out-of-process compute by composition
+      compute: { runner: nodeComputeRunner() }, // host GRANTS out-of-process compute by composition
       duckdbInitSql: PROVISION,
       runId: "c1", now: "T1",
     });
@@ -41,15 +41,15 @@ describe("example: out-of-process compute (R lm over Arrow IPC) is a manifest â€
     assert.ok(fit.r_squared > 0.99, `near-perfect fit (got ${fit.r_squared})`);
   });
 
-  test("fails closed with NO process runner bound â€” process.compute cannot resolve without the host's opt-in", async () => {
+  test("fails closed with NO compute runner bound â€” compute.run cannot resolve without the host's opt-in", async () => {
     const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-compute-"));
     await assert.rejects(
       () => runBioQueryFromManifest({
         cwd, dbPath: ":memory:", manifestPath: MANIFEST, sql: "SELECT * FROM lm_fit",
         duckdbInitSql: PROVISION,
-        runId: "c2", now: "T1", // no `process` -> process.compute stays unbound
+        runId: "c2", now: "T1", // no `compute` -> compute.run stays unbound
       }),
-      /process\.compute' is declared but no implementation is bound/,
+      /compute\.run' is declared but no implementation is bound/,
     );
   });
 });

@@ -146,7 +146,7 @@ describe("job durability: rich status is not lost + the ledger timestamp wins + 
     const { conn, cwd } = await setup();
     // a runner whose status carries progress+message (as a real long-running worker does), stamped with its OWN clock
     const runner: JobRunner = {
-      async submit() {},
+      async submit(spec) { return spec.runId; },
       async status(runId) { return { runId, phase: "running", at: "RUNNER-CLOCK", message: "step 2/3", progress: { current: 2, total: 3, unit: "chunks" } }; },
       async collect() { return null; },
     };
@@ -217,7 +217,7 @@ describe("job durability: rich status is not lost + the ledger timestamp wins + 
   test("progress within a phase is DURABLE: a same-phase progress change records a new as-of row", async () => {
     const { conn, cwd } = await setup();
     let progress = { current: 1, total: 3, unit: "chunks" };
-    const runner: JobRunner = { async submit() {}, async status(runId) { return { runId, phase: "running", at: "RUNNER", progress }; }, async collect() { return null; } };
+    const runner: JobRunner = { async submit(spec) { return spec.runId; }, async status(runId) { return { runId, phase: "running", at: "RUNNER", progress }; }, async collect() { return null; } };
     await submitBioJob(conn, runner, { cwd, runId: "pg1", replay: replay("pg1"), now: "2026-07-01T00:00:01Z" });
     await pollBioJob(conn, runner, { cwd, runId: "pg1", now: "2026-07-01T00:00:05Z" }); // records running @ 1/3
     progress = { current: 2, total: 3, unit: "chunks" };
@@ -267,7 +267,7 @@ describe("job durability: rich status is not lost + the ledger timestamp wins + 
 
   test("fail closed: a buggy/hostile runner returning a mismatched runId or invalid phase is refused before the ledger", async () => {
     const { conn, cwd } = await setup();
-    const good: JobRunner = { async submit() {}, async status() { return null; }, async collect() { return null; } };
+    const good: JobRunner = { async submit(spec) { return spec.runId; }, async status() { return null; }, async collect() { return null; } };
     // wrong runId
     const wrongId: JobRunner = { ...good, async status(runId) { return { runId: "OTHER", phase: "running", at: "T" }; } };
     await submitBioJob(conn, wrongId, { cwd, runId: "v1", replay: replay("v1"), now: "2026-07-01T00:00:01Z" });

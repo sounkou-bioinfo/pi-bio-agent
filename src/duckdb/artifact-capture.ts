@@ -5,14 +5,14 @@ import type { CasStore } from "../core/cas.js";
 
 // Capture DECLARED FILE OUTPUTS of an out-of-process computation into CAS, content-addressed — the #3 artifact
 // transport (the nf-r-ipc/Nextflow split: VALUES return via Arrow, FILES go via CAS, never through the IPC). This
-// is a SHARED host-side invariant, factored out of process-compute so any future compute adapter (a JobRunner /
+// is a SHARED host-side invariant, factored out of compute-run so any future compute adapter (a JobRunner /
 // SLURM / NNG / container backend that owns a work dir) captures files under the EXACT SAME safety rules instead
 // of reimplementing them subtly differently: relative-only paths, reject a symlink or a non-regular file, confirm
 // the REALPATH stays inside the work dir (a child's `ln -s /etc/passwd out.txt` resolves lexically inside dir but
 // realpaths out), enforce a byte cap BEFORE reading the file whole into memory, then sha256 → cas.put.
 //
 // Lives at the duckdb layer (not hosts): the layer order here is hosts → duckdb → core, so a duckdb resolver
-// (process-compute) must not import UP into hosts; a hosts adapter reaches DOWN into duckdb (the allowed edge).
+// (compute-run) must not import UP into hosts; a hosts adapter reaches DOWN into duckdb (the allowed edge).
 // It depends only on core (CasStore) + node builtins.
 
 /** A file a computation promises to write into its work dir. `path` is RELATIVE to that dir. */
@@ -41,11 +41,11 @@ export async function captureDeclaredOutputsToCas(opts: {
   outputs: readonly DeclaredOutput[];
   cas: CasStore;
   maxOutputBytes: number;
-  /** message prefix / actor for errors (default "process.compute" — preserves the resolver's error identity). */
+  /** message prefix / actor for errors (default "compute.run" — preserves the resolver's error identity). */
   label?: string;
 }): Promise<CapturedArtifact[]> {
   const { workDir, outputs, cas, maxOutputBytes } = opts;
-  const label = opts.label ?? "process.compute";
+  const label = opts.label ?? "compute.run";
   const artifacts: CapturedArtifact[] = [];
   const dirRoot = resolve(workDir);
   // the work dir itself may sit under a symlinked tmp (e.g. macOS /tmp -> /private/tmp), so the containment check

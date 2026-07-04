@@ -130,26 +130,26 @@ describe("host: bio_run_operation end-to-end", () => {
     assert.equal(receipts[0].resourceId, "annotated_variants");
   });
 
-  test("(#6) replay records process facts ONLY for the operation's required resources — an unrelated process.compute resource is not a provenance lie", async () => {
-    // the op requires only the two CSV resources; the manifest ALSO declares a process.compute resource the op
+  test("(#6) replay records compute facts ONLY for the operation's required resources — an unrelated compute.run resource is not a provenance lie", async () => {
+    // the op requires only the two CSV resources; the manifest ALSO declares a compute.run resource the op
     // never resolves. replay.json must NOT record that unrun subprocess command as "what actually ran".
-    const withUnrelatedProcess: BioManifest = {
+    const withUnrelatedCompute: BioManifest = {
       ...manifest,
       provides: {
         ...manifest.provides!,
-        resolvers: [...manifest.provides!.resolvers!, { id: "process.compute", version: "0.1.0", title: "Process compute", description: "Run a subprocess.", output: { mode: "table" } }],
+        resolvers: [...manifest.provides!.resolvers!, { id: "compute.run", version: "0.1.0", title: "Compute", description: "Run external compute.", output: { mode: "table" } }],
         resources: [
           ...manifest.provides!.resources!,
-          { id: "unrelated_proc", title: "Unrelated", kind: "virtual", resolver: "process.compute", params: { table: "unrelated", command: ["sh", "./nope.sh"], resultTable: "artifacts" } },
+          { id: "unrelated_proc", title: "Unrelated", kind: "virtual", resolver: "compute.run", params: { table: "unrelated", command: ["sh", "./nope.sh"], resultTable: "artifacts" } },
         ],
       },
     };
-    const cwd = await tmpProject(withUnrelatedProcess);
+    const cwd = await tmpProject(withUnrelatedCompute);
     const res = await runBioOperationFromManifest({ cwd, dbPath: ":memory:", manifestPath: "manifest.json", operationId: "rare_high_impact.report", runId: "no-proc-leak", now: "2026-06-28T00:00:00Z" });
     assert.equal(res.ok, true, res.ok ? "" : `run failed: ${(res as { error?: unknown }).error}`);
     if (!res.ok) throw new Error("unreachable");
     const replay = JSON.parse(await fs.readFile(join(res.runDir, "replay.json"), "utf8"));
-    assert.equal(replay.process, undefined, "the op required only CSV resources — the unrelated subprocess is not recorded as what ran");
+    assert.equal(replay.compute, undefined, "the op required only CSV resources — the unrelated subprocess is not recorded as what ran");
   });
 
   test("network is opt-in: http.get fails closed without a fetch, runs when one is injected", async () => {

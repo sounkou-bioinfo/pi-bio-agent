@@ -1,6 +1,6 @@
 // The library (SDK) entry point — the substrate as an importable package. A host embeds pi-bio-agent by importing
 // the core contracts + validators, the DuckDB adapters/resolvers, and the host run-store/CAS/governance helpers,
-// then injecting its own effect ports (SqlConn, ProcessRunner, CasStore, fetch). Nothing here is Pi-specific;
+// then injecting its own effect ports (SqlConn, ComputeRunner, CasStore, fetch). Nothing here is Pi-specific;
 // the Pi coding-agent extension is one consumer of exactly these exports.
 //
 //   import { runBioQueryFromManifest } from "pi-bio-agent";        // the whole surface

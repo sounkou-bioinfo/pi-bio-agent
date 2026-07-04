@@ -5,19 +5,19 @@ import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { runBioQueryFromManifest } from "../src/hosts/run-store.js";
-import { nodeProcessRunner } from "../src/process/node-process-runner.js";
+import { nodeComputeRunner } from "../src/process/node-compute-runner.js";
 import { fsCasStore } from "../src/hosts/fs-cas.js";
 
-// The #3 artifact transport: a process op returns a VALUE (Arrow table) AND writes declared FILE outputs that the
+// The #3 artifact transport: a compute op returns a VALUE (Arrow table) AND writes declared FILE outputs that the
 // resolver captures into CAS (content-addressed) — files never enter the IPC (the nf-r-ipc/Nextflow split).
-const MANIFEST = resolve(process.cwd(), "examples", "process-artifacts", "manifest.json");
+const MANIFEST = resolve(process.cwd(), "examples", "compute-artifacts", "manifest.json");
 const PROVISION = ["INSTALL nanoarrow FROM community", "LOAD nanoarrow"];
 
 const rOk = (() => {
   try { execFileSync("Rscript", ["-e", 'if(!requireNamespace("nanoarrow",quietly=TRUE)) quit(status=1)'], { stdio: "ignore" }); return true; } catch { return false; }
 })();
 
-describe("example: process.compute with FILE outputs captured into CAS (the #3 artifact transport)", { skip: rOk ? false : "Rscript + R 'nanoarrow' not available" }, () => {
+describe("example: compute.run with FILE outputs captured into CAS (the #3 artifact transport)", { skip: rOk ? false : "Rscript + R 'nanoarrow' not available" }, () => {
   test("returns the value as a table AND captures declared file outputs into CAS with receipts", async () => {
     const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-artifacts-"));
     const casDir = await fs.mkdtemp(join(tmpdir(), "pi-bio-cas-"));
@@ -25,7 +25,7 @@ describe("example: process.compute with FILE outputs captured into CAS (the #3 a
     const out = await runBioQueryFromManifest({
       cwd, dbPath: ":memory:", manifestPath: MANIFEST,
       sql: "SELECT n, mean_x, status FROM summary",
-      process: { runner: nodeProcessRunner() }, cas,
+      compute: { runner: nodeComputeRunner() }, cas,
       duckdbInitSql: PROVISION, runId: "art", now: "T1",
     });
     assert.equal(out.ok, true, out.ok ? "" : `run failed: ${(out as { error?: unknown }).error}`);
@@ -59,7 +59,7 @@ describe("example: process.compute with FILE outputs captured into CAS (the #3 a
     const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-artifacts-"));
     const out = await runBioQueryFromManifest({
       cwd, dbPath: ":memory:", manifestPath: MANIFEST, sql: "SELECT * FROM summary",
-      process: { runner: nodeProcessRunner() }, // no `cas`
+      compute: { runner: nodeComputeRunner() }, // no `cas`
       duckdbInitSql: PROVISION, runId: "art2", now: "T1",
     });
     assert.equal(out.ok, false, "declared file outputs require a CAS store -> fail closed");

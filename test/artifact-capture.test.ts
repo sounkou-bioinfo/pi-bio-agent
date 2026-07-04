@@ -7,7 +7,7 @@ import type { CasStore } from "../src/core/cas.js";
 import type { ContentAddress } from "../src/core/resources.js";
 import { captureDeclaredOutputsToCas } from "../src/duckdb/artifact-capture.js";
 
-// The shared file-artifact capture invariant, factored out of process-compute so future compute adapters
+// The shared file-artifact capture invariant, factored out of compute-run so future compute adapters
 // (JobRunner / SLURM / NNG / container) inherit the SAME safety rules. These tests pin those rules directly,
 // independent of the resolver: a regular file is captured; a symlink / non-regular / outside-realpath / oversized
 // / missing output all fail closed.
@@ -75,6 +75,6 @@ describe("captureDeclaredOutputsToCas: shared file-artifact capture safety", () 
 
   test("a custom label prefixes the error (so a future adapter names itself)", async () => {
     const dir = await workDir();
-    await assert.rejects(() => captureDeclaredOutputsToCas({ workDir: dir, outputs: [{ name: "o", path: "nope" }], cas: fakeCas(), maxOutputBytes: 16, label: "nngProcessRunner" }), /^Error: nngProcessRunner: /);
+    await assert.rejects(() => captureDeclaredOutputsToCas({ workDir: dir, outputs: [{ name: "o", path: "nope" }], cas: fakeCas(), maxOutputBytes: 16, label: "nngComputeRunner" }), /^Error: nngComputeRunner: /);
   });
 });

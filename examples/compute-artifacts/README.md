@@ -1,6 +1,6 @@
-# Out-of-process compute with FILE outputs — the `process` artifact transport (#3)
+# Out-of-process compute with FILE outputs — the file artifact transport (#3)
 
-File outputs are unavoidable in bioinformatics (BAM/VCF/plots/reports, multi-file dirs). `process.compute`'s
+File outputs are unavoidable in bioinformatics (BAM/VCF/plots/reports, multi-file dirs). `compute.run`'s
 Arrow-table-back contract covers the *rectangular* case; this example adds the **file** case, modeled on
 `nf-r-ipc` / Nextflow:
 
@@ -12,9 +12,9 @@ summarize.R (in work dir) ┤
 
 The hard split (the `nf-r-ipc` lesson): **values go through the IPC; files never do** — they are written to the
 child's work dir and **content-addressed** beside it. Nextflow's content-addressed work dir is *our CAS-of-bytes*,
-so this is mostly composition (`process.compute` + CAS), not new substrate.
+so this is mostly composition (`compute.run` + CAS), not new substrate.
 
-A process op declares `outputs: [{ name, path, kind? }]`; the child writes them into its `cwd`; after a clean
+A compute op declares `outputs: [{ name, path, kind? }]`; the child writes them into its `cwd`; after a clean
 exit the resolver captures each into CAS and records `{name, path, digest, size}` in the receipt — the same
 receipt `nf-r-ipc` keeps (script digest + input digests + exit + stdout/stderr + **output digest** + wall time).
 Declaring outputs **requires a host-injected CAS** (fails closed without one); a declared output the child didn't
@@ -32,10 +32,10 @@ n  mean_x  status
 5     3.0  ok
 ```
 
-The VALUE came back as a table (n=5); the declared FILE outputs (`rows.csv`, `report.txt`) were captured into CAS — verified content-addressed in `test/process-artifacts-example.test.ts`.
+The VALUE came back as a table (n=5); the declared FILE outputs (`rows.csv`, `report.txt`) were captured into CAS — verified content-addressed in `test/compute-artifacts-example.test.ts`.
 <!-- END GENERATED:artifacts-run -->
 
-`test/process-artifacts-example.test.ts` verifies the two declared outputs (`rows.csv` as `kind: table`,
+`test/compute-artifacts-example.test.ts` verifies the two declared outputs (`rows.csv` as `kind: table`,
 `report.txt` as `kind: file`) are captured **content-addressed in CAS** (the receipt's `sha256:` digests resolve
 to the real bytes), and that declaring `outputs` **without** a CAS fails closed. A `table`-kind artifact is
 re-readable downstream via `read_csv` over its CAS path; a `file`-kind one is referenced by handle.

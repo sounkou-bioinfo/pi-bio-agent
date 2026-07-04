@@ -33,7 +33,7 @@ on re-examination every stage composes existing primitives (see
 | # | Stage | Primitive | Where it lives |
 |---|---|---|---|
 | 1 | Case structuring (singleton vs multiplex/family) | SQL views over ingested tables | app manifest |
-| 2 | Batch annotation on UNIQUE SNV/CNV keys | `ncurl_table` (GeneBe, with fanout + backoff) **or** `process.compute` (VEP CLI) | app manifest |
+| 2 | Batch annotation on UNIQUE SNV/CNV keys | `ncurl_table` (GeneBe, with fanout + backoff) **or** `compute.run` (VEP CLI) | app manifest |
 | 3 | HPO extraction harness (4 modes) | `decideGrounding` (deterministic-first + abstaining model) + the judge port + the agent loop | app manifest |
 | 4 | Gene prioritization over Monarch KG | `bio_edges` + `entailed_edge`, remote `ATTACH monarch-kg.duckdb`, duckpgq paths | app manifest |
 | 5 | Deterministic variant scoring | SQL over annotation columns (REVEL/AlphaMissense/SpliceAI/CADD) | app manifest |
@@ -81,7 +81,7 @@ queryable rather than rely on narrative reports alone.
   came from. "Prefer database tables" is the substrate.
 - **Annotation throughput and cost.** Turnaround drives a resolver choice, both manifest-expressible: the GeneBe
   API via `ncurl_table` with rate-limited fanout + exponential backoff (the WGS-chr22 seam), or the VEP CLI via
-  `process.compute`. Restricted fields (REVEL, AlphaMissense, CADD, SpliceAI,
+  `compute.run`. Restricted fields (REVEL, AlphaMissense, CADD, SpliceAI,
   OMIM are commercial-restricted) are *declared* in the manifest and *recorded* in the receipt (source, version,
   license); the allow/deny gate is host policy, like PII, not core.
 - **Versioning for audit and accreditation.** Tool, database, and API versions must be logged. The existing path is
@@ -95,7 +95,7 @@ queryable rather than rely on narrative reports alone.
   deterministic computation and provenance; recorded, human-signed-off judgment where a model helps.
 - **PII / BAA.** The rule is a decision, not a caveat: if a model request contains PII, a **local model or a
   provider BAA is mandatory**; if PII is stripped first, any model (local or cloud, no BAA) is fine. So
-  de-identification is a *preprocessing gate* before the heavier judgment model — a `process.compute` op or a
+  de-identification is a *preprocessing gate* before the heavier judgment model — a `compute.run` op or a
   wrapped-`fetch` decorator running a local PII-detection/removal model against HIPAA Safe Harbor-style identifiers
   such as names, dates of birth, medical record numbers, Social Security numbers, and addresses. It is a host port
   decorator, not core; the receipt records that de-id ran and which model/version. For synthetic or pre-deidentified

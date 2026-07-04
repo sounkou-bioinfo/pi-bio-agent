@@ -16,7 +16,7 @@ import { stat } from "node:fs/promises";
 import { forget, listMemory, recall, remember, memorySubjectId, normalizeAsOf, MEMORY_NOW, type MemoryContent } from "../../src/hosts/memory-store.js";
 import { recordSkill, skillSubjectId } from "../../src/hosts/skill-store.js";
 import { systemClock } from "../../src/core/clock.js";
-import type { SqlConn, ProcessRunner } from "../../src/core/ports.js";
+import type { SqlConn, ComputeRunner } from "../../src/core/ports.js";
 import type { FetchLike } from "../../src/duckdb/resolvers/http-table-scan.js";
 
 function text(payload: unknown) {
@@ -51,7 +51,7 @@ const BIO_ORIENTATION = [
   "- AUTHOR (the pi spirit): you can WRITE a new manifest JSON yourself and run it — write the file, call",
   "  `bio_describe_model` on it to validate + discover its operation ids, then `bio_run_operation`. `bio_run_operation`",
   "  binds the built-in resolvers `duckdb.file_scan`, `duckdb.sql_materialize`, `duckhts.read_bcf`; the host-granted",
-  "  `http.get` (injected-fetch network) and out-of-process `process.compute` fail closed unless the operator granted",
+  "  `http.get` (injected-fetch network) and `compute.run` fail closed unless the operator granted",
   "  them (`ncurl_table` is not a resolver — it is SQL inside a `duckdb.sql_materialize` query). (Caveat: a",
   "  file_scan/read_bcf `path` or SQL that hits a REMOTE URI can still reach the network via DuckDB/httpfs — that",
   "  egress is the host's sandbox to police, not a library gate.)",
@@ -138,7 +138,7 @@ async function withRunLog<T>(open: OpenStore, cwd: string, dbPath: string, run: 
     return await run(store.conn);
   } catch (e) {
     // Retry unlogged ONLY for a lock error at the run's DB OPEN (isRunDbOpenError) — that is BEFORE any resource
-    // resolution / process.compute side effect (the run db aliased the log store's file). A lock surfacing LATER may
+    // resolution / compute.run side effect (the run db aliased the log store's file). A lock surfacing LATER may
     // have already run side effects, so retrying it could DUPLICATE them — propagate instead.
     if (isBioStoreLocked(e) && isRunDbOpenError(e)) { close(); return await run(undefined); }
     throw e;
@@ -174,11 +174,10 @@ type OpenStore = (cwd: string) => Promise<BioStore>;
 
 export interface BioExtensionOptions {
   network?: { fetch: FetchLike };
-  /** Out-of-process COMPUTE grant: the host injects a ProcessRunner so a manifest's `process.compute` resources can
-   *  spawn (R/Python/shell) — same explicit, composed-in grant model as `network`. Absent => process.compute fails
-   *  closed (unbound). The prompt/tools advertise this capability; without this it could never actually be granted. */
-  process?: { runner: ProcessRunner };
-  /** CAS grant: a content-addressed store so `process.compute` can capture declared FILE outputs by digest, and
+  /** COMPUTE grant: the host injects a ComputeRunner so a manifest's `compute.run` resources can execute.
+   *  Same explicit, composed-in grant model as `network`. Absent => compute.run fails closed. */
+  compute?: { runner: ComputeRunner };
+  /** CAS grant: a content-addressed store so `compute.run` can capture declared FILE outputs by digest, and
    *  runs can serialize result/receipts/replay bytes outside the DB. Absent => file outputs fail closed. */
   cas?: CasStore;
   /** Host-owned DuckDB session variables, bound after ordinary agent `bindings`, digested but not serialized in
@@ -200,7 +199,7 @@ export interface BioExtensionOptions {
 
 export function createBioExtension(options: BioExtensionOptions = {}): (pi: ExtensionAPI) => void {
   const network = options.network;
-  const processGrant = options.process; // the out-of-process compute grant (threaded into runs so process.compute can bind)
+  const computeGrant = options.compute; // threaded into runs so compute.run can bind
   const cas = options.cas; // the CAS grant (file outputs + byte serialization); absent => file outputs fail closed
   const protectedSessionBindings = options.protectedSessionBindings;
   const protectedSessionVariables = options.protectedSessionVariables;
@@ -252,7 +251,7 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
   pi.registerTool({
     name: "bio_run_operation",
     label: "Run a bio operation",
-    description: "Run a declared duckdb.sql operation from a manifest JSON against an explicit DuckDB database, persisting run/result/receipts under .pi/bio-agent/runs/<runId>. Built-in resolvers always bound: duckdb.file_scan, duckdb.sql_materialize, duckhts.read_bcf. Host-GRANTED (fail closed unless the operator injected them): http.get (network) and process.compute (out-of-process). `ncurl_table` is not a resolver — it is SQL used inside a duckdb.sql_materialize query. Any other resolver id fails closed. The manifest must pass registry validation and the operation must be duckdb.sql.",
+    description: "Run a declared duckdb.sql operation from a manifest JSON against an explicit DuckDB database, persisting run/result/receipts under .pi/bio-agent/runs/<runId>. Built-in resolvers always bound: duckdb.file_scan, duckdb.sql_materialize, duckhts.read_bcf. Host-GRANTED (fail closed unless the operator injected them): http.get (network) and compute.run (async compute). `ncurl_table` is not a resolver — it is SQL used inside a duckdb.sql_materialize query. Any other resolver id fails closed. The manifest must pass registry validation and the operation must be duckdb.sql.",
     parameters: Type.Object({
       dbPath: Type.String({ description: "Explicit DuckDB database path, or ':memory:'." }),
       manifestPath: Type.String({ description: "Path to a manifest JSON file (relative to cwd or absolute)." }),
@@ -265,7 +264,7 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
       // not strip unknown keys. network/signal are host-composed, never agent-supplied.
       const { dbPath, manifestPath, operationId, runId } = params;
       return text(await withRunLog(openStore, ctx.cwd, dbPath, (storeConn) =>
-        runBioOperationFromManifest({ cwd: ctx.cwd, dbPath, manifestPath, operationId, runId, network, process: processGrant, cas, protectedSessionBindings, protectedSessionVariables, signal, store: storeConn, author })));
+        runBioOperationFromManifest({ cwd: ctx.cwd, dbPath, manifestPath, operationId, runId, network, compute: computeGrant, cas, protectedSessionBindings, protectedSessionVariables, signal, store: storeConn, author })));
     },
   });
 
@@ -285,7 +284,7 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
       // Only schema-approved fields (see bio_run_operation): never spread untrusted params into the host runner.
       const { dbPath, manifestPath, sql, resources, bindings, runId } = params;
       return text(await withRunLog(openStore, ctx.cwd, dbPath, (storeConn) =>
-        runBioQueryFromManifest({ cwd: ctx.cwd, dbPath, manifestPath, sql, resources, bindings, runId, network, process: processGrant, cas, protectedSessionBindings, protectedSessionVariables, signal, store: storeConn, author })));
+        runBioQueryFromManifest({ cwd: ctx.cwd, dbPath, manifestPath, sql, resources, bindings, runId, network, compute: computeGrant, cas, protectedSessionBindings, protectedSessionVariables, signal, store: storeConn, author })));
     },
   });
 

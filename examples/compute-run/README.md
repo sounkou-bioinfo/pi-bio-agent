@@ -13,12 +13,12 @@ points (file_scan)  --SELECT x,y-->  Arrow IPC file  -->  Rscript ./compute.R <i
 ## The skill is data, not code
 
 ```json
-{ "id": "lm_fit", "resolver": "process.compute",
+{ "id": "lm_fit", "resolver": "compute.run",
   "params": { "table": "lm_fit", "inputSql": "SELECT x, y FROM points",
               "command": ["Rscript", "./compute.R"], "timeoutMs": 60000 } }
 ```
 
-The `process.compute` resolver does the marshalling — `COPY (inputSql) TO in.arrow (FORMAT arrow)`, run the
+The `compute.run` resolver does the marshalling — `COPY (inputSql) TO in.arrow (FORMAT arrow)`, run the
 command with the **in/out Arrow paths appended as the last two argv entries** (not env vars — argv is explicit
 and never inherited down a process tree), `read_arrow(out.arrow)` back into `table` — so the **data contract
 stays in SQL + Arrow**. The script is the only domain code, and it is a tiny, language-agnostic contract: *read
@@ -51,17 +51,17 @@ DuckDB writes the Arrow IPC **stream** format, so R uses `read_nanoarrow`/`write
 ## Running it — compute is the host's opt-in
 
 Spawning a process is a **capability the host grants by composition**, exactly like network: the host injects a
-`ProcessRunner` (`nodeProcessRunner()`), and without it the `process.compute` resource **fails closed** (the
+`ComputeRunner` (`nodeComputeRunner()`), and without it the `compute.run` resource **fails closed** (the
 agent can never spawn a process on its own). The host also provisions the Arrow codec (`INSTALL nanoarrow FROM
 community`). A non-zero exit, a timeout, or a clean exit that wrote **no** output file all throw — the run
 records the failure, never a silent empty table.
 
-**Scope (do not over-trust it):** binding a `ProcessRunner` grants the agent's manifests the ability to run the
+**Scope (do not over-trust it):** binding a `ComputeRunner` grants the agent's manifests the ability to run the
 commands they declare. It is *not* a sandbox — enforce real isolation (a restricted user, a container,
 seccomp, resource limits) at the **host** boundary, and only inject a runner for manifests you trust to name
 safe commands.
 
-`test/process-compute-example.test.ts` runs this manifest end to end through the host with a **real spawned
+`test/compute-run-example.test.ts` runs this manifest end to end through the host with a **real spawned
 Rscript** (no mock) and asserts the fitted slope ≈ 2, intercept ≈ 1, R² > 0.99 over `data/points.csv` (which is
 ≈ `y = 2x + 1`), plus the fail-closed-without-a-runner path.
 

@@ -30,7 +30,7 @@ real to ignore. The resolution is **manifests over a small kernel, executed by p
 ```text
 core kernel        identity · resource handles/CAS/resolvers · facts/relations/time · declarations · runs · memory
 manifests          genomics · proteomics · transcriptomics/single-cell · metagenomics · data-science · clinical-annotation
-execution backends DuckDB SQL (data + SQL-native network via ducknng) · `process` out-of-process compute (R/Python/Go/shell over Arrow IPC)
+execution backends DuckDB SQL (data + SQL-native network via ducknng) · `compute.run` out-of-process compute (R/Python/Go/shell over Arrow IPC)
 ```
 
 - **core owns the grammar** (what *is* a resource, operation, fact, run, term, temporal scope, resolver).
@@ -270,7 +270,7 @@ type BioOperationTransport = "duckdb.sql";   // built today; a `process` transpo
 - **`duckdb.sql`** carries both **data** (files/formats as table functions) and **network** (`ducknng_ncurl_table`: an HTTP/GraphQL call is a SQL table function, not a per-API TypeScript client).
 - **`process`** is the one general out-of-process backend (argv in a run dir over Arrow IPC). `Rscript`, `python`,
   `bcftools`, `nextflow`, `snakemake` are **argv presets over `process`**, never separate transports: one backend,
-  not `runDeseq2()`/`runGatk()` sprawl. `process.compute` (the resolver form: table, file, and files-only outputs)
+  not `runDeseq2()`/`runGatk()` sprawl. `compute.run` (the resolver form: table, file, and files-only outputs)
   is **built**; the operation-level `process` transport is earned, not prebuilt (see
   [design notes](design.md#execution-beyond-sql-shell-r-and-workflows-as-process-operations)).
 

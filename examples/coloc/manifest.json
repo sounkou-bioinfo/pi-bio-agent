@@ -8,7 +8,7 @@
     "resolvers": [
       { "id": "duckdb.file_scan", "version": "0.1.0", "title": "DuckDB file scan", "description": "Read a delimited locus file into a table (stands in for a tabix region-extract).", "output": { "mode": "table" } },
       { "id": "duckdb.sql_materialize", "version": "0.1.0", "title": "SQL materialize", "description": "Materialize a table from a read-only SELECT (here, the allele harmonization join).", "output": { "mode": "table" } },
-      { "id": "process.compute", "version": "0.1.0", "title": "Out-of-process compute", "description": "Run an external process (R coloc.abf) over an Arrow-IPC input and read its Arrow-IPC output back as a table.", "output": { "mode": "table" } }
+      { "id": "compute.run", "version": "0.1.0", "title": "Out-of-process compute", "description": "Run an external process (R coloc.abf) over an Arrow-IPC input and read its Arrow-IPC output back as a table.", "output": { "mode": "table" } }
     ],
     "resources": [
       { "id": "gwas_locus", "title": "GWAS locus sumstats", "kind": "virtual", "resolver": "duckdb.file_scan", "params": { "path": "data/gwas_locus.csv", "table": "gwas_locus" } },
@@ -21,7 +21,7 @@
         }
       },
       {
-        "id": "coloc_result", "title": "Colocalization posteriors (COMPUTE pillar)", "kind": "virtual", "resolver": "process.compute",
+        "id": "coloc_result", "title": "Colocalization posteriors (COMPUTE pillar)", "kind": "virtual", "resolver": "compute.run",
         "params": {
           "table": "coloc_result",
           "inputSql": "SELECT tissue, snp, beta_gwas, varbeta_gwas, beta_eqtl, varbeta_eqtl FROM harmonized",

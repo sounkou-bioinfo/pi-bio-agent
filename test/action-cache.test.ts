@@ -89,29 +89,29 @@ describe("ActionCache: input CASID -> output CASID (LLVM CAS ActionCache in the 
     assert.notEqual(actionInputDigest(base), actionInputDigest({ ...base, sourceReceiptDigests: ["sha256:s2"] }));
   });
 
-  test("process facts: the input digest is STABLE across a replay.json round-trip (no undefined keys to be dropped)", () => {
-    // resolvedProcessFacts omits undefined optional fields, so the in-memory replay.process equals the one recovered
-    // from replay.json (JSON drops undefined keys). Same digest either way -> a process.compute run object recomputes.
+  test("compute facts: the input digest is STABLE across a replay.json round-trip (no undefined keys to be dropped)", () => {
+    // resolvedComputeFacts omits undefined optional fields, so the in-memory replay.compute equals the one recovered
+    // from replay.json (JSON drops undefined keys). Same digest either way -> a compute.run run object recomputes.
     const proc = { resourceId: "r", command: ["Rscript", "fit.R"], resultTable: "artifacts" as const };
     assert.equal(
-      actionInputDigest({ ...base, process: proc }),
-      actionInputDigest({ ...base, process: JSON.parse(JSON.stringify(proc)) }),
+      actionInputDigest({ ...base, compute: proc }),
+      actionInputDigest({ ...base, compute: JSON.parse(JSON.stringify(proc)) }),
       "digest is stable across serialization when there are no undefined keys",
     );
     // CONTRAST — the bug the omit-undefined fix avoids: an undefined-valued key is tagged in memory but DROPPED by
     // JSON.stringify, so the round-tripped digest would differ (not recomputable from the recorded replay).
     const withUndef = { resourceId: "r", command: ["Rscript", "fit.R"], resultTable: "artifacts" as const, table: undefined };
     assert.notEqual(
-      actionInputDigest({ ...base, process: withUndef }),
-      actionInputDigest({ ...base, process: JSON.parse(JSON.stringify(withUndef)) }),
-      "an undefined key breaks round-trip stability — which is why resolvedProcessFacts must omit them",
+      actionInputDigest({ ...base, compute: withUndef }),
+      actionInputDigest({ ...base, compute: JSON.parse(JSON.stringify(withUndef)) }),
+      "an undefined key breaks round-trip stability — which is why resolvedComputeFacts must omit them",
     );
   });
 
-  test("the key is sensitive to RESULT-AFFECTING execution facts (init SQL, config, process, env) — no wrong-result serving", () => {
+  test("the key is sensitive to RESULT-AFFECTING execution facts (init SQL, config, compute, env) — no wrong-result serving", () => {
     assert.notEqual(actionInputDigest(base), actionInputDigest({ ...base, duckdbInitSqlDigest: "sha256:init" }), "init SQL (via its digest) changes the key");
     assert.notEqual(actionInputDigest(base), actionInputDigest({ ...base, duckdbConfigDigest: "sha256:cfg" }), "config changes the key");
-    assert.notEqual(actionInputDigest(base), actionInputDigest({ ...base, process: { command: ["Rscript", "fit.R"] } }), "process changes the key");
+    assert.notEqual(actionInputDigest(base), actionInputDigest({ ...base, compute: { command: ["Rscript", "fit.R"] } }), "compute changes the key");
     assert.notEqual(actionInputDigest(base), actionInputDigest({ ...base, environment: { status: "matched", observedDigest: "sha256:e" } }), "environment changes the key");
   });
 

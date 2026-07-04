@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { join, resolve, isAbsolute } from "node:path";
 import { RUN_REPLAY_SPEC_SCHEMA, receiptContentDigest, canonicalDigest, type RunReplaySpec } from "../core/reproducibility.js";
 import type { CasStore } from "../core/cas.js";
-import type { ProcessRunner } from "../core/ports.js";
+import type { ComputeRunner } from "../core/ports.js";
 import type { FetchLike } from "../duckdb/resolvers/http-table-scan.js";
 import { runBioOperationFromManifest, runBioQueryFromManifest, envSummaryFromReceipts, type RunOperationResponse } from "./run-store.js";
 
@@ -12,7 +12,7 @@ import { runBioOperationFromManifest, runBioQueryFromManifest, envSummaryFromRec
 // A faithful re-run of the same inputs yields the same content digests (receiptContentDigest excludes wall-clock),
 // so a mismatch is REAL drift — a changed resolver, params, source version, or resolved result — not a clock diff.
 // Fail closed: a replay without a manifest or without pinned sourceReceiptDigests cannot be verified, so it throws
-// rather than reporting a hollow "match". (Portable snapshot->temp-manifest staging and process.compute env
+// rather than reporting a hollow "match". (Portable snapshot->temp-manifest staging and compute.run env
 // re-pinning are later refinements; this slice reproduces same-host query/operation runs.)
 //
 // PATH-PORTABILITY LIMITATION (fails SAFE): a file-backed resource's paramsDigest includes the ABSOLUTE path that
@@ -40,7 +40,7 @@ export interface ReproduceResult {
   resultMatched?: boolean;
   expectedResultDigest?: string;
   producedResultDigest?: string;
-  /** ENVIRONMENT-content check: the re-run's observed env fingerprint vs the pinned one (process.compute only —
+  /** ENVIRONMENT-content check: the re-run's observed env fingerprint vs the pinned one (compute.run only —
    *  env lives in provenance notes that the receipt digest drops). undefined = not pinned/not checkable. */
   environmentMatched?: boolean;
   expectedEnvDigest?: string;
@@ -58,7 +58,7 @@ export interface ReproduceRequest {
   /** always a fresh db (default :memory:) — reproduce must not read a prior run's state. */
   dbPath?: string;
   network?: { fetch: FetchLike };
-  process?: { runner: ProcessRunner };
+  compute?: { runner: ComputeRunner };
   cas?: CasStore;
   /** the host re-supplies the DuckDB config (it may bear secrets, so it is NOT stored in the replay — only its
    *  digest is). reproduce re-applies it and verifies it matches the pinned `duckdbConfigDigest`, failing closed. */
@@ -137,7 +137,7 @@ export async function reproduceRun(req: ReproduceRequest): Promise<ReproduceResu
   const base = {
     cwd: req.cwd, dbPath: req.dbPath ?? ":memory:", manifestPath: replay.manifest!.path!,
     bindings: replay.bindings, duckdbInitSql: req.duckdbInitSql, protectedSessionBindings: req.protectedSessionBindings, protectedSessionVariables: req.protectedSessionVariables, duckdbConfig: req.duckdbConfig,
-    network: req.network, process: req.process, cas: req.cas,
+    network: req.network, compute: req.compute, cas: req.cas,
     runId: `reproduce-${shortId}${suffix}`, now: req.now,
   };
 
@@ -173,11 +173,11 @@ export async function reproduceRun(req: ReproduceRequest): Promise<ReproduceResu
     if (!producedResultDigest) throw new Error("reproduce: replay pins a resultDigest but the re-run produced none — pass a `cas` so the result content can be verified (fail closed)");
     resultMatched = producedResultDigest === expectedResultDigest;
   }
-  // ENVIRONMENT drift: a process.compute run's environment attestation lives in the receipt's provenance NOTES
+  // ENVIRONMENT drift: a compute.run run's environment attestation lives in the receipt's provenance NOTES
   // (env_observed:/env_status:), which receiptContentDigest DROPS — so a re-run under a DIFFERENT environment
   // (different tool versions/layers) but identical output would otherwise falsely 'match'. If the replay pinned an
   // observed env fingerprint, recompute the re-run's and compare: a mismatch is real env drift, not a match. Only
-  // process.compute runs carry an env summary; a pure-SQL run has none on either side, so this is a no-op there.
+  // compute.run runs carry an env summary; a pure-SQL run has none on either side, so this is a no-op there.
   const expectedEnvDigest = replay.environment?.observedDigest;
   const producedEnvDigest = envSummaryFromReceipts(receipts)?.observedDigest;
   let environmentMatched: boolean | undefined;

@@ -21,10 +21,11 @@ export function queueJobRunner(conn: SqlConn, deps: QueueJobRunnerDeps): JobRunn
   };
 
   return {
-    async submit(spec: JobSubmitSpec): Promise<void> {
+    async submit(spec: JobSubmitSpec): Promise<string> {
       assertJobReplay(spec.runId, spec.replay);
       const now = deps.clock();
       await enqueueJob(conn, { runId: spec.runId, replay: spec.replay, now });
+      return spec.runId;
     },
     async status(runId: string): Promise<JobStatus | null> {
       return (await ledger.status(runId)) ?? (await statusFromQueue(runId));

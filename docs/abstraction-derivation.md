@@ -9,6 +9,22 @@ tags: [abstractions, primitives, machine-studying]
 
 The core should stay small enough that new domains can be expressed as data, tool specs, and study notes instead of new framework code.
 
+## Reconciliation rule
+
+When two local abstractions start describing the same motion, do not add an overlay primitive to make both true.
+Reconcile them against concrete instances, then collapse the weaker boundary. The method is:
+
+- list the real cases already in the repo;
+- name what must survive across all of them;
+- delete naming that leaks one implementation into the primitive;
+- keep compatibility only when an external surface truly requires it.
+
+This is how the compute/job split should be read. Local child-process execution, an NNG worker, a scheduler,
+a stateful REPL, an Absurd-style task queue, and the current run replay queue all share the same lifecycle:
+`submit -> status -> collect -> cancel`. The primitive is `AsyncRunner`; `ComputeRunner` is its compute
+specialization, and the durable run queue is the replay/run specialization. The mutable queue/claim table is
+coordination. Receipts, CAS objects, replay specs, result digests, and `bio_observations` are the evidence.
+
 ## Lessons from curation systems
 
 Metadata curation shows a useful determinism gradient:

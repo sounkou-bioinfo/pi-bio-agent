@@ -90,29 +90,40 @@ export interface ResolverOutput {
 export type BioResolverImpl = (resource: VirtualResourceSpec, ctx: ResolutionContext) => Promise<ResolverOutput>;
 
 /**
+ * Future-like async execution: submit returns a handle, status is a non-blocking observation, collect waits for
+ * the value, and cancel is best-effort. This is the nanonext/mirai/future shape we want every long-running
+ * execution surface to share; a local immediate runner is just the simplest backend, not a separate semantics.
+ */
+export interface AsyncRunner<Spec, Handle, Status, Result> {
+  submit(spec: Spec): Promise<Handle>;
+  status(handle: Handle): Promise<Status | null>;
+  collect(handle: Handle): Promise<Result | null>;
+  cancel?(handle: Handle): Promise<void>;
+}
+
+/**
  * The PROCESS-RUNTIME port — the COMPUTE pillar's seam. A host-injected capability to run an OUT-OF-PROCESS
  * computation (R / Python / Go / shell), exactly like `fetch` is injected for the network: the agent's manifest
- * declares a `process.compute` resource, and without a ProcessRunner bound it FAILS CLOSED (the agent can never
- * spawn a process on its own). The runner only spawns and reports — it does NOT touch DuckDB. The resolver owns
- * the Arrow-IPC marshalling (DuckDB `COPY (sql) TO arrow_in (FORMAT arrow)`, the process computes, DuckDB
- * `read_arrow(arrow_out)`), so the DATA contract stays in SQL/Arrow and the runner stays a thin, auditable exec
- * boundary. This is NOT the durable async lifecycle: a ProcessRunner call waits for one process exit. Long-running
- * resume/status/cancel belongs to JobRunner + the queue/ledger layer, which may invoke this same payload boundary
- * inside a worker. Out-of-process, not FFI: a crash/OOM/timeout in the computation is contained in the child.
+ * declares a `compute.run` resource, and without a ComputeRunner bound it FAILS CLOSED (the agent can never
+ * spawn a process on its own). The runner only accepts, reports, collects, and cancels work — it does NOT touch
+ * DuckDB. The resolver owns the Arrow-IPC marshalling (DuckDB `COPY (sql) TO arrow_in (FORMAT arrow)`, the process
+ * computes, DuckDB `read_arrow(arrow_out)`), so the DATA contract stays in SQL/Arrow and the runner stays a thin,
+ * auditable exec boundary. Out-of-process, not FFI: a crash/OOM/timeout in the computation is contained in the
+ * child. Long-running queue, NNG, stateful kernel, or local spawn backends must all present this same async shape.
  */
-export interface ProcessRunSpec {
+export interface ComputeTaskSpec {
   /** [executable, ...args] — an argv array, NEVER a shell string (so there is no shell to inject into). */
   command: readonly string[];
   cwd?: string;
   /** Extra environment for the child — tool knobs only; the Arrow in/out paths are passed as the last two ARGV
-   *  entries (see process.compute), never via env. The child does NOT inherit the host's full `process.env` (that
+   *  entries (see compute.run), never via env. The child does NOT inherit the host's full `process.env` (that
    *  carries secrets); the runner gives it a minimal non-secret base (PATH/HOME/locale) plus exactly this. */
   env?: Record<string, string>;
   timeoutMs?: number;
   signal?: AbortSignal;
 }
 
-export interface ProcessRunResult {
+export interface ComputeTaskResult {
   /** The child's exit code, or null if it was killed by a signal/timeout. */
   exitCode: number | null;
   /** The signal that killed the child (e.g. "SIGKILL"), or null on a normal exit. Lets a caller distinguish an
@@ -123,12 +134,35 @@ export interface ProcessRunResult {
   timedOut: boolean;
 }
 
-export interface ProcessRunner {
-  /** One-shot execution. Async as a Promise, not a submit/status/collect job API. */
-  run(spec: ProcessRunSpec): Promise<ProcessRunResult>;
+export type ComputeTaskPhase = "queued" | "running" | "waiting" | "succeeded" | "failed" | "cancelled";
+
+export interface ComputeTaskHandle {
+  /** Host-assigned durable or in-memory handle. A local runner may use a UUID; a remote runner may use a queue id. */
+  runId: string;
+  submittedAt?: string;
+  backend?: string;
+}
+
+export interface ComputeTaskStatus {
+  runId: string;
+  phase: ComputeTaskPhase;
+  at?: string;
+  progress?: { current?: number; total?: number; unit?: string };
+  message?: string;
+}
+
+export interface ComputeRunner extends AsyncRunner<ComputeTaskSpec, ComputeTaskHandle, ComputeTaskStatus, ComputeTaskResult> {
+  /** Collect waits for the process value, like future::value() / mirai::collect_mirai(). */
+  collect(handle: ComputeTaskHandle): Promise<ComputeTaskResult>;
   /** OPTIONAL reproducibility probe (C1): describe the environment a run WOULD execute in, as an OBSERVED
-   *  EnvDescriptor, for the declared-vs-observed attestation. Absent => process.compute records an explicit
+   *  EnvDescriptor, for the declared-vs-observed attestation. Absent => compute.run records an explicit
    *  `unknown` observation, never a fake pin. MUST be cheap and side-effect-free — no spawning a version probe,
    *  no network, no mutation (a hanging/mutating probe is a host bug). A richer host provider may return more. */
-  describeEnvironment?(spec: ProcessRunSpec): Promise<EnvDescriptor>;
+  describeEnvironment?(spec: ComputeTaskSpec): Promise<EnvDescriptor>;
+}
+
+/** Convenience for synchronous consumers of the async process shape: submit work, then collect its value. */
+export async function collectComputeTask(runner: ComputeRunner, spec: ComputeTaskSpec): Promise<ComputeTaskResult> {
+  const handle = await runner.submit(spec);
+  return runner.collect(handle);
 }

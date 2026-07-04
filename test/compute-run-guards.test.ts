@@ -4,10 +4,11 @@ import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runBioQueryFromManifest } from "../src/hosts/run-store.js";
-import { nodeProcessRunner } from "../src/process/node-process-runner.js";
+import { collectComputeTask } from "../src/core/ports.js";
+import { nodeComputeRunner } from "../src/process/node-compute-runner.js";
 import { fsCasStore } from "../src/hosts/fs-cas.js";
 
-// Param-guard tests for the process.compute resolver — these validate BEFORE any spawn or extension LOAD, so
+// Param-guard tests for the compute.run resolver — these validate BEFORE any spawn or extension LOAD, so
 // they need neither R nor nanoarrow and run deterministically everywhere. They lock in the hardening from the
 // pal review: a non-positive timeoutMs must NOT silently disable the timeout, and params.env must be strings.
 
@@ -26,7 +27,7 @@ describe("SECURITY: spawned children do not inherit host secrets, and CAS/run pa
   test("a spawned child does NOT see host process.env secrets, but DOES get explicit spec.env + a resolvable PATH", async () => {
     process.env.PI_BIO_FAKE_SECRET = "topsecret-do-not-leak";
     try {
-      const res = await nodeProcessRunner().run({
+      const res = await collectComputeTask(nodeComputeRunner(), {
         command: [process.execPath, "-e", "process.stdout.write(`secret=${process.env.PI_BIO_FAKE_SECRET ?? 'ABSENT'} knob=${process.env.TOOL_KNOB ?? 'unset'}`)"],
         env: { TOOL_KNOB: "on" },
       });
@@ -41,36 +42,49 @@ describe("SECURITY: spawned children do not inherit host secrets, and CAS/run pa
     const ac = new AbortController();
     ac.abort();
     await assert.rejects(
-      () => nodeProcessRunner().run({ command: ["sh", "-c", `touch ${marker}; sleep 10`], signal: ac.signal }),
+      () => collectComputeTask(nodeComputeRunner(), { command: ["sh", "-c", `touch ${marker}; sleep 10`], signal: ac.signal }),
       /already aborted|not spawning/,
     );
     await new Promise((r) => setTimeout(r, 50)); // give a (wrongly) spawned child time to run its side effect
     await assert.rejects(() => fs.access(marker), /ENOENT/, "the aborted process never spawned, so it never touched the marker");
   });
+
+  test("compute runner is future-shaped: submit returns before collect resolves, then local state is evicted", async () => {
+    const runner = nodeComputeRunner();
+    const handle = await runner.submit({
+      command: [process.execPath, "-e", "setTimeout(() => process.stdout.write('done'), 120)"],
+    });
+    const status = await runner.status(handle);
+    assert.equal(status?.phase, "running", "status is observable before the value is collected");
+    const result = await runner.collect(handle);
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, "done");
+    assert.equal(await runner.status(handle), null, "the local runner should not retain collected stdout/stderr forever");
+  });
 });
 
 const BASE = {
   schema: "pi-bio.manifest.v1", id: "compute-guards", version: "0.1.0",
-  title: "process.compute param guards", description: "fail-closed param validation for process.compute",
+  title: "compute.run param guards", description: "fail-closed param validation for compute.run",
   provides: {
-    resolvers: [{ id: "process.compute", version: "0.1.0", title: "compute", description: "compute", output: { mode: "table" } }],
+    resolvers: [{ id: "compute.run", version: "0.1.0", title: "compute", description: "compute", output: { mode: "table" } }],
   },
 };
 
 async function runWith(params: Record<string, unknown>): Promise<{ ok: boolean; error?: string }> {
   const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-guards-"));
-  const manifest = { ...BASE, provides: { ...BASE.provides, resources: [{ id: "r", title: "r", kind: "virtual", resolver: "process.compute", params }] } };
+  const manifest = { ...BASE, provides: { ...BASE.provides, resources: [{ id: "r", title: "r", kind: "virtual", resolver: "compute.run", params }] } };
   await fs.writeFile(join(cwd, "manifest.json"), JSON.stringify(manifest));
   const out = await runBioQueryFromManifest({
     cwd, dbPath: ":memory:", manifestPath: "manifest.json",
     sql: "SELECT * FROM r",
-    process: { runner: nodeProcessRunner() }, // runner bound — but validation throws before it ever spawns
+    compute: { runner: nodeComputeRunner() }, // runner bound — but validation throws before it ever spawns
     runId: "g1", now: "T1",
   });
   return out.ok ? { ok: true } : { ok: false, error: (out as { error?: unknown }).error != null ? String((out as { error: unknown }).error) : "" };
 }
 
-describe("process.compute: fail-closed param guards (no spawn, no R)", () => {
+describe("compute.run: fail-closed param guards (no spawn, no R)", () => {
   const good = { table: "r", inputSql: "SELECT 1 AS x", command: ["true"] };
 
   test("timeoutMs: 0 is rejected (must not silently disable the timeout -> unbounded child)", async () => {
@@ -101,9 +115,9 @@ describe("process.compute: fail-closed param guards (no spawn, no R)", () => {
     const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-guards-cap-"));
     const cas = fsCasStore(await fs.mkdtemp(join(tmpdir(), "pi-bio-cas-")));
     const params = { table: "r", resultTable: "artifacts", command: ["sh", "-c", "printf hello > out.txt"], outputs: [{ name: "o", path: "out.txt" }], maxOutputBytes: 1 };
-    const manifest = { ...BASE, provides: { ...BASE.provides, resources: [{ id: "r", title: "r", kind: "virtual", resolver: "process.compute", params }] } };
+    const manifest = { ...BASE, provides: { ...BASE.provides, resources: [{ id: "r", title: "r", kind: "virtual", resolver: "compute.run", params }] } };
     await fs.writeFile(join(cwd, "manifest.json"), JSON.stringify(manifest));
-    const out = await runBioQueryFromManifest({ cwd, dbPath: ":memory:", manifestPath: "manifest.json", sql: "SELECT * FROM r", process: { runner: nodeProcessRunner() }, cas, runId: "cap1", now: "T1" });
+    const out = await runBioQueryFromManifest({ cwd, dbPath: ":memory:", manifestPath: "manifest.json", sql: "SELECT * FROM r", compute: { runner: nodeComputeRunner() }, cas, runId: "cap1", now: "T1" });
     assert.equal(out.ok, false, "the 5-byte output exceeds the 1-byte cap");
     assert.match(String((out as { error?: unknown }).error ?? ""), /over the 1-byte cap/);
   });

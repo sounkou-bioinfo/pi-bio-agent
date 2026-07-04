@@ -1,7 +1,7 @@
 # Files-only out-of-process compute
 
 A tool that returns **no table, only files** — the common bioinformatics case (`samtools index` → a `.bai`,
-`bcftools` → a `.vcf.gz`, a plot renderer → a `.svg`). `process.compute` supports it with
+`bcftools` → a `.vcf.gz`, a plot renderer → a `.svg`). `compute.run` supports it with
 `resultTable: "artifacts"`:
 
 - **no `inputSql`** → no `in.arrow` is handed in (the tool uses its own inputs / command args), and
@@ -18,7 +18,7 @@ Run it (`sh` only — no R, no network):
 
 ```bash
 # via the host (a query over the artifacts listing):
-#   runBioQueryFromManifest({ manifestPath, sql: "SELECT name, kind, size FROM tracks ORDER BY name", process, cas })
+#   runBioQueryFromManifest({ manifestPath, sql: "SELECT name, kind, size FROM tracks ORDER BY name", compute, cas })
 ```
 
 <!-- BEGIN GENERATED:files-only-run (npm run readme:examples — do not edit by hand) -->
@@ -30,8 +30,8 @@ regions_bed  file     66
 summary      table    38
 ```
 
-The tool returned NO rectangular value — the table IS the captured-artifacts listing (2 files, each a content-addressed CAS handle). Verified in `test/process-files-only-example.test.ts`.
+The tool returned NO rectangular value — the table IS the captured-artifacts listing (2 files, each a content-addressed CAS handle). Verified in `test/compute-files-only-example.test.ts`.
 <!-- END GENERATED:files-only-run -->
 
-The `digest` column of each row is a `sha256:` CAS address; `test/process-files-only-example.test.ts` reads the
+The `digest` column of each row is a `sha256:` CAS address; `test/compute-files-only-example.test.ts` reads the
 captured `regions.bed` back out of CAS by that digest and checks the bytes.

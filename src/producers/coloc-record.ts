@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import type { ProcessRunner, SqlConn } from "../core/ports.js";
+import type { ComputeRunner, SqlConn } from "../core/ports.js";
 import { recordObservation } from "../duckdb/observations.js";
 import { runBioQueryFromManifest } from "../hosts/run-store.js";
 
@@ -65,7 +65,7 @@ export interface RunColocRecordArgs {
   manifestPath: string;
   /** the bio_observations connection the posteriors are recorded into (the ONE store). */
   store: SqlConn;
-  processRunner: ProcessRunner;
+  computeRunner: ComputeRunner;
   locusId: string;
   runId: string;
   recordedAt: string;
@@ -86,7 +86,7 @@ export interface RunColocRecordResult {
 
 const NANOARROW_INIT = ["INSTALL nanoarrow FROM community", "LOAD nanoarrow"];
 
-/** The PRODUCTION pipeline: run the coloc manifest (process.compute -> coloc.R -> posteriors table) through the
+/** The PRODUCTION pipeline: run the coloc manifest (compute.run -> coloc.R -> posteriors table) through the
  *  host, parse its result.json posteriors, and record them into the store via the shared recorder. This is "the
  *  production run records its judgment" — the same function the example CLI and the integration test both drive,
  *  so the mapping is exercised end to end, not only in a unit test. */
@@ -94,7 +94,7 @@ export async function runColocRecord(args: RunColocRecordArgs): Promise<RunColoc
   const out = await runBioQueryFromManifest({
     cwd: args.cwd, dbPath: args.dbPath ?? ":memory:", manifestPath: args.manifestPath,
     sql: "SELECT tissue, hypothesis, posterior FROM coloc_result",
-    process: { runner: args.processRunner }, duckdbInitSql: args.duckdbInitSql ?? NANOARROW_INIT,
+    compute: { runner: args.computeRunner }, duckdbInitSql: args.duckdbInitSql ?? NANOARROW_INIT,
     runId: args.runId, now: args.now ?? args.recordedAt,
   });
   if (!out.ok) return { ok: false, runId: out.runId, rows: [], recorded: 0, error: out.error };

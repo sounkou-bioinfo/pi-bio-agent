@@ -35,9 +35,10 @@ export function ledgerJobRunner(conn: SqlConn, dispatch: JobDispatch): JobRunner
   };
 
   return {
-    async submit(spec: JobSubmitSpec): Promise<void> {
+    async submit(spec: JobSubmitSpec): Promise<string> {
       assertJobReplay(spec.runId, spec.replay); // fail closed at the boundary
       await dispatch(spec); // hand the job to the worker pool; the worker reports status into the shared slot
+      return spec.runId;
     },
     status: readStatus,
     async collect(runId: string): Promise<JobResult | null> {

@@ -13,7 +13,7 @@ import { execFileSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { openBioStore } from "../../dist/hosts/bio-store.js";
-import { nodeProcessRunner } from "../../dist/process/node-process-runner.js";
+import { nodeComputeRunner } from "../../dist/process/node-compute-runner.js";
 import { runColocRecord } from "../../dist/producers/coloc-record.js";
 import { observationsAsOf, materializeBioEdgesAsOf } from "../../dist/duckdb/observations.js";
 
@@ -33,7 +33,7 @@ if (!rOk) {
 const store = await openBioStore(process.cwd());
 try {
   const res = await runColocRecord({
-    cwd: here, manifestPath, store: store.conn, processRunner: nodeProcessRunner(),
+    cwd: here, manifestPath, store: store.conn, computeRunner: nodeComputeRunner(),
     locusId, runId: `coloc-record-${Date.now()}`, recordedAt: now,
   });
   if (!res.ok) { console.error(`coloc run failed: ${res.error}`); process.exit(1); }

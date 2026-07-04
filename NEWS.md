@@ -43,7 +43,7 @@ is the plan of record; [`docs/refinments.md`](docs/refinments.md) tracks open it
 - SQL-native network: `ducknng_ncurl_table` composes an HTTP call and parses JSON into a
   table, so a new REST / GraphQL / MCP endpoint is a manifest, not new code. `http.get`
   is the injected-fetch fallback (fail-closed).
-- Out-of-process compute: `process.compute` runs R / Python / shell over Arrow IPC with
+- Out-of-process compute: `compute.run` runs R / Python / shell over Arrow IPC with
   timeouts, output caps, process-group kill, and environment attestation; declared file
   outputs are captured into CAS.
 - Reproducibility: runtime-agnostic environment identity, a `replay.json` seed, and

@@ -48,6 +48,6 @@ Run: `npm run build && node scripts/ducknng-fs.mjs`
 The directory tree is mutated in place over ducknng RPC (`mkdir`/`mv`/`rm` = `INSERT`/`UPDATE`/`DELETE`), and `ls -R`
 is a recursive CTE over the served tree. The two *hard* pieces (a mutable metadata graph over RPC + content-
 addressed bytes) were already built and tested — so a distributed FS is a **composition**, with dedup/versioning/
-provenance/`du` for free. FUSE (a host-port like the ProcessRunner) would make it actually mountable. Push belongs
+provenance/`du` for free. FUSE (a host port like `ComputeRunner`) would make it actually mountable. Push belongs
 outside the metadata truth: use it to wake watchers or workers after a committed SQL/CAS update, not as the
 authoritative file state.

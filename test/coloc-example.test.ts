@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { runBioQueryFromManifest } from "../src/hosts/run-store.js";
-import { nodeProcessRunner } from "../src/process/node-process-runner.js";
+import { nodeComputeRunner } from "../src/process/node-compute-runner.js";
 
 // The two-pillar flagship end to end, MULTI-TISSUE: GWAS + per-tissue eQTL loci -> SQL allele HARMONIZATION
 // (DATA pillar) -> out-of-process R coloc.abf PER TISSUE over Arrow IPC (COMPUTE pillar; per-tissue = the
@@ -26,7 +26,7 @@ async function rows(sql: string): Promise<Array<Record<string, unknown>>> {
   const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-coloc-"));
   const out = await runBioQueryFromManifest({
     cwd, dbPath: ":memory:", manifestPath: MANIFEST, sql,
-    process: { runner: nodeProcessRunner() },
+    compute: { runner: nodeComputeRunner() },
     duckdbInitSql: PROVISION, runId: "coloc", now: "T1",
   });
   assert.equal(out.ok, true, out.ok ? "" : `run failed: ${(out as { error?: unknown }).error}`);

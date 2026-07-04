@@ -8,7 +8,7 @@ import { createBioRegistry, describeManifest, validateBioManifest, type BioRegis
 import { recordRunObservation, type RunObservation } from "./run-observations.js";
 import { actionCachePut, actionInputDigest } from "./action-cache.js";
 import type { CasStore } from "../core/cas.js";
-import type { BioResolverImpl, ProcessRunner, SqlConn } from "../core/ports.js";
+import type { BioResolverImpl, ComputeRunner, SqlConn } from "../core/ports.js";
 import { OperationRunError, runOperation, runQuery, type OperationResult } from "../core/operations.js";
 import type { BioRunRecord } from "../core/run-spec.js";
 import type { BioArtifact } from "../core/types.js";
@@ -18,7 +18,7 @@ import { duckdbFileScanResolver } from "../duckdb/resolvers/duckdb-file-scan.js"
 import { duckdbSqlMaterializeResolver } from "../duckdb/resolvers/duckdb-sql-materialize.js";
 import { duckhtsReadBcfResolver } from "../duckdb/resolvers/duckhts-read-bcf.js";
 import { httpTableResolver, type FetchLike } from "../duckdb/resolvers/http-table-scan.js";
-import { processComputeResolver } from "../duckdb/resolvers/process-compute.js";
+import { computeRunResolver } from "../duckdb/resolvers/compute-run.js";
 
 // Host-level run runner + store. Core returns { run, result, receipts }; persistence and resolver binding
 // live HERE, not in core. Only built-in resolver impls are bound; a manifest that declares any other
@@ -34,9 +34,9 @@ const BUILTIN_RESOLVERS: Record<string, BioResolverImpl> = {
 // by construction, not a library egress firewall. file_scan / read_bcf may read remote URIs freely; whether
 // egress is possible is the host's sandbox decision (container/seccomp/Pi/OS), not ours.
 const NETWORK_RESOLVER = "http.get";
-// The COMPUTE capability: a manifest's process.compute resource resolves only when the host injects a
-// ProcessRunner (grants out-of-process compute by composition), exactly like http.get needs an injected fetch.
-const PROCESS_RESOLVER = "process.compute";
+// The COMPUTE capability: a manifest's compute.run resource resolves only when the host injects a
+// ComputeRunner (grants out-of-process compute by composition), exactly like http.get needs an injected fetch.
+const COMPUTE_RESOLVER = "compute.run";
 
 // Built-in resolvers whose params.path is a file location to resolve relative to the manifest's directory.
 const FILE_PATH_RESOLVERS = new Set(["duckdb.file_scan", "duckhts.read_bcf"]);
@@ -54,9 +54,9 @@ function resolveResourcePaths(manifest: BioManifest, manifestDir: string): BioMa
   const resources = manifest.provides.resources.map((res) => {
     if (!res || typeof res !== "object") return res; // non-object element — leave it for validateBioManifest to reject cleanly (don't TypeError here)
     if (!res.params || typeof res.params !== "object") return res; // missing/malformed params — validation rejects it; don't TypeError on res.params.command/.path
-    // process.compute: a script SHIPS WITH the manifest, referenced "./compute.R" — resolve such relative
+    // compute.run: a script SHIPS WITH the manifest, referenced "./compute.R" — resolve such relative
     // command entries against the manifest dir (absolute paths and bare executable names are left untouched).
-    if (res.resolver === PROCESS_RESOLVER) {
+    if (res.resolver === COMPUTE_RESOLVER) {
       const cmd = (res.params as { command?: unknown }).command;
       if (!Array.isArray(cmd)) return res;
       const command = cmd.map((c) => (typeof c === "string" && (c.startsWith("./") || c.startsWith("../"))) ? resolve(manifestDir, c) : c);
@@ -119,7 +119,7 @@ const AMBIENT_SQL_READ = /\b(from|join)\s+('|[\w$.]+\s*\()|\bread_\w+\s*\(|\b\w*
 const VOLATILE_SQL = /\b(random|uuid|gen_random_uuid|nextval|txid_current|now)\s*\(|\b(current_timestamp|current_date|current_time|localtimestamp|localtime)\b/i;
 
 // Mark an error that occurred while OPENING the run's DuckDB db (create/connect) — BEFORE any resource resolution or
-// process.compute side effect. A host that logs runs into a store can safely RETRY such a failure unlogged (e.g. the
+// compute.run side effect. A host that logs runs into a store can safely RETRY such a failure unlogged (e.g. the
 // run db aliased the log store's file and lock-conflicted); a lock/error surfacing LATER may have already run side
 // effects, so it must NOT be blindly retried. See the extension's withRunLog.
 export function markRunDbOpenError<E>(err: E): E {
@@ -280,8 +280,8 @@ export interface RunOperationRequest {
   /** Network opt-in: pass a fetch to enable the http.get resolver. Absent = http.get stays unbound and any
    *  networked resource fails closed. The host (not core) owns this policy; nothing is read from ambient state. */
   network?: { fetch: FetchLike };
-  /** COMPUTE opt-in (host grants out-of-process compute): pass a ProcessRunner to enable the process.compute resolver. Absent => process.compute stays unbound and fails closed. */
-  process?: { runner: ProcessRunner };
+  /** COMPUTE opt-in (host grants out-of-process compute): pass a ComputeRunner to enable the compute.run resolver. Absent => compute.run stays unbound and fails closed. */
+  compute?: { runner: ComputeRunner };
   /** Cooperative cancellation, forwarded to each resolver (e.g. http.get's fetch). */
   signal?: AbortSignal;
   /** CAS mode (host opt-in): a content-addressed byte store. Present = resolvers snapshot bytes into it and
@@ -324,7 +324,7 @@ function resolveInCwd(cwd: string, p: string): string {
 
 /** Load + validate + register a manifest and bind the built-in resolver impls it declares. Shared by the
  *  operation and the ad-hoc query entry points. */
-async function prepareRegistry(req: { cwd: string; manifestPath: string; network?: { fetch: FetchLike }; process?: { runner: ProcessRunner } }): Promise<{ registry: BioRegistry; manifest: BioManifest; raw: BioManifest; manifestDigest: string }> {
+async function prepareRegistry(req: { cwd: string; manifestPath: string; network?: { fetch: FetchLike }; compute?: { runner: ComputeRunner } }): Promise<{ registry: BioRegistry; manifest: BioManifest; raw: BioManifest; manifestDigest: string }> {
   const manifestPath = resolveInCwd(req.cwd, req.manifestPath);
   const text = await fs.readFile(manifestPath, "utf8");
   const raw = JSON.parse(text) as BioManifest; // the AUTHORED manifest — portable replay intent (relative paths intact)
@@ -336,7 +336,7 @@ async function prepareRegistry(req: { cwd: string; manifestPath: string; network
   // declaring resource fails closed at resolve time.
   const injected: Record<string, BioResolverImpl | undefined> = {
     [NETWORK_RESOLVER]: req.network ? httpTableResolver(req.network.fetch) : undefined,
-    [PROCESS_RESOLVER]: req.process ? processComputeResolver(req.process.runner) : undefined,
+    [COMPUTE_RESOLVER]: req.compute ? computeRunResolver(req.compute.runner) : undefined,
   };
   for (const r of manifest.provides?.resolvers ?? []) {
     const impl = BUILTIN_RESOLVERS[r.id] ?? injected[r.id];
@@ -376,16 +376,16 @@ export async function describeBioManifestFromPath(req: { cwd: string; manifestPa
   return { manifestPath: req.manifestPath, valid: true, ...describeManifest(raw) };
 }
 
-/** The RESOLVED process.compute facts for a run's resources (absolute command paths etc. — what actually ran on
+/** The RESOLVED compute.run facts for a run's resources (absolute command paths etc. — what actually ran on
  *  this host), captured beside the authored manifest snapshot so replay has BOTH portable intent and local facts.
- *  First process resource among `resources` (the walking-skeleton case; coloc/files-only declare one). */
-function resolvedProcessFacts(manifest: BioManifest, resources: string[]): RunReplaySpec["process"] | undefined {
-  const r = (manifest.provides?.resources ?? []).find((x) => x.resolver === PROCESS_RESOLVER && resources.includes(x.id));
+ *  First compute resource among `resources` (the walking-skeleton case; coloc/files-only declare one). */
+function resolvedComputeFacts(manifest: BioManifest, resources: string[]): RunReplaySpec["compute"] | undefined {
+  const r = (manifest.provides?.resources ?? []).find((x) => x.resolver === COMPUTE_RESOLVER && resources.includes(x.id));
   if (!r) return undefined;
   const p = r.params as { table?: string; command?: readonly string[]; inputSql?: string; resultTable?: "arrow" | "artifacts"; outputs?: Array<{ name: string; path: string; kind?: string }> };
   // Build with ONLY DEFINED fields — never leave `undefined`-valued keys. The run-object INPUT CASID is hashed from
-  // this in-memory `replay.process`, but replay.json (JSON.stringify) DROPS undefined keys, so an undefined-valued
-  // key would make the digest recomputed from the recorded replay differ from the original — a process.compute run
+  // this in-memory `replay.compute`, but replay.json (JSON.stringify) DROPS undefined keys, so an undefined-valued
+  // key would make the digest recomputed from the recorded replay differ from the original — a compute.run run
   // object then isn't recomputable from its own replay (breaks reproduce/dedup). Omitting the keys keeps them equal.
   return {
     resourceId: r.id,
@@ -397,12 +397,12 @@ function resolvedProcessFacts(manifest: BioManifest, resources: string[]): RunRe
   };
 }
 
-/** The env attestation SUMMARY lifted from the receipts' `environment` provenance entry (process.compute records
- *  it as notes). Returns the FIRST process receipt that carries one — a deliberate walking-skeleton limit: today a
- *  run has at most ONE process.compute resource. LIMITATION (owed when multi-process runs ship): with two+ process
+/** The env attestation SUMMARY lifted from the receipts' `environment` provenance entry (compute.run records
+ *  it as notes). Returns the FIRST compute receipt that carries one — a deliberate walking-skeleton limit: today a
+ *  run has at most ONE compute.run resource. LIMITATION (owed when multi-compute runs ship): with two+ compute
  *  resources this captures only the first, so reproduce()'s env-drift check would miss drift in a LATER resource's
  *  environment. The fix is a per-receipt env summary (keyed by resourceId) compared per resource; not built now
- *  because there is no multi-process consumer yet (building it would be speculative). Exported so
+ *  because there is no multi-compute consumer yet (building it would be speculative). Exported so
  *  reproduce() can recompute the RE-RUN's env summary and compare it to the pinned one (env lives in provenance
  *  NOTES, which receiptContentDigest drops — so without this check an env-drifted re-run would falsely 'match'). */
 export function envSummaryFromReceipts(receipts: ReadonlyArray<{ provenance: ReadonlyArray<{ source: string; notes?: string[] }> }>): EnvAttestationSummary | undefined {
@@ -665,11 +665,11 @@ export async function runBioOperationFromManifest(req: RunOperationRequest): Pro
   // A HIGH-ENTROPY suffix, not just Date.now(): `run:<runId>` is the ledger statement_key, and in a SHARED store
   // (across projects/agents) a bare timestamp collides -> two unrelated runs would conflate into one as-of slot.
   const runId = req.runId ?? `${req.operationId.replace(/[^a-zA-Z0-9._-]/g, "_")}-${Date.now()}-${randomUUID().slice(0, 8)}`;
-  // Scope process facts to the resources the operation ACTUALLY resolves (its declared requiredResources) — NOT
-  // every resource the manifest happens to declare. Otherwise replay.json would record an unrelated process.compute
+  // Scope compute facts to the resources the operation ACTUALLY resolves (its declared requiredResources) — NOT
+  // every resource the manifest happens to declare. Otherwise replay.json would record an unrelated compute.run
   // resource's command as "what ran" even though runOperation never resolved it (a provenance lie).
   const requiredResources = op.sql.requiredResources ?? [];
-  const proc = resolvedProcessFacts(manifest, requiredResources);
+  const proc = resolvedComputeFacts(manifest, requiredResources);
   const replay: RunReplaySpec = {
     schema: RUN_REPLAY_SPEC_SCHEMA, runId, kind: "operation",
     manifest: { digest: manifestDigest, snapshot: raw, path: req.manifestPath },
@@ -678,7 +678,7 @@ export async function runBioOperationFromManifest(req: RunOperationRequest): Pro
     ...(req.protectedSessionBindings ? { protectedSessionBindingsDigest: canonicalDigest(req.protectedSessionBindings) } : {}), // pin WHICH protected bindings (digest only; values are not replayed)
     ...(protectedNamesDigest ? { protectedSessionVariablesDigest: protectedNamesDigest } : {}), // pin additional protected names declared by the host
     ...(req.duckdbConfig ? { duckdbConfigDigest: canonicalDigest(req.duckdbConfig) } : {}), // pin WHICH config (digest, not the secret-bearing config itself)
-    ...(proc ? { process: proc } : {}),
+    ...(proc ? { compute: proc } : {}),
   };
   return runAndPersist(req.cwd, req.dbPath, runId, req.operationId, "operation", (conn) => runOperation(registry, conn, { operationId: req.operationId, runId, now, signal: req.signal, cas: req.cas }), req.now, req.duckdbInitSql, req.bindings, req.protectedSessionBindings, req.protectedSessionVariables, req.duckdbConfig, replay, req.store ? { store: req.store, author: req.author } : undefined, req.cas, req.serialize);
 }
@@ -700,8 +700,8 @@ export interface RunQueryRequest {
   /** Lean storage: when false, skip writing result/receipts/replay JSON files — their bytes go to CAS (needs a cas) and the run:<id> fact + casRefs reference them by digest; run.json is always written. Default true. */
   serialize?: boolean;
   network?: { fetch: FetchLike };
-  /** COMPUTE opt-in (host grants out-of-process compute): pass a ProcessRunner to enable the process.compute resolver. Absent => process.compute stays unbound and fails closed. */
-  process?: { runner: ProcessRunner };
+  /** COMPUTE opt-in (host grants out-of-process compute): pass a ComputeRunner to enable the compute.run resolver. Absent => compute.run stays unbound and fails closed. */
+  compute?: { runner: ComputeRunner };
   /** Cooperative cancellation, forwarded to each resolver (e.g. http.get's fetch). */
   signal?: AbortSignal;
   /** CAS mode (host opt-in): a content-addressed byte store for cross-db byte reuse. */
@@ -740,7 +740,7 @@ export async function runBioQueryFromManifest(req: RunQueryRequest): Promise<Run
   const resources = req.resources ?? (manifest.provides?.resources ?? []).map((r) => r.id);
   const now = req.now ?? systemClock();
   const runId = req.runId ?? `query-${Date.now()}-${randomUUID().slice(0, 8)}`; // globally unique: see runBioOperationFromManifest
-  const proc = resolvedProcessFacts(manifest, resources);
+  const proc = resolvedComputeFacts(manifest, resources);
   const replay: RunReplaySpec = {
     schema: RUN_REPLAY_SPEC_SCHEMA, runId, kind: "query",
     manifest: { digest: manifestDigest, snapshot: raw, path: req.manifestPath },
@@ -749,7 +749,7 @@ export async function runBioQueryFromManifest(req: RunQueryRequest): Promise<Run
     ...(req.protectedSessionBindings ? { protectedSessionBindingsDigest: canonicalDigest(req.protectedSessionBindings) } : {}), // pin WHICH protected bindings (digest only; values are not replayed)
     ...(protectedNamesDigest ? { protectedSessionVariablesDigest: protectedNamesDigest } : {}), // pin additional protected names declared by the host
     ...(req.duckdbConfig ? { duckdbConfigDigest: canonicalDigest(req.duckdbConfig) } : {}), // pin WHICH config (digest, not the secret-bearing config itself)
-    ...(proc ? { process: proc } : {}),
+    ...(proc ? { compute: proc } : {}),
   };
   return runAndPersist(req.cwd, req.dbPath, runId, "ad-hoc.query", "query", (conn, protectedSessionVariables) => runQuery(registry, conn, { sql: req.sql, resources, runId, now, signal: req.signal, cas: req.cas, protectedSessionVariables }), req.now, req.duckdbInitSql, req.bindings, req.protectedSessionBindings, req.protectedSessionVariables, req.duckdbConfig, replay, req.store ? { store: req.store, author: req.author } : undefined, req.cas, req.serialize);
 }

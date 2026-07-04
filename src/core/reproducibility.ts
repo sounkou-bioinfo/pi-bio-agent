@@ -10,7 +10,7 @@ import { createHash } from "node:crypto";
 //   2. EnvironmentAttestation — declared (the reproduction CONTRACT) + observed (what actually RAN) + a drift
 //      STATUS. One `env_digest` cannot both promise and attest; the envelope keeps them honest.
 //
-// Plus RunReplaySpec: the ACTUAL replay inputs (manifest snapshot, SQL/params, process params, env attestation) —
+// Plus RunReplaySpec: the ACTUAL replay inputs (manifest snapshot, SQL/params, compute params, env attestation) —
 // NOT just digests. A digest-only receipt cannot drive reproduce(); C1 seeds the bundle C2 will execute.
 
 export const ENV_DESCRIPTOR_SCHEMA = "pi-bio.env_descriptor.v1" as const;
@@ -125,7 +125,7 @@ export interface EnvironmentAttestation {
   schema: typeof ENV_ATTESTATION_SCHEMA;
   /** the reproduction CONTRACT — what a replay intends to recreate (from the manifest / replay spec). */
   declared?: EnvSide;
-  /** what ACTUALLY ran — the host's observation (a ProcessRunner probe / a host provider). */
+  /** what ACTUALLY ran — the host's observation (a ComputeRunner probe / a host provider). */
   observed?: EnvSide;
   status: "matched" | "drift" | "declared_only" | "observed_only" | "unknown";
   notes?: string[];
@@ -156,7 +156,7 @@ export function attestEnvironment(
 
 // ── replay seed ──────────────────────────────────────────────────────────────────────────────────────────────
 // The bundle C2's reproduce() will execute. It must carry the ACTUAL inputs, not just digest pointers. For paths
-// resolved on THIS host (process.compute `./script.R` → an absolute path), keep BOTH the authored manifest snapshot
+// resolved on THIS host (compute.run `./script.R` → an absolute path), keep BOTH the authored manifest snapshot
 // (portable intent) and the resolved execution facts (what actually ran) — see run-store's path resolution.
 
 /** A stable digest over any JSON value (canonical key order). */
@@ -198,7 +198,7 @@ export interface EnvAttestationSummary {
 export interface RunReplaySpec {
   schema: typeof RUN_REPLAY_SPEC_SCHEMA;
   runId: string;
-  kind: "query" | "operation" | "process.compute";
+  kind: "query" | "operation" | "compute.run";
   /** the AUTHORED manifest (portable replay intent) + its digest; snapshot is the manifest JSON as written. */
   manifest?: { digest: string; snapshot: unknown; path?: string };
   operationId?: string;
@@ -218,8 +218,8 @@ export interface RunReplaySpec {
    *  Names are pinned by digest so the ad-hoc query boundary is reproduced without serializing the declaration. */
   protectedSessionVariablesDigest?: string;
   duckdbConfigDigest?: string;
-  /** the RESOLVED process execution facts (what actually ran on this host). */
-  process?: { resourceId?: string; table?: string; command?: readonly string[]; inputSql?: string; resultTable?: "arrow" | "artifacts"; outputs?: Array<{ name: string; path: string; kind?: string }> };
+  /** the RESOLVED compute execution facts (what actually ran on this host). */
+  compute?: { resourceId?: string; table?: string; command?: readonly string[]; inputSql?: string; resultTable?: "arrow" | "artifacts"; outputs?: Array<{ name: string; path: string; kind?: string }> };
   /** env SUMMARY (status + digests); the full attestation is in receipts.json. Enriched AFTER the run resolves. */
   environment?: EnvAttestationSummary;
   /** stable digests of the receipts this run produced — reproduce()'s pin on the exact provenance it should match. */

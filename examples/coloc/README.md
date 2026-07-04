@@ -19,7 +19,7 @@ eqtl_locus ┘        (DATA pillar)   (COMPUTE pillar)
    (keeps same-orientation, **flips** the eQTL beta when alleles are swapped, **drops** allele mismatches), and
    sets `varbeta = se²`. Pure SQL. (`rs9` is swapped → its beta flips `-0.07 → +0.07`; `rs12` mismatches → dropped,
    leaving 11 of 12 SNPs.)
-3. **`coloc_result`** (`process.compute`, the **COMPUTE pillar**) — exports the harmonized bundle as Arrow IPC to
+3. **`coloc_result`** (`compute.run`, the **COMPUTE pillar**) — exports the harmonized bundle as Arrow IPC to
    an out-of-process R run of **`coloc.abf`** (Giambartolomei 2014 — per-SNP approximate Bayes factors + the
    H0–H4 posterior combination, a thing SQL is poor at) and reads the posteriors back as a table. Uses the real
    `coloc` package when present, else a faithful inline implementation of the same algorithm.
@@ -57,13 +57,13 @@ Run the test: `npm test` (gated on `Rscript` + the R `nanoarrow` package).
 ## How it thickens (and why it's the finish line)
 
 This skeleton is `coloc.abf` on **one locus across a few tissues** (no LD matrix needed). The substrate primitives it
-would lean on are already **built** as standalone examples/phases (the `process` artifact transport in
-[`process-artifacts/`](../process-artifacts/), Phase-4 fact recording, `runPipeline`); thickening coloc is what turns
+would lean on are already **built** as standalone examples/phases (the file artifact transport in
+[`compute-artifacts/`](../compute-artifacts/), Phase-4 fact recording, `runPipeline`); thickening coloc is what turns
 them into a real *in-flagship* consumer — it is **one flagship, not three remaining promises**:
 
 - **per-tissue fan-out** over real GTEx eQTL tissues = the partition+map DAG (`runPipeline`);
-- **PLINK2 reference LD** + **SuSiE/HyPrColoc** = richer COMPUTE process ops (these need LD);
-- a multi-output, long-running coloc run = the first real consumer of the **`process` artifact transport**
+- **PLINK2 reference LD** + **SuSiE/HyPrColoc** = richer compute ops (these need LD);
+- a multi-output, long-running coloc run = the first real consumer of the **file artifact transport**
   (file outputs → CAS).
 
 Recording each locus's posteriors as **time-versioned, provenance-bearing KG facts** (Phase-4 `record`) is now

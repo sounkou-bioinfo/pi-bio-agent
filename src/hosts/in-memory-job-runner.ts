@@ -26,7 +26,7 @@ export function inMemoryJobRunner(deps: InMemoryJobRunnerDeps): InMemoryJobRunne
   const jobs = new Map<string, Entry>();
 
   return {
-    async submit(spec: JobSubmitSpec): Promise<void> {
+    async submit(spec: JobSubmitSpec): Promise<string> {
       assertJobReplay(spec.runId, spec.replay); // fail closed at the runner boundary too
       if (jobs.has(spec.runId)) throw new Error(`in-memory job runner: job '${spec.runId}' already submitted`);
       // install a DEFERRED done before starting work, so settle() can never observe a placeholder promise
@@ -50,6 +50,7 @@ export function inMemoryJobRunner(deps: InMemoryJobRunnerDeps): InMemoryJobRunne
           resolveDone();
         }
       })();
+      return spec.runId;
     },
     async status(runId: string): Promise<JobStatus | null> {
       return jobs.get(runId)?.status ?? null;

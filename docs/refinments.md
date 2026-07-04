@@ -259,7 +259,7 @@ Honest boundary: claiming the substrate covers all of ClawBio is too strong. Wor
 looked outside the substrate:
 
 - **stateful-async services** (submit -> poll -> fetch): a sequence of HTTP calls with a `job_id` threaded
-  through + a poll-until-ready loop. That is http-with-session + a poll primitive driven by a process op /
+  through + a poll-until-ready loop. That is http-with-session + a poll primitive driven by a compute op /
   conductor step: composition, not a new transport.
 - **GraphQL**: a `POST` with a JSON query body to one endpoint, JSON back -> table: a `method`+`body`
   generalization of the http resolver.
@@ -543,12 +543,12 @@ default): `autoinstall_known_extensions=false` + `autoload_known_extensions=fals
 `disabled_filesystems='HTTPFileSystem,S3FileSystem'` (+ `lock_configuration=true` to seal). Documenting the recipe
 is fine; building/defaulting it into the library is not: that would re-open a closed doctrine.
 
-**(1b) `process.compute.params.env` secrets boundary.** The replay manifest snapshot is persisted
+**(1b) `compute.run.params.env` secrets boundary.** The replay manifest snapshot is persisted
 verbatim (`run-store.ts` `manifest.snapshot: raw`), so a credential in `params.env` leaks in cleartext into
 replay.json / CAS: asymmetric with host `duckdbInitSql`, which is digested for exactly this reason. Fixed now at
 the boundary: documented that `params.env` is non-secret-only and host secret env comes through the host-injected
-ProcessRunner (never a manifest param). Open decision (reproducibility trade-off): whether to also
-redact `process.compute` env values in the persisted snapshot (keys kept for replay structure, values omitted): closes the leak with no leaky denylist, but loses faithful replay of legit non-secret env values. Parallels the
+ComputeRunner (never a manifest param). Open decision (reproducibility trade-off): whether to also
+redact `compute.run` env values in the persisted snapshot (keys kept for replay structure, values omitted): closes the leak with no leaky denylist, but loses faithful replay of legit non-secret env values. Parallels the
 initSql digest choice (reduced fidelity for secret-safety). Decide before building.
 
 **(2) Server-side atomic monotonic writes ([[reproducibility-and-longrunning-lane]] residue #2).** The earlier
@@ -631,7 +631,7 @@ R/shell) need to run external code. Design grounded in two prior-art projects (`
 - **CLI composition layer (`BLIT`, [WangLabCSU/blit](https://github.com/WangLabCSU/blit)):** command-line
   tools as composable objects, not strings: `exec()` -> a structured object; pipe translation (`|>` -> `|`);
   `cmd_run`/`cmd_parallel`; lifecycle hooks (`on_start`/`on_exit`/`on_succeed`/`on_fail`) -> adopt as receipt
-  events + fault-tolerant branching; micromamba/Conda env management -> a process op should declare + pin its
+  events + fault-tolerant branching; micromamba/Conda env management -> a compute op should declare + pin its
   env (tool versions) in the receipt for reproducibility; auto native-data->CLI-input (df->tsv->temp->cleanup)
   for tools that don't speak Arrow (our `http.get` temp-materialize already has this shape). So: nf-r-ipc =
   Arrow/nanoarrow transport + typed contract; BLIT = CLI composition + env pinning + lifecycle; mangoro =
@@ -646,7 +646,7 @@ a provenance-bearing `DatasetLD` object, `AncestryWeightsProvider`, `ColocEngine
 DuckDB/PlinkingDuck/coloc/HyPrColoc/ColocBoost as adapters: i.e. our resolver/port + receipt model in R/S7. The
 agent solves coloc as a manifest: data pillar = tabix region-extract per GTEx tissue + SQL harmonization
 (SumstatProvider) + LD from PLINK2 reference via PlinkingDuck (LDProvider); compute pillar = ColocEngine /
-fine-mapping as Arrow-IPC process ops; composition = a DAG with per-tissue partition+map. Receipts at every step
+fine-mapping as Arrow-IPC compute ops; composition = a DAG with per-tissue partition+map. Receipts at every step
 (allele basis, harmonization, LD provenance, coloc posteriors). This is the "fruitfulness in speculative new
 areas" demonstration: the bet generalizing from ClawBio lookups to real statistical-genetics research.
 
@@ -820,34 +820,57 @@ Open library questions to resolve before claiming that position:
   shapes: `withAuth` fallback when secrecy matters more than SQL-native execution; an isolated declared operation
   that sets a short-lived session variable and never exposes arbitrary SQL on that connection; or a
   ducknng/DuckDB-secret handle-to-header primitive we add upstream/backport so SQL never sees the raw token.
-- **Downstream VM boundary:** if an application needs stronger execution isolation than a process runner or
+- **Downstream VM boundary:** if an application needs stronger execution isolation than local child-process compute or a
   bubblewrap-style wrapper, use a downstream microVM host such as
   [Gondolin](https://github.com/earendil-works/gondolin), not a new core sandbox model. Gondolin's useful pattern
   is VM execution with host-mediated HTTP/TLS, filesystem policy, and placeholder secret substitution scoped by
   host allowlists. In this library, that remains a host composition: run Pi/workers/tools in the VM, inject only the
   authorized ports, and keep the core contract at manifests, SQL, receipts, CAS, jobs, and ledger facts.
-- **Generic long-running job/service lane:** this is bigger than `process.compute`. Agents, external compute,
-  stateful kernels, queue workers, remote API jobs, and interactive services all need one durable lifecycle:
-  submit/claim/heartbeat/wait/event/complete/cancel/status/collect, with replay and result handles recorded in the
-  ledger. The first concrete library piece now exists: `hosts/job-queue.ts` provides a `SqlConn`-backed operational
-  queue with replay enqueue, atomic claim, lease heartbeat, waiting/park, and terminal finish. The observation
-  ledger remains the status/result audit truth; the queue is a mutable coordination index. Absurd is useful prior
-  art here because the implementation is DB-native, not README-only: tasks, runs, checkpoints, waits, events, and
-  idempotency keys are tables; `claim_task` uses leased `FOR UPDATE SKIP LOCKED` claims; `extend_claim` is
-  heartbeat; `await_event` parks a run as sleeping; `emit_event` is first-write-wins and wakes sleepers. A
-  queue-backed `JobRunner` now submits to that queue and reads status/result from the ledger, so hosts can use the
-  existing job-store path unchanged. Remaining library work is event keys, idempotency keys, checkpoint/result
-  handles, and push wakeups over ducknng/Quack/websocket/CLI; push is never the source of truth.
-- **Push is an accelerator, not the authority.** Over a ducknng server, workers can use raw NNG `push/pull` for
-  distribution and `pub/sub` or monitor/event streams for wakeups; status/result still land in
-  `job:<runId>:status` / `job:<runId>:result`. Over a DuckDB Quack server, the remote DB can be attached, queried,
-  and written with DuckDB secret-backed auth, projection/filter pushdown, and transaction forwarding, but there is
-  no visible push/notification surface in the local Quack tree. Treat Quack as an ergonomic server-backed `SqlConn`
-  and pair it with ducknng or polling for wakeups until Quack grows a real notification stream.
-- **NNG compute mode:** the pending mode is a dispatch implementation under that generic lifecycle, not a new
-  lifecycle: `nngProcessRunner` / `process.nng_compute` sends Arrow/file-artifact work to a remote or persistent
-  worker, shared run directory/CAS, same receipts, same `JobRunner` status/collect/cancel semantics. It should not
-  become a separate reproducibility model.
+- **Generic long-running job/service lane:** this is bigger than `compute.run`. Agents, external compute,
+  stateful kernels, queue workers, remote API jobs, and interactive services all need one async lifecycle:
+  submit/claim/heartbeat/wait/event/complete/cancel/status/collect. The primitive is `AsyncRunner`; `ComputeRunner`
+  is the compute specialization, and the durable replay queue is the run specialization. The first concrete
+  library piece now exists: `hosts/job-queue.ts` provides a `SqlConn`-backed operational queue with replay enqueue,
+  atomic claim, lease heartbeat, waiting/park, and terminal finish. The queue/claim tables are mutable
+  coordination. The observation ledger is the status/result audit truth. Receipts, replay specs, CAS
+  result/artifact digests, and run observations are the evidence that survives backend swaps.
+
+  Absurd is useful prior art here because the implementation is DB-native, not README-only: tasks, runs,
+  checkpoints, waits, events, and idempotency keys are tables; `claim_task` uses leased `FOR UPDATE SKIP LOCKED`
+  claims; `extend_claim` is heartbeat; `await_event` parks a run as sleeping; `emit_event` is first-write-wins and
+  wakes sleepers. That maps cleanly to our shape: task/run tables become an `AsyncRunner` backend; checkpoints and
+  intermediate results become CAS handles plus ledger observations; event waits are coordination facts; terminal
+  receipts and result digests remain the reproducibility authority. Remaining library work is event keys,
+  idempotency keys, checkpoint/result handles, and push wakeups over ducknng/Quack/websocket/CLI. Be precise about
+  push: a durable event log can be authoritative; a raw live transport frame is only a wakeup unless the backend
+  gives it durable/acknowledged stream semantics.
+
+  The important application primitive is the **step checkpoint**, not only the queue. A task can be decomposed into
+  ordered steps whose successful return values are retained; after a worker crash, lease expiry, or agent
+  compaction/resume, the next attempt should read completed step checkpoints and continue from the first missing
+  step. This applies equally to Nextflow-shaped compute stages, long API jobs, and agent turns. The first local
+  dogfood is `test/absurd-queue-push-dogfood.test.ts`: attempt 1 records an `extract` step, its lease expires,
+  attempt 2 reclaims the job, reuses that checkpoint without re-running it, records the `summarize` step, and
+  completes through the same ledger result/status slots.
+
+  Do not add an Absurd type system to core. The core should expose the narrow structural contracts an Absurd-like
+  backend needs to satisfy: replay spec in, async handle out, status/progress observations, checkpoint/event ids,
+  CAS result/artifact handles, and terminal receipts. A ducknng-backed Absurd adapter can be a host package or
+  example when real applications need it; if two implementations converge on the same checkpoint/event schema,
+  then promote that schema into core.
+- **Push wakeups are transport facts unless made durable.** Over a ducknng server, workers can use raw NNG
+  `push/pull` for distribution and `pub/sub` or monitor/event streams for wakeups, but this backend still checks
+  durable state before acting: queue rows are claimed, wakeup events/checkpoints are observations, and status/result
+  land in `job:<runId>:status` / `job:<runId>:result`. `test/absurd-queue-push-dogfood.test.ts` demonstrates the
+  narrow rule: a ducknng push frame references a recorded wakeup event and accelerates a worker, while an unrecorded
+  frame does not create queue work. Over a DuckDB Quack server, the remote DB can be attached, queried, and written
+  with DuckDB secret-backed auth, projection/filter pushdown, and transaction forwarding, but there is no visible
+  push/notification surface in the local Quack tree. Treat Quack as an ergonomic server-backed `SqlConn` and pair it
+  with ducknng or polling for wakeups until Quack grows a real notification stream.
+- **NNG compute mode:** the pending mode is a `ComputeRunner` implementation under that generic lifecycle, not a
+  new lifecycle: `nngComputeRunner` sends Arrow/file-artifact work to a remote or persistent worker, shared run
+  directory/CAS, same receipts, same status/collect/cancel semantics. It should not become a separate
+  reproducibility model.
 - **Stateful kernels:** persistent Python/R/Julia sessions are useful for iteration, but they need explicit session
   handles, environment attestation, variable/artifact capture, and replay boundaries. A stateful REPL is a host
   service over the compute ports, not a reason to let ambient interpreter state leak into runs.

@@ -1,6 +1,7 @@
 import type { RunReplaySpec } from "./reproducibility.js";
 import type { BioRunStatus } from "./run-spec.js";
 import type { JsonValue } from "./json.js";
+import type { AsyncRunner } from "./ports.js";
 
 // L1 — the async/long-running lane. Bio work is minutes-to-hours (a whole-VCF annotation, an alignment, a
 // cohort regression), so a run must be able to OUTLIVE the call that started it. A job is a run made DURABLE and
@@ -8,10 +9,10 @@ import type { JsonValue } from "./json.js";
 // run it out-of-band AND it stays reproducible. Job status is the SAME temporal substrate as Phase 4: a
 // `job:<runId>:status` observation slot, so "what was this job's status as of t" is an as-of query, not bespoke.
 //
-// This is the PORT (the seam a host implements); the interface is the contract. The in-memory fake is the second
-// impl from day one (the doctrine: accept interfaces, and a port earns itself only with a real second impl — the
-// fake is the mocking case). A real host can back it with the durable queue/lease primitives in hosts/job-queue.ts,
-// a worker pool, or a ducknng topology; the port does not care which transport accepted the replay.
+// This is the RUN-SPECIALIZED view of the same AsyncRunner primitive used by ComputeRunner. It exists because a
+// replayable bio run has run-specific validation and ledger slots, not because jobs have a separate lifecycle. A
+// real host can back it with hosts/job-queue.ts, an Absurd-style task/run/checkpoint table set, a worker pool, or a
+// ducknng topology; all of those are durable AsyncRunner backends, not new core abstractions.
 
 /** A run made durable+async. The replay spec is REQUIRED — a job you cannot reproduce is not a job (fail closed). */
 export interface JobSubmitSpec {
@@ -25,7 +26,7 @@ export interface JobSubmitSpec {
 export function assertJobReplay(runId: string, replay: RunReplaySpec | undefined): asserts replay is RunReplaySpec {
   if (!replay || typeof replay !== "object" || Array.isArray(replay)) throw new Error("job: a RunReplaySpec is required (fail closed)");
   if (replay.schema !== "pi-bio.run_replay_spec.v1") throw new Error("job: replay.schema must be 'pi-bio.run_replay_spec.v1'");
-  if (replay.kind !== "query" && replay.kind !== "operation" && replay.kind !== "process.compute") throw new Error(`job: replay.kind '${String(replay.kind)}' is invalid`);
+  if (replay.kind !== "query" && replay.kind !== "operation" && replay.kind !== "compute.run") throw new Error(`job: replay.kind '${String(replay.kind)}' is invalid`);
   if (replay.runId !== runId) throw new Error(`job: replay.runId '${replay.runId}' must match the job runId '${runId}'`);
   // "a job you cannot reproduce is not a job": reject a hollow {schema,kind,runId} that carries nothing to re-run.
   // An operation needs its operationId; a query needs its sql. (The manifest to run against is enforced at reproduce
@@ -61,12 +62,14 @@ export interface JobResult {
   error?: string;
 }
 
+export type JobHandle = string;
+
 /**
- * The executor port. `submit` starts a job (returns once it is accepted, NOT once it finishes); `status` and
- * `collect` poll. A terminal phase (succeeded/failed/cancelled) is stable — once reported it does not change.
+ * The run executor specialization. `submit` starts a job and returns its handle once accepted; `status` and
+ * `collect` use that same handle id. A terminal phase (succeeded/failed/cancelled) is stable.
  */
-export interface JobRunner {
-  submit(spec: JobSubmitSpec): Promise<void>;
+export interface JobRunner extends AsyncRunner<JobSubmitSpec, string, JobStatus, JobResult> {
+  submit(spec: JobSubmitSpec): Promise<JobHandle>;
   status(runId: string): Promise<JobStatus | null>;
   collect(runId: string): Promise<JobResult | null>;
   /** OPTIONAL best-effort cancellation (L3). A runner that can stop in-flight work implements it (the in-memory

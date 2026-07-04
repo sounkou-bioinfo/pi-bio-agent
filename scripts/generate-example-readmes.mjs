@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { runBioQueryFromManifest, runBioOperationFromManifest } from "../dist/hosts/run-store.js";
-import { nodeProcessRunner } from "../dist/process/node-process-runner.js";
+import { nodeComputeRunner } from "../dist/process/node-compute-runner.js";
 import { fsCasStore } from "../dist/hosts/fs-cas.js";
 
 // LITERATE PROGRAMMING (the R/knitr discipline), generalized: every runnable example README's recorded-run
@@ -34,7 +34,7 @@ async function runProbe(ex, probe) {
   const common = {
     cwd, dbPath: ":memory:", manifestPath: ex.manifest,
     runId: "g" + Math.random().toString(36).slice(2), now: "T1",
-    ...(ex.process ? { process: { runner: nodeProcessRunner() } } : {}),
+    ...(ex.compute ? { compute: { runner: nodeComputeRunner() } } : {}),
     ...(ex.cas ? { cas: fsCasStore(await fs.mkdtemp(join(tmpdir(), "ex-cas-"))) } : {}), // for examples that declare file outputs
     ...(ex.duckdbInitSql ? { duckdbInitSql: ex.duckdbInitSql } : {}),
   };
@@ -61,7 +61,7 @@ const EXAMPLES = [
     id: "coloc-run",
     dir: "examples/coloc",
     deps: "r-nanoarrow",
-    process: true,
+    compute: true,
     duckdbInitSql: NANOARROW_INIT,
     probes: {
       harm: { sql: "SELECT tissue, count(*) n FROM harmonized GROUP BY tissue" },
@@ -92,9 +92,9 @@ const EXAMPLES = [
   },
   {
     id: "lm-run",
-    dir: "examples/process-compute",
+    dir: "examples/compute-run",
     deps: "r-nanoarrow",
-    process: true,
+    compute: true,
     duckdbInitSql: NANOARROW_INIT,
     probes: { fit: { sql: "SELECT n, slope, intercept, r_squared FROM lm_fit" } },
     render({ fit }) {
@@ -115,9 +115,9 @@ const EXAMPLES = [
   },
   {
     id: "artifacts-run",
-    dir: "examples/process-artifacts",
+    dir: "examples/compute-artifacts",
     deps: "r-nanoarrow",
-    process: true,
+    compute: true,
     cas: true, // declares file outputs -> needs a CAS store
     duckdbInitSql: NANOARROW_INIT,
     probes: { summary: { sql: "SELECT n, mean_x, status FROM summary" } },
@@ -132,15 +132,15 @@ const EXAMPLES = [
           { key: "status", label: "status" },
         ]),
         "",
-        `The VALUE came back as a table (n=${Number(r.n)}); the declared FILE outputs (\`rows.csv\`, \`report.txt\`) were captured into CAS — verified content-addressed in \`test/process-artifacts-example.test.ts\`.`,
+        `The VALUE came back as a table (n=${Number(r.n)}); the declared FILE outputs (\`rows.csv\`, \`report.txt\`) were captured into CAS — verified content-addressed in \`test/compute-artifacts-example.test.ts\`.`,
       ].join("\n");
     },
   },
   {
     id: "files-only-run",
-    dir: "examples/process-files-only",
+    dir: "examples/compute-files-only",
     deps: "none", // a `sh` tool — no R, no nanoarrow (a files-only op loads no Arrow codec)
-    process: true,
+    compute: true,
     cas: true, // declares file outputs -> needs a CAS store
     probes: { tracks: { sql: "SELECT name, kind, size FROM tracks ORDER BY name" } },
     render({ tracks }) {
@@ -153,7 +153,7 @@ const EXAMPLES = [
           { key: "size", label: "size", right: true, fmt: (v) => String(Number(v)) },
         ]),
         "",
-        `The tool returned NO rectangular value — the table IS the captured-artifacts listing (${tracks.length} files, each a content-addressed CAS handle). Verified in \`test/process-files-only-example.test.ts\`.`,
+        `The tool returned NO rectangular value — the table IS the captured-artifacts listing (${tracks.length} files, each a content-addressed CAS handle). Verified in \`test/compute-files-only-example.test.ts\`.`,
       ].join("\n");
     },
   },
