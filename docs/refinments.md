@@ -625,10 +625,7 @@ R/shell) need to run external code. Design grounded in two local prior-art proje
   `value_id/parent_id/key/index/tag/v_*`, with distinct typed-NA tags + R-class normalization): the same
   flat-table-encodes-a-tree pattern as our SemanticSQL statements (a real convergence, not a new abstraction).
 - **Out-of-process is the robust choice (third confirming instance, `~/mangoro`):** R<->Go IPC over nanomsg
-  (mangos) + Arrow (nanoarrow), explicitly avoiding in-process FFI (cgo c-shared's multiple-runtime problems): the same call as avoiding DuckTinyCC. Two execution modes: spawn-per-call (simple, stateless) vs a persistent
-  worker messaged via nanomsg+Arrow (amortizes R/Python startup, stateful): the latter fits long-running or
-  per-tissue-repeated compute (e.g. coloc over GTEx tissues). Node-hosted: child_process + Arrow files/stdio,
-  or a held-open worker over a socket.
+  (mangos) + Arrow (nanoarrow), explicitly avoiding in-process FFI (cgo c-shared's multiple-runtime problems): the same call as avoiding DuckTinyCC. Spawn-per-call and a persistent worker are runner implementations under the same replay/receipt/job lifecycle, not separate semantics. A held-open worker messaged via nanomsg+Arrow amortizes R/Python startup and fits long-running or per-tissue-repeated compute (e.g. coloc over GTEx tissues). Node-hosted: child_process + Arrow files/stdio, or a held-open worker over a socket.
 - **CLI composition layer (`~/BLIT`, [WangLabCSU/blit](https://github.com/WangLabCSU/blit)):** command-line
   tools as composable objects, not strings: `exec()` -> a structured object; pipe translation (`|>` -> `|`);
   `cmd_run`/`cmd_parallel`; lifecycle hooks (`on_start`/`on_exit`/`on_succeed`/`on_fail`) -> adopt as receipt

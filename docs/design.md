@@ -24,7 +24,7 @@ operations, skills, and study notes compose those primitives for particular work
      `ncurl_table` (HTTP is a table function), `run_rpc` (a live shared mutable DB many processes write through),
      and NNG topologies (pub/sub, push/pull, survey, bus, pair). ducknng is the owned DuckDB extension that this
      repo uses to push the network/RPC/topology leg forward.
-   - **Compute (code execution)**: code SQL is poor at (an `lm()` fit, an R/Python/Go tool) runs **out-of-process over Arrow IPC** (`process.compute`); only the data contract is SQL/Arrow, the computation is a contained child.
+   - **Compute (code execution)**: code SQL is poor at (an `lm()` fit, an R/Python/Go tool) runs **out-of-process over Arrow IPC** (`process.compute`); only the data contract is SQL/Arrow, the computation is a contained child. The payload contract and lifecycle contract are layered: local immediate execution and durable async jobs share replay/receipt semantics.
    - **Knowledge + memory**: ontologies and our own KG share one shape (`bio_edges` + `entailed_edge` closure, from SemanticSQL); grounding is deterministic-SQL-first with fail-closed model fallback. **Memory is machine studying**: the agent studies a corpus before a task is known and retains expertise as *study notes* projected into the KG: data it queries, distinct from *skills* (activated behavior) and *facts* (measured, tool-derived).
 
 3. **The discipline that keeps the bet honest.** Interfaces are the contract for in-process code; DI injects host
@@ -284,6 +284,10 @@ Three things keep this consistent with the rest of the substrate:
   `duckdb.sql` only, `BioOperationTransport = "duckdb.sql"`), the argv-in-a-run-dir path for the six-hour batch /
   Nextflow-Snakemake case. The compute pillar's resolver path, table AND file artifacts, exists; the
   operation-transport wrapper does not.
+
+  This is a payload boundary, not a separate synchronous compute world. A host may run it immediately for a small
+  local call, or dispatch the same replayable work through `JobRunner` so status and result live in the ledger. New
+  compute transports should preserve that layering instead of creating different semantics for long-running work.
 
 **One general backend, not a backend zoo.** When the first executor is built, it is `process` (run an argv
 command in a run dir, capture stdout/stderr/exit, register declared outputs as artifacts). `Rscript`,

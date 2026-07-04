@@ -45,14 +45,14 @@ Instructions for coding agents working in this repository.
 - Downstream applications should run through the substrate: manifest or operation spec -> resolver/adapter -> DuckDB table -> recorded run -> observations/receipts.
 - If application code bypasses the runner, ledger, receipts, or CAS without a deliberate reason, call that out as integration debt.
 
-## Pillars And Compute Modes
+## Pillars And Compute Lifecycle
 
 - The current pillars are data, network, compute, and knowledge/memory over DuckDB-centered provenance.
 - Data: files, formats, table functions, and SQL materialization.
 - Network: `ducknng_ncurl_table` and related primitives from the owned `ducknng` extension when available; `http.get` is the host-injected fallback.
-- Compute today: `process.compute` is a one-shot out-of-process Arrow IPC resolver, enabled only when the host injects a `ProcessRunner`.
-- Long-running work today: `JobRunner`/ledger status records model durable job lifecycle; concrete dispatch is host-owned.
-- Gap to be explicit about: NNG can become a compute mode for stateful, non-DuckDB REPL-style workers and interactive services. Do not pretend that is already a general operation transport; define it only when a real consumer exercises it.
+- Compute has two layers, not two separate worlds: `process.compute` describes the payload boundary for out-of-process work (Arrow/table input, file artifacts, env attestation), while `JobRunner` describes the durable async lifecycle (submit/status/collect/cancel through the ledger).
+- All execution paths should be designed so they can be lifted into the durable async job shape from the beginning. A local immediate run is just the simplest host policy, not a different semantics.
+- Gap to be explicit about: NNG can become a stateful compute/REPL lifecycle for non-DuckDB workers and interactive services. Do not pretend that is already a general operation transport; define it only when a real consumer exercises it.
 
 ## Checks
 
