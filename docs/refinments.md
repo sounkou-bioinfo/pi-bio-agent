@@ -5,40 +5,43 @@ description: "Open design issues and cleanup targets still to sharpen before abs
 tags: [refinements, open-issues, worklog]
 ---
 
-# Refinments
+# Refinements
 
 Open design issues and cleanup targets. Keep this file focused on what still needs sharpening before the abstractions harden.
 
-## Generic clinical-genomics application: does the library need anything new? (2026-07-03, re-examined)
+## Generic clinical-genomics application: does the library need anything new?
 
-First pass named three "immanent library builds" for a downstream clinical-genomics application
-([`clinical-genomics-application.md`](./clinical-genomics-application.md)). Applying our own anti-idealist rule
-([`design.md`](./design.md#core-boundary)) honestly, **none is a necessary library primitive** — each is a
-manifestation/composition of primitives we already ship. The stronger, correct finding: the application is a
-**manifest pack + producers + an agent over the EXISTING library**, needing ~zero new library code. That validates
-the bet harder than a "build" would. Add a thin convenience only when ≥2 real uses demand it, never before.
+First pass named three possible library builds for a downstream clinical-genomics application
+([`clinical-genomics-application.md`](./clinical-genomics-application.md)). Re-examined against the core-boundary
+rule ([`design.md`](./design.md#core-boundary)), none currently requires a core primitive. The application should
+remain application code over the library: manifests, producers, fixtures, rules, host policy, and an agent. Add a
+core convenience only when repeated application implementations expose a shared primitive.
 
-1. **Grounding "harness with modes" — NOT a build.** `decideGrounding` (`src/core/judgment.ts`) ALREADY is the
+1. **Grounding harness with modes.** `decideGrounding` (`src/core/judgment.ts`) covers the
    candidates→model mode (deterministic match → abstaining model, no invented CURIE, recorded + gated). The others
    are endpoints: deterministic-only = the SQL grounding; model-only = the judge port; model→tools→model = the
    agent's own tool loop. A "4-mode harness" is a mode selector over `decideGrounding` + the agent — config and a
-   manifest, not a primitive. (If, after ≥2 real HPO/gene uses, hand-rolling the resolve→adjudicate pattern proves
-   repetitive, a thin `bio_ground` tool is justified THEN.)
-2. **External graph → `bio_edges` — NOT a build. PROVEN to be pure SQL** (`scripts/foreign-graph-closure.mjs`):
-   `ATTACH` read-only + a `subject/predicate/object → from_id/predicate/to_id` SELECT + the EXISTING
+   manifest, not a primitive. (If, after at least two real HPO/gene uses, hand-rolling the resolve→adjudicate
+   pattern proves repetitive, a thin `bio_ground` tool is justified.)
+2. **External graph → `bio_edges`.** `scripts/foreign-graph-closure.mjs` shows the current mechanism:
+   `ATTACH` read-only + a `subject/predicate/object → from_id/predicate/to_id` SELECT + the existing
    `materializeEntailedEdges` (which already takes any source table). The script's closure derives the 2-hop
    subsumption and the gene→has_phenotype→ancestor walk; the real remote `monarch-kg.duckdb` ATTACHes over httpfs
-   and is biolink-shaped. It is a manifest, zero new library code. Only the hedge remains open: full-KG closure
+   and is biolink-shaped. It is application SQL over existing primitives. The open question is full-KG closure
    *performance* at scale (the proof is a locus extract, as intended).
-3. **Ledger → training dataset — NOT a build.** A `SELECT`/view over `bio_observations` joined to the Phase-4
+3. **Ledger → training dataset.** A `SELECT`/view over `bio_observations` joined to the Phase-4
    approval slots (contested = a `WHERE` over decisions), producing a stable dataset schema. A documented query, not
    a new pipeline. The data plane a differentiated-intelligence fine-tune consumes; we own it, not the training loop.
 
 Also app/host, not library: unique-key dedup (a SQL `DISTINCT` idiom); scoring weights + ACMG points + calibration
 (authored rules, app producers with tests); PII de-id + license gating (host port decorators — the one small
 library-adjacent item is letting the resolver receipt carry `license` + de-id status alongside `source`/`version`,
-so the host can gate on provenance). Net: the library's clinical-genomics application to-do is essentially empty; the
-work is app-side.
+so the host can gate on provenance). Net: the clinical-genomics work should happen outside core, in the
+application.
+
+Dogfood requirement: BioConnect-style application code that fetches, normalizes, or scores around the substrate is
+technical debt unless it is proving a missing primitive. The expected route is application manifest or operation
+spec -> resolver or adapter -> DuckDB table -> recorded run.
 
 ## Naming and layering
 
@@ -54,7 +57,7 @@ work is app-side.
 
 - Keep core importable as a TypeScript library; all host surfaces call into it.
 - Pi coding-agent extension remains the first host adapter and proof target.
-- Add a small CLI with `--json` output for validation, indexing, and operation-pack tests.
+- Add a small CLI with `--json` output for validation, indexing, and application-operation tests.
 - Add JSON-RPC over stdio after CLI commands stabilize; avoid a long-running daemon until there is a real need.
 - Decide whether the MCP surface is generated from the manifest's operations or hand-curated.
 - Define one command/RPC schema naming convention and use it consistently across Pi, CLI, JSON-RPC, and future MCP.
@@ -66,7 +69,7 @@ work is app-side.
 
 - Move current extension helper logic into reusable library functions so CLI/JSON-RPC can call the same code.
 - Add Pi tools for spec validation, not just listing.
-- Add operation-pack discovery and `operation.describe` before execution.
+- Add operation discovery and `operation.describe` before execution.
 - Add operation dry-run output: request shape, cache key, network policy, provenance plan, and expected resource handles.
 - Add study-note indexing/search tests and decide whether notes are JSON, OKF markdown, or both during the transition.
 - Add a tool/command naming convention that can map cleanly to CLI and JSON-RPC names.
@@ -116,10 +119,10 @@ work is app-side.
 - Keep it process-per-session and local-first.
 - Add protocol tests with request/response fixtures.
 
-### Stage 6: operation packs
+### Stage 6: application-owned operations
 
-- Implement OpenTargets as the first declarative operation pack with mock-network tests.
-- Add Monarch/HPO and Ensembl/VEP only after the operation-pack shape proves stable.
+- Implement OpenTargets as the first declarative application-owned operation with mock-network tests.
+- Add Monarch/HPO and Ensembl/VEP only after the operation-spec shape proves stable.
 - Generate typed clients or a restricted code-runtime facade from operation specs.
 
 ### Stage 7: code runtime
@@ -150,12 +153,12 @@ each lands only when a concrete consumer forces it, never ahead.
 - **Format/repository split → our resolver already collapses the combinatorics.** `targets` split `format`
   (serialization) from `repository` (location) to avoid the format×provider explosion. `duckdb.sql_materialize`
   is the same move taken further: one resolver, declared SQL, any reader/source. No resolver-per-format zoo.
-- **Resolution memoization: BUILT** (`src/duckdb/resolution-memo.ts`): the lazy graph's memo table, keyed on
+- **Resolution memoization: built** (`src/duckdb/resolution-memo.ts`): the lazy graph's memo table, keyed on
   content FRESHNESS (`file_scan` content digest; `http.get` ETag/Last-Modified via conditional `If-None-Match` →
   `304`). `sql_materialize` deliberately opts out (arbitrary SQL has undeclared/volatile determinants). The
   remaining layer is CAS-of-bytes (cross-db reuse): see the section above. CAS = store by content hash,
   versioned; use it for collaboration / reproducibility / rollback / audit; skip it for large churny outputs.
-- **Remote freshness via ETag/Last-Modified: DONE in `http.get`** (the `FetchLike` port now exposes response
+- **Remote freshness via ETag/Last-Modified: done in `http.get`** (the `FetchLike` port now exposes response
   headers; a stored validator drives a conditional request and a `304` replays the cached receipt).
 - **An audit pass re-validates external state**: a separate run comparing stored vs current validators (ETags)
   to catch data that changed outside the pipeline. Relevant once remote resources + caching exist.
@@ -168,41 +171,41 @@ each lands only when a concrete consumer forces it, never ahead.
   |> collect()`: i.e. resolver(s) → operation SQL. A process-op producing Parquet artifacts that `file_scan`/
   `sql_materialize` then aggregate is exactly this; no bespoke combine step.
 
-## CAS-of-bytes: BUILT (slices 1-2), and its honest scope
+## CAS-of-bytes: built scope
 
 Distinct from the resolution memo (which caches a materialized TABLE within one persistent db): CAS dedups the
-raw BYTES across dbs/projects, keyed by content hash. BUILT:
+raw bytes across dbs/projects, keyed by content hash. Built:
 - `src/core/cas.ts` (`CasStore`: pathFor/has/put + a cross-db url->{etag,address} index) + `src/hosts/fs-cas.ts`
   (filesystem, `<root>/<algo>/<digest>`, atomic).
 - Host opt-in by composition (`cas` threads RunRequest -> runQuery/runOperation -> `ResolutionContext.cas`),
   default absent = fast mode.
 - `http.get` CAS mode: a 200 snapshots the body under its sha256 + seeds the (scope,url)->ETag index; a DIFFERENT
-  db with an empty per-db memo but the SAME host-provided `remoteCacheScope` sends If-None-Match from that index
-  and on 304 materializes from CAS bytes with NO re-download (test: body downloads exactly once across two dbs).
+  db with an empty per-db memo but the same host-provided `remoteCacheScope` sends If-None-Match from that index
+  and on 304 materializes from CAS bytes with no re-download (test: body downloads exactly once across two dbs).
   The scope is FAIL-CLOSED: the cross-db index is skipped entirely without a scope, and is keyed per-scope so an
   authenticated response (host auth injected by a fetch policy is invisible to the resolver's memo decision) can
   never leak one caller's bytes to another. Public content uses one constant scope for full reuse.
 
-### Honest scope: CAS is for WHOLE objects, not a universal remote cache (pal #7)
+### Honest scope: CAS is for whole objects, not a universal remote cache
 CAS-of-whole-bytes is right for a REST/JSON API body or a moderate dump fetched by `http.get` itself. It is the
-WRONG granularity for two cases, which are separate tiers chosen by which resolver the manifest declares:
+wrong granularity for two cases, which are separate tiers chosen by which resolver the manifest declares:
 
-- **Small-region joins over a huge indexed remote VCF (gnomAD):** use HTTP RANGE + tabix via htslib, not whole-
-  object CAS. **BUILT**: region-scoped `duckhts.read_bcf` (`src/duckdb/resolvers/duckhts-read-bcf.ts`) takes a
+- **Small-region joins over a huge indexed remote VCF (gnomAD):** use HTTP range + tabix via htslib, not whole-
+  object CAS. Built: region-scoped `duckhts.read_bcf` (`src/duckdb/resolvers/duckhts-read-bcf.ts`) takes a
   `region` (an htslib `chrom:start-end` string OR `{chrom,start,end}`) and emits `read_bcf(?, region := ?,
   tidy_format := true)`, reading only that region's blocks; the live WGS chr22 flagship uses it
   (`examples/wgs-chr22-annotation`, `test/duckhts-region.test.ts`). Remaining (spec):
   - a MULTI-region `regions: [{chrom,start,end}]` array and an explicit `index?` param (today: single `region`,
     index discovered by convention); resolver canonicalizes to htslib region strings and reads only those blocks.
   - Provenance: record the VCF URI + the INDEX (.tbi/.csi) URI + index/file ETag + the canonical region list;
-    do NOT record a whole-file sha256 that was never downloaded. CAS may cache the small INDEX bytes (reused,
+    do not record a whole-file sha256 that was never downloaded. CAS may cache the small index bytes (reused,
     tiny) and/or the derived region table: never the whole VCF.
   - Traps: htslib regions are 1-based closed vs BED 0-based half-open; validate VCF+index as a pair (ETag skew);
     split multiallelics + left-normalize REF/ALT + match contig naming/assembly before exact joins; prefer CSI
     for large contigs.
 - **Remote columnar/large files DuckDB reads directly (parquet/csv on http/s3):** lean on DuckDB httpfs +
-  `cache_httpfs` block caching, NOT our CAS: those bytes never flow through our resolver (pal #8 confirmed).
-  `cache_httpfs` is a mutable/evictable PERFORMANCE cache, NOT a receipted artifact: do not conflate it with
+  `cache_httpfs` block caching, not our CAS: those bytes never flow through our resolver.
+  `cache_httpfs` is a mutable/evictable performance cache, not a receipted artifact: do not conflate it with
   provenance. Enable recipe (a host bootstraps the connection BEFORE resolving):
   ```sql
   INSTALL httpfs; LOAD httpfs;
@@ -212,11 +215,11 @@ WRONG granularity for two cases, which are separate tiers chosen by which resolv
   ```
   Then `read_parquet('https://…')` etc. used by `duckdb.file_scan`/`duckdb.sql_materialize` benefit
   transparently. `cache_httpfs` is now in the extension catalog (`src/duckdb/extensions.ts`).
-  - **BUILT (was pal #8):** the host runner (`src/hosts/run-store.ts`) has a `duckdbInitSql?: string[]` option on
+  - **Built:** the host runner (`src/hosts/run-store.ts`) has a `duckdbInitSql?: string[]` option on
     both request types, run statement-by-statement once per connection BEFORE resolution (`test/run-store-init-sql.test.ts`), so a host can `INSTALL`/`LOAD`/`SET` (httpfs + cache_httpfs, ducknng, secrets) without `sql_materialize`
     needing to. (The non-transactional caveat below still applies: keep DDL/DML out of init.)
   - Provenance note: for DuckDB-internal remote reads the receipt records the URI + SQL/params + resolver +
-    time, but NO byte digest (we never saw the bytes). That is correct for fast/lazy/range mode. Byte-perfect
+    time, but no byte digest (we never saw the bytes). That is correct for fast/lazy/range mode. Byte-perfect
     replay would require snapshot mode (download whole object into CAS first), which forfeits lazy/range reads: a bad trade for large parquet/HTS; offer it only when regulatory provenance demands it.
 
 ### Decision rule for a manifest author
@@ -226,21 +229,20 @@ WRONG granularity for two cases, which are separate tiers chosen by which resolv
 
 ## What the substrate closes over: Fugu, RLM, networked agents reduce to one property
 
-Three frontier ideas, one foundation. The load-bearing realization: each reduces to **data living addressably
-OUTSIDE the prompt (DuckDB tables + CAS + receipts), navigated by BOUNDED queries + content-addressed shared
-memory.** That single property, our bet, is what closes over all three, which is why the *baseline* (the large
-executable middle of ClawBio as manifests) and the *speculative upside* share one substrate rather than being
-separate efforts.
+Three frontier ideas, one foundation. The load-bearing realization: each depends on **data living addressably
+outside the prompt (DuckDB tables + CAS + receipts), navigated by bounded queries + content-addressed shared
+memory.** That property is why the baseline (the executable middle of ClawBio as manifests) and the speculative
+upside share one substrate rather than becoming separate efforts.
 
 - **[RLM: Recursive Language Models](https://alexzhang13.github.io/blog/2025/rlm/)** (Zhang & Khattab, MIT
   CSAIL; [arXiv 2512.24601](https://arxiv.org/abs/2512.24601)): store the unbounded context as a *variable in a
   Python REPL*; the LM peeks/greps/partitions/maps/summarizes it and launches recursive LM sub-calls: dodging
-  "context rot" because no call holds the whole context. **We close over it: `bio_query` over DuckDB is the same
-  loop with context as TABLES, not a string var.** peek=`LIMIT`/schema discovery; grep=`WHERE LIKE`/`regexp`/
+  context degradation because no call holds the whole context. **`bio_query` over DuckDB is the same loop with
+  context as tables, not a string variable.** peek=`LIMIT`/schema discovery; grep=`WHERE LIKE`/`regexp`/
   FTS; partition+map=`GROUP BY` + per-partition sub-operations; summarize=SQL aggregates; the agent only ever
-  sees BOUNDED results. Sharper: the REDUCE half of RLM's OOLONG benchmark ("among these user IDs, how many label
+  sees bounded results. Sharper: the reduce half of RLM's OOLONG benchmark ("among these user IDs, how many label
   X over 6000 rows") is a `GROUP BY` *once the labels exist*: RLM recurses and can miscount at long context, and
-  the count is exact for us. But the MAP half (labeling each row) is NOT solved by SQL: it stays the judgment/LM
+  the count is exact for us. But the map half (labeling each row) is not solved by SQL: it stays the judgment/LM
   boundary (`decideGrounding`/sub-agent); the `GROUP BY` is only the deterministic reduce after labels exist.
   Recursion depth = nested sub-operations.
 - **[Sakana Fugu](https://sakana.ai/fugu)**: its "shared memory so agents don't re-discover artifacts" = our
@@ -248,38 +250,38 @@ separate efforts.
 - **Networked agents**: stigmergy via a shared CAS root. Agents communicate by content-addressed receipted
   artifacts, not live chat.
 
-Narrative: BASELINE = the SQL-REPL-over-addressable-data substrate + a process runtime reproduce the large
-executable MIDDLE of ClawBio as manifests. SPECULATIVE upside = the same substrate closing over Fugu/RLM/
-networked agents.
+Narrative: the SQL-REPL-over-addressable-data substrate plus a process runtime covers the executable middle of
+ClawBio as manifests. The same substrate can later support Fugu/RLM/networked-agent patterns.
 
-Honest boundary (pal #9, corrected: most of pal's "fits neither" classes COLLAPSE; pushed back): "all of
-ClawBio for free" is too strong, but the gap is much smaller than pal claimed. Working through pal's classes:
+Honest boundary: claiming the substrate covers all of ClawBio is too strong. Working through the classes that
+looked outside the substrate:
 
 - **stateful-async services** (submit -> poll -> fetch): a sequence of HTTP calls with a `job_id` threaded
   through + a poll-until-ready loop. That is http-with-session + a poll primitive driven by a process op /
-  conductor step: COMPOSITION, not a new transport. Collapses.
+  conductor step: composition, not a new transport.
 - **GraphQL**: a `POST` with a JSON query body to one endpoint, JSON back -> table: a `method`+`body`
-  generalization of the http resolver. Collapses.
-- **auth**: a host-INJECTED header (Bearer/API key); the resolver already takes `headers`, secrets stay out of
-  the manifest like `fetch` does. Collapses, and matches the doctrine.
+  generalization of the http resolver.
+- **auth**: a host-injected header (Bearer/API key); the resolver already takes `headers`, secrets stay out of
+  the manifest like `fetch` does.
 - **pagination**: follow `next` cursors in a bounded loop, `UNION` each page into the table: a resolver loop /
-  conductor map. Collapses.
-- **human/clinical sign-off**: a host gate AROUND runs: out of executable scope by definition (the substrate
+  conductor map.
+- **human/clinical sign-off**: a host gate around runs: out of executable scope by definition (the substrate
   produces the auditable artifact a human approves), not a coverage gap.
 
-The ONLY genuinely irreducible thing is the LM's own SEMANTIC JUDGMENT (literature interpretation, phenotype
-disambiguation, narrative synthesis), and that is not a gap, it is the judgment boundary we designed on purpose
-(two-tier grounding: deterministic SQL projection -> LM judgment). The substrate FEEDS it; the model does the
+The genuinely irreducible thing is the model's semantic judgment (literature interpretation, phenotype
+disambiguation, narrative synthesis), and that is not a gap; it is the judgment boundary designed on purpose
+(two-tier grounding: deterministic SQL projection -> LM judgment). The substrate feeds it; the model does the
 semantic step. So the corrected claim: substrate + process runtime + judgment boundary cover ClawBio's
-COMPUTATIONAL surface; what isn't "free" is (i) the model's semantic judgment (the designed seam) and (ii) human
-sign-off (host policy). The collapse is ARCHITECTURAL (no new substrate class), but it does require real
-http-resolver generalization (POST/body, host-injected auth, pagination-follow, poll) that does not exist yet: that is pal's one accurate point. See "HTTP resolver generalization" below.
+computational surface; what is not covered is (i) the model's semantic judgment and (ii) human sign-off (host
+policy). The architectural claim is no new substrate class, but it does require real http-resolver generalization
+(POST/body, host-injected auth, pagination-follow, poll) that does not exist yet. See "HTTP resolver
+generalization" below.
 
-Narrowed further (pal #10c, honest): "no new SUBSTRATE class for many request/response APIs" is the defensible
-claim; **production SEMANTICS are NOT free** and are real engineering, not architecture:
-- stateful-async needs DURABLE job ids + resume-after-crash + idempotency keys + cancellation + TTL/cleanup +
-  PARTIAL receipts (today a resolver that submits a remote job and crashes before returning loses the job id: `src/core/operations.ts` only records a receipt after `resolveResource` returns).
-- auth is more than a header: OAuth refresh needs a host-owned TOKEN LIFECYCLE + retry-on-401 (today `headers`
+Narrowed further: "no new substrate class for many request/response APIs" is the defensible
+claim; **production semantics are not free** and are real engineering, not architecture:
+- stateful-async needs durable job ids + resume-after-crash + idempotency keys + cancellation + TTL/cleanup +
+  partial receipts (today a resolver that submits a remote job and crashes before returning loses the job id: `src/core/operations.ts` only records a receipt after `resolveResource` returns).
+- auth is more than a header: OAuth refresh needs a host-owned token lifecycle + retry-on-401 (today `headers`
   come from manifest params, not a host `authHeaders` capability).
 - rate limits: `429`/`Retry-After`/quota budgets/host throttling: unaddressed.
 - streaming/binary/SSE/websockets: today `FetchResponse` is `text()`-only, JSON/CSV/NDJSON: full-body only.
@@ -295,19 +297,20 @@ Resolutions (these are ADDRESSABLE via known machinery, not open research):
 - **streaming / binary / SSE / websockets** -> **pi-mono has reusable patterns** for these transports; widen
   `FetchResponse` beyond `text()` to a byte stream and adopt them.
 - **the HTTP carrier itself** -> **`ducknng_ncurl`** (ducknng ships an HTTP/curl client + `ducknng_ncurl_table`):
-  the http-resolver generalization (POST/body/auth/streaming) AND the nng agent topologies live in ONE DuckDB
+  the http-resolver generalization (POST/body/auth/streaming) and the nng agent topologies live in one DuckDB
   extension, both Arrow-native. So the request/response generalization and the multi-agent transport converge.
 
 ### Streaming transports (decided: not either/or, three needs, three tools)
 - **Pull-streaming HTTP** (large bodies; byte-cap so a runaway response can't exhaust memory): read the runtime
-  `fetch` body (a `ReadableStream`) with a cap. BUILT + WIRED: `src/duckdb/resolvers/http-stream.ts` `readCapped(stream,
-  maxBytes)`, applied by the default networked adapter (`cappedFetchLike`): the byte-cap half of pal #4. DuckDB-native equivalent: `ducknng_ncurl`.
+  `fetch` body (a `ReadableStream`) with a cap. Built and wired: `src/duckdb/resolvers/http-stream.ts`
+  `readCapped(stream, maxBytes)`, applied by the default networked adapter (`cappedFetchLike`). DuckDB-native
+  equivalent: `ducknng_ncurl`.
 - **SSE** (server-sent events: LLM token streams, progress): parse `data:` frames off the same chunked stream.
   **pi-mono** ([github.com/badlogic/pi-mono](https://github.com/badlogic/pi-mono)) has these exact parsing
   patterns (it streams LLM output): adopt them for an SSE transport.
 - **Bidirectional / server-push / live subscriptions** -> **wss over nng** (ducknng's `ws://`/`wss://`
-  transport). THE tie-in: the pub/sub blackboard's `awaitNote` currently POLLS (SELECT loop); over wss-over-nng
-  it becomes a real PUSH subscription (no polling). ducknng unifies `ncurl` (HTTP) + ws/wss + the nng
+  transport). The tie-in: the pub/sub blackboard's `awaitNote` currently polls (SELECT loop); over wss-over-nng
+  it becomes a push subscription. ducknng unifies `ncurl` (HTTP) + ws/wss + the nng
   topologies, Arrow-native, so the streaming carriers and the agent transport are again one extension.
 
 ### HTTP resolver generalization (the real build the collapse needs)
@@ -325,15 +328,15 @@ Each is a bounded resolver generalization within the bet, not a new transport. B
 Three user questions converge on the same gap. The variant-annotation example hard-codes 5 rsIDs in the request
 body. Overfitting: a real skill doesn't bake the query data into the manifest. The two missing pieces:
 
-- **API DISCOVERY (don't hand-author the resource shape).** Many bio APIs (Ensembl, EBI, …) ship an OpenAPI/
-  Swagger spec. DERIVE http resources from it: the endpoint URL (server+path), method, parameters, request-body
-  schema, and RESPONSE schema all come from the spec, so the resource is GENERATED, not authored (matches
+- **API discovery (do not hand-author the resource shape).** Many bio APIs (Ensembl, EBI, …) ship an OpenAPI/
+  Swagger spec. Derive HTTP resources from it: the endpoint URL (server+path), method, parameters, request-body
+  schema, and response schema all come from the spec, so the resource is generated, not authored (matches
   "hand-writing manifests should be banned"), and the response shape the agent unnests is grounded in the spec,
   not guessed. `OPTIONS` is the *runtime* sibling of this (an endpoint's "what can I do here" probe), which is
-  why OPTIONS/HEAD aren't in the body->table resolver: they're DISCOVERY, a separate concern from data-fetch.
+  why OPTIONS/HEAD aren't in the body->table resolver: they're discovery, a separate concern from data-fetch.
   Build: `openApiToResources(spec)` -> http resource templates (url/method/body-schema/format); the agent picks
   an operation and fills its params.
-- **PARAMETERIZED RESOURCES: done the SQL way, not a DSL.** The query data comes from the agent / upstream, not
+- **Parameterized resources: done the SQL way, not a DSL.** The query data comes from the agent / upstream, not
   the manifest, and it is all SQL (no bespoke templating; the `fillTemplate`/`$sql` DSL was reverted):
   - **agent params = DuckDB SESSION VARIABLES.** `bindings` -> `SET VARIABLE name = ?` on the conn before
     resolution; a resource's `url` (when not a literal) is a SQL EXPRESSION evaluated against the conn:
@@ -344,32 +347,32 @@ body. Overfitting: a real skill doesn't bake the query data into the manifest. T
     `json_group_array((SELECT id FROM variants))`. The request is a function of upstream data, in SQL.
   - **Encoding: solved in pure SQL.** DuckDB has `url_encode` built in, so values compose safely:
     `'…?q=' || url_encode(getvariable('query'))` turns `lung cancer` into `lung%20cancer`. No UDF needed.
-  - **The fetch ITSELF is SQL via ducknng: PROVEN (corrected).** Earlier I wrongly said "ducknng isn't
+  - **The fetch itself is SQL via ducknng.** Earlier notes said "ducknng isn't
     installable here." It is: built for DuckDB v1.5.2 (community/local build); our node-api ships v1.5.4: a
     version LAG, not unavailability (node-api `1.5.2-r.2`/`1.5.3-r.3` exist). In a version-matched scratch env
-    (`@duckdb/node-api@1.5.2-r.2` + `LOAD '~/ducknng/build/release/ducknng.duckdb_extension'`), this ran live:
+    (`@duckdb/node-api@1.5.2-r.2` + `LOAD '~/ducknng/build/release/ducknng.duckdb_extension'`), this ran:
     `SELECT * FROM ducknng_ncurl_table('http://httpbin.org/' || url_encode(getvariable('path')), 'GET', NULL,
     NULL, 12000, 0::UBIGINT)`: fetched + parsed the JSON body into a table, URL composed in pure SQL. So with
     ducknng version-matched, HTTP needs NO `http.get` TS resolver at all: it's `ducknng_ncurl_table` (+ chunking
-    via SQL, retry via SQL/Retry-After). **HTTPS works too** (proven against the REAL OLS4 API): build a TLS
-    config from the system CA bundle as IN-MEMORY PEM and pass its id: `SET VARIABLE tls = ducknng_tls_config_from_pem('', '', getvariable('ca'), '', 1);
+    via SQL, retry via SQL/Retry-After). **HTTPS works too** (proven against the OLS4 API): build a TLS
+    config from the system CA bundle as in-memory PEM and pass its id: `SET VARIABLE tls = ducknng_tls_config_from_pem('', '', getvariable('ca'), '', 1);
      SELECT * FROM ducknng_ncurl_table('https://www.ebi.ac.uk/ols4/api/search?q=' || url_encode(getvariable('query')),
        'GET', NULL, NULL, 20000, getvariable('tls')::UBIGINT)` -> parsed the OLS4 response into a table
-    (`response`, `responseHeader`, `facet_counts`). So the WHOLE fetch is SQL: SET VARIABLE params + url_encode
+    (`response`, `responseHeader`, `facet_counts`). So the whole fetch is SQL: SET VARIABLE params + url_encode
     composition + a PEM TLS config + ncurl_table parse. The `http.get` TS resolver (global fetch) + the
-    http-policies (withRetry/withAuth) remain the FALLBACK when the DuckDB version doesn't match a ducknng build.
-    ADOPTED: pinned `@duckdb/node-api` to **1.5.2-r.2**: the prebuilt ducknng (community AND the local build) is
-    for v1.5.2, NOT 1.5.3 (the install error confirms it); on 1.5.2, `INSTALL ducknng FROM community` loads (6
+    http-policies (withRetry/withAuth) remain the fallback when the DuckDB version doesn't match a ducknng build.
+    Adopted: pinned `@duckdb/node-api` to **1.5.2-r.2**: the prebuilt ducknng (community and the local build) is
+    for v1.5.2, not 1.5.3 (the install error confirms it); on 1.5.2, `INSTALL ducknng FROM community` loads (6
     ncurl fns) AND duckhts still works (full suite green). When ducknng is released/backported for a newer DuckDB
     (or built from source: trivial), bump the pin. Next: migrate the `http.get` resource to a
     `duckdb.sql_materialize` over `ducknng_ncurl_table` so the fetch is SQL, with the TS resolver as fallback.
-- **BATCH HTTP = a chunked, rate-limited PIPELINE, not one request.** VEP caps the batch (~200-1000 ids) and
+- **Batch HTTP = a chunked, rate-limited pipeline, not one request.** VEP caps the batch (~200-1000 ids) and
   rate-limits (~15 req/s, `429`+`Retry-After`, hourly quota). Annotating a real VCF: chunk the variant list (SQL)
   into batches <= the limit, run them through `runPipeline` (the push/pull pool) with `withRetry` (429/backoff),
   `UNION` the results.
-- **SQL-native HTTP: BOTH examples migrated; the earlier "walls" were mostly wrong (corrected on ducknng
-  1.5.2).** `ols4-grounding` (GET, URL from a scalar `getvariable` + `url_encode`) AND `variant-annotation`
-  (POST batch) are now `duckdb.sql_materialize` over `ducknng_ncurl_table`: NO TS resolver. An earlier note here
+- **SQL-native HTTP: both examples migrated.** `ols4-grounding` (GET, URL from a scalar `getvariable` +
+  `url_encode`) and `variant-annotation`
+  (POST batch) are now `duckdb.sql_materialize` over `ducknng_ncurl_table`: no TS resolver. An earlier note here
   claimed the batch case "can't be pure SQL"; that was wrong. The corrections, precisely:
   - `ducknng_ncurl_table` arg order is `(url, method, headers_json[VARCHAR], body[BLOB], timeout_ms, tls)`: for
     a POST the body is the **4th** arg (a `BLOB`), headers the **3rd** (a JSON array `[{name,value}]`).
@@ -382,7 +385,7 @@ body. Overfitting: a real skill doesn't bake the query data into the manifest. T
     point conflated a substrate convenience with a ducknng limit). On the pinned 1.5.2 build a subquery placed
     *directly inside* the table-function args is still rejected ("Table function cannot contain subqueries"), so
     the aggregate goes through a variable first; a later build may let the scalar subquery sit inline.
-  - **NB: the table-function limits below are DuckDB-CORE, not ducknng's.** "Table function cannot contain
+  - **The table-function limits below are DuckDB-core, not ducknng-specific.** "Table function cannot contain
     subqueries" and "does not support lateral join column parameters" are how *every* DuckDB table function
     behaves (`read_csv`, `read_parquet`, … all reject subquery args and correlated lateral column inputs);
     `ducknng_ncurl_table` only **inherits** them. The single genuinely *ducknng-flavored* wrinkle is that its
@@ -391,78 +394,78 @@ body. Overfitting: a real skill doesn't bake the query data into the manifest. T
     a ducknng defect.
   - **The one real constraint is multi-*request* fanout**, not row count. Because of the DuckDB-core limits above,
     `ducknng_ncurl_table` can't be **lateral-correlated** for one-call-per-chunk inside a single `SELECT`, but
-    that does NOT mean per-chunk HTTP leaves SQL: the SCALAR `ducknng_ncurl_aio(...)` *does* fire one real request
+    that does not mean per-chunk HTTP leaves SQL: the scalar `ducknng_ncurl_aio(...)` *does* fire one real request
     per row with **error-as-value** `(ok, status, body_text)`, so the per-chunk fanout is SQL-native; only the
-    multi-ROUND retry orchestration is host code (`src/duckdb/ncurl-fanout.ts`), and only because a recursive CTE
-    constant-folds the IO (see the RETRY note below). For chunk fanout (a whole VCF > VEP's ~200–1000-id/request cap, ~15 req/s + `429`/`Retry-After`):
+    multi-round retry orchestration is host code (`src/duckdb/ncurl-fanout.ts`), and only because a recursive CTE
+    constant-folds the I/O (see the retry note below). For chunk fanout (a whole VCF > VEP's ~200–1000-id/request cap, ~15 req/s + `429`/`Retry-After`):
     launch per-row `ducknng_ncurl_aio(...)` handles (scalar, it *can* fire per chunk), materialize the aio ids, and **drain repeatedly**, `ducknng_ncurl_aio_collect(...)` is an *any-ready collector, not a wait-for-all
     barrier*, so getting 1 of 3 launched handles back is legal until you drain the rest (the earlier "returned
     one row, fragile" note misread this). Or drive the separate calls outside one SQL statement with
     `runPipeline` + `withRetry` (honoring `Retry-After`) and `UNION` the results.
-  So: single GET/POST with scalar params (incl. an upstream-aggregated body) is the SQL-native path TODAY (both
+  So: single GET/POST with scalar params (incl. an upstream-aggregated body) is the SQL-native path today (both
   examples). The TS `http.get` resolver + `runPipeline` is the right tool only for the multi-REQUEST chunked-VCF
   fanout, or as the fallback when a DuckDB version has no ducknng build.
-- **RETRY is ERROR-AS-VALUE, and the loop is the AIO DRAIN (not a recursive CTE): all verified on 1.5.2.** Two
+- **Retry is error-as-value, and the loop is the AIO drain (not a recursive CTE): verified on 1.5.2.** Two
   building blocks are real: (a) `ducknng_ncurl(...)` and `ducknng_ncurl_aio_collect(...)` return `(ok, status,
   error, …)` ROWS: a non-2xx / `429` / `503` / connection failure is a VALUE you branch on, not a thrown
   exception (contrast `ducknng_ncurl_table`, which THROWS on non-2xx, proved: same transient failure returns a
   `status=503` row from `ncurl` but a Binder Error from `ncurl_table`). So a retry decision is `WHERE status IN
   (429,503,…)`, not try/catch. (b) iteration IS simulable in SQL: `WITH RECURSIVE` loops, counts attempts, and
-  terminates on a data condition. BUT the naive composition, a single recursive CTE that re-fires a table function (`ncurl`/`ncurl_table`) per iteration, does NOT re-hit the network: DuckDB evaluates the literal-arg
+  terminates on a data condition. But the naive composition, a single recursive CTE that re-fires a table function (`ncurl`/`ncurl_table`) per iteration, does not re-hit the network: DuckDB evaluates the literal-arg
   IO table function ONCE per statement and reuses the result across all iterations (proved three ways: a scalar
   subquery → one real call reused 4×; the table function in `FROM` → call#s `1,2,2,2`), and you can't perturb the
   args per iteration to defeat the folding because the table functions reject column/correlated args ("only
-  literals"). The primitive that DOES re-execute per row is the SCALAR launcher `ducknng_ncurl_aio(url, …)`, scalar, so it accepts a per-row column arg: `SELECT ducknng_ncurl_aio(url, …) AS h FROM chunks` launches one
-  REAL request per chunk (proved: 3 chunks → 3 distinct server-side call#s), then `ducknng_ncurl_aio_collect(
-  list(h), wait_ms)` drains them (one error-as-value row per newly-terminal handle). RETRY = re-launch the subset
+  literals"). The primitive that re-executes per row is the scalar launcher `ducknng_ncurl_aio(url, …)`, so it accepts a per-row column arg: `SELECT ducknng_ncurl_aio(url, …) AS h FROM chunks` launches one
+  real request per chunk (proved: 3 chunks → 3 distinct server-side call#s), then `ducknng_ncurl_aio_collect(
+  list(h), wait_ms)` drains them (one error-as-value row per newly-terminal handle). Retry = re-launch the subset
   whose drained `status` says to (another per-row scalar `aio` over the not-yet-2xx chunks), looped at the
   statement-driver level (agent re-issues a drain round) with backoff between rounds. Net: error-as-value makes
-  retry a DATA branch; the re-executing loop is launch-all + status-driven re-launch/drain (scalar aio), NOT a
+  retry a data branch; the re-executing loop is launch-all + status-driven re-launch/drain (scalar aio), not a
   recursive CTE over the throwing/constant-folded table functions. This is the SQL-native shape of the
   "rate-limits = exponential backoff" production-semantics resolution.
-- **UPDATE (2026-06-30): the constant-fold is a ducknng BUG we OWN AND FIXED (backport pending).** Root cause:
+- **Update: the constant-fold issue was fixed in ducknng, with backport work tracked separately.** Root cause:
   `ducknng_ncurl(...)` did HTTP I/O inside a table-function BIND path, so DuckDB treated the constant-argument
-  table function as reusable inside the recursive CTE: the retry CTE iterated but the request fired ONCE
-  (reused). FIX (in the ducknng branch we maintain): raw `ducknng_ncurl(...)` now executes through a **VOLATILE
+  table function as reusable inside the recursive CTE: the retry CTE iterated but the request fired once
+  (reused). Fix (in the ducknng branch we maintain): raw `ducknng_ncurl(...)` now executes through a **volatile
   scalar** internally (`ducknng__ncurl_row(...)`); the public `ducknng_ncurl(...)` stays a table macro over it. So
   a recursive-CTE retry now **re-fires the HTTP call per iteration** (verified upstream: `503, 503, 200`; body
-  call counts `1, 2, 3`; still error-as-value, no throw). **KEY RULE for that pattern:** make the call **depend on
+  call counts `1, 2, 3`; still error-as-value, no throw). **Key rule for that pattern:** make the call **depend on
   the recursive row** (put `attempt` in the URL/body), e.g. `url || '?attempt=' || (a.attempt+1)`, else DuckDB may
-  still make one extra **speculative** call after the stop condition. CAVEATS, both load-bearing: (1) this is the
-  SCALAR/row `ducknng_ncurl` path: the dynamic-schema `ducknng_ncurl_table(...)` infers columns from response
+  still make one extra **speculative** call after the stop condition. Caveats, both load-bearing: (1) this is the
+  scalar/row `ducknng_ncurl` path: the dynamic-schema `ducknng_ncurl_table(...)` infers columns from response
   Content-Type at bind, so it stays unsuitable for lateral per-row retry/chunk fanout (don't "just mark it
-  volatile"); (2) the fix is **NOT in our installed community build** (`8dbf073` still exposes `ducknng_ncurl` as
-  a `table` function, no `ducknng__ncurl_row`), so `src/duckdb/ncurl-fanout.ts` is still required TODAY. Once we
+  volatile"); (2) the fix is **not in our installed community build** (`8dbf073` still exposes `ducknng_ncurl` as
+  a `table` function, no `ducknng__ncurl_row`), so `src/duckdb/ncurl-fanout.ts` is still required today. Once we
   backport the volatile-scalar fix across the DuckDB versions we ship, a single-endpoint multi-round retry
   collapses to **one recursive-CTE SELECT** (attempt-in-row); `ncurl-fanout.ts` then remains only for the
   table-function CHUNK fanout (many endpoints) and for unpatched builds. This is the first concrete payoff of
-  **owning the ducknng stack** (we dropped quack and fix/backport ducknng ourselves).
-- **FOLLOW-UP: backport LANDED (release branch), but community won't ship it; + the SIGNING flip.** Tracking:
+  maintaining the ducknng stack directly.
+- **Follow-up: backport landed on the release branch; community builds do not carry it.** Tracking:
   [`#1`](https://github.com/sounkou-bioinfo/ducknng/issues/1) (per-DuckDB-version branches),
-  [`#2`](https://github.com/sounkou-bioinfo/ducknng/issues/2) (the volatile-scalar `ncurl` fix: **DONE**, landed
+  [`#2`](https://github.com/sounkou-bioinfo/ducknng/issues/2) (the volatile-scalar `ncurl` fix: **done**, landed
   on `main` and backported to `release/duckdb-1.5.2`, commit `95196e0`), and
   [`#3`](https://github.com/sounkou-bioinfo/ducknng/issues/3) (publish tagged binary releases per DuckDB version).
-  **Verified in OUR node-api runtime** (loading the `release/duckdb-1.5.2` build with `allow_unsigned`):
+  **Verified in the node-api runtime** (loading the `release/duckdb-1.5.2` build with `allow_unsigned`):
   `ducknng__ncurl_row` is registered `VOLATILE`, and a `WITH RECURSIVE` retry with the call **depending on the
-  recursive row** (`?attempt=N`) RE-FIRES per iteration (distinct calls, not one reused): the fix works.
-  - **The catch: `community-extensions` does NOT carry backports.** The community build tracks one line, so
+  recursive row** (`?attempt=N`) re-fires per iteration (distinct calls, not one reused): the fix works.
+  - **The catch: `community-extensions` does not carry backports.** The community build tracks one line, so
     `INSTALL ducknng FROM community` will never ship the 1.5.2-branch fix (still `8dbf073` here). To consume it we
     must use a **from-source / repo-published-release** build (the point of `#3`): download/build the
     `release/duckdb-1.5.2` `.duckdb_extension` and `LOAD '<path>'`. Because that build is **unsigned**, the host
-    sets `allow_unsigned_extensions = true` in `duckdbConfig` (host-owned, never an agent param): the SIGNING
-    flip we documented, now the real install path. **Provisioning helper:** `npm run provision:ducknng-owned`
+    sets `allow_unsigned_extensions = true` in `duckdbConfig` (host-owned, never an agent param): the signing
+    difference documented here is now the real install path. **Provisioning helper:** `npm run provision:ducknng-owned`
     (`scripts/provision-ducknng-owned.sh`) resolves the target DuckDB version, then downloads the tagged release
     asset (`v0.1.1+duckdb<ver>`) if published, else builds `release/duckdb-<ver>` from source, places it under
-    `.pi/ducknng/duckdb-<ver>/ducknng.duckdb_extension`, and VERIFIES `ducknng__ncurl_row` is `VOLATILE` before
+    `.pi/ducknng/duckdb-<ver>/ducknng.duckdb_extension`, and verifies `ducknng__ncurl_row` is `VOLATILE` before
     printing the `LOAD` recipe. (Per-DuckDB-version binary publishing is upstream `#3`.)
   - **Trigger to flip the substrate:** probe `duckdb_functions()` for `ducknng__ncurl_row`; when present (i.e. the
     host loaded an owned build), enable the recursive-CTE retry path and narrow `ncurl-fanout.ts` to the
     chunk-fanout case. With the default community build it stays absent, so `ncurl-fanout.ts` remains in use: no
     change until the host opts into the owned build.
-  - **Signing reverses once we ship our OWN build.** The *community* `ducknng`/`nanoarrow` are **signed**: they
-    `INSTALL/LOAD FROM community` with NO `allow_unsigned_extensions` (we dropped that flag from the signed-path
+  - **Signing differs for maintained builds.** The *community* `ducknng`/`nanoarrow` are **signed**: they
+    `INSTALL/LOAD FROM community` with no `allow_unsigned_extensions` (we dropped that flag from the signed-path
     examples/tests). But an extension we **build from source** (the backport branches, a local dev build) is
-    **UNSIGNED**, so loading it REQUIRES `allow_unsigned_extensions = true`. That is **host-owned `duckdbConfig`**
+    **unsigned**, so loading it requires `allow_unsigned_extensions = true`. That is **host-owned `duckdbConfig`**
     set at DB open (`DuckDBInstance.create(path, { allow_unsigned_extensions: "true" })`: the same home as
     cache_httpfs / S3 secrets), **never an agent param**, and it stays scoped to the dev/owned-build deployment.
     So the rule is: *signed community build → no flag; our from-source backport build → host sets the flag.* Both
@@ -504,9 +507,9 @@ produces share one dependency model; execution = topological order, each step re
 isolation boundary), writes its note (the shared memory). Provenance composes: each note's `sources` already
 records what fed it. Build only on explicit go: it changes `deriveStudyPlan`'s consumers and needs a test.
 
-## Effect discipline: pal review #5 follow-ups
+## Effect discipline: prior-review follow-ups
 
-Pal #5 audited for ambient/hidden effects. One real finding fixed: wall-clock reads now funnel through the one
+A prior review audited for ambient/hidden effects. One real finding fixed: wall-clock reads now funnel through the one
 `systemClock()` adapter (`src/core/clock.ts`) instead of scattered `?? new Date()` fallbacks. Open, in priority:
 
 - **Strict `now` (the endpoint, deferred).** The funnel removes the *hidden* scattered reads but keeps a
@@ -516,71 +519,71 @@ Pal #5 audited for ambient/hidden effects. One real finding fixed: wall-clock re
   call sites; do it when a determinism/replay need (a reproducible run) drives it.
 - **Run/note ID generation.** `runId` (`Date.now()`) and study-note `randomUUID()` are nondeterministic host-
   boundary effects. Inject an `idFactory` (or require `runId`) when reproducible run identity is needed.
-- **Memo cache opt-out.** The resolution memo silently changes whether a resolver re-fetches (freshness-correct: it replays the SAME receipt, so results are identical, only perf differs). Add `cache?: false` to the run
+- **Memo cache opt-out.** The resolution memo silently changes whether a resolver re-fetches (freshness-correct: it replays the same receipt, so results are identical, only perf differs). Add `cache?: false` to the run
   request / resolver ctx for callers who want to force a cold re-resolve.
 
-By doctrine, NOT bugs (recorded so we don't re-litigate): pal #1-4/#10-12. DuckDB replacement scans / httpfs /
-htslib / direct fs reaching local files and remote URLs. The library is deliberately NOT the network/filesystem
-sandbox; egress + fs confinement are the HOST's boundary (container/seccomp/Pi/OS). `validateReadOnlySelect`
-governs statement CLASS (single read-only SELECT), not reachability.
+By doctrine, these are not library bugs: DuckDB replacement scans, httpfs, htslib, and direct filesystem access can
+reach local files and remote URLs. The library is deliberately not the network/filesystem sandbox; egress and
+filesystem confinement are the host's boundary (container/seccomp/Pi/OS). `validateReadOnlySelect` governs
+statement class (single read-only SELECT), not reachability.
 
-### Frontier residues for public release (pal #13, 2026-07-02)
+### Frontier residues for public release
 
-**(1) DuckDB ambient egress: NOT a library build (doctrine reaffirmed).** pal #13 re-flagged that in the default
+**(1) DuckDB ambient egress: not a library build.** A prior review re-flagged that in the default
 profile `bio_query(sql: "SELECT * FROM read_csv_auto('https://…')")` can reach the network if httpfs autoloads.
-This is the SAME doctrine as pal #1-4 above and stays settled: **the library is deliberately not the network/
-filesystem sandbox**: egress confinement is the HOST's boundary (container / seccomp / Pi / OS). The fail-closed
-facility we DO own is the injected `fetch` PORT (http.get injects none by default → fails closed); DuckDB's own
+This is the same doctrine as above: **the library is deliberately not the network/
+filesystem sandbox**. Egress confinement is the host's boundary (container / seccomp / Pi / OS). The fail-closed
+facility the library owns is the injected `fetch` port (http.get injects none by default → fails closed); DuckDB's own
 reachability (httpfs / replacement scans / htslib) is a host-provisioned capability, and we never claim SQL can't
-reach out. So we do NOT thread a network-grant lockdown into the runner, and we do NOT police egress. If a host
-WANTS defense-in-depth it can pass this via its own `duckdbConfig` at DB open (host code, host choice, not a library
+reach out. Do not thread a network-grant lockdown into the runner or make the library police egress. If a host
+wants defense-in-depth it can pass this via its own `duckdbConfig` at DB open (host code, host choice, not a library
 default): `autoinstall_known_extensions=false` + `autoload_known_extensions=false` +
 `disabled_filesystems='HTTPFileSystem,S3FileSystem'` (+ `lock_configuration=true` to seal). Documenting the recipe
 is fine; building/defaulting it into the library is not: that would re-open a closed doctrine.
 
-**(1b) `process.compute.params.env` secrets boundary (pal #15).** The replay manifest snapshot is persisted
-VERBATIM (`run-store.ts` `manifest.snapshot: raw`), so a credential in `params.env` leaks in cleartext into
-replay.json / CAS: asymmetric with host `duckdbInitSql`, which is DIGESTED for exactly this reason. Fixed now at
+**(1b) `process.compute.params.env` secrets boundary.** The replay manifest snapshot is persisted
+verbatim (`run-store.ts` `manifest.snapshot: raw`), so a credential in `params.env` leaks in cleartext into
+replay.json / CAS: asymmetric with host `duckdbInitSql`, which is digested for exactly this reason. Fixed now at
 the boundary: documented that `params.env` is non-secret-only and host secret env comes through the host-injected
-ProcessRunner (never a manifest param). OPEN DECISION (reproducibility trade-off, don't blind-edit): whether to also
-REDACT `process.compute` env VALUES in the persisted snapshot (keys kept for replay structure, values omitted): closes the leak with no leaky denylist, but loses faithful replay of legit non-secret env values. Parallels the
+ProcessRunner (never a manifest param). Open decision (reproducibility trade-off): whether to also
+redact `process.compute` env values in the persisted snapshot (keys kept for replay structure, values omitted): closes the leak with no leaky denylist, but loses faithful replay of legit non-secret env values. Parallels the
 initSql digest choice (reduced fidelity for secret-safety). Decide before building.
 
 **(2) Server-side atomic monotonic writes ([[reproducibility-and-longrunning-lane]] residue #2).** Concurrent
 same-slug `remember`/`forget` over separate RPC clients are not linearizable: `withSlotLock` serializes only
 in-process; two clients read the same latest revision, compute the same `recorded_at`, insert competing revisions,
 and current-as-of ties on `observation_id DESC` (not write order). Now documented as an open residue in
-`docs/concurrency.md`. FIX: the ducknng server serializes per `statement_key`: a server-side lock / single-writer
+`docs/concurrency.md`. Fix direction: the ducknng server serializes per `statement_key`: a server-side lock / single-writer
 transaction / atomic advance-then-insert procedure exposed as an RPC method. Needs the ducknng RPC harness stood
 up (a focused build). Until built: server-backed store is safe for distinct slugs / serialized access only.
 
-## Network opt-in hardening: pal review #4 follow-ups
+## Network opt-in hardening: prior-review follow-ups
 
-The host network opt-in is wired by COMPOSITION, not ambient env: `createBioExtension({ network })` takes the
+The host network opt-in is wired by composition, not ambient env: `createBioExtension({ network })` takes the
 fetch port explicitly; the default entrypoint injects none (http.get fails closed), and `index-networked.ts` is
-the operator's explicit grant. (Pal #4 suggested an env gate, but env vars inherit across forks/embeddings and
+the operator's explicit grant. (A prior review suggested an env gate, but env vars inherit across forks/embeddings and
 are invisible to the model: the substrate's injected-effect discipline forbids them; choosing the entrypoint is
 the visible, auditable, agent-inaccessible grant instead.) Open,
 freshness/provenance-correct refinements it surfaced, in priority order. Build each only with the named consumer
 in hand; none are speculative, but none should be half-built autonomously.
 
-- **Cancellation: DONE.** `AbortSignal` now threads Pi tool -> RunQuery/RunOperationRequest -> runQuery/
+- **Cancellation: done.** `AbortSignal` now threads Pi tool -> RunQuery/RunOperationRequest -> runQuery/
   runOperation -> `ResolutionContext.signal` -> http.get's injected fetch. An aborted tool call tears the
   request down (best-effort; a resolver that can't honor it ignores it).
-- **Byte cap: DONE (timeout still open).** The default networked adapter (`index-networked.ts` `cappedFetchLike`)
+- **Byte cap: done (timeout still open).** The default networked adapter (`index-networked.ts` `cappedFetchLike`)
   now shapes `FetchResponse.text()` through `readCapped(res.body, DEFAULT_MAX_RESPONSE_BYTES)`, so a runaway/
   unbounded remote body can't exhaust process memory; a host wraps its own fetch for a tighter/per-endpoint cap.
   Timeout is still host-policy (wrap the fetch with an `AbortSignal` deadline).
 - **304 revalidation provenance.** A `304` replays the stored receipt with the original `retrievedAt`: honest
-  about the BYTES (unchanged) but silent that freshness was reconfirmed later. Optional enhancement: stamp a
+  about the bytes (unchanged) but silent that freshness was reconfirmed later. Optional enhancement: stamp a
   `revalidatedAt` note so the receipt shows "T1 bytes, revalidated current at T2". Not a correctness bug.
 - **Redirect provenance.** The receipt records the declared `p.url`, not the final response URL after redirects.
   `FetchResponse` has no `.url`; widen it and record the final URL when it differs.
 - **Per-call acknowledgement (optional, never sufficient alone).** An `allowNetwork: true` tool param as an
-  ADDITIONAL per-call acknowledgement on top of the env gate, visible in the transcript, but the env gate
+  additional per-call acknowledgement on top of the env gate, visible in the transcript, but the env gate
   stays the hard requirement.
 
-NOT bugs, by doctrine (the library is not the egress firewall — the host sandbox is): the env gate governs only
+Not bugs, by doctrine (the library is not the egress firewall; the host sandbox is): the env gate governs only
 `http.get`'s bound fetch, not other resolvers' remote reads (`file_scan`/`read_bcf`/`sql_materialize` may read
 remote URIs if the host/DuckDB allows); and `http.get` does no SSRF allowlisting: the host's injected fetch
 enforces allow/block lists. Both are documented at the opt-in site so a reader does not over-trust the gate.
@@ -602,48 +605,49 @@ enforces allow/block lists. Both are documented at the opt-in site so a reader d
 
 ## Code execution runtime
 
-The COMPUTE pillar of "ClawBio for free": the data/lookup/annotation/query skills are the SQL-REPL + resolver
+The compute pillar for the ClawBio factoring: the data/lookup/annotation/query skills are the SQL-REPL + resolver
 tiers, but ClawBio's compute skills (Ancestry PCA, Fine-Mapping SuSiE/ABF, scRNA, nf-core/Galaxy wrappers,
 R/shell) need to run external code. Design grounded in two local prior-art projects (`~/nf-r-ipc`, `~/DuckTinyCC`):
 
-- **Spawn external processes from Node** (`child_process`; detached for long-running, like the pal launches): NOT in-DuckDB FFI (`~/DuckTinyCC` JIT-compiles C into SQL UDFs at runtime; wild, but the wrong risk surface
-  for the process path) and NOT a JVM/Nextflow plugin. The host owns process spawning = a host-injected effect,
+- **Spawn external processes from Node** (`child_process`; detached for long-running): not in-DuckDB FFI
+  (`~/DuckTinyCC` JIT-compiles C into SQL UDFs at runtime, but that is the wrong risk surface
+  for the process path) and not a JVM/Nextflow plugin. The host owns process spawning = a host-injected effect,
   matching the doctrine; it is sandboxable and simple. (DuckTinyCC stays a niche later option for hot-path UDFs.)
 - **Arrow IPC as the interchange** (the lingua franca): DuckDB exports Arrow natively; R reads via
   `nanoarrow`/`arrow`, Python via `pyarrow`. DuckDB -> Arrow -> process -> Arrow -> DuckDB (read via arrow scan).
   This is exactly `~/nf-r-ipc`'s transport (Nextflow<->R over Arrow IPC), but Node-hosted.
-- **A strict contract** modeled on `~/nf-r-ipc/CONTRACT.md`: the invocation is DATA in a manifest (a "process
+- **A strict contract** modeled on `~/nf-r-ipc/CONTRACT.md`: the invocation is data in a manifest (a "process
   operation": `{executable, script: path|inline, inputs: [table], output: schema|kind, args}`); typed request/
-  response; typed error classes; fail-closed. Provenance RECEIPT (same model as resolvers): script digest +
+  response; typed error classes; fail-closed. Provenance receipt (same model as resolvers): script digest +
   input digests + exit code + stdout/stderr + output digest + wall time.
 - **Result shape:** rectangular results (PCA loadings, credible sets, summary stats) -> Arrow tables directly.
-  Non-tabular R values -> adopt nf-r-ipc's `value_graph` (a FLAT Arrow table encoding a tree via
-  `value_id/parent_id/key/index/tag/v_*`, with distinct typed-NA tags + R-class normalization): the SAME
+  Non-tabular R values -> adopt nf-r-ipc's `value_graph` (a flat Arrow table encoding a tree via
+  `value_id/parent_id/key/index/tag/v_*`, with distinct typed-NA tags + R-class normalization): the same
   flat-table-encodes-a-tree pattern as our SemanticSQL statements (a real convergence, not a new abstraction).
-- **Out-of-process is the robust choice (3rd confirming instance, `~/mangoro`):** R<->Go IPC over nanomsg
-  (mangos) + Arrow (nanoarrow), explicitly AVOIDING in-process FFI (cgo c-shared's multiple-runtime problems): the same call as avoiding DuckTinyCC. Two execution modes: SPAWN-PER-CALL (simple, stateless) vs a PERSISTENT
-  WORKER messaged via nanomsg+Arrow (amortizes R/Python startup, stateful): the latter fits long-running or
+- **Out-of-process is the robust choice (third confirming instance, `~/mangoro`):** R<->Go IPC over nanomsg
+  (mangos) + Arrow (nanoarrow), explicitly avoiding in-process FFI (cgo c-shared's multiple-runtime problems): the same call as avoiding DuckTinyCC. Two execution modes: spawn-per-call (simple, stateless) vs a persistent
+  worker messaged via nanomsg+Arrow (amortizes R/Python startup, stateful): the latter fits long-running or
   per-tissue-repeated compute (e.g. coloc over GTEx tissues). Node-hosted: child_process + Arrow files/stdio,
   or a held-open worker over a socket.
 - **CLI composition layer (`~/BLIT`, [WangLabCSU/blit](https://github.com/WangLabCSU/blit)):** command-line
-  tools as COMPOSABLE OBJECTS, not strings: `exec()` -> a structured object; pipe translation (`|>` -> `|`);
-  `cmd_run`/`cmd_parallel`; LIFECYCLE HOOKS (`on_start`/`on_exit`/`on_succeed`/`on_fail`) -> adopt as receipt
-  events + fault-tolerant branching; MICROMAMBA/Conda env management -> a process op should DECLARE + PIN its
+  tools as composable objects, not strings: `exec()` -> a structured object; pipe translation (`|>` -> `|`);
+  `cmd_run`/`cmd_parallel`; lifecycle hooks (`on_start`/`on_exit`/`on_succeed`/`on_fail`) -> adopt as receipt
+  events + fault-tolerant branching; micromamba/Conda env management -> a process op should declare + pin its
   env (tool versions) in the receipt for reproducibility; auto native-data->CLI-input (df->tsv->temp->cleanup)
   for tools that don't speak Arrow (our `http.get` temp-materialize already has this shape). So: nf-r-ipc =
   Arrow/nanoarrow transport + typed contract; BLIT = CLI composition + env pinning + lifecycle; mangoro =
   out-of-process generalizes (R/Go) + persistent-worker option; Node = the host that spawns + owns lifecycle.
-- **Init non-transactional caveat (pal #9):** `duckdbInitSql` runs statement-by-statement, not in a transaction;
+- **Init non-transactional caveat:** `duckdbInitSql` runs statement-by-statement, not in a transaction;
   on a persistent DB a later failure can leave earlier side effects with no failed-run receipt. Fine for
   idempotent INSTALL/LOAD/SET (its intended use); keep DDL/DML out of init.
 
 ### Flagship: post-GWAS colocalization (`~/PostGWAS` + `~/coloclize`), the two-pillar proof
-PostGWAS independently arrives at our architecture: provider CONTRACTS (`SumstatProvider`, `LDProvider` returning
+PostGWAS independently arrives at our architecture: provider contracts (`SumstatProvider`, `LDProvider` returning
 a provenance-bearing `DatasetLD` object, `AncestryWeightsProvider`, `ColocEngine`, `FineMapResultProvider`) with
-DuckDB/PlinkingDuck/coloc/HyPrColoc/ColocBoost as ADAPTERS: i.e. our resolver/port + receipt model in R/S7. The
-agent solves coloc as a manifest: DATA pillar = tabix region-extract per GTEx tissue + SQL harmonization
-(SumstatProvider) + LD from PLINK2 reference via PlinkingDuck (LDProvider); COMPUTE pillar = ColocEngine /
-fine-mapping as Arrow-IPC process ops; COMPOSITION = a DAG with per-tissue partition+map. Receipts at every step
+DuckDB/PlinkingDuck/coloc/HyPrColoc/ColocBoost as adapters: i.e. our resolver/port + receipt model in R/S7. The
+agent solves coloc as a manifest: data pillar = tabix region-extract per GTEx tissue + SQL harmonization
+(SumstatProvider) + LD from PLINK2 reference via PlinkingDuck (LDProvider); compute pillar = ColocEngine /
+fine-mapping as Arrow-IPC process ops; composition = a DAG with per-tissue partition+map. Receipts at every step
 (allele basis, harmonization, LD provenance, coloc posteriors). This is the "fruitfulness in speculative new
 areas" demonstration: the bet generalizing from ClawBio lookups to real statistical-genetics research.
 
@@ -659,21 +663,22 @@ The restricted-runtime contract (build before exposing powerful execution):
 - Define how operation clients are generated from operation specs and injected into the runtime.
 - Add tests proving large intermediate results can be filtered in-env without entering model context.
 
-## Operation packs
+## Application operation sets
 
-- Start with small declarative packs rather than bespoke adapters:
+- Start with small declarative application-owned operation sets rather than bespoke core adapters:
   - OpenTargets GraphQL
   - Monarch/HPO ontology evidence
   - Ensembl/VEP annotation
   - ClinVar/ClinGen evidence references
-- For each pack, require:
+- For each operation set, require:
   - input schema
   - output shape or normalizer
   - identifier namespace notes
   - network policy
   - cache/provenance policy
   - mock-network tests
-- Keep provider/API documentation in study bundles; promote stable invocation details into operation specs.
+- Keep provider/API documentation in study bundles; promote stable invocation details into application-owned
+  operation specs.
 
 ## Skills and study notes
 
@@ -689,24 +694,24 @@ The restricted-runtime contract (build before exposing powerful execution):
 
 ## KG and ontology substrate
 
-**Direction settled (2026-06-29): the [SemanticSQL](https://github.com/INCATools/semantic-sql) shape.** The graph is `bio_edges(from_id, predicate,
+**Direction settled: the [SemanticSQL](https://github.com/INCATools/semantic-sql) shape.** The graph is `bio_edges(from_id, predicate,
 to_id)` (the statement/edge base) plus `entailed_edge` (the precomputed transitive closure). The same shape
 serves imported ontologies and our own committed graph; descendants/subsumption/graph-walk are one indexed
 JOIN, not a walker. See [`design.md`](./design.md#the-semanticsql-shape-statements--entailed_edge-one-substrate-for-graph-ontology-and-scales).
 
-- DONE: `entailed_edge` closure (`materializeEntailedEdges`, `src/duckdb/graph-closure.ts`): per-predicate
+- Done: `entailed_edge` closure (`materializeEntailedEdges`, `src/duckdb/graph-closure.ts`): per-predicate
   transitive closure over `bio_edges`, indexed both directions; cycles terminate via UNION dedup.
-- DONE: ordinal scales as data (`scale_members` from a ranked `TermSet`): total order to the graph's partial
+- Done: ordinal scales as data (`scale_members` from a ranked `TermSet`): total order to the graph's partial
   order; `decideGrounding` membership unchanged.
-- NEXT (deferred until a real grounding/traversal consumer): a thin ontology-ingest resolver that projects an
-  OBO ontology into our `statements` + `bio_edges` shape. NO DuckDB sqlite extension: the real SemanticSQL
+- Next (deferred until a real grounding/traversal consumer): a thin ontology-ingest resolver that projects an
+  OBO ontology into our `statements` + `bio_edges` shape. No DuckDB sqlite extension: the real SemanticSQL
   schema is four flat all-TEXT triple tables (`statements(subject,predicate,object,value,datatype,language)`,
-  `edge(s,p,o)`, `entailed_edge(s,p,o)`, `prefix`); their `edge` IS our `bio_edges`. Ingest from a
-  NATIVE-readable format: OBO Graphs JSON via `read_json`, or build TSVs / triple parquet via
+  `edge(s,p,o)`, `entailed_edge(s,p,o)`, `prefix`); their `edge` is our `bio_edges`. Ingest from a
+  native-readable format: OBO Graphs JSON via `read_json`, or build TSVs / triple parquet via
   `duckdb.file_scan`, or an optional one-time `sqlite3` CLI dump → parquet (the sqlite3 binary, not DuckDB's
   extension). Compute the closure with `materializeEntailedEdges` (we don't need their `entailed_edge`). Pin a
   build date as provenance, honor per-ontology CC-BY. OLS4 REST only for fresh text→CURIE misses (judgment
-  tier); cached CURIEs + FTS are the deterministic projection tier; ABSTAIN below threshold.
+  tier); cached CURIEs + FTS are the deterministic projection tier; abstain below threshold.
 - Add bounded graph-walk semantics with expansion handles so high-degree neighborhoods do not flood context
   (now a bounded SQL query over `entailed_edge`, not a custom walker).
 - Add trust/provenance fields consistently across facts, edges, and artifacts (`bio_edges.trust` exists; keep
@@ -715,24 +720,24 @@ JOIN, not a walker. See [`design.md`](./design.md#the-semanticsql-shape-statemen
 
 ## Retrieval and semantic search
 
-Settled direction (2026-06-29): a **tiered retrieval ladder, cheapest deterministic tier first**. Search
-returns *candidates (data)* that feed `decideGrounding` (rank, ABSTAIN below threshold, never invent a CURIE);
+Settled direction: a **tiered retrieval ladder, cheapest deterministic tier first**. Search
+returns *candidates (data)* that feed `decideGrounding` (rank, abstain below threshold, never invent a CURIE);
 the engine is a swappable adapter. Climb a tier only when a real corpus/recall failure forces it.
 
-- Tier 0, exact: SQL equality on label/exact-synonym (`statements`). Deterministic, offline. HAVE.
-- Tier 1, lexical BM25: DuckDB FTS over labels/synonyms/notes/docs. In-DB, offline. NEXT real add (already
+- Tier 0, exact: SQL equality on label/exact-synonym (`statements`). Deterministic, offline. In place.
+- Tier 1, lexical BM25: DuckDB FTS over labels/synonyms/notes/docs. In-DB, offline. Next real add (already
   planned for grounding misses).
 - Tier 2, dense single-vector: DuckDB VSS (HNSW) over an embedding column for paraphrase recall. Still in-DB.
   Add only if Tier 1 recall is insufficient on a real corpus.
 - Tier 3, late-interaction multivector ([ColBERT](https://github.com/stanford-futuredata/ColBERT) /
   [TACHIOM](https://github.com/TusKANNy/tachiom)-style): SOTA high-recall, but a large-corpus / research-grade
-  runtime (TACHIOM exists to fix the k-means index bottleneck at ~600M-vector scale). OVERKILL
+  runtime (TACHIOM exists to fix the k-means index bottleneck at ~600M-vector scale). Overkill
   for ontology grounding (MONDO ~25k, HPO ~17k, SO ~2k terms: tiny candidate spaces) and for our notes. If
-  literature-scale retrieval ever forces it, it enters as an EXTERNAL retrieval SERVICE behind a resolver/HTTP
-  boundary returning ranked candidates as DATA: never a multivector engine baked into core. Absorb the
+  literature-scale retrieval ever forces it, it enters as an external retrieval service behind a resolver/HTTP
+  boundary returning ranked candidates as data: never a multivector engine baked into core. Absorb the
   function (ranked candidates), not the runtime.
 
-Tiers 0–2 live IN the DuckDB substrate (SQL/FTS/VSS), consistent with graph-as-SQL; only Tier 3 goes external.
+Tiers 0–2 live in the DuckDB substrate (SQL/FTS/VSS), consistent with graph-as-SQL; only Tier 3 goes external.
 
 ## Biomedical workflow fixtures
 
@@ -755,34 +760,34 @@ Tiers 0–2 live IN the DuckDB substrate (SQL/FTS/VSS), consistent with graph-as
   - resolver fail-closed behavior
   - no ambient network in code runtime
   - read-only SQL validation
-  - operation pack request generation
+  - application-operation request generation
   - resource/CAS integrity
   - skill boundary rules
 - Treat `validateReadOnlySelect()` as a preflight helper only. The eventual execution adapter must also use a genuinely read-only/scoped DuckDB connection or equivalent sandbox.
 
-## Distributed CAS garbage collection (BUILT: the metadata-driven GC)
+## Distributed CAS garbage collection (metadata-driven GC)
 
 Two GCs ship, by safety regime:
 
 - **Node-local** (`src/hosts/gc.ts`, `collectGarbage` default `casMode: "node-local"`): mark-and-sweep: CAS =
-  heap, retained run receipts = roots, unreachable bytes swept. Correct when THIS process is the sole writer (a
+  heap, retained run receipts = roots, unreachable bytes swept. Correct when this process is the sole writer (a
   GC pass leaves no dangling pointers; the cross-db remote index is best-effort + subordinate to receipt roots).
-- **Shared / distributed** (`src/hosts/cas-metadata.ts`): the metadata-driven GC. This is a LIBRARY, so the
+- **Shared / distributed** (`src/hosts/cas-metadata.ts`): the metadata-driven GC. This is a library, so the
   advertised shared/cross-db CAS + the NNG/ducknng topologies must ship a *correct* shared GC, not a warning
   label: "no in-repo consumer" is the wrong test when downstream users are the consumers. `collectGarbage` with
-  `casMode: "shared"` either delegates to this (when given a `metadata` authority) or FAILS CLOSED (it refuses to
+  `casMode: "shared"` either delegates to this (when given a `metadata` authority) or fails closed (it refuses to
   sweep a shared CAS from an incomplete local root set).
 
-The shared GC is our own substrate shape ([[semantic-sql-graph-substrate]]): roots are ROWS, GC is a SQL
-ANTI-JOIN, owned by a metadata authority that is just a DuckDB: local file OR ducknng-served shared db, the SAME
+The shared GC is our own substrate shape ([[semantic-sql-graph-substrate]]): roots are rows, GC is a SQL
+anti-join, owned by a metadata authority that is just a DuckDB: local file or ducknng-served shared db, the same
 SQL runs over either ([[duckdb-process-boundary-locking]]). Transport is orthogonal; correctness is SQL.
 
 - `cas_object(algorithm, digest, size_bytes, state{committed|tombstoned|deleted}, committed_at, tombstoned_at)`
 - `cas_ref(ref_id, ref_type{run|artifact|remote_index|fs_version|manual_pin}, algorithm, digest, expires_at)`: durable (or TTL'd) references = the root set as rows. `addCasRef` / `dropCasRefs`.
 - `cas_lease(lease_id, holder, algorithm, digest, expires_at)`: in-flight reads/writes; the **reuse-race** fix.
-  `withCasObject` acquires a lease, re-checks state, RESURRECTS a tombstoned-but-unswept object (revive under the
+  `withCasObject` acquires a lease, re-checks state, resurrects a tombstoned-but-unswept object (revive under the
   lease) or returns a clean miss on a deleted one. `minAgeMs`/grace is a fallback margin, not the mechanism.
-- `gcMark` = tombstone committed objects past cutoff with NO live ref AND NO live lease (RETURNING the rows);
+- `gcMark` = tombstone committed objects past cutoff with no live ref and no live lease (returning the rows);
   `gcSweep` = after a grace, delete tombstoned bytes (`cas.remove`) + mark deleted; `gcMarkSweep` = both, one
   `minAgeMs` knob. State transitions, not "hope a local view is complete."
 
@@ -792,9 +797,9 @@ write/reuse race (→ `cas_lease` + `withCasObject`), and the remote-index race 
 single in-memory DuckDB authority (`test/cas-metadata-gc.test.ts`), which exercises the exact SQL a
 ducknng-served authority runs.
 
-STILL OPEN (integration, not core): auto-registering `cas_ref` rows from run receipts + captured artifacts, and
+Still open (integration, not core): auto-registering `cas_ref` rows from run receipts + captured artifacts, and
 resolvers taking a `withCasObject` lease around a cross-db `cas.pathFor` reuse (so the shared path is wired
-through the run-store, not just callable); a `gc_epoch` row + a published tombstone/delete EVENT for cross-node
+through the run-store, not just callable); a `gc_epoch` row + a published tombstone/delete event for cross-node
 observers; the ducknng-served-authority dogfood script. A `utimes` LRU-touch on CAS hit is a cheap node-local
 nicety (cache semantics, not a lease): only if a real workload wants it.
 

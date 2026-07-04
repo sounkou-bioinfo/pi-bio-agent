@@ -7,7 +7,7 @@
 
 ## Proposal
 
-- [Generic clinical-genomics application on pi-bio-agent](clinical-genomics-application.md) — A downstream APPLICATION pattern that consumes pi-bio-agent as a library: staged, deterministic-first variant analysis (case structuring, annotation, HPO, prioritization, scoring, ACMG, family-aware interpretation) with recorded-and-gated judgment. Read before scoping clinical-genomics applications or papers. _(flagship, application, clinical-genomics, product, reproducibility)_
+- [Clinical-genomics application pattern on pi-bio-agent](clinical-genomics-application.md) — A downstream application pattern that consumes pi-bio-agent as a library: staged, deterministic-first variant analysis (case structuring, annotation, HPO, prioritization, scoring, ACMG, family-aware interpretation) with recorded-and-gated judgment. Read before scoping clinical-genomics applications or papers. _(flagship, application, clinical-genomics, product, reproducibility)_
 - [Memory and knowledge unification](memory-and-knowledge-unification.md) — The temporal memory unification: memory, facts, jobs, and store-logged runs are one append-only bio_observations store (Datomic-style, as-of/history/tombstone; runs fold in only when a store/run-log is supplied). Read before changing the memory store or its graph projection. _(memory, temporal, bio-observations, unification)_
 
 ## Reference

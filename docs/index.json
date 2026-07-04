@@ -19,8 +19,8 @@
       "slug": "clinical-genomics-application",
       "path": "docs/clinical-genomics-application.md",
       "type": "Proposal",
-      "title": "Generic clinical-genomics application on pi-bio-agent",
-      "description": "A downstream APPLICATION pattern that consumes pi-bio-agent as a library: staged, deterministic-first variant analysis (case structuring, annotation, HPO, prioritization, scoring, ACMG, family-aware interpretation) with recorded-and-gated judgment. Read before scoping clinical-genomics applications or papers.",
+      "title": "Clinical-genomics application pattern on pi-bio-agent",
+      "description": "A downstream application pattern that consumes pi-bio-agent as a library: staged, deterministic-first variant analysis (case structuring, annotation, HPO, prioritization, scoring, ACMG, family-aware interpretation) with recorded-and-gated judgment. Read before scoping clinical-genomics applications or papers.",
       "tags": [
         "flagship",
         "application",

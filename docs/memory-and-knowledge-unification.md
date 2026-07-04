@@ -11,13 +11,13 @@ Notes on what a coding agent's file-based memory system teaches us, and a propos
 unify `pi-bio-agent`'s currently-separate memory representations under one knowledge-unit
 abstraction.
 
-This is now **IMPLEMENTED** (2026-07-02): see [Implemented: temporal memory in one
-store](#implemented-2026-07-02-temporal-memory-in-one-store) below (the store, the agent-tool rewire + rename, and
+This is now implemented: see [Implemented: temporal memory in one
+store](#implemented-temporal-memory-in-one-store) below (the store, the agent-tool rewire + rename, and
 temporal skills are all done). The rest of this document remains the design rationale it sharpens, alongside
 [`abstraction-derivation.md`](./abstraction-derivation.md) and the storage/skill items in
 [`refinments.md`](./refinments.md).
 
-## Implemented (2026-07-02): temporal memory in one store
+## Implemented: temporal memory in one store
 
 Memory is **the same temporal store as facts**, append-only, as-of, attributed, which honors the
 unified-data-model bet instead of sitting beside it as flat last-write-wins files.
@@ -36,7 +36,7 @@ unified-data-model bet instead of sitting beside it as flat last-write-wins file
   the *same* SemanticSQL closure as facts. (Typed `StudyNote.links` are not yet authorable via `bio_remember`: a
   deliberate future feature, not an implied capability.)
 
-**ONE store, not a `memory.duckdb`.** Facts, jobs, activation, and memory are all rows in the **same
+**One store, not a `memory.duckdb`.** Facts, jobs, activation, and memory are all rows in the **same
 `bio_observations` table in the same DuckDB** as the graph (`src/hosts/bio-store.ts` `openBioStore`). A separate
 memory database would re-fragment the ledger and break the single `entailed_edge` closure that walks
 **observation-backed** memory, ontology, and fact edges together. Tested: a memory note and a `gene→disease` fact
@@ -48,7 +48,7 @@ projection.)
 **Sharing is a host-chosen boundary** (`openBioStore` is the seam: the library records; the host decides where
 the store lives). Because every memory row carries its **author** (`source`) and an **as-of** time, a *shared*
 store stays attributed and time-consistent. (One caveat: monotonic "latest wins" per slot is serialized
-same-process and across separate processes on a local file store. DuckDB's cross-process exclusive-writer lock, but NOT yet across concurrent CLIENTS of a shared server-backed store, where two clients can still collide on the
+same-process and across separate processes on a local file store. DuckDB's cross-process exclusive-writer lock, but not yet across concurrent clients of a shared server-backed store, where two clients can still collide on the
 read-then-write; that needs a server-side atomic advance+insert / serializable txn, see `monotonicRecordedAt`.)
 
 | Scope | Mechanism | Semantics |
@@ -61,7 +61,7 @@ read-then-write; that needs a server-side atomic advance+insert / serializable t
 Access stays host-gated (ducknng mTLS / peer-allowlists / exec opt-in). This is **Fugu's inter-workflow shared
 memory** (report §3.2.2) made literal: the same transport story the substrate already had, not a new invention.
 
-**Tool wire-up + rename: DONE (2026-07-02).** The agent tools now use the store, not files: `bio_remember` =
+**Tool wire-up + rename.** The agent tools now use the store, not files: `bio_remember` =
 `remember(author)` + a legible file view; `bio_recall`/`bio_list_memory` = `recall`/`listMemory` with an `asOf`
 time-travel param; `bio_forget` = `forget` (retraction); `bio_walk_memory` + the always-on recall index read the
 store. Skills are temporal too (`bio_create_skill` → `skill:<name>` observations, `src/hosts/skill-store.ts`), and
@@ -259,11 +259,11 @@ file path, and a `note` summary (slug/kind/title/hook/tags).
 
 ## Memory → graph projection
 
-`remember` (`src/hosts/memory-store.ts`) writes a note's `[[links]]` as edge observations into the ONE
+`remember` (`src/hosts/memory-store.ts`) writes a note's `[[links]]` as edge observations into the one
 `bio_observations` log. Two consumers of those edges: (1) `materializeBioEdgesAsOf` (`src/duckdb/observations.ts`)
 folds them into the `bio_edges_as_of` SQL closure **as of the recall clock**: the temporal, SQL-walkable graph
 projection; (2) the `bio_walk_memory` Pi tool, which currently does a **pure in-memory** bounded BFS
-(`walkMemoryGraph`, `src/core/study.ts`) over the **current** notes (`listMemory` at now), NOT the as-of SQL closure: a walk of `bio_edges_as_of` (time-travelled, SQL) is a deliberate later enhancement. The projections
+(`walkMemoryGraph`, `src/core/study.ts`) over the **current** notes (`listMemory` at now), not the as-of SQL closure: a walk of `bio_edges_as_of` (time-travelled, SQL) is a deliberate later enhancement. The projections
 (`studyNoteLinkEdges` / `studyNoteNode` / `studyNoteGraph`) stay pure and dangling-tolerant (an edge may
 reference an absent target). The CLI is `src/cli/memory.ts` (`memory list/show/history`, as-of by default),
 compiled via `src/cli/bin.ts` to the `pi-bio-agent` bin.

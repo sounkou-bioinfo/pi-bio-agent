@@ -1,6 +1,6 @@
 
 <!-- README.md is generated from README.Rmd — please edit that file, then `npm run readme:rmd`. -->
-<!-- The `pi` chunks run a LIVE Pi agent; the `biocli` chunks run the built CLI. Rendering needs a built `dist/` and (for `pi`) a model. -->
+<!-- The `pi` chunks run a live Pi agent; the `biocli` chunks run the built CLI. Rendering needs a built `dist/` and (for `pi`) a model. -->
 
 # pi-bio-agent
 
@@ -9,18 +9,17 @@
 v2+](https://img.shields.io/badge/License-GPL%20v2%2B-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen.svg)](package.json)
 
-A lean, provider-agnostic **bioinformatics substrate for Pi agents**.
-You point an agent at a manifest; it does schema discovery, writes its
-own read-only SQL over your data, and answers. Every run is recorded and
-reproducible, and the whole thing runs on your own infrastructure. Not a
-hosted product. A substrate.
+A lean, provider-agnostic library for **agent-controlled scientific
+computation**. You point an agent at a manifest; it does schema
+discovery, writes read-only SQL over your data, and answers through
+recorded, reproducible runs on infrastructure you control. Pi is the
+first host adapter, not the boundary of the system.
 
 ## See it
 
-Point a live Pi agent at a manifest and ask in plain English. It writes
-the SQL itself (we never hand it the query), runs it through the
-substrate, and answers. A real transcript, produced live when this
-README renders:
+Point a live Pi-hosted agent at a manifest and ask in plain English. It
+writes the SQL itself, runs it through the same library path used by the
+CLI, and answers. This transcript is produced when the README renders:
 
 ``` sh
 pi --model gpt-5.3-codex-spark -e extensions/pi-coding-agent/index.ts -p \
@@ -38,26 +37,29 @@ pi --model gpt-5.3-codex-spark -e extensions/pi-coding-agent/index.ts -p \
 > | stop_gained | 2        |
 > | synonymous  | 1        |
 
-That is the agent doing schema discovery and composing a `GROUP BY`, not
-returning a canned answer.
+The agent discovers the schema and composes the `GROUP BY`; the answer
+is not canned.
 
-## The bet
+## Architecture bets
 
-**Manifests, SQL, resources, and ontology data are the PROGRAM;
-TypeScript is only the interpreter.** Everything reduces to *data plus
-an injected effect port*, so every layer is a plug:
+**Manifests, SQL, resources, and ontology data are the program;
+TypeScript is the interpreter.** The core keeps workflow-specific
+behavior in data plus injected effect ports:
 
 - a new **question** is a manifest and SQL, never a new `.ts`;
 - a new **data format** is a *DuckDB extension* (`duckhts`, `anndata`,
   `duckdb_zarr`, `plinking_duck`, …);
 - a new **API** is an `ncurl_table` call over
-  **[ducknng](https://github.com/sounkou-bioinfo/ducknng)**, our owned,
-  community-signed, Arrow-native NNG transport;
+  **[ducknng](https://github.com/sounkou-bioinfo/ducknng)**, the
+  Arrow-native NNG transport maintained alongside this project;
 - a new **compute backend** (SLURM, Modal, an NNG pool) is one injected
   `JobDispatch`;
 - a new **model** is an injected judge.
 
-The interpreter stays thin; the agent writes the SQL.
+The interpreter stays thin. Application code can compose manifests,
+operations, producers, and host policy around the core; those
+compositions stay outside the core library unless repeated use exposes a
+missing primitive.
 
 ## How it works
 
@@ -73,7 +75,7 @@ DuckDB:
 | **Data**               | `duckdb.sql_materialize`: any read-only query over everything DuckDB reaches (local files, object stores, other DBs, lakes). A new format is a DuckDB *extension*, not new code: VCF/BAM ([`duckhts`](https://duckdb.org/community_extensions/extensions/duckhts)), single-cell ([`anndata`](https://duckdb.org/community_extensions/extensions/anndata)), [`duckdb_zarr`](https://duckdb.org/community_extensions/extensions/duckdb_zarr), [`plinking_duck`](https://duckdb.org/community_extensions/extensions/plinking_duck), even HTML or git history. |
 | **Network**            | `ducknng_ncurl_table`: an HTTP endpoint *is* a table function, URL/headers/body composed in SQL and JSON parsed into columns, no TypeScript. Plus `ducknng_run_rpc` (a live DB many processes write through) and NNG worker pools (push/pull, pub/sub, survey). `http.get` is the fallback where a build lacks ducknng.                                                                                                                                                                                                                                    |
 | **Compute**            | `process.compute`: what SQL is poor at (an `lm()` fit, a model) runs out-of-process over Arrow IPC. Only the data contract is SQL/Arrow; the computation is a contained child, not FFI.                                                                                                                                                                                                                                                                                                                                                                    |
-| **Knowledge + memory** | one SemanticSQL graph (`bio_edges` + its `entailed_edge` closure), so subsumption and graph-walks are one indexed join. Grounding runs deterministically first, abstains below threshold, and never invents a CURIE. Memory is *study notes* projected into the same graph, not prompt-stuffed context that rots.                                                                                                                                                                                                                                          |
+| **Knowledge + memory** | one SemanticSQL graph (`bio_edges` + its `entailed_edge` closure), so subsumption and graph-walks are one indexed join. Grounding runs deterministically first, abstains below threshold, and never invents a CURIE. Memory is *study notes* projected into the same graph, not prompt-only context that becomes stale.                                                                                                                                                                                                                                      |
 
 **The spine.** Facts, memory, `job:<id>:status`, and runs are not
 separate systems. They are rows in one append-only `bio_observations`
@@ -94,15 +96,14 @@ notes](docs/design.md) go deeper.
 
 ## More, live
 
-**The agent over live ClinVar.** Point it at
+**The agent over live ClinVar.** Point a Pi-hosted agent at
 [`clinvar-region.json`](examples/connectors/clinvar-region.json) and it
-reads a ClinVar VCF region straight over HTTP with `duckhts` (an htslib
-tabix range read of just the TP53 locus, not the whole file), discovers
-that `INFO_CLNSIG` is an array, and writes its own `UNNEST` +
-`GROUP BY`. Live when this README renders. Unlike the zero-config block
-above, this one is **host-provisioned**: it needs
-`npm run provision:duckhts` and a host that permits `duckhts`’s HTTP
-range reads (DuckDB-native egress, the host’s boundary):
+reads a ClinVar VCF region over HTTP with `duckhts` (an htslib tabix
+range read of the TP53 locus, not the whole file), discovers that
+`INFO_CLNSIG` is an array, and writes its own `UNNEST` + `GROUP BY`.
+This example is **host-provisioned**: it needs
+`npm run provision:duckhts` and a host that permits `duckhts` HTTP range
+reads (DuckDB-native egress is the host’s boundary).
 
 ``` sh
 pi --model gpt-5.3-codex-spark -e extensions/pi-coding-agent/index.ts -p \
@@ -257,12 +258,12 @@ shared job ledger, and a *separate worker process* runs the job and
 reports each phase (`running` → `succeeded`) over `ducknng_run_rpc` into
 the `job:<id>:status` slot the coordinator polls, which reads it back
 with the same `observationAsOfKey`. The worker can be any language that
-speaks NNG (Node here, or R via `nanonext`/`mirai`). This is the
-“AI-for-science” distributed backend as a *topology over data-in-SQL* on
-our owned transport, with status as inspectable data rather than opaque
-runtime state. Real separate processes, live when this README renders
-(the push/pull, pub/sub, and survey topologies are exercised the same
-way in [`scripts/`](scripts/) and [`test/`](test/)):
+speaks NNG (Node here, or R via `nanonext`/`mirai`). This is a
+distributed backend as a *topology over data-in-SQL* on ducknng, with
+status as inspectable data rather than opaque runtime state. Real
+separate processes, live when this README renders (the push/pull,
+pub/sub, and survey topologies are exercised the same way in
+[`scripts/`](scripts/) and [`test/`](test/)):
 
 ``` sh
 node scripts/nng-job-runner.mjs
@@ -275,10 +276,10 @@ node scripts/nng-job-runner.mjs
       [worker nng-worker-1 pid 3172992] reported 'succeeded' over ducknng RPC
       [coordinator] 'wgs-annotate-chr22' final status, read back from the shared slot: "succeeded"
 
-    A SEPARATE worker process wrote the job's status (running, then succeeded) into the coordinator's
+    A separate worker process wrote the job's status (running, then succeeded) into the coordinator's
     job:<id>:status slot over ducknng RPC, and the coordinator read it back with the same as-of query it
     uses for any observation. The job-store code did not change, and the worker can be any language that
-    speaks NNG. A language-agnostic distributed backend over our owned transport, not an opaque runtime.
+    speaks NNG. The transport is language-agnostic, and status remains queryable ledger data.
 
 **And files, not just status — because this is bioinformatics.** A job
 produces a *file* (a plot, a VCF), and another agent has to read it.
@@ -303,8 +304,8 @@ node scripts/nng-file-handoff.mjs
     from CAS. Files move by content address; the ledger moves the reference. No ducknng-fs needed: a shared
     CAS covers the HPC case, and a no-shared-FS deployment ships the CAS bytes over the same transport.
 
-**Now with real agents, not a script.** The handoff above is scripted
-plumbing. Here two *live* Pi agents do it over the substrate. A producer
+**Two-agent artifact handoff.** The handoff above is scripted plumbing.
+Here two *live* Pi-hosted agents use the same substrate. A producer
 agent, granted the compute and CAS ports by its entrypoint, runs an
 out-of-process R compute and captures the file outputs:
 
@@ -404,11 +405,10 @@ Every [example](examples/) carries a recorded, verified run, and
 
 ## Why a substrate, not a hosted product
 
-The hosted “AI for science” workbenches (e.g. [Claude
-Science](https://www.anthropic.com/news/claude-science-ai-workbench))
-ship the same primitives: auditable, reproducible artifacts, on-demand
-compute, dozens of connected databases, reviewer agents. We arrived at
-that spine independently. The difference is what it runs *on*:
+Hosted scientific workbenches commonly bundle auditable artifacts,
+on-demand compute, connected databases, and review workflows behind a
+service boundary. `pi-bio-agent` exposes the same kind of substrate as
+an importable library and CLI, with host-owned effects:
 
 |                 | a hosted workbench                    | **pi-bio-agent**                                                                                                                 |
 |-----------------|---------------------------------------|----------------------------------------------------------------------------------------------------------------------------------|
@@ -417,16 +417,16 @@ that spine independently. The difference is what it runs *on*:
 | where it runs   | a vendor’s cloud                      | **your** laptop, cluster, or HPC; an importable library + CLI where the host owns effects and egress                             |
 | trust model     | a model-based reviewer                | **fail-closed determinism**: strict-allowlist manifests, a read-only SQL guard, grounding that abstains                          |
 
-Same destination; we own the road. A UI is a thin client over the
-CLI/SDK. See [what the substrate closes over](docs/closes-over.md) for
-the agent-topology, Fugu, and RLM argument.
+A UI can be a thin client over the CLI/SDK. See [what the substrate
+closes over](docs/closes-over.md) for the agent-topology, Fugu, and RLM
+argument.
 
-**And the agent reads and writes these too.** The package ships its
-`examples/`, `docs/`, and every manifest, so an installed agent has the
-whole corpus on disk: it reads a connector to learn the pattern, then
-authors a new one itself. A new database, MCP server, or HTS source is a
-*file the agent writes*, not a feature request. Read → compose →
-validate → run → keep.
+**The agent can read and write the substrate artifacts.** The package
+ships its `examples/`, `docs/`, and every manifest, so an installed
+agent has the corpus on disk: it can read a connector to learn the
+pattern, then draft a new one. A new database, MCP server, or HTS source
+should normally enter as application-owned manifests or operation specs
+that can be read, composed, validated, run, and retained.
 
 ## Install in Pi
 
@@ -476,9 +476,9 @@ pi-bio-agent query examples/variant-counts/manifest.json --db :memory: \
 # run a declared, tested operation
 pi-bio-agent run examples/rare-high-impact/manifest.json --db :memory: --operation rare_high_impact.report
 
-# memory is append-only, as-of, attributed observations in the ONE store (agent:memory: in bio_observations)
+# memory is append-only, as-of, attributed observations in one store (agent:memory: in bio_observations)
 pi-bio-agent memory list
-pi-bio-agent memory show <slug> --as-of 2026-07-01T00:00:00Z   # time-travel: what memory said then
+pi-bio-agent memory show <slug> --as-of <ISO-8601-time>         # time-travel: what memory said then
 pi-bio-agent memory history <slug>                            # what changed, when, by whom
 ```
 
@@ -515,7 +515,8 @@ The primitives here are discovered, not invented; [what the substrate
 closes over](docs/closes-over.md) makes that argument with citations.
 Prior art and lineage:
 
-- **ClawBio**, the origin corpus this factors (“ClawBio for free”):
+- **ClawBio**, the origin corpus this factors into manifests, resolvers,
+  and operations:
   <https://github.com/ClawBio/ClawBio>
 - **Machine studying** (Li, Battle, Khattab, 2026):
   <https://jacobxli.com/blog/2026/machine-studying/>
@@ -523,9 +524,10 @@ Prior art and lineage:
   conducts): <https://sakana.ai/fugu/>
 - **Recursive Language Models / RLM** (REPL-over-context; `bio_query` is
   the SQL REPL): <https://arxiv.org/abs/2512.24601>
-- **ducknng**, our owned Arrow-native NNG transport, in the lineage of
-  R’s `nanonext` + `mirai`: <https://github.com/sounkou-bioinfo/ducknng>
-  · [NNG](https://nng.nanomsg.org/) ·
+- **ducknng**, the Arrow-native NNG transport maintained alongside this
+  project, in the lineage of R’s `nanonext` + `mirai`:
+  <https://github.com/sounkou-bioinfo/ducknng> ·
+  [NNG](https://nng.nanomsg.org/) ·
   [`nanonext`](https://github.com/r-lib/nanonext) ·
   [`mirai`](https://mirai.r-lib.org/)
 - **SemanticSQL** (the `bio_edges` + `entailed_edge` graph shape):

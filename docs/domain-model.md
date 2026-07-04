@@ -9,8 +9,8 @@ tags: [domain-model, resources, resolvers, temporality, manifests, execution-bac
 
 ## The domain bet
 
-> A bio agent is **not a pile of skills**. It is **time-aware, resource-addressed, operation-registered
-> bioinformatics execution and knowledge**: where concrete operations are registered, inspectable,
+> A bio agent is **time-aware, resource-addressed, and operation-registered
+> bioinformatics execution and knowledge**: concrete operations are registered, inspectable,
 > reproducible, and queryable.
 
 Core models the **grammar by which a domain becomes inspectable**, not all of bioinformatics. The clean
@@ -56,7 +56,7 @@ in core**: the test that rejects the speculative zoo (Feature/Sample/Cohort/Matr
 ```text
 core/         contracts, primitives, validators — no question-specific SQL, no Pi dependency, no domain zoo
 duckdb/       materialization, schema/view execution, graph sync
-extensions/   domain & operation packs: views, term sets, SQL operations, resolvers, fixtures
+extensions/   application-owned views, term sets, SQL operations, resolvers, fixtures
 hosts/        Pi, CLI, future JSON-RPC/MCP
 notes/        machine-studying memory, not authoritative facts
 ```
@@ -117,7 +117,7 @@ interface BioResolverSpec {       // DECLARATION — serializable, lives in a ma
   output: { mode: "inline" | "reference" | "content_address" | "table"; mediaType?: string; schemaRef?: string };
   temporal?: { kind: "snapshot" | "live" | "as_of"; source?: string; versionRequired?: boolean };
   // validated keys: id/version/title/description/output/temporal (unknown keys rejected). Network/compute POLICY is
-  // a HOST concern (injected effects fail closed), not a resolver-spec field; auth is host-owned (see http.get).
+  // a host concern (injected effects fail closed), not a resolver-spec field; auth is host-owned (see http.get).
 }
 type BioResolverImpl = (resource: VirtualResourceSpec, ctx: ResolutionContext) => Promise<ResolverOutput>;  // BINDING — runtime only
 interface ResolverOutput { result: ResourceHandle; sourceSnapshots: SourceSnapshot[]; provenance: Provenance[]; } // the impl returns only resolved data
@@ -216,7 +216,7 @@ interface BioOperationSpec {
 The operation's SQL returns the answer: classified rows, or a `GROUP BY` count. There is no report
 primitive and no TypeScript reducer: counts/aggregation are SQL.
 
-Question logic lives **here or in the registered operation pack: never in core helpers.**
+Question logic lives **here or in application-owned operation specs: never in core helpers.**
 
 ## Typed judgment: the determinism gradient
 
@@ -234,11 +234,11 @@ runGroundingJudgment(registry, { termSetId, question, minConfidence?, now }, jud
 This is a **pattern over existing primitives** (a term set + a thin validator), not a new registry kind:
 the model can choose or abstain, but it can never mint an id the substrate did not already register.
 
-## Domain packs & the manifest
+## Application manifests
 
-A manifest is the registration boundary for concrete implementations. It declares serializable specs;
+A manifest is the registration boundary for concrete application behavior. It declares serializable specs;
 **do not prebuild a giant framework: let the flagship pull each `provides.*` kind into existence.**
-(A manifest is simply THE PROGRAM: a named bag of `provides.*`, with no taxonomy tag the substrate must
+(A manifest is the program: a named bag of `provides.*`, with no taxonomy tag the substrate must
 interpret.)
 
 ```ts
@@ -253,10 +253,10 @@ interface BioManifest {
 }
 ```
 
-Examples (registered data, not guessed TS classes): a **genomics** pack provides `duckhts.read_bcf`/
+Examples (registered data, not guessed TS classes): a **genomics** application provides `duckhts.read_bcf`/
 `gnomad.frequency_lookup` resolvers, `so.loss_of_function` term set, and `rare_high_impact.report` SQL;
 **proteomics** provides mzML/FASTA resolvers, UniProt/GO sets, peptide/PSM SQL; **single-cell** provides
-h5ad/Zarr resolvers and PCA/UMAP SQL. Source dialect and analysis are SQL, not per-pack TypeScript.
+h5ad/Zarr resolvers and PCA/UMAP SQL. Source dialect and analysis are SQL, not per-application TypeScript.
 
 ## Execution backends: two transports, not a zoo
 
@@ -267,8 +267,8 @@ per-language backend enum. The congealed shape is **two transports over one subs
 type BioOperationTransport = "duckdb.sql";   // built today; a `process` transport is earned when a real pipeline needs it
 ```
 
-- **`duckdb.sql`** carries both **data** (files/formats as table functions) and **network** (`ducknng_ncurl_table`: an HTTP/GraphQL call IS a SQL table function, not a per-API TypeScript client).
-- **`process`** is the ONE general out-of-process backend (argv in a run dir over Arrow IPC). `Rscript`, `python`,
+- **`duckdb.sql`** carries both **data** (files/formats as table functions) and **network** (`ducknng_ncurl_table`: an HTTP/GraphQL call is a SQL table function, not a per-API TypeScript client).
+- **`process`** is the one general out-of-process backend (argv in a run dir over Arrow IPC). `Rscript`, `python`,
   `bcftools`, `nextflow`, `snakemake` are **argv presets over `process`**, never separate transports: one backend,
   not `runDeseq2()`/`runGatk()` sprawl. `process.compute` (the resolver form: table, file, and files-only outputs)
   is **built**; the operation-level `process` transport is earned, not prebuilt (see

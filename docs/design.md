@@ -7,19 +7,32 @@ tags: [architecture, boundaries, adapters, harness]
 
 # Design notes
 
-`pi-bio-agent` should remain a lean, provider-agnostic substrate for biomedical agents. The core should define the durable primitives; adapters, operations, skills, and study notes compose those primitives for particular workflows.
+`pi-bio-agent` should remain a lean, provider-agnostic library for agent-controlled scientific computation, with
+biomedical workflows as the first domain. The core should define durable primitives; application code, adapters,
+operations, skills, and study notes compose those primitives for particular workflows.
 
-## The bets (the roots everything else derives from)
+## Architecture bets
 
-1. **The manifest is the program; TypeScript is the interpreter.** A bio agent is not a pile of skills. Manifests, SQL, resources, and ontology data are the PROGRAM; core is a small set of generic primitives that runs them. A new question or data source is a new *manifest* (data), never a new `.ts`. If a question needs a new core file instead of a manifest/SQL/adapter, the bet is failing: redesign it as data.
+1. **The manifest is the program; TypeScript is the interpreter.** Manifests, SQL, resources, and ontology data
+   are the program; core is a small set of generic primitives that runs them. A new question or data source is a
+   new application-owned manifest or operation spec, not a new core file. If a question needs bespoke TypeScript instead of a
+   manifest, SQL, or adapter, the design has failed at its own boundary and should be redesigned as data.
 
 2. **In SQL we trust: four legs on one DuckDB substrate.**
    - **Data**: files and formats as SQL (`file_scan`, `duckhts` for VCF/BAM/BED/…).
-   - **Network**: HTTP, cross-process shared state, and multi-agent coordination as SQL, via the owned **ducknng** extension: `ncurl_table` (HTTP is a table function), `run_rpc` (a live shared mutable DB many processes write through), NNG topologies (pub/sub, push/pull, survey, bus, pair). ducknng is central, not a vehicle.
+   - **Network**: HTTP, cross-process shared state, and multi-agent coordination as SQL, via **ducknng**:
+     `ncurl_table` (HTTP is a table function), `run_rpc` (a live shared mutable DB many processes write through),
+     and NNG topologies (pub/sub, push/pull, survey, bus, pair). ducknng is part of the substrate, not an
+     incidental transport.
    - **Compute (code execution)**: code SQL is poor at (an `lm()` fit, an R/Python/Go tool) runs **out-of-process over Arrow IPC** (`process.compute`); only the data contract is SQL/Arrow, the computation is a contained child.
    - **Knowledge + memory**: ontologies and our own KG share one shape (`bio_edges` + `entailed_edge` closure, from SemanticSQL); grounding is deterministic-SQL-first with fail-closed model fallback. **Memory is machine studying**: the agent studies a corpus before a task is known and retains expertise as *study notes* projected into the KG: data it queries, distinct from *skills* (activated behavior) and *facts* (measured, tool-derived).
 
-3. **The discipline that keeps the bet honest.** Interfaces are the contract for in-process code; DI injects host **effects** (SQL conn, fetch, ProcessRunner, CAS), which **fail closed** when unbound. Identity is a **digest**; a human `version` is only a label; a `schema`/`.v1` tag lives only where bytes cross a real serialization/IPC boundary, never on every nested value. Manifests pass a **strict allowlist** so cut surface can't ride back as inert keys. The **judgment / approval decision** (model or human) is the one irreducible boundary: the substrate records and gates it, never computes it.
+3. **The discipline that keeps the bet honest.** Interfaces are the contract for in-process code; DI injects host
+   **effects** (SQL conn, fetch, ProcessRunner, CAS), which **fail closed** when unbound. Identity is a **digest**;
+   a human `version` is only a label; a `schema`/`.v1` tag lives only where bytes cross a real serialization/IPC
+   boundary, never on every nested value. Manifests pass a **strict allowlist** so removed surface cannot ride
+   back as inert keys. The **judgment / approval decision** (model or human) is the one irreducible boundary: the
+   substrate records and gates it, never computes it.
 
 ## Main boundary
 
@@ -41,10 +54,10 @@ Core contracts
 Execution adapters
   DuckDB read-only SQL                          (the substrate)
   ducknng    network as SQL (ncurl_table/_aio), cross-process shared-DB RPC (run_rpc),
-             and NNG topologies (pub/sub, push/pull, survey, bus, pair) — the owned extension
-             that makes network/distributed/multi-agent SQL-native
+             and NNG topologies (pub/sub, push/pull, survey, bus, pair) — the maintained
+             extension that makes network/distributed/multi-agent coordination SQL-native
   duckhts    HTS readers (VCF/BCF, BAM/CRAM, BED/GFF, tabix) as SQL table functions
-  process    out-of-process R / Python / Go / shell over Arrow IPC (the COMPUTE pillar)
+  process    out-of-process R / Python / Go / shell over Arrow IPC (the compute pillar)
   http.get   TS resolver + injected fetch — the fallback where a DuckDB build has no ducknng
 
 Storage/index adapters
@@ -67,12 +80,17 @@ skill sprawl in a different shape. (`variants.ts` holds only variant identity fo
 question-level builders in core.)
 
 > **Pre-1.0 core has no compatibility promise.** Remove speculative types rather than maintain unclear
-> abstractions: clarity over hodgepodge. Concrete biomedical behavior enters through operation/extension
+> abstractions. Concrete biomedical behavior enters through operation/extension
 > **manifests with tests**, never through convenience helpers in core. Keep only: (1) true primitives
 > (identity, coordinates, CURIEs, content addresses); (2) contracts with real boundaries (`BioManifest`,
 > `BioOperationSpec`, `ResourceHandle`, `BioRunSpec`, graph node/edge snapshot, study note); (3) adapters
 > with tests (DuckDB sync/report, Pi extension, CLI, project helpers). Everything else is removed until a
 > real consumer demands it.
+
+Application code has the same obligation. BioConnect-style connectors or case workflows that fetch, normalize, or
+score data beside the substrate are integration debt unless they are deliberately proving a missing primitive. The
+default path is application manifest or operation spec -> resolver/adapter -> DuckDB table -> recorded run. If
+application code keeps running around that path, the framework is not dogfooding itself.
 
 **Real abstraction, not idealist abstraction** (this sharpens "until a real consumer demands it", which is too
 crude). An abstraction may be built *ahead of any downstream consumer* when it is **immanent in the concrete**: the expressed essence of ≥2–3 things already built and nameable. `duckdb.sql_materialize` qualified: it was
@@ -83,13 +101,13 @@ from outside the work: a shape you can merely picture future things fitting (`Ex
 sprawl to refuse. The discipline that stops "emergent" from becoming a loophole: **name the existing instances
 the abstraction abstracts, never the future ones it might serve.**
 
-### Powerful by default, host-controlled effects, provenance-aware not policy-obsessed
+### Host-Controlled Effects
 
 > **The library is a substrate + receipt system, not a network/filesystem sandbox.** Like Pi, it gives
 > powerful local execution and leaves the *risk boundary* to the host/deployment: container, seccomp,
 > Firecracker, the Pi runtime, corporate egress, or a user-supplied sandbox extension. DuckDB's replacement
-> scans (`FROM 'x.parquet'`), httpfs remote reads, and extension autoloading are **features to ride, not
-> threats to police**; fighting them with brittle SQL regexes is fighting the substrate.
+> scans (`FROM 'x.parquet'`), httpfs remote reads, and extension autoloading are host-provisioned capabilities;
+> brittle SQL regexes are not a reliable sandbox.
 
 What the library *does* enforce is **accountability, not access**: every answer-producing run records the query
 that ran (a digest of the SQL **and** its bound params), the resources/sources it declared, the resolver
@@ -116,7 +134,8 @@ is a thin facade over those ports, with a named consumer, not a speculative inte
 
 ## Integration surfaces
 
-`pi-bio-agent` should not be Pi-only. Pi is the first and most important host adapter because it is where this package is used today, but the stable product is a small core library with multiple thin surfaces over the same registries.
+`pi-bio-agent` should not be Pi-only. Pi is the first host adapter because it is where this package is used today,
+but the stable product is a small core library with multiple thin surfaces over the same registries.
 
 Model-provider integration should use `pi-ai` and the Pi auth stack rather than bespoke provider code. If a surface needs model calls, it should resolve providers through `pi-ai` and credentials through Pi's modular model services: `ModelRegistry`, `AuthStorage`, OAuth helpers, and extension-level `registerProvider` when a provider must be added or overridden. The bio substrate should not grow its own model-provider registry, token store, or provider-specific fallback logic. `auth.json` remains one backend used by AuthStorage, not a bio-agent-owned file format.
 
@@ -124,7 +143,7 @@ Priority order:
 
 1. **TypeScript library API**: importable core contracts, validators, registries, and adapters. This is the source of truth.
 2. **Pi extension**: exposes registry inspection, study-note operations, skill drafting, SQL validation, and later operation execution inside Pi.
-3. **CLI**: scriptable local entry point for validation, indexing, operation-pack testing, and resource/CAS utilities. CLI output should support `--json` for automation.
+3. **CLI**: scriptable local entry point for validation, indexing, application-operation testing, and resource/CAS utilities. CLI output should support `--json` for automation.
 4. **JSON-RPC over stdio**: machine interface for editors, other agents, or wrappers that do not run inside Pi. Start with stdio rather than a daemon.
 5. **MCP server surface**: optional later wrapper that projects selected operations/resources as MCP tools/resources. MCP is a transport, not the core architecture.
 
@@ -149,7 +168,8 @@ operation.describe
 operation.dryRun
 ```
 
-Execution that can reach the network, run code, or materialize data should remain opt-in and policy-explicit even in CLI/JSON-RPC mode.
+Execution that can reach the network, run code, or materialize data should remain opt-in and policy-explicit in
+every host surface, including CLI and JSON-RPC.
 
 ## Pi coding-agent extension target
 
@@ -175,7 +195,7 @@ enabled by default (local, no ambient capability):
   resource materialization + local DuckDB query/operation execution
     (bio_query / bio_run_operation over an explicit dbPath)
 
-fails closed unless the HOST explicitly injects the capability:
+fails closed unless the host explicitly injects the capability:
   network (the `fetch` port — http.get; default entrypoint injects none)
   out-of-process code runtime (`process.compute` — the ProcessRunner grant)
   extension INSTALL + egress config on the connection (host-owned `duckdbInitSql`
@@ -188,12 +208,16 @@ never an agent tool param) is where a host runs `INSTALL`/`LOAD`. A *manifest* m
 **LOAD-only and fails closed** if the host has not already provisioned that extension, so it grants no
 new capability the host didn't install. Whether an agent can author such a manifest is the host's
 call. And DuckDB's *own* reachability (httpfs / replacement scans / htslib) once an extension IS
-loaded is a host-provisioned capability: egress confinement is the HOST's boundary (container /
+loaded is a host-provisioned capability: egress confinement is the host's boundary (container /
 seccomp / OS): the library is deliberately not the network/filesystem sandbox. See `docs/refinments.md`.
 
 ## HTTP/API integrations
 
-Many biomedical APIs are mostly the same shape: HTTP (REST or GraphQL) plus a thin layer of biomedical semantics. OpenTargets, Monarch, Ensembl REST/VEP REST, BioThings, ClinVar-style APIs, and similar services should not each become bespoke framework code: they are the **network pillar**: a REST GET or a GraphQL POST is a `ducknng_ncurl_table` call whose URL/body composes in SQL, so a new API is a new manifest, not a new client.
+Many biomedical APIs are mostly the same shape: HTTP (REST or GraphQL) plus a thin layer of biomedical semantics.
+OpenTargets, Monarch, Ensembl REST/VEP REST, BioThings, ClinVar-style APIs, and similar services should not each
+become bespoke framework code. They belong in the **network pillar**: a REST GET or a GraphQL POST is a
+`ducknng_ncurl_table` call whose URL/body composes in SQL, so a new API is an application-owned manifest or
+operation spec, not a new client.
 
 Target shape:
 
@@ -224,7 +248,7 @@ The thin description is still valuable when it encodes identifier namespaces, pr
 ## Execution beyond SQL: shell, R, and workflows as process operations
 
 A `duckdb.sql` operation is one transport. Long-running external work, a shell command, an `Rscript`, a Nextflow/Snakemake pipeline, an alignment or a variant caller, enters the **same way the question always
-does: as DATA, not a new TypeScript client.** A *process operation* declares a **command + inputs + declared
+does: as data, not a new TypeScript client.** A *process operation* declares a **command + inputs + declared
 outputs + tool/version**; a host-bound **executor** runs it; the result is **artifacts** (files → CAS), a
 streamed run record, and a receipt, not rows. Those artifacts re-enter as resolved resources for a downstream
 `file_scan` / `sql_materialize` → SQL operation, so a pipeline is just `op → artifact → resource → op`: the
@@ -247,15 +271,15 @@ Three things keep this consistent with the rest of the substrate:
   `BioRunStatus`/`BioRunEventType` stay closed because the state machine branches on them. `BioRunRecord` streams
   `started → progress → checkpoint → completed/failed`. A six-hour job is a `background`/`batch` run whose record
   accrues progress + checkpoints and ends in output artifacts.
-- **Out-of-process compute is BUILT: table, file, and files-only outputs.** The `process.compute` resolver
+- **Out-of-process compute is built: table, file, and files-only outputs.** The `process.compute` resolver
   (`src/duckdb/resolvers/process-compute.ts`) + the injected `ProcessRunner` port
   (`src/process/node-process-runner.ts`) run an out-of-process child (R/Python/Go/shell) over Arrow IPC with a
   script-bytes provenance digest, detached process-group kill on timeout/abort, and fail-closed-without-runner.
-  Three output shapes exist: a **TABLE** read back from the child's Arrow IPC (DuckDB → Arrow → child → Arrow →
-  table, `examples/process-compute`); declared **FILE outputs** captured content-addressed into **CAS**
+  Three output shapes exist: a **table** read back from the child's Arrow IPC (DuckDB → Arrow → child → Arrow →
+  table, `examples/process-compute`); declared **file outputs** captured content-addressed into **CAS**
   (`resultTable: "artifacts"` + `captureDeclaredOutputsToCas` in `src/duckdb/artifact-capture.ts`: relative-path-only, symlink/non-regular-file rejecting, realpath-confined to the work dir, byte-capped,
   fail-closed-without-CAS; `examples/process-artifacts`); and the **files-only** case where the resource's table
-  IS the captured-artifacts listing (`examples/process-files-only`). What is still missing is only the
+  is the captured-artifacts listing (`examples/process-files-only`). What is still missing is only the
   *operation-level* executor: a `process` **BioOperationTransport** (the OPERATION transport is still
   `duckdb.sql` only, `BioOperationTransport = "duckdb.sql"`), the argv-in-a-run-dir path for the six-hour batch /
   Nextflow-Snakemake case. The compute pillar's resolver path, table AND file artifacts, exists; the
@@ -290,7 +314,7 @@ The storage model is layered. Core should store handles, indexes, facts, and pro
 
 Use the filesystem for things humans and agents should be able to read, diff, and edit:
 
-- repo docs and operation-pack docs
+- repo docs and application-operation docs
 - skills (`SKILL.md`) as procedural playbooks
 - study notes / OKF-style concepts
 - generated examples and fixtures
@@ -412,7 +436,7 @@ when a graph query needs it. Composition
 (`op → artifact → resource → op`) is a lazy DAG: [targets](https://docs.ropensci.org/targets/) /
 [Nextflow](https://www.nextflow.io)-shaped.
 
-The discipline is the same as everywhere else: **the laziness lives in DATA** (the declared manifest/SQL is the
+The discipline is the same as everywhere else: **the laziness lives in data** (the declared manifest/SQL is the
 lazy expression), interpreted by thin TS. It is **dbplyr/targets, not [Effect-TS](https://effect.website) /
 fp-ts**: pulling in a TS
 lazy/effect monad would be the idealist move (a monad with no instances we need; the laziness is already in the
@@ -425,10 +449,10 @@ change with a preserved mtime can't false-hit). It is correct, not a stale-cache
 byte storage (CAS) for cross-db reuse, and remote freshness via HTTP cache validation (ETag `If-None-Match` →
 `304`, the shared index scoped per host `remoteCacheScope`). Scope note: `remoteCacheScope` is a
 `ResolutionContext` field, so the cross-db shared-remote reuse is active for a host that drives resolvers directly;
-the packaged run tools (`bio_query`/`bio_run_operation` → `runQuery`/`runOperation`) do **not** yet thread it, so
+the packaged run tools (`bio_query`/`bio_run_operation` → `runQuery`/`runOperation`) do not yet thread it, so
 that path does per-db 304 revalidation without the cross-db shared remote index. Threading `remoteCacheScope`
 through the run requests is a named, host-owned leftover, not an advertised default. `sql_materialize` reads arbitrary SQL/live sources
-and can't cheaply content-pin its inputs, so it is deliberately NOT memoized (it declares `live_source`; a run
+and can't cheaply content-pin its inputs, so it is deliberately not memoized (it declares `live_source`; a run
 over a live source is not put in the ActionCache and is `not_reproducible` without a CAS output pin). Derived tables (`scale_members`,
 `entailed_edge`) are pure and trivially safe (recompute). **`as_of` is now built** (Phase 4.0a): the temporal
 facts live in the append-only `bio_observations` (`src/duckdb/observations.ts`), `observationsAsOf(t)` is

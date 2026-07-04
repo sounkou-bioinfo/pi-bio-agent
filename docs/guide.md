@@ -158,7 +158,7 @@ Memory (notes and skills) is append-only, as-of, attributed observations in the 
 
 ```sh
 pi-bio-agent memory list                                      # current notes (as of now)
-pi-bio-agent memory show <slug> --as-of 2026-07-01T00:00:00Z  # time-travel: what memory said then
+pi-bio-agent memory show <slug> --as-of <ISO-8601-time>        # time-travel: what memory said then
 pi-bio-agent memory history <slug>                            # what changed, when, by whom
 ```
 

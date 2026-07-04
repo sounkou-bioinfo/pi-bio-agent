@@ -7,9 +7,7 @@ tags: [topologies, fugu, rlm, machine-studying, positioning]
 
 # What the substrate closes over
 
-Several frontier ideas in agent research, learned orchestration, REPL-over-context, multi-agent topologies, studying-before-the-task, are usually shipped as separate systems. In this substrate they are **not features to
-add**; they are consequences of one property: **addressable data + SQL + an owned transport**. We do not claim to
-*implement* these papers: we claim our substrate is the thing they approximate. Below, each with its reference.
+Several frontier ideas in agent research, learned orchestration, REPL-over-context, multi-agent topologies, and studying-before-the-task are usually shipped as separate systems. In this substrate they are consequences of one property: **addressable data + SQL + a maintained transport**. We do not claim to implement those papers directly; the claim is that the substrate exposes the lower-level machinery they rely on.
 
 ## Agent topologies: NNG protocols as agent patterns
 
@@ -109,16 +107,16 @@ task is known and retaining the expertise. Here that retention is **study notes 
 ## The unifying claim
 
 Learned orchestration, REPL-over-context, every topology, and studying-as-memory all reduce to **addressable data
-+ SQL + an owned transport**. That is why "a new question is a manifest," "a new format is a DuckDB extension," "a
-new compute backend is a `JobDispatch`," and "memory, compute, and facts are one temporal ledger" are the same
-sentence. We own the substrate those ideas are approximations of.
++ SQL + a maintained transport**. That is why "a new question is a manifest," "a new format is a DuckDB extension,"
+"a new compute backend is a `JobDispatch`," and "memory, compute, and facts are one temporal ledger" are the same
+sentence.
 
 ## Lineage: where the substrate came from
 
-The substrate is not a greenfield idea; it is the **factoring** of a working corpus. **ClawBio**, ~80 per-question bioinformatics skills, each a 12–26 KB bespoke program, is the origin: those skills factor into
+The substrate is not a greenfield idea; it is the **factoring** of a working corpus. **ClawBio**, roughly 80 per-question bioinformatics skills, each a 12–26 KB bespoke program, is the origin: those skills factor into
 *shared format resolvers + declared SQL operations + term sets + one generic runner*, which is exactly this
-library. Reproducing the ClawBio surface as **manifests + SQL**, zero new TypeScript per question, is
-**"ClawBio for free"**, and its `rhi_01` case is the flagship's ground truth
+library. Reproducing that surface as **manifests + SQL**, with no new TypeScript per question, is the flagship
+test, and its `rhi_01` case is the flagship's ground truth
 ([`rare-high-impact`](../examples/rare-high-impact/)).
 **Machine studying** is the memory half of the same bet: the agent studies a corpus *before* the task and keeps
 what it learns as queryable notes, not prompt context.
