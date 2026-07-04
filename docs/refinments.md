@@ -829,12 +829,15 @@ Open library questions to resolve before claiming that position:
 - **Generic long-running job/service lane:** this is bigger than `process.compute`. Agents, external compute,
   stateful kernels, queue workers, remote API jobs, and interactive services all need one durable lifecycle:
   submit/claim/heartbeat/wait/event/complete/cancel/status/collect, with replay and result handles recorded in the
-  ledger. Absurd is useful prior art here because the implementation is DB-native, not README-only: tasks, runs,
-  checkpoints, waits, events, and idempotency keys are tables; `claim_task` uses leased `FOR UPDATE SKIP LOCKED`
-  claims; `extend_claim` is heartbeat; `await_event` parks a run as sleeping; `emit_event` is first-write-wins and
-  wakes sleepers. Its honest limitation is pull-only workers. Our improvement should be a server-backed
-  `JobRunner`/queue over a `SqlConn`, where polling remains the source of truth and push is an optional wakeup
-  acceleration.
+  ledger. The first concrete library piece now exists: `hosts/job-queue.ts` provides a `SqlConn`-backed operational
+  queue with replay enqueue, atomic claim, lease heartbeat, waiting/park, and terminal finish. The observation
+  ledger remains the status/result audit truth; the queue is a mutable coordination index. Absurd is useful prior
+  art here because the implementation is DB-native, not README-only: tasks, runs, checkpoints, waits, events, and
+  idempotency keys are tables; `claim_task` uses leased `FOR UPDATE SKIP LOCKED` claims; `extend_claim` is
+  heartbeat; `await_event` parks a run as sleeping; `emit_event` is first-write-wins and wakes sleepers. A
+  queue-backed `JobRunner` now submits to that queue and reads status/result from the ledger, so hosts can use the
+  existing job-store path unchanged. Remaining library work is event keys, idempotency keys, checkpoint/result
+  handles, and push wakeups over ducknng/Quack/websocket/CLI; push is never the source of truth.
 - **Push is an accelerator, not the authority.** Over a ducknng server, workers can use raw NNG `push/pull` for
   distribution and `pub/sub` or monitor/event streams for wakeups; status/result still land in
   `job:<runId>:status` / `job:<runId>:result`. Over a DuckDB Quack server, the remote DB can be attached, queried,

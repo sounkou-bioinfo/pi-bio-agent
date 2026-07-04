@@ -10,8 +10,8 @@ import type { JsonValue } from "./json.js";
 //
 // This is the PORT (the seam a host implements); the interface is the contract. The in-memory fake is the second
 // impl from day one (the doctrine: accept interfaces, and a port earns itself only with a real second impl — the
-// fake is the mocking case). A real host backs it with a queue / worker pool / ducknng topology later — no NNG,
-// no cancel, no real out-of-process exec in L1.
+// fake is the mocking case). A real host can back it with the durable queue/lease primitives in hosts/job-queue.ts,
+// a worker pool, or a ducknng topology; the port does not care which transport accepted the replay.
 
 /** A run made durable+async. The replay spec is REQUIRED — a job you cannot reproduce is not a job (fail closed). */
 export interface JobSubmitSpec {

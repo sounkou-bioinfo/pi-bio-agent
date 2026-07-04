@@ -14,4 +14,6 @@ export * from "./skill-store.js";
 export * from "./in-memory-job-runner.js";
 export * from "./reproduce.js";
 export * from "./ledger-job-runner.js";
+export * from "./job-queue.js";
+export * from "./queue-job-runner.js";
 export * from "../process/node-process-runner.js"; // the ProcessRunner host adapter the guide/SDK reference

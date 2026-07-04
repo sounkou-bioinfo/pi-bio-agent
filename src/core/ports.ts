@@ -96,7 +96,9 @@ export type BioResolverImpl = (resource: VirtualResourceSpec, ctx: ResolutionCon
  * spawn a process on its own). The runner only spawns and reports — it does NOT touch DuckDB. The resolver owns
  * the Arrow-IPC marshalling (DuckDB `COPY (sql) TO arrow_in (FORMAT arrow)`, the process computes, DuckDB
  * `read_arrow(arrow_out)`), so the DATA contract stays in SQL/Arrow and the runner stays a thin, auditable exec
- * boundary. Out-of-process, not FFI: a crash/OOM/timeout in the computation is contained in the child.
+ * boundary. This is NOT the durable async lifecycle: a ProcessRunner call waits for one process exit. Long-running
+ * resume/status/cancel belongs to JobRunner + the queue/ledger layer, which may invoke this same payload boundary
+ * inside a worker. Out-of-process, not FFI: a crash/OOM/timeout in the computation is contained in the child.
  */
 export interface ProcessRunSpec {
   /** [executable, ...args] — an argv array, NEVER a shell string (so there is no shell to inject into). */
@@ -122,6 +124,7 @@ export interface ProcessRunResult {
 }
 
 export interface ProcessRunner {
+  /** One-shot execution. Async as a Promise, not a submit/status/collect job API. */
   run(spec: ProcessRunSpec): Promise<ProcessRunResult>;
   /** OPTIONAL reproducibility probe (C1): describe the environment a run WOULD execute in, as an OBSERVED
    *  EnvDescriptor, for the declared-vs-observed attestation. Absent => process.compute records an explicit

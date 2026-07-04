@@ -127,8 +127,8 @@ Phase 2 (done)   Network is SQL-native: ducknng_ncurl_table composes URL/headers
                  JSON -> table with no TS resolver; http.get is the fallback + fanout/retry seam.
 Phase 3 (done)   Out-of-process compute: process.compute (Arrow IPC) with timeout/output caps, process-
                  group kill, script-bytes provenance, fail-closed. Table, file, and files-only outputs
-                 all built (declared outputs captured into CAS). Remaining: operation-level long-running
-                 `process` transport (multi-output batch).
+                 all built (declared outputs captured into CAS). It is one-shot execution; durable async
+                 lifecycle belongs to the job lane below.
 Phase 4 (active) Safe harness-adaptation surface: declare -> validate -> test -> record -> activate ->
                  rollback. Consumes Phase 1's leftover (record = judgments as KG facts; activate/
                  rollback = as-of temporality). See slice status below.
@@ -175,17 +175,20 @@ the lane is **complete**.
 - **C1: environment identity + replay seed. Built.** Runtime-agnostic `EnvDescriptor` (composite
   layers, no runtime privileged), deterministic `envDigest`, explicit `unknown` (never a fake pin),
   declared-vs-observed attestation. Every run seeds `replay.json` with actual inputs. It does not execute replay.
-- **L1: async JobRunner skeleton.** A `JobRunner` port (submit/status/collect/cancel) over
-  `BioRunRecord` + job-status observations (same temporal substrate as Phase 4). In-memory fake first;
-  outputs → CAS. No NNG, no cancel yet.
+- **L1: async JobRunner skeleton. Built.** A `JobRunner` port (submit/status/collect/cancel) over
+  `BioRunRecord` + job-status observations (same temporal substrate as Phase 4). In-memory and ledger-backed
+  implementations exist; outputs can be CAS refs.
+- **L1.5: durable queue/lease coordination. Built.** `hosts/job-queue.ts` provides an operational queue over
+  `SqlConn`: enqueue replay specs, atomically claim the next available job, heartbeat/extend leases, park a
+  job as waiting, and finish a live claim. The observation ledger remains the status/result audit truth; the
+  queue is the worker coordination index.
 - **C2: reproduceRun().** Re-execute `replay.json` + attestation, diff digests →
   reproduced/diverged/not_reproducible (honest reasons, never fake confidence).
 - **L2/L3: durable resume + cancellation. Built.** Rehydrate job status without the runner; cancel
   records a terminal `cancelled` phase where the ledger wins over process memory. Strictly-monotonic,
   terminal-is-terminal.
 
-What stays the host's (named consumers now exist, and the coloc flagship forces the interface): micromamba/conda/renv/container execution, a cluster/queue
-JobRunner adapter (SLURM/k8s/Modal), scheduler, semantic env compatibility.
+What stays the host's (named consumers now exist, and the coloc flagship forces the interface): micromamba/conda/renv/container execution, SLURM/k8s/Modal adapters, scheduler policy, semantic env compatibility, and push notification.
 
 ### Later lane (not core): NNG host capabilities
 
@@ -196,7 +199,7 @@ FUSE host-port) and **execution/control** (pure NNG process calling, slotting be
 `ProcessRunner` port: no new core type). Order: `nngProcessRunner` (shared run dir/CAS, contract
 unchanged) → `process.nng_compute` (pure Arrow-over-NNG, cross-machine) → `ducknng-fs` host-port.
 
-The specific pending compute mode is therefore **NNG-backed process compute**, not a new operation semantics:
+The specific pending compute mode is therefore **NNG-backed stateful process compute**, not a new operation semantics:
 Arrow IPC payloads over ducknng to a remote or persistent worker, declared outputs captured to CAS, environment
 attestation recorded, and durable status/result/cancel exposed through the same `JobRunner` ledger. A persistent
 Python/R/Julia kernel is a sessionful runner implementation with explicit session handles and replay boundaries;
