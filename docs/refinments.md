@@ -691,24 +691,44 @@ The restricted-runtime contract (build before exposing powerful execution):
 
 ## KG and ontology substrate
 
-**Direction settled: the [SemanticSQL](https://github.com/INCATools/semantic-sql) shape.** The graph is `bio_edges(from_id, predicate,
-to_id)` (the statement/edge base) plus `entailed_edge` (the precomputed transitive closure). The same shape
-serves imported ontologies and our own committed graph; descendants/subsumption/graph-walk are one indexed
-JOIN, not a walker. See [`design.md`](./design.md#the-semanticsql-shape-statements--entailed_edge-one-substrate-for-graph-ontology-and-scales).
+**Direction settled: port the [SemanticSQL](https://github.com/INCATools/semantic-sql) source spec into DuckDB.**
+The upstream source of truth is LinkML: `statements(subject,predicate,object,value,datatype,language)`,
+`prefix(prefix,base)`, `entailed_edge(subject,predicate,object)`, plus generated views such as `edge`. Our local
+compiled graph is `bio_edges(from_id, predicate, to_id)` plus `entailed_edge` / `entailed_edge_as_of`. The same
+shape serves imported ontologies and our own committed graph; descendants/subsumption/graph-walk are one indexed
+JOIN, not a walker. See [`design.md`](./design.md#the-semanticsql-shape-source-spec---local-graph-tables).
 
 - Done: `entailed_edge` closure (`materializeEntailedEdges`, `src/duckdb/graph-closure.ts`): per-predicate
   transitive closure over `bio_edges`, indexed both directions; cycles terminate via UNION dedup.
 - Done: ordinal scales as data (`scale_members` from a ranked `TermSet`): total order to the graph's partial
   order; `decideGrounding` membership unchanged.
-- Next (deferred until a real grounding/traversal consumer): a thin ontology-ingest resolver that projects an
-  OBO ontology into our `statements` + `bio_edges` shape. No DuckDB sqlite extension: the real SemanticSQL
-  schema is four flat all-TEXT triple tables (`statements(subject,predicate,object,value,datatype,language)`,
-  `edge(s,p,o)`, `entailed_edge(s,p,o)`, `prefix`); their `edge` is our `bio_edges`. Ingest from a
-  native-readable format: OBO Graphs JSON via `read_json`, or build TSVs / triple parquet via
-  `duckdb.file_scan`, or an optional one-time `sqlite3` CLI dump → parquet (the sqlite3 binary, not DuckDB's
-  extension). Compute the closure with `materializeEntailedEdges` (we don't need their `entailed_edge`). Pin a
-  build date as provenance, honor per-ontology CC-BY. OLS4 REST only for fresh text→CURIE misses (judgment
-  tier); cached CURIEs + FTS are the deterministic projection tier; abstain below threshold.
+- Source-spec gap audit from `INCATools/semantic-sql`:
+  - **No schema-port generator yet.** Current tests hand-create `statements` and `bio_edges`; we do not yet parse
+    SemanticSQL LinkML or generate DuckDB DDL/views from the source spec.
+  - **`prefix` is missing as a first-class table.** CURIE/IRI expansion, prefix validation, and cross-database
+    identifier hygiene are still ad hoc.
+  - **Generated views are not modeled.** We only exercise label/synonym statements and direct edge rows, not the
+    generated `rdfs_*`, OMO synonym/mapping, OWL restriction/axiom, RO edge, subgraph, taxon-constraint,
+    similarity, or term-association views.
+  - **`edge` semantics are under-modeled.** In SemanticSQL, `edge` is a generated relation-graph view that folds
+    named subclasses, existential restrictions, subproperties, and selected type assertions. Our current import
+    test treats `edge` as already materialized rows.
+  - **Closure semantics are simpler.** SemanticSQL commonly consumes `relation-graph` output; our CTE closes each
+    declared predicate independently. That is good for local graphs, but not source-spec parity for equivalence,
+    reflexivity policy, property hierarchy, individuals, or imported precomputed closures.
+  - **Axiom annotations and provenance are not carried through.** OWL reified axioms, axiom annotations, evidence
+    xrefs, ontology status, and repair/problem views need a projection into receipts/trust/attrs rather than being
+    flattened away.
+  - **Multi-ontology attachment is not dogfooded.** SemanticSQL's SQLite pattern supports attached databases and
+    cross-ontology joins; we have not yet shown the DuckDB equivalent over attached/staged ontology artifacts.
+- Next (deferred until a real grounding/traversal consumer): a thin ontology-ingest resolver that ports the
+  SemanticSQL source schema into DuckDB staging tables and projects its `edge` view into our `bio_edges` shape.
+  No DuckDB sqlite extension is required: ingest from a native-readable format such as OBO Graphs JSON via
+  `read_json`, generated TSVs / triple parquet via `duckdb.file_scan`, or an optional one-time `sqlite3` CLI dump
+  -> parquet. Compute the closure with `materializeEntailedEdges` unless a pinned upstream `entailed_edge`
+  artifact is deliberately accepted. Pin a build date as provenance, honor per-ontology CC-BY. OLS4 REST only for
+  fresh text→CURIE misses (judgment tier); cached CURIEs + FTS are the deterministic projection tier; abstain
+  below threshold.
 - Add bounded graph-walk semantics with expansion handles so high-degree neighborhoods do not flood context
   (now a bounded SQL query over `entailed_edge`, not a custom walker).
 - Add trust/provenance fields consistently across facts, edges, and artifacts (`bio_edges.trust` exists; keep

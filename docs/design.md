@@ -431,12 +431,16 @@ DuckDB is the default local analytical store:
 
 DuckDB should hold hot structured facts and indexes. Large raw bytes stay in CAS/object storage or virtual resources unless there is a deliberate reason to import them.
 
-#### The SemanticSQL shape: statements + `entailed_edge` (one substrate for graph, ontology, and scales)
+#### The SemanticSQL shape: source spec -> local graph tables
 
-The graph layer follows [SemanticSQL](https://github.com/INCATools/semantic-sql) (how Bioconductor's
-[ontoProc2](https://github.com/vjcitn/ontoProc2) serves OBO ontologies): a tiny fixed relational shape, queried
-by plain SQL, with no graph runtime.
-Two tables carry it, and **the same shape serves imported ontologies and our own committed graph**: distinguished only by scope:
+The graph layer follows the [SemanticSQL](https://github.com/INCATools/semantic-sql) source spec: LinkML schemas
+compile to SQL base tables and views. The load-bearing source tables are `statements(subject, predicate, object,
+value, datatype, language)`, `prefix(prefix, base)`, and `entailed_edge(subject, predicate, object)`; `edge` is a
+generated view over statements/OWL-derived views, not a separate framework noun. Bioconductor's
+[ontoProc2](https://github.com/vjcitn/ontoProc2) and the [op2workshop](https://github.com/vjcitn/op2workshop)
+workflow are the lineage that made this source spec the right port target.
+
+Locally, the same shape serves imported ontologies and our own committed graph, distinguished only by scope:
 
 - **`bio_edges(from_id, predicate, to_id, attrs, trust)`**: the statement/edge base (`subject=from_id,
   predicate, object=to_id`). Labels, synonyms, definitions, and relations are all just rows; the predicate is

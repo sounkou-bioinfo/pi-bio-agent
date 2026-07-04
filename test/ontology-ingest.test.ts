@@ -6,12 +6,13 @@ import { duckdbNodeConn } from "../src/duckdb/node-api.js";
 import { duckdbFileScanResolver } from "../src/duckdb/resolvers/duckdb-file-scan.js";
 import { materializeEntailedEdges } from "../src/duckdb/graph-closure.js";
 
-// Proof that ingesting a real ontology needs NO DuckDB sqlite extension. SemanticSQL is four flat all-TEXT
-// triple tables; their `edge(subject,predicate,object)` IS our `bio_edges`, and `entailed_edge(s,p,o)` is what
-// we already compute. So we ingest the triples from CSV with the EXISTING duckdb.file_scan resolver (native
-// read_csv), map the SemanticSQL column names to ours in ONE line of SQL (dialect = data), compute our own
-// closure, and ground + expand — all native, no extension, no new ingest code. (The same holds for OBO Graphs
-// JSON via read_json, or a triple parquet — file_scan reads them all.)
+// Proof that ingesting a real ontology needs NO DuckDB sqlite extension. The canonical SemanticSQL schema is
+// LinkML: base tables such as statements/prefix/entailed_edge plus generated views such as
+// edge(subject,predicate,object). This fixture models the post-view edge rows as CSV, ingests them with the
+// EXISTING duckdb.file_scan resolver (native read_csv), maps the SemanticSQL column names to ours in ONE line of
+// SQL (dialect = data), computes our own closure, and grounds + expands — all native, no extension, no new ingest
+// code. (The same holds for OBO Graphs JSON via read_json, generated TSVs, or triple parquet — file_scan reads
+// them all.)
 
 const manifest: BioManifest = {
   schema: "pi-bio.manifest.v1", id: "ontology-ingest", version: "0.1.0",

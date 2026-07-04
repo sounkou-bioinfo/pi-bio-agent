@@ -32,9 +32,10 @@ DuckDB is the default tabular and graph substrate for `pi-bio-agent`.
 ## Stable views
 
 Backends should expose stable views even when the physical source is an extension call, parquet file, attached DuckDB database, or shell-produced staging file.
-For ontology sources, this includes INCAtools/Semantic SQL SQLite databases: attach or stage their rows, then
-project them into the generic ontology views below. SQLite is the interchange artifact; DuckDB remains the
-joined/queryable substrate for agent-authored SQL and recursive closure.
+For ontology sources, this means port the canonical INCAtools/Semantic SQL LinkML schema shape, not an
+application-specific wrapper: `statements`, `prefix`, `entailed_edge`, plus generated views such as `edge`.
+SQLite Semantic SQL databases are interchange artifacts; DuckDB remains the joined/queryable substrate for
+agent-authored SQL and recursive closure.
 
 Suggested stable views:
 

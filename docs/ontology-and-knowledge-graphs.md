@@ -70,27 +70,34 @@ The important principle: labels are not semantics. A domain phrase becomes usefu
 
 ### Semantic SQL to DuckDB
 
-The direct lineage here is [INCAtools Semantic SQL](https://github.com/INCATools/semantic-sql) and the
-[op2workshop](https://github.com/vjcitn/op2workshop) / ontoProc2 workflow. That stack already proves the useful
-shape: biomedical ontologies can be distributed as common SQLite artifacts, connected with
-`semsql_connect(ontology="mondo")`, searched for labels, inspected by CURIE, and traversed for descendants.
-The workshop then brings MONDO CURIEs back to GWAS catalog interpretation rather than leaving ontology work as
-an isolated browser task.
+The direct lineage is the [INCAtools Semantic SQL](https://github.com/INCATools/semantic-sql) source spec.
+[op2workshop](https://github.com/vjcitn/op2workshop) / ontoProc2 is the discovery route that made the fit obvious:
+biomedical ontologies can be distributed as common SQLite artifacts, connected with
+`semsql_connect(ontology="mondo")`, searched for labels, inspected by CURIE, traversed for descendants, and then
+joined back to GWAS phenotype interpretation. The schema we port, however, is the source LinkML spec in
+`INCATools/semantic-sql`, not the workshop package.
 
-`pi-bio-agent` should translate that substrate rather than wrap it as a special ontology client. The import path is:
+Semantic SQL's source of truth is LinkML. It compiles to SQL base tables and views: `statements` for RDF triples
+(`subject`, `predicate`, `object`, `value`, `datatype`, `language`), `prefix` for CURIE expansion, and
+`entailed_edge` for relation-graph closure. Tables like `edge`, `rdfs_label_statement`, and other
+domain-specific statement tables are generated views over those base tables.
+
+`pi-bio-agent` should port that source schema shape into DuckDB rather than wrap it as a special ontology client.
+The import path is:
 
 ```text
-Semantic SQL SQLite tables -> DuckDB staging tables -> bio_edges / entailed_edge -> manifest SQL
+Semantic SQL LinkML source spec -> SQLite/Semantic SQL artifacts -> DuckDB staging tables
+  -> bio_edges / entailed_edge -> manifest SQL
 ```
 
-SQLite is a source format; DuckDB is the query substrate. The currently exercised path maps Semantic SQL
-`edge(subject,predicate,object)` into `bio_edges(from_id,predicate,to_id)`, keeps label/synonym statements in a
-DuckDB table for grounding, and recomputes closure with `entailed_edge`. A richer resolver can also project CURIEs,
-labels, definitions, synonyms, predicates, xrefs, obsolete flags, source ontology, and version/provenance into the
-stable `ontology_terms`, `ontology_edges`, and `ontology_mappings` views above. This keeps ontology lookup,
-descendant expansion, term-set materialization, GWAS phenotype joins, and agent-authored SQL in one execution
-model. Do not add a MONDO/HPO/OLS-specific helper when a resolver can materialize the Semantic SQL rows into the
-generic graph contract.
+SQLite is an interchange artifact; DuckDB is the query substrate. The currently exercised path maps Semantic SQL
+`edge(subject,predicate,object)` into `bio_edges(from_id,predicate,to_id)`, keeps label/synonym `statements` in a
+DuckDB table for grounding, and recomputes closure with our `entailed_edge` materializer. A richer resolver can
+also project CURIEs, labels, definitions, synonyms, predicates, xrefs, obsolete flags, source ontology, and
+version/provenance into the stable `ontology_terms`, `ontology_edges`, and `ontology_mappings` views above. This
+keeps ontology lookup, descendant expansion, term-set materialization, GWAS phenotype joins, and agent-authored
+SQL in one execution model. Do not add a MONDO/HPO/OLS-specific helper when a resolver can materialize the
+Semantic SQL schema into the generic graph contract.
 
 ## Knowledge graph
 

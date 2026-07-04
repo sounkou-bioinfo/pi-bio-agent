@@ -63,14 +63,17 @@ means graph-as-SQL over DuckDB, SemanticSQL edges, memory, and run
 ledgers.
 
 The ontology path is the same bet in a more concrete biomedical form.
-[INCAtools Semantic SQL](https://github.com/INCATools/semantic-sql) and
-[`op2workshop`](https://github.com/vjcitn/op2workshop) show ontologies
-distributed as common SQLite artifacts, queried by CURIE, label, and
-descendant closure. Locally, the exercised path maps Semantic SQL
-statement/edge rows into DuckDB tables, then uses the same `bio_edges` /
-`entailed_edge` closure shape as observations and memory. Richer
-adapters can project those rows into the stable `ontology_*` views when
-term metadata or mappings matter.
+[`op2workshop`](https://github.com/vjcitn/op2workshop) pointed us back
+to the canonical [INCATools Semantic
+SQL](https://github.com/INCATools/semantic-sql) source spec: LinkML
+schemas that compile to SQL base tables and views. The source schema’s
+load-bearing tables are `statements`, `prefix`, and `entailed_edge`;
+`edge` and the domain-specific statement tables are generated views over
+those tables. Locally, the exercised path ports that schema shape into
+DuckDB: Semantic SQL statement/edge rows become DuckDB tables, then use
+the same `bio_edges` / `entailed_edge` closure shape as observations and
+memory. Richer adapters can project those rows into stable `ontology_*`
+views when term metadata or mappings matter.
 
 The judgment boundary follows the same discipline.
 [`metacurator`](https://github.com/seandavi/metacurator) is useful here
@@ -538,8 +541,8 @@ Prior art and lineage:
   and operations: <https://github.com/ClawBio/ClawBio>
 - **metacurator**, deterministic curation stages plus a typed judgment
   boundary: <https://github.com/seandavi/metacurator>
-- **op2workshop / ontoProc2**, Semantic SQL ontology artifacts used for
-  CURIE search and closure: <https://github.com/vjcitn/op2workshop>
+- **op2workshop / ontoProc2**, the workshop lineage that led us back to
+  the Semantic SQL source spec: <https://github.com/vjcitn/op2workshop>
 - **Machine studying** (Li, Battle, Khattab, 2026):
   <https://jacobxli.com/blog/2026/machine-studying/>
 - **Sakana Fugu** (learned orchestration over shared memory and access
@@ -552,7 +555,8 @@ Prior art and lineage:
   [NNG](https://nng.nanomsg.org/) ·
   [`nanonext`](https://github.com/r-lib/nanonext) ·
   [`mirai`](https://mirai.r-lib.org/)
-- **SemanticSQL** (the `bio_edges` + `entailed_edge` graph shape):
+- **SemanticSQL** (canonical LinkML source schema for `statements`,
+  `prefix`, generated views, and `entailed_edge`):
   <https://github.com/INCATools/semantic-sql>
 - Design thread (sounkou-bioinfo × Manuel):
   [LinkedIn](https://www.linkedin.com/feed/update/urn:li:activity:7473824764575436800)
