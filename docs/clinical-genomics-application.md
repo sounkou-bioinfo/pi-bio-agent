@@ -1,19 +1,19 @@
 ---
 type: Proposal
-title: "BioConnect: an end-to-end clinical-genomics application on pi-bio-agent"
-description: "The flagship APPLICATION product that consumes pi-bio-agent as a library: staged, deterministic-first variant analysis (case structuring, annotation, HPO, prioritization, scoring, ACMG, family-aware interpretation) with recorded-and-gated judgment. Read before scoping the application or a paper."
+title: "Generic clinical-genomics application on pi-bio-agent"
+description: "A downstream APPLICATION pattern that consumes pi-bio-agent as a library: staged, deterministic-first variant analysis (case structuring, annotation, HPO, prioritization, scoring, ACMG, family-aware interpretation) with recorded-and-gated judgment. Read before scoping clinical-genomics applications or papers."
 tags: [flagship, application, clinical-genomics, product, reproducibility]
 ---
 
-# BioConnect: an end-to-end clinical-genomics application on pi-bio-agent
+# Generic clinical-genomics application on pi-bio-agent
 
-BioConnect is a **downstream application product**, not part of the library. It consumes `pi-bio-agent` the way
-the thesis intends: the library ships primitives; the application brings the workflow, the manifests, the
-producers, and the domain rules. If BioConnect runs a real clinical-genomics case end to end with the library
-essentially unchanged, the bet is demonstrated at product scale, not just in the walking skeleton.
+This is a **downstream application pattern**, not part of the library. It consumes `pi-bio-agent` the way the thesis
+intends: the library ships primitives; the application brings the workflow, the manifests, the producers, and the
+domain rules. If a real clinical-genomics case-analysis application runs end to end with the library essentially
+unchanged, the bet is demonstrated at product scale, not just in the walking skeleton.
 
-It is the **rare-high-impact flagship grown up**: same substrate, same abstention/no-diagnosis gates, a real
-staged workflow instead of three synthetic variants.
+It generalizes the **rare-high-impact example**: same substrate, same abstention/no-diagnosis gates, a real staged
+workflow instead of three synthetic variants.
 
 ## The mental model
 
@@ -22,15 +22,15 @@ staged workflow instead of three synthetic variants.
 
 DuckDB does retrieval, filtering, aggregation, and baseline scoring, deterministically. The model is called only on
 the *reduced* candidate set, for interpretation and synthesis, and its output is recorded and gated. That is design
-bet #1 (the manifest is the program) and #2 (four legs on one DuckDB substrate), arriving independently from a
-clinical team ([`bioconnect-flagship`](../docs/roadmap.md), study synthesis 2026-07-03).
+bet #1 (the manifest is the program) and #2 (four legs on one DuckDB substrate), stated as a reusable application
+architecture.
 
 ## The staged workflow, mapped to primitives
 
 Each stage names the `pi-bio-agent` primitive it uses and whether it is a **manifest** the app composes, an **app
 producer** (host code the app owns), or the substrate's existing **record + gate**. There is no "library build"
 column: on re-examination every stage composes primitives we already ship (see
-[`refinments.md`](./refinments.md#bioconnect-does-the-library-need-anything-new-2026-07-03-re-examined)).
+[`refinments.md`](./refinments.md#generic-clinical-genomics-application-does-the-library-need-anything-new-2026-07-03-re-examined)).
 
 | # | Stage | Primitive | Where it lives |
 |---|---|---|---|
@@ -64,11 +64,11 @@ new primitive — each is a composition of things already shipped, so it stays a
 3. **Ledger → training dataset** is not a build — a `SELECT`/view over `bio_observations` joined to the Phase-4
    approval slots (contested = a `WHERE` over decisions), with a documented dataset schema.
 
-So BioConnect is a **manifest pack + producers + a thin case-analysis agent** over the existing library, which
-validates the bet: the substrate absorbed a real clinical workflow with ~zero new primitives. The one
+So the downstream application is a **manifest pack + producers + a thin case-analysis agent** over the existing
+library, which validates the bet: the substrate absorbs a real clinical workflow with ~zero new primitives. The one
 library-adjacent scrap is a field, not an abstraction: let a resolver receipt carry `license` + de-id status next to
-`source`/`version`. Everything else (calibration weights, ACMG points, scoring rules, the agent and its tools) is
-app code. The library does not learn a domain.
+`source`/`version`. Everything else (calibration weights, ACMG points, scoring rules, the agent and its tools) is app
+code. The library does not learn a domain.
 
 ## Production and reproducibility (the regulatory-fit argument)
 
@@ -97,24 +97,18 @@ Clinical genomics is regulated, so this is the section a paper needs.
 - **PII / BAA.** The rule is a decision, not a caveat: if a model request contains PII, a **local model or a
   provider BAA is mandatory**; if PII is stripped first, any model (local or cloud, no BAA) is fine. So
   de-identification is a *preprocessing gate* before the heavier judgment model — a `process.compute` op or a
-  wrapped-`fetch` decorator running a local PII-detection/removal model (e.g. OpenMed's clinical PII models: HIPAA
-  Safe Harbor, the 19 identifiers — names, DOB, MRN, SSN, addresses; see
-  [Maziyar Panahi / OpenMed](https://x.com/MaziyarPanahi/status/2011216438883676265)). It is a host port decorator,
-  not core; the receipt records that de-id ran and which model/version. (Note: this is itself a *differentiated
-  intelligence* instance — a small specialized local model for one bounded task — so the same small-tuned-model
-  pattern shows up twice in the pipeline, at de-id and at HPO extraction.) In the current dataset PII was removed
-  upfront and the genotypes are synthetic, so HPO extraction has no model restriction; the gate matters for real
-  clinical text.
+  wrapped-`fetch` decorator running a local PII-detection/removal model against HIPAA Safe Harbor-style identifiers
+  such as names, dates of birth, medical record numbers, Social Security numbers, and addresses. It is a host port
+  decorator, not core; the receipt records that de-id ran and which model/version. For synthetic or pre-deidentified
+  fixtures this gate is expected to be a no-op; for real clinical text it is mandatory.
 
 ## The judgment data plane
 
-The Bridgewater/Thinking-Machines result (fine-tune a small model to org taste, beat frontier ~30% fewer errors at
-~14× lower cost) is the **complement** to this application, not a competitor. They *train* the judge; we *record
-and gate* it. But the `bio_observations` ledger + CAS **is** the provenanced (input, judgment) corpus a fine-tune
-assumes, and their contested-example verification (train on cheap labels, route disagreements to experts) **is**
-this app's abstain-and-route grounding plus the Phase-4 approval gate. BioConnect produces the data plane; whether
-to train a differentiated model on it is the host's call (the trained conductor we deliberately leave out). Build
-#3 (the exporter) is the seam.
+Fine-tuning or otherwise specializing a small model to an organization's review preferences is the **complement** to
+this application, not a competitor. The application does not train the judge; it records and gates judgments. But the
+`bio_observations` ledger + CAS **is** the provenanced `(input, judgment)` corpus such training assumes, and
+contested-example verification maps directly onto abstain-and-route grounding plus the Phase-4 approval gate. The
+application produces the data plane; whether to train a differentiated model on it is the host's call.
 
 ## Safety gates (inherited, non-negotiable)
 
@@ -138,7 +132,7 @@ quality.
 
 ## The bet, at product scale
 
-pi-bio-agent stays a lean substrate. BioConnect is the host that brings the backend: a manifest pack, a few
-producers, and a thin case-analysis agent, with **zero new library primitives**. If it runs a real
-case end to end under the gates, with the annotation source and every tool/DB/API version in the receipt and the
-model's judgment recorded and signed off, the substrate has done its job: the application is composed, not coded.
+pi-bio-agent stays a lean substrate. The application host brings the backend: a manifest pack, a few producers, and
+a thin case-analysis agent, with **zero new library primitives**. If it runs a real case end to end under the gates,
+with the annotation source and every tool/DB/API version in the receipt and the model's judgment recorded and signed
+off, the substrate has done its job: the application is composed, not coded.

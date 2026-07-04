@@ -9,14 +9,14 @@ tags: [refinements, open-issues, worklog]
 
 Open design issues and cleanup targets. Keep this file focused on what still needs sharpening before the abstractions harden.
 
-## BioConnect: does the library need anything new? (2026-07-03, re-examined)
+## Generic clinical-genomics application: does the library need anything new? (2026-07-03, re-examined)
 
-First pass named three "immanent library builds" for the BioConnect flagship
-([`bioconnect-application.md`](./bioconnect-application.md)). Applying our own anti-idealist rule
+First pass named three "immanent library builds" for a downstream clinical-genomics application
+([`clinical-genomics-application.md`](./clinical-genomics-application.md)). Applying our own anti-idealist rule
 ([`design.md`](./design.md#core-boundary)) honestly, **none is a necessary library primitive** — each is a
-manifestation/composition of primitives we already ship. The stronger, correct finding: BioConnect is a **manifest
-pack + producers + an agent over the EXISTING library**, needing ~zero new library code. That validates the bet
-harder than a "build" would. Add a thin convenience only when ≥2 real uses demand it, never before.
+manifestation/composition of primitives we already ship. The stronger, correct finding: the application is a
+**manifest pack + producers + an agent over the EXISTING library**, needing ~zero new library code. That validates
+the bet harder than a "build" would. Add a thin convenience only when ≥2 real uses demand it, never before.
 
 1. **Grounding "harness with modes" — NOT a build.** `decideGrounding` (`src/core/judgment.ts`) ALREADY is the
    candidates→model mode (deterministic match → abstaining model, no invented CURIE, recorded + gated). The others
@@ -37,7 +37,8 @@ harder than a "build" would. Add a thin convenience only when ≥2 real uses dem
 Also app/host, not library: unique-key dedup (a SQL `DISTINCT` idiom); scoring weights + ACMG points + calibration
 (authored rules, app producers with tests); PII de-id + license gating (host port decorators — the one small
 library-adjacent item is letting the resolver receipt carry `license` + de-id status alongside `source`/`version`,
-so the host can gate on provenance). Net: the library's BioConnect to-do is essentially empty; the work is app-side.
+so the host can gate on provenance). Net: the library's clinical-genomics application to-do is essentially empty; the
+work is app-side.
 
 ## Naming and layering
 

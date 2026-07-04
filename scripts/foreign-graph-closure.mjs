@@ -64,13 +64,16 @@ async function main() {
   const twoHopDirect = await conn.all("SELECT 1 FROM bio_edges WHERE from_id='HP:0001250' AND to_id='HP:0000707'");
   assert(twoHop.length === 1 && twoHopDirect.length === 0, "closure derived the 2-hop subsumption HP:0001250 -> HP:0000707 (not a direct edge)");
 
-  // 4c) the ontology-aware gene walk BioConnect needs: gene -has_phenotype-> leaf, leaf -subclass*-> ancestor.
+  // 4c) the ontology-aware gene walk a clinical-genomics app needs: gene -has_phenotype-> leaf, leaf -subclass*-> ancestor.
   const walk = await conn.all(`
-    SELECT e.from_id AS gene, p.from_id AS leaf, e.to_id AS ancestor
+    SELECT p.from_id AS gene, p.to_id AS leaf, e.to_id AS ancestor
     FROM bio_edges p
     JOIN entailed_edge e ON e.from_id = p.to_id AND e.predicate = 'biolink:subclass_of'
     WHERE p.predicate = 'biolink:has_phenotype' AND p.from_id = 'NCBIGene:6323' AND e.to_id = 'HP:0000707'`);
-  assert(walk.length >= 1, "gene reaches an ANCESTOR phenotype via has_phenotype + subsumption closure (the phenotype-aware gene walk)");
+  assert(
+    walk.some((r) => r.gene === "NCBIGene:6323" && r.leaf === "HP:0001250" && r.ancestor === "HP:0000707"),
+    "gene reaches an ANCESTOR phenotype via has_phenotype + subsumption closure (the phenotype-aware gene walk)",
+  );
 
   console.log("  PROVED: an external ATTACHed graph, projected by column map, is walked by the SAME entailed_edge closure");
   console.log(`    gene NCBIGene:6323 -has_phenotype-> HP:0001250, and HP:0001250 -subclass*-> HP:0000707 (derived), so the gene is phenotype-linked to the ancestor.`);
