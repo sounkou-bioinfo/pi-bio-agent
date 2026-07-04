@@ -440,7 +440,11 @@ generated view over statements/OWL-derived views, not a separate framework noun.
 [ontoProc2](https://github.com/vjcitn/ontoProc2) and the [op2workshop](https://github.com/vjcitn/op2workshop)
 workflow are the lineage that made this source spec the right port target.
 
-Locally, the same shape serves imported ontologies and our own committed graph, distinguished only by scope:
+Locally, the same shape serves imported ontologies and our own committed graph, distinguished only by scope. The
+projection contract is symmetric: a remote KG table, a SemanticSQL staging table, an app producer result, a memory
+link, or an edge-like `bio_observations` row can all declare how it projects into the same graph columns. That
+declaration is the graph projection profile: source columns, CURIE-prefix registry, generated-view policy,
+transitive-predicate policy, temporal/as-of policy, and provenance fields.
 
 - **`bio_edges(from_id, predicate, to_id, attrs, trust)`**: the statement/edge base (`subject=from_id,
   predicate, object=to_id`). Labels, synonyms, definitions, and relations are all just rows; the predicate is

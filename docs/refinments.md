@@ -737,10 +737,13 @@ JOIN, not a walker. See [`design.md`](./design.md#the-semanticsql-shape-source-s
   fresh text→CURIE misses (judgment tier); cached CURIEs + FTS are the deterministic projection tier; abstain
   below threshold.
 - Immanent refinement exposed by the gap audit: a **graph projection profile**, not a convenience tool zoo. A
-  profile is data that says how a foreign source becomes the compiled graph: source tables/columns, CURIE-prefix
-  registry, generated-view policy (`edge`, labels, synonyms, restrictions), transitive-predicate policy, closure
-  source (`relation-graph` artifact vs local CTE), and provenance/license fields. The existing resolver + SQL +
-  closure primitives execute that profile; the profile makes the projection repeatable, reviewable, and receipted.
+  profile is data that says how any source relation becomes a graph projection: foreign KGs (`monarch.denormalized_edges`),
+  SemanticSQL staging tables (`statements` / generated `edge`), internal producers, memory links, and
+  `bio_observations` as-of views all compile through the same contract. The profile declares source
+  tables/columns, CURIE-prefix registry, generated-view policy (`edge`, labels, synonyms, restrictions),
+  transitive-predicate policy, closure source (`relation-graph` artifact vs local CTE), temporal/as-of policy,
+  and provenance/license fields. The existing resolver + SQL + closure primitives execute that profile; the
+  profile makes the projection repeatable, reviewable, and receipted.
 - Add bounded graph-walk semantics with expansion handles so high-degree neighborhoods do not flood context
   (now a bounded SQL query over `entailed_edge`, not a custom walker).
 - Add trust/provenance fields consistently across facts, edges, and artifacts (`bio_edges.trust` exists; keep
