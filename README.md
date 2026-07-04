@@ -62,6 +62,16 @@ useful signal shifts between structure, features, and labels. Here that
 means graph-as-SQL over DuckDB, SemanticSQL edges, memory, and run
 ledgers.
 
+The ontology path is the same bet in a more concrete biomedical form.
+[INCAtools Semantic SQL](https://github.com/INCATools/semantic-sql) and
+[`op2workshop`](https://github.com/vjcitn/op2workshop) show ontologies
+distributed as common SQLite artifacts, queried by CURIE, label, and
+descendant closure. Locally, the exercised path maps Semantic SQL
+statement/edge rows into DuckDB tables, then uses the same `bio_edges` /
+`entailed_edge` closure shape as observations and memory. Richer
+adapters can project those rows into the stable `ontology_*` views when
+term metadata or mappings matter.
+
 The judgment boundary follows the same discipline.
 [`metacurator`](https://github.com/seandavi/metacurator) is useful here
 because its implementation separates deterministic curation stages from
@@ -528,6 +538,8 @@ Prior art and lineage:
   and operations: <https://github.com/ClawBio/ClawBio>
 - **metacurator**, deterministic curation stages plus a typed judgment
   boundary: <https://github.com/seandavi/metacurator>
+- **op2workshop / ontoProc2**, Semantic SQL ontology artifacts used for
+  CURIE search and closure: <https://github.com/vjcitn/op2workshop>
 - **Machine studying** (Li, Battle, Khattab, 2026):
   <https://jacobxli.com/blog/2026/machine-studying/>
 - **Sakana Fugu** (learned orchestration over shared memory and access

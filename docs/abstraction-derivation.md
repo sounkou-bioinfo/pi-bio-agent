@@ -63,9 +63,9 @@ Studying is different from skill sprawl. A skill is a reusable playbook. A study
 
 The agent should study a corpus, index what it learns, and only promote stable workflows into skills.
 
-## External convergence: ClawBio, metacurator, cu-research-intelligence, biomedical-agent-kg
+## External convergence: ClawBio, metacurator, op2workshop, cu-research-intelligence, biomedical-agent-kg
 
-Four independently-built systems arrive at the same substrate from different directions. We cite them
+Independently-built systems arrive at the same substrate from different directions. We cite them
 to justify *patterns*, not to import their nouns.
 
 - **[ClawBio](https://github.com/ClawBio/ClawBio)**: ~80 per-question skills (a 12–26 KB program each).
@@ -80,6 +80,16 @@ to justify *patterns*, not to import their nouns.
   lookup, round-trip confirmation, branch checking, and obsolete-term handling. That is term-set membership +
   fail-closed + abstention: our resolver discipline with a model behind one impl. The reconciliation is the point:
   no metacurator-specific core primitive is needed.
+- **[op2workshop](https://github.com/vjcitn/op2workshop)**: a Bioc2026 ontoProc2 workshop that exercises the
+  **Semantic SQL as ontology substrate** bet from the R/Bioconductor side. The useful code path is not a new
+  framework primitive: `semsql_connect(ontology="mondo")` retrieves a common SQLite ontology artifact,
+  `search_labels`, `get_term_info`, and `get_descendants` make CURIE lookup and closure programmable, and
+  GWAS catalog examples bring those CURIEs back to phenotype interpretation. Locally, that closes over as
+  SQLite/INCAtools rows -> DuckDB staging tables -> `bio_edges` + recursive `entailed_edge` views -> manifest
+  SQL. The current tests prove that direct statement/edge-table translation; richer adapters can additionally
+  project term metadata into `ontology_terms`, `ontology_edges`, and `ontology_mappings`. The lesson is
+  translation of existing Semantic SQL tables into our DuckDB graph contract, not a separate ontology client in
+  core.
 - **[cu-research-intelligence](https://github.com/seandavi/cu-research-intelligence)**. OpenAlex →
   Parquet → DuckDB with per-partition watermarks and a storage backend that swaps local→R2 with no code
   change. Reinforces **CAS/raw→curated layering**, snapshot temporality, and DuckDB as the query layer.
@@ -91,7 +101,7 @@ to justify *patterns*, not to import their nouns.
   text or high-degree neighborhoods exceed prompt budgets. That is the external benchmark version of our
   graph-as-SQL posture.
 
-The shared spine across these systems, **DuckDB as query/index substrate · generated/spec-first contracts · graph-as-code/SQL over graph-as-prompt · provenance/receipts · fail-closed resolvers over opaque stable ids · deterministic spine + typed judgment · CAS/raw→curated layering**, is evidence the primitives are discovered, not invented.
+The shared spine across these systems, **DuckDB as query/index substrate · generated/spec-first contracts · Semantic SQL rows translated into typed graph tables · graph-as-code/SQL over graph-as-prompt · provenance/receipts · fail-closed resolvers over opaque stable ids · deterministic spine + typed judgment · CAS/raw→curated layering**, is evidence the primitives are discovered, not invented.
 
 ## Load-bearing primitives
 
