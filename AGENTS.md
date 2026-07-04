@@ -37,6 +37,7 @@ Instructions for coding agents working in this repository.
 - Application behavior belongs in application code: manifests, operation specs, producers, fixtures, adapters, host policy, and tests.
 - Do not add per-question biomedical helpers to core. A question should become manifest data, SQL, a term set, an operation spec, or an adapter with tests.
 - The library records and gates effects; it is not the sandbox. Network, filesystem, credentials, process isolation, and deployment policy are host responsibilities.
+- If a downstream application needs a real VM boundary, use a host-level microVM control plane such as Gondolin and inject only the approved ports. Do not turn core SQL validation into a sandbox story.
 - Silent fallbacks are not acceptable here. If a resolver, extension, CAS, process runner, network capability, or graph feature is unavailable, fail clearly or record an explicit non-reproducible / unsupported reason.
 - This is pre-1.0 library work with no obligation to preserve unclear legacy surfaces. Prefer clarity and deletion over backward-compatibility contortions.
 - Prefer interfaces and dependency-injected host ports over config-file sprawl. New behavior should enter through typed contracts and explicit host composition, not ambient env flags or scattered JSON settings.

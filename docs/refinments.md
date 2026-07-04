@@ -772,7 +772,7 @@ Open library questions to resolve before claiming that position:
   SQL-native carriers first where the carrier can keep secrets unreadable: DuckDB `CREATE SECRET`, ducknng
   TLS/mTLS/peer allowlists, and host-authored declared operations. TypeScript is justified for a missing host
   boundary, audit hook, token-refresh policy, or policy injector; not for routine per-API clients.
-- **ducknng credentialed HTTP gap (investigated against `~/ducknng`; upstream issue:
+- **ducknng credentialed HTTP gap (investigated against the ducknng source tree; upstream issue:
   [`ducknng#5`](https://github.com/sounkou-bioinfo/ducknng/issues/5)).** Current `ducknng_ncurl`,
   `ducknng_ncurl_aio`, and `ducknng_ncurl_table` all take `headers_json` as ordinary SQL input and pass it through
   `ducknng_http_transact`; `ducknng_http_headers_build` returns an ordinary SQL string; there is no current
@@ -813,11 +813,19 @@ Open library questions to resolve before claiming that position:
   agent SQL.
 - **Token rotation/refresh boundary:** reuse the Pi pattern rather than inventing manifest config. Pi's
   `AuthStorage` stores API keys/OAuth credentials in a locked 0600 file, refreshes OAuth under lock, and returns an
-  access token only at request time. `http.get` already supports this because `withAuth` calls `getAuthHeaders` per
-  request and host auth wins over manifest headers. The ducknng SQL path needs one of three explicit shapes:
-  `withAuth` fallback when secrecy matters more than SQL-native execution; an isolated declared operation that sets
-  a short-lived session variable and never exposes arbitrary SQL on that connection; or a ducknng/DuckDB-secret
-  handle-to-header primitive we add upstream/backport so SQL never sees the raw token.
+  access token only at request time. `http.get` already supports dynamic refresh because `withAuth` calls
+  `getAuthHeaders` per request and host auth wins over manifest headers. That is necessary but not the target
+  credential primitive: the policy is attached to the injected fetch, not to a resource/operation URL scope, tenant,
+  method set, replay/cache scope, or redacted connector receipt. The ducknng SQL path needs one of three explicit
+  shapes: `withAuth` fallback when secrecy matters more than SQL-native execution; an isolated declared operation
+  that sets a short-lived session variable and never exposes arbitrary SQL on that connection; or a
+  ducknng/DuckDB-secret handle-to-header primitive we add upstream/backport so SQL never sees the raw token.
+- **Downstream VM boundary:** if an application needs stronger execution isolation than a process runner or
+  bubblewrap-style wrapper, use a downstream microVM host such as
+  [Gondolin](https://github.com/earendil-works/gondolin), not a new core sandbox model. Gondolin's useful pattern
+  is VM execution with host-mediated HTTP/TLS, filesystem policy, and placeholder secret substitution scoped by
+  host allowlists. In this library, that remains a host composition: run Pi/workers/tools in the VM, inject only the
+  authorized ports, and keep the core contract at manifests, SQL, receipts, CAS, jobs, and ledger facts.
 - **NNG compute mode:** the pending mode is `nngProcessRunner` / `process.nng_compute`: Arrow-over-NNG to a
   remote or persistent worker, shared run directory/CAS, same receipts, same `JobRunner` status/collect/cancel
   semantics. It should not become a separate reproducibility model.

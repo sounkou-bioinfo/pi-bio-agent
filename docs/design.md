@@ -169,8 +169,9 @@ the abstraction abstracts, never the future ones it might serve.**
 
 > **The library is a substrate + receipt system, not a network/filesystem sandbox.** Like Pi, it gives
 > powerful local execution and leaves the *risk boundary* to the host/deployment: container, seccomp,
-> Firecracker, the Pi runtime, corporate egress, or a user-supplied sandbox extension. DuckDB's replacement
-> scans (`FROM 'x.parquet'`), httpfs remote reads, and extension autoloading are host-provisioned capabilities;
+> Firecracker/microVMs, a downstream [Gondolin](https://github.com/earendil-works/gondolin)-style VM control
+> plane, the Pi runtime, corporate egress, or a user-supplied sandbox extension. DuckDB's replacement scans
+> (`FROM 'x.parquet'`), httpfs remote reads, and extension autoloading are host-provisioned capabilities;
 > brittle SQL regexes are not a reliable sandbox.
 
 What the library *does* enforce is **accountability, not access**: every answer-producing run records the query
@@ -184,6 +185,11 @@ composed in SQL and the JSON parsed into a table: no TS resolver (the `ols4-grou
 way network is a **host-injected capability** (`file_scan`/`read_bcf`/`sql_materialize` may read remote URIs if
 the environment allows): the host decides whether egress is possible, the library records that it happened. A
 strict "no external I/O / CAS-snapshot-first" profile is an **optional host policy**, not the default stance.
+
+When a downstream application needs a real VM boundary, keep it downstream: the host can run Pi, worker
+processes, or stateful tools inside a Gondolin-style microVM and inject only the ports that application authorizes
+(`fetch`, `SqlConn`, `ProcessRunner`, CAS, and the ledger). That strengthens effect isolation without changing
+manifest semantics or pretending SQL validation is a sandbox.
 
 **The host-control surface is the injected ports, not a separate hook framework.** Pi-agent-core makes
 lifecycle hooks (before/after, context transforms) central, and that pattern is real, but in *our* shape it is
@@ -660,9 +666,12 @@ ducknng and consumed with `ducknng_ncurl`, and a host-composed `SET VARIABLE` â†
 pattern is composition, not secrecy: the same connection can read `getvariable`, so use it only behind a
 host-authored declared operation or isolated run connection. The host-auth pattern to reuse from Pi is locked
 `AuthStorage` plus OAuth refresh: resolve a short-lived token immediately before the operation and persist only
-digests/config provenance, never token values. The remaining gaps are `wss`/server-push app subscriptions,
-TLS/mTLS auth fixtures in this repo, and an unreadable DuckDB-secret/host-secret handle that ducknng can turn into
-headers without exposing the raw token to agent SQL.
+digests/config provenance, never token values. The current `http.get` `withAuth` wrapper is dynamic in that
+sense: it calls the host auth supplier per request and host headers override colliding manifest headers. But it is
+still a coarse fetch-wide wrapper, not a connector-scoped credential profile with URL/method policy, tenant/cache
+scope, redacted receipts, and ducknng-native SQL execution. The remaining gaps are `wss`/server-push app
+subscriptions, TLS/mTLS auth fixtures in this repo, and an unreadable DuckDB-secret/host-secret handle that
+ducknng can turn into headers without exposing the raw token to agent SQL.
 
 ## Progressive disclosure
 
