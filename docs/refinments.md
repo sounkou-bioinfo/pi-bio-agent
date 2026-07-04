@@ -744,8 +744,11 @@ JOIN, not a walker. See [`design.md`](./design.md#the-semanticsql-shape-source-s
   transitive-predicate policy, closure source (`relation-graph` artifact vs local CTE), temporal/as-of policy,
   and provenance/license fields. The existing resolver + SQL + closure primitives execute that profile; the
   profile makes the projection repeatable, reviewable, and receipted.
-- Add bounded graph-walk semantics with expansion handles so high-degree neighborhoods do not flood context
-  (now a bounded SQL query over `entailed_edge`, not a custom walker).
+- Add bounded graph-query windows so high-degree neighborhoods do not flood context. This is not a new graph
+  runtime: it is a result shape over the same projections (`bio_edges`, `bio_edges_as_of`, `entailed_edge`,
+  `entailed_edge_as_of`) that returns rows plus omitted-counts/frontier summaries and, when needed, a continuation
+  resource handle. It applies symmetrically to foreign KGs and our own graph; `bio_walk_memory` is the current
+  small in-memory affordance, while large/as-of walks should be SQL windows over the compiled graph.
 - Add trust/provenance fields consistently across facts, edges, and artifacts (`bio_edges.trust` exists; keep
   it uniform with receipts/artifacts).
 - Add as-of/known-at time lenses where variant reanalysis or changing knowledge releases matter.
