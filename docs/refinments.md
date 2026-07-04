@@ -826,9 +826,25 @@ Open library questions to resolve before claiming that position:
   is VM execution with host-mediated HTTP/TLS, filesystem policy, and placeholder secret substitution scoped by
   host allowlists. In this library, that remains a host composition: run Pi/workers/tools in the VM, inject only the
   authorized ports, and keep the core contract at manifests, SQL, receipts, CAS, jobs, and ledger facts.
-- **NNG compute mode:** the pending mode is `nngProcessRunner` / `process.nng_compute`: Arrow-over-NNG to a
-  remote or persistent worker, shared run directory/CAS, same receipts, same `JobRunner` status/collect/cancel
-  semantics. It should not become a separate reproducibility model.
+- **Generic long-running job/service lane:** this is bigger than `process.compute`. Agents, external compute,
+  stateful kernels, queue workers, remote API jobs, and interactive services all need one durable lifecycle:
+  submit/claim/heartbeat/wait/event/complete/cancel/status/collect, with replay and result handles recorded in the
+  ledger. Absurd is useful prior art here because the implementation is DB-native, not README-only: tasks, runs,
+  checkpoints, waits, events, and idempotency keys are tables; `claim_task` uses leased `FOR UPDATE SKIP LOCKED`
+  claims; `extend_claim` is heartbeat; `await_event` parks a run as sleeping; `emit_event` is first-write-wins and
+  wakes sleepers. Its honest limitation is pull-only workers. Our improvement should be a server-backed
+  `JobRunner`/queue over a `SqlConn`, where polling remains the source of truth and push is an optional wakeup
+  acceleration.
+- **Push is an accelerator, not the authority.** Over a ducknng server, workers can use raw NNG `push/pull` for
+  distribution and `pub/sub` or monitor/event streams for wakeups; status/result still land in
+  `job:<runId>:status` / `job:<runId>:result`. Over a DuckDB Quack server, the remote DB can be attached, queried,
+  and written with DuckDB secret-backed auth, projection/filter pushdown, and transaction forwarding, but there is
+  no visible push/notification surface in the local Quack tree. Treat Quack as an ergonomic server-backed `SqlConn`
+  and pair it with ducknng or polling for wakeups until Quack grows a real notification stream.
+- **NNG compute mode:** the pending mode is a dispatch implementation under that generic lifecycle, not a new
+  lifecycle: `nngProcessRunner` / `process.nng_compute` sends Arrow/file-artifact work to a remote or persistent
+  worker, shared run directory/CAS, same receipts, same `JobRunner` status/collect/cancel semantics. It should not
+  become a separate reproducibility model.
 - **Stateful kernels:** persistent Python/R/Julia sessions are useful for iteration, but they need explicit session
   handles, environment attestation, variable/artifact capture, and replay boundaries. A stateful REPL is a host
   service over the compute ports, not a reason to let ambient interpreter state leak into runs.

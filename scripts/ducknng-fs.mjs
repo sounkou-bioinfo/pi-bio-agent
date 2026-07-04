@@ -5,11 +5,13 @@ import { join } from "node:path";
 import { DuckDBInstance } from "@duckdb/node-api";
 
 // DOGFOOD (ridiculous-but-cool): a content-addressed distributed FILE SYSTEM as a COMPOSITION of pieces we
-// already have — the metadata tree is a DuckDB table served over ducknng RPC (mutable cross-process: mkdir/
-// rename/rm are UPDATE/DELETE — the writes quack can't do), and the bytes live in CAS (content-addressed ->
-// dedup + versioning for free). Same split as Latch Data (Postgres metadata + S3 bytes + FUSE), but: dedup,
-// snapshots, provenance, and `ls -R`/`du` come FREE (CAS + a recursive CTE). The only unbuilt piece is a FUSE
-// host-port; the FS *semantics* are demonstrated here as SQL over ducknng + CAS. No new substrate — composition.
+// already have — the metadata tree is a DuckDB table behind a server-backed SqlConn (ducknng RPC here: mutable
+// cross-process mkdir/rename/rm are INSERT/UPDATE/DELETE), and the bytes live in CAS (content-addressed -> dedup
+// + versioning for free). Same split as Latch Data (Postgres metadata + S3 bytes + FUSE), but: dedup, snapshots,
+// provenance, and `ls -R`/`du` come FREE (CAS + a recursive CTE). The same shape can later sit behind DuckDB
+// Quack when an attached remote catalog is the better SqlConn. Push is only a wakeup/invalidation accelerator
+// after committed metadata/CAS updates, not the authority. The only unbuilt piece is a FUSE host-port; the FS
+// *semantics* are demonstrated here as SQL over ducknng + CAS. No new substrate — composition.
 //
 // Run:  npm run build && node scripts/ducknng-fs.mjs
 

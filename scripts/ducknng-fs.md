@@ -6,13 +6,16 @@
 
 | Latch Data | here |
 |---|---|
-| Postgres metadata tree | a DuckDB `fs_node` table **served over ducknng RPC** (mutable cross-process) |
+| Postgres metadata tree | a DuckDB `fs_node` table behind a server-backed `SqlConn` (ducknng RPC here; Quack attach/query is another candidate) |
 | S3/GCP object bytes | **CAS-of-bytes** (content-addressed) |
 | FUSE + GraphQL sync | a FUSE host-port (**unbuilt** — the one new piece) |
 
 `mkdir`/`write`/`read`/`ls -R`/`mv`/`rm` are each a SQL statement RPC'd to the metadata server (+ CAS for bytes):
-`mkdir`/`mv`/`rm` are `INSERT`/`UPDATE`/`DELETE` (the writes quack can't do); `ls -R` is a recursive CTE; bytes are
-content-addressed. **Dedup, snapshots, and provenance fall out for free.**
+`mkdir`/`mv`/`rm` are `INSERT`/`UPDATE`/`DELETE`; `ls -R` is a recursive CTE; bytes are content-addressed.
+**Dedup, snapshots, and provenance fall out for free.** This original dogfood uses ducknng `exec` because it proves
+mutable shared state directly. The more general target is any server-backed `SqlConn`: ducknng for NNG topologies
+and push wakeups, DuckDB Quack for attached remote catalogs / query pushdown / DuckDB-secret-backed auth where that
+server surface is available.
 
 Run: `npm run build && node scripts/ducknng-fs.mjs`
 
@@ -45,4 +48,6 @@ Run: `npm run build && node scripts/ducknng-fs.mjs`
 The directory tree is mutated in place over ducknng RPC (`mkdir`/`mv`/`rm` = `INSERT`/`UPDATE`/`DELETE`), and `ls -R`
 is a recursive CTE over the served tree. The two *hard* pieces (a mutable metadata graph over RPC + content-
 addressed bytes) were already built and tested — so a distributed FS is a **composition**, with dedup/versioning/
-provenance/`du` for free. FUSE (a host-port like the ProcessRunner) would make it actually mountable.
+provenance/`du` for free. FUSE (a host-port like the ProcessRunner) would make it actually mountable. Push belongs
+outside the metadata truth: use it to wake watchers or workers after a committed SQL/CAS update, not as the
+authoritative file state.
