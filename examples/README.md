@@ -42,13 +42,13 @@ orchestrator (piece 1); the agent conducts.
 
 Topologies are a **scaffold choice, not an executor change** — `req/rep` star (the coordinator), `survey`
 (debate), `pub/sub` (decentralized blackboard), `push/pull` (pipeline) are all built; `bus` (mesh) is noted. The
-DuckDB-native transport for the real cross-machine versions is [`~/ducknng`](https://nng.nanomsg.org/) (NNG +
+DuckDB-native transport for the real cross-machine versions is [`ducknng`](https://github.com/sounkou-bioinfo/ducknng) (NNG +
 Arrow + manifest methods + mTLS), which also ships `ducknng_ncurl` (an HTTP client) — so the http-resolver
 generalization and the agent topologies converge in one extension.
 
 ## 4. The process boundary — sharing state across agent processes
 DuckDB's file lock is **process-exclusive-writer** (verified). So state-sharing across agent processes is either
-immutable (CAS) or via a single owner (a **ducknng** server — we own this stack; quack was dropped). See the
+immutable (CAS) or via a single owner (a **ducknng** server; quack was dropped for the mutable shared-state demos). See the
 boundary analysis in [`docs/refinments.md`](../docs/refinments.md).
 
 | Example | Proof |
@@ -67,7 +67,7 @@ with the DATA contract staying SQL/Arrow.
 | [`process-compute/`](process-compute/) | the **COMPUTE pillar** itself — a DuckDB table → Arrow IPC → real spawned R `lm()` → Arrow IPC → table; fail-closed without a `ProcessRunner` — `test/process-compute-example.test.ts` |
 | [`process-artifacts/`](process-artifacts/) | **FILE outputs (#3)** — a process op returns a table (Arrow) AND captures declared file outputs into **CAS** (content-addressed, recorded in the receipt); values in the IPC, files beside it (the `nf-r-ipc`/Nextflow split) — `test/process-artifacts-example.test.ts` |
 | [`wgs-chr22-annotation/`](wgs-chr22-annotation/) | **NETWORK + COMPUTE on real WGS data** — `duckhts` region read → chunked VEP fanout (`ncurl-fanout`) → ClinVar → rare/high-impact — `test/ncurl-fanout.test.ts` |
-| [`coloc/`](coloc/) | **the two-pillar flagship** — post-GWAS colocalization (`~/PostGWAS`/`~/coloclize` shape): SQL allele **harmonization** (DATA) → out-of-process R **`coloc.abf`** over Arrow IPC (COMPUTE) → `PP.H4` posteriors. `test/coloc-example.test.ts` (real `coloc::coloc.abf`, `PP.H4 ≈ 1.0` on a shared-causal locus) |
+| [`coloc/`](coloc/) | **the two-pillar flagship** — post-GWAS colocalization (`PostGWAS`/`coloclize` shape): SQL allele **harmonization** (DATA) → out-of-process R **`coloc.abf`** over Arrow IPC (COMPUTE) → `PP.H4` posteriors. `test/coloc-example.test.ts` (real `coloc::coloc.abf`, `PP.H4 ≈ 1.0` on a shared-causal locus) |
 
 ---
 Run all deterministic examples: `npm test`. The **live** dogfoods need the `pi` CLI (multi-agent) / a free

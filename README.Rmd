@@ -17,6 +17,13 @@ wrap_prompt <- function(p, width = 56) {
   lines <- c(lines, cur); n <- length(lines)
   paste(vapply(seq_len(n), function(i) paste0('  "', lines[i], if (i < n) " " else "", '"', if (i < n) " \\" else ""), ""), collapse = "\n")
 }
+sanitize_paths <- function(txt) {
+  wd <- normalizePath(getwd(), winslash = "/", mustWork = FALSE)
+  txt <- gsub(paste0(wd, "/"), "", txt, fixed = TRUE)
+  txt <- gsub(wd, ".", txt, fixed = TRUE)
+  txt <- gsub("[ \t]+(?=\n|$)", "", txt, perl = TRUE)
+  txt
+}
 knitr::knit_engines$set(pi = function(options) {
   prompt <- paste(options$code, collapse = " ")
   # a small, fast model keeps a LIVE agent chunk to seconds (a live ClinVar run is ~20s, not minutes),
@@ -36,7 +43,7 @@ knitr::knit_engines$set(pi = function(options) {
                     "-p", "--no-session", shQuote(prompt)),
             stdout = TRUE, stderr = TRUE, timeout = tmo),
     error = function(e) "[pi unavailable]")
-  reply <- paste0("> ", gsub("\n", "\n> ", paste(out, collapse = "\n")))
+  reply <- paste0("> ", gsub("\n", "\n> ", sanitize_paths(paste(out, collapse = "\n"))))
   knitr::asis_output(paste0(
     "``` sh\n", "pi --model ", model, " -e ", ep, " -p \\\n", wrap_prompt(prompt), "\n", "```\n\n",
     reply, "\n"))
@@ -49,7 +56,7 @@ knitr::knit_engines$set(biocli = function(options) {
   args <- paste(options$code, collapse = " ")
   out <- suppressWarnings(system(paste("node dist/cli/bin.js", args, "2>&1"), intern = TRUE))
   status <- attr(out, "status")
-  out_txt <- paste(out, collapse = "\n")
+  out_txt <- sanitize_paths(paste(out, collapse = "\n"))
   if (!is.null(status) && status != 0) stop("biocli render failed (exit ", status, "): ", args, "\n", out_txt)
   lang <- if (grepl("^\\s*[\\[{]", out_txt)) "json" else ""
   # wrap each flag onto its own continuation line so long commands don't overflow the README
@@ -58,13 +65,13 @@ knitr::knit_engines$set(biocli = function(options) {
 })
 
 # custom knitr engine: run an NNG-topology dogfeed (real separate OS processes coordinating over ducknng) and show
-# its stdout. Fail the render on a non-zero exit — never bake a broken topology demo as if it had worked. Needs the
-# owned ducknng extension provisioned (`npm run provision:ducknng-owned`) and process spawning.
+# its stdout. Fail the render on a non-zero exit — never bake a broken topology demo as if it had worked. Needs
+# ducknng provisioned (`npm run provision:ducknng-owned`) and process spawning.
 knitr::knit_engines$set(nng = function(options) {
   script <- paste(options$code, collapse = " ")
   out <- suppressWarnings(system(paste("node", script, "2>&1"), intern = TRUE))
   status <- attr(out, "status")
-  out_txt <- paste(out, collapse = "\n")
+  out_txt <- sanitize_paths(paste(out, collapse = "\n"))
   if (!is.null(status) && status != 0) stop("nng demo failed (exit ", status, "): ", script, "\n", out_txt)
   knitr::asis_output(paste0("``` sh\nnode ", script, "\n```\n\n", "```\n", out_txt, "\n```\n"))
 })
@@ -98,8 +105,8 @@ workflow-specific behavior in data plus injected effect ports:
 
 - a new **question** is a manifest and SQL, never a new `.ts`;
 - a new **data format** is a *DuckDB extension* (`duckhts`, `anndata`, `duckdb_zarr`, `plinking_duck`, …);
-- a new **API** is an `ncurl_table` call over **[ducknng](https://github.com/sounkou-bioinfo/ducknng)**, the
-  owned Arrow-native DuckDB extension for NNG/HTTP/RPC transport;
+- a new **API** is an `ncurl_table` call over **[ducknng](https://github.com/sounkou-bioinfo/ducknng)**, an
+  Arrow-native DuckDB extension for NNG/HTTP/RPC transport;
 - a new **compute backend** (SLURM, Modal, an NNG pool) is one injected `JobDispatch`;
 - a new **model** is an injected judge.
 
@@ -316,9 +323,9 @@ that argument with citations. Prior art and lineage:
 - **ClawBio**, the origin corpus this factors into manifests, resolvers, and operations:
   <https://github.com/ClawBio/ClawBio>
 - **Machine studying** (Li, Battle, Khattab, 2026): <https://jacobxli.com/blog/2026/machine-studying/>
-- **Sakana Fugu** (learned orchestration; we own the substrate it conducts): <https://sakana.ai/fugu/>
+- **Sakana Fugu** (learned orchestration over shared memory and access lists): <https://sakana.ai/fugu/>
 - **Recursive Language Models / RLM** (REPL-over-context; `bio_query` is the SQL REPL): <https://arxiv.org/abs/2512.24601>
-- **ducknng**, the owned Arrow-native DuckDB extension for NNG/HTTP/RPC transport, in the lineage of R's
+- **ducknng**, an Arrow-native DuckDB extension for NNG/HTTP/RPC transport, in the lineage of R's
   `nanonext` + `mirai`: <https://github.com/sounkou-bioinfo/ducknng> · [NNG](https://nng.nanomsg.org/) ·
   [`nanonext`](https://github.com/r-lib/nanonext) · [`mirai`](https://mirai.r-lib.org/)
 - **SemanticSQL** (the `bio_edges` + `entailed_edge` graph shape): <https://github.com/INCATools/semantic-sql>

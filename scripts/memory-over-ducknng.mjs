@@ -7,8 +7,8 @@
 // docs/concurrency.md), nor persistent/inter-machine behavior (the server DB here is `:memory:`). The memory-store
 // functions are reused UNCHANGED: they take a `SqlConn` that here routes over RPC. (Params are inlined into the RPC
 // SQL string with escaping — the robust version is host code; this is a dogfood.)
-// PREREQUISITE: the owned ducknng extension must be installed — `npm run provision:ducknng-owned` (else `LOAD
-// ducknng` below fails on a clean host).
+// PREREQUISITE: ducknng must be installed — `npm run provision:ducknng-owned` if the community build is not enough
+// (else `LOAD ducknng` below fails on a clean host).
 // Run: `npm run provision:ducknng-owned && npm run build && node scripts/memory-over-ducknng.mjs`  (imports ../dist)
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";

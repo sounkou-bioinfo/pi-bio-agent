@@ -89,7 +89,7 @@ SELECT attempt, status, body_text FROM attempts ORDER BY attempt`;
 
 /**
  * Retry a single HTTP endpoint until it stops being transient (or `maxAttempts`). Uses the SQL-native
- * recursive-CTE path when the owned ducknng build is loaded (`ducknng__ncurl_row` VOLATILE), else a host loop.
+ * recursive-CTE path when a ducknng build exposes `ducknng__ncurl_row` as VOLATILE, else a host loop.
  * Returns the LAST attempt's outcome. `conn` must already have ducknng LOADed.
  */
 export async function ncurlRetry(conn: SqlConn, opts: NcurlRetryOptions): Promise<NcurlRetryResult> {

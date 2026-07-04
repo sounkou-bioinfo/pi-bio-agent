@@ -7,8 +7,14 @@ import { DuckDBInstance } from "@duckdb/node-api";
 import { duckdbNodeConn } from "../../dist/duckdb/node-api.js";
 import { ncurlFanout } from "../../dist/duckdb/ncurl-fanout.js";
 
-const VCF = process.env.WGS_VCF ?? "/root/WG010.vcf.gz";
-const CLINVAR = process.env.CLINVAR_VCF ?? "/root/duckhts/clinvar.vcf.gz";
+const requireEnv = (name) => {
+  const value = process.env[name];
+  if (!value) throw new Error(`${name} is required; point it at a local bgzipped, tabix-indexed VCF`);
+  return value;
+};
+
+const VCF = requireEnv("WGS_VCF");
+const CLINVAR = requireEnv("CLINVAR_VCF");
 const REGION = process.env.WGS_REGION ?? "chr22:23000000-24000000"; // gene-rich ~1Mb
 const CV_REGION = REGION.replace("chr", ""); // ClinVar contigs are '22', not 'chr22'
 const CONTIG = CV_REGION.split(":")[0]; // the normalized contig (e.g. '22'), derived — NOT hard-coded

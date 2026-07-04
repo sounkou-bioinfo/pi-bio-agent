@@ -22,8 +22,8 @@ operations, skills, and study notes compose those primitives for particular work
    - **Data**: files and formats as SQL (`file_scan`, `duckhts` for VCF/BAM/BED/…). The bet includes the large DuckDB community extension ecosystem: new formats should usually arrive as extensions/table functions, not bespoke framework parsers.
    - **Network**: HTTP, cross-process shared state, and multi-agent coordination as SQL, via **ducknng**:
      `ncurl_table` (HTTP is a table function), `run_rpc` (a live shared mutable DB many processes write through),
-     and NNG topologies (pub/sub, push/pull, survey, bus, pair). ducknng is the owned DuckDB extension that this
-     repo uses to push the network/RPC/topology leg forward.
+     and NNG topologies (pub/sub, push/pull, survey, bus, pair). ducknng is the DuckDB extension that carries the
+     network/RPC/topology leg.
    - **Compute (code execution)**: code SQL is poor at (an `lm()` fit, an R/Python/Go tool) runs **out-of-process over Arrow IPC** (`process.compute`); only the data contract is SQL/Arrow, the computation is a contained child. The payload contract and lifecycle contract are layered: local immediate execution and durable async jobs share replay/receipt semantics.
    - **Knowledge + memory**: ontologies and our own KG share one shape (`bio_edges` + `entailed_edge` closure, from SemanticSQL); grounding is deterministic-SQL-first with fail-closed model fallback. **Memory is machine studying**: the agent studies a corpus before a task is known and retains expertise as *study notes* projected into the KG: data it queries, distinct from *skills* (activated behavior) and *facts* (measured, tool-derived).
 
@@ -33,6 +33,44 @@ operations, skills, and study notes compose those primitives for particular work
    boundary, never on every nested value. Manifests pass a **strict allowlist** so removed surface cannot ride
    back as inert keys. The **judgment / approval decision** (model or human) is the one irreducible boundary: the
    substrate records and gates it, never computes it.
+
+## Hard-Learned Lessons
+
+These are not slogans; they are constraints learned in implementation and tests. Keep them visible when changing
+the related code.
+
+- **SQL safety needs parser help, but is still only statement-class safety.** The string guard rejects obvious
+  writes and stacked statements; DuckDB's `json_serialize_sql` catches dynamic SQL calls like
+  `query()` / `query_table()` across quoted and qualified spellings. This protects the operation boundary, not
+  host egress or filesystem access. See `src/core/sql-guard.ts`, `src/core/operations.ts`,
+  `src/duckdb/resolvers/duckdb-sql-materialize.ts`, and `test/operations-readonly.test.ts`.
+- **Memoization is proven from plans and ASTs, not from resolver names.** A run is cacheable only when the physical
+  plan reads resolved tables or pure sources and the AST avoids volatile/consistent-within-query functions. Table
+  functions, replacement scans, live sources, or introspection drift fail closed. See
+  `src/duckdb/plan-hermeticity.ts`, `src/hosts/run-store.ts`, `test/plan-hermeticity.test.ts`, and
+  `test/action-cache.test.ts`.
+- **`duckdb.sql_materialize` is the materialization primitive.** It generalized `file_scan`, `read_bcf`, and
+  HTTP-shaped resources into "declared read -> table"; it is not a generic escape hatch for writes. See
+  `src/duckdb/resolvers/duckdb-sql-materialize.ts` and `test/duckdb-sql-materialize.test.ts`.
+- **ducknng HTTP fanout is a real boundary, not an implementation detail.** `ducknng_ncurl_table` is right for one
+  response table. Whole-VCF or paginated annotation needs per-row scalar AIO launch, repeated any-ready drain, and
+  status-as-value retry logic; permanent `4xx` terminates, transient `429`/`5xx` retries. See
+  `src/duckdb/ncurl-fanout.ts`, `src/duckdb/ncurl-retry.ts`, `test/ncurl-fanout.test.ts`, and
+  `examples/wgs-chr22-annotation/README.md`.
+- **RPC shared state means a single writer owns the DB.** Clients should hold only throwaway `:memory:` DuckDB
+  connections that call `ducknng_run_rpc` / `ducknng_query_rpc`. Same-slot memory writes rely on the server's
+  serialized execution and `insertObservationIfSlotMax`; do not silently swap in a concurrent pool. See
+  `docs/concurrency.md`, `src/duckdb/observations.ts`, `scripts/memory-over-ducknng.mjs`, and
+  `scripts/blackboard-shared.mjs`.
+- **CAS is storage and deduplication, not freshness.** A digest proves bytes; freshness comes from a source
+  validator such as ETag or from an explicit snapshot policy. Range readers and DuckDB-owned remote I/O do not
+  become whole-object CAS just because they are reproducible enough for a receipt. See `src/core/cas.ts`,
+  `test/http-cas-reuse.test.ts`, and the CAS section in `docs/refinments.md`.
+- **Process payload and job lifecycle are layered.** `process.compute` defines the Arrow/file-artifact boundary
+  for one execution; `JobRunner` defines submit/status/collect/cancel over the ledger. Local immediate execution
+  should still be shape-compatible with the durable async path. See `src/core/jobs.ts`,
+  `src/duckdb/resolvers/process-compute.ts`, `examples/process-compute/`, `examples/process-artifacts/`, and
+  `scripts/nng-job-runner.mjs`.
 
 ## Main boundary
 
@@ -54,7 +92,7 @@ Core contracts
 Execution adapters
   DuckDB read-only SQL                          (the substrate)
   ducknng    network as SQL (ncurl_table/_aio), cross-process shared-DB RPC (run_rpc),
-             and NNG topologies (pub/sub, push/pull, survey, bus, pair) — the owned
+             and NNG topologies (pub/sub, push/pull, survey, bus, pair) — the
              DuckDB extension that makes network/distributed/multi-agent coordination SQL-native
   duckhts    HTS readers (VCF/BCF, BAM/CRAM, BED/GFF, tabix) as SQL table functions
   process    out-of-process R / Python / Go / shell over Arrow IPC (the compute pillar)

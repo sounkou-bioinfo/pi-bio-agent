@@ -2,7 +2,7 @@
 
 File outputs are unavoidable in bioinformatics (BAM/VCF/plots/reports, multi-file dirs). `process.compute`'s
 Arrow-table-back contract covers the *rectangular* case; this example adds the **file** case, modeled on
-[`~/nf-r-ipc`](../../docs/refinments.md) / Nextflow:
+`nf-r-ipc` / Nextflow:
 
 ```
                           values  → Arrow IPC (out.arrow) → a DuckDB table   ← the VALUE return

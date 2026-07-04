@@ -1,7 +1,7 @@
 # JobRunner NNG compute profile (dogfood)
 
 `node scripts/nng-job-runner.mjs` — the native, language-agnostic distributed-compute backend for the L1
-`JobRunner`, over the owned ducknng extension (the alternative to an SSH-SLURM / Modal backend).
+`JobRunner`, over ducknng RPC (the alternative to an SSH-SLURM / Modal backend).
 
 A **separate worker process** executes a job and reports each phase (`running` → `succeeded`) by running a
 `recordObservation`-shaped `INSERT` over `ducknng_run_rpc` against the coordinator's shared DuckDB. The

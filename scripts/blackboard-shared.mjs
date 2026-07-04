@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { DuckDBInstance } from "@duckdb/node-api";
 
 // DOGFOOD: topology x shared-writes — the decentralized BLACKBOARD (pub/sub) running ACROSS PROCESSES over
-// ducknng RPC (we own this stack; quack is dropped). Each agent is a SEPARATE OS process that coordinates ONLY
+// ducknng RPC (quack is dropped for this mutable shared-state path). Each agent is a SEPARATE OS process that coordinates ONLY
 // through a shared blackboard table on a ducknng server: publish = ducknng_run_rpc(INSERT), await = poll
 // ducknng_query_rpc(SELECT) until the row appears. No coordinator, no client opens the db file, exec opt-in.
 // (Append-only publish — first-writer-wins — is all a blackboard needs; for mutate-in-place see
@@ -63,7 +63,7 @@ async function orchestrate() {
   console.log("\nWhat it proves: four DISTINCT OS processes coordinated a diamond DAG through ONE shared table on a");
   console.log("ducknng server — no coordinator, no shared file handle. 'extract' published first (the others polled");
   console.log("for it via query_rpc), 'classify' last (it blocked on annotate+qc). The pub/sub order emerged from");
-  console.log("the shared writes — topology x shared-writes, on a stack we own (ducknng RPC, quack dropped).");
+  console.log("the shared writes — topology x shared-writes over ducknng RPC (quack dropped for this path).");
 }
 
 const [mode, slug, depsCsv] = process.argv.slice(2);

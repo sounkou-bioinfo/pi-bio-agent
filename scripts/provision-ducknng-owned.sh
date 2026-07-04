@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Provision an OWNED ducknng build for pi-bio-agent — the per-DuckDB-version backport that the community build
+# Provision a local ducknng build for pi-bio-agent — the per-DuckDB-version backport that the community build
 # does NOT carry (community-extensions does no backports). The build with the volatile-scalar `ncurl` fix
 # (`ducknng__ncurl_row`, recursive-CTE retry that re-fires per iteration) lives on `release/duckdb-<ver>` and is
 # published as the tag `v0.1.1+duckdb<ver>`. The resulting `.duckdb_extension` is UNSIGNED, so the host loads it
@@ -11,7 +11,7 @@ set -euo pipefail
 #   1. $DUCKNNG_EXT_PREBUILT  — a .duckdb_extension you already built (escape hatch / CI cache).
 #   2. an already-provisioned ext at the output path (idempotent; re-run with --force to refresh).
 #   3. `gh release download v0.1.1+duckdb<ver>` from the ducknng repo (the tagged binary, when published).
-#   4. build `release/duckdb-<ver>` from a ducknng checkout ($DUCKNNG_DIR, default ~/ducknng or a fresh clone).
+#   4. build `release/duckdb-<ver>` from a ducknng checkout ($DUCKNNG_DIR, default .pi/src/ducknng or a fresh clone).
 # It then VERIFIES the result loads and exposes `ducknng__ncurl_row` as VOLATILE, and prints the LOAD recipe.
 #
 # Usage:  scripts/provision-ducknng-owned.sh [--force]
@@ -64,7 +64,7 @@ from_release() {
 }
 
 from_source() {
-  local dir="${DUCKNNG_DIR:-$HOME/ducknng}"
+  local dir="${DUCKNNG_DIR:-$HERE/.pi/src/ducknng}"
   if [ ! -d "$dir/.git" ]; then
     echo "==> cloning ${REPO} -> $dir"; git clone "https://github.com/${REPO}.git" "$dir"
   fi

@@ -1,8 +1,8 @@
 # Shared-write blackboard (pub/sub × shared writes, cross-process) — evidence
 
 `scripts/blackboard-shared.mjs` is a **dogfood** composing two others: the decentralized **blackboard** (pub/sub)
-topology of `blackboard-run.md` and **cross-process shared state** over **ducknng RPC** (a stack we own; quack is
-dropped). Each agent is a **separate OS process** that coordinates *only* through one shared blackboard table on a
+topology of `blackboard-run.md` and **cross-process shared state** over **ducknng RPC** (quack is dropped for the
+mutable shared-state demos). Each agent is a **separate OS process** that coordinates *only* through one shared blackboard table on a
 ducknng server — publish = `ducknng_run_rpc(INSERT)`, await = poll `ducknng_query_rpc(SELECT)` until the row
 appears. No coordinator, no client opens the db file, exec opt-in.
 
@@ -40,7 +40,7 @@ storage shim, which still `throw NotImplementedException` at quack HEAD (`29fc03
 runs the SQL string on a server with **native DuckDB** (no shim), so the full write surface works (see
 `ducknng-rpc-mutate.md`: a client mutated a server table to `k1=99, k3=5` via remote `UPDATE`/`DELETE`/upsert).
 
-So we **own ducknng and drop quack**: one transport covers the whole topology matrix *and* both shared-state
+So the ducknng path replaces quack here: one transport covers the whole topology matrix *and* both shared-state
 shapes (append for the blackboard, mutate for a fact-superseding KG), with opt-in exec as the host security
-boundary, on a stack we can fix and backport across DuckDB versions ourselves. The in-process `sqlBlackboard`
+boundary. The in-process `sqlBlackboard`
 (`src/hosts/sql-blackboard.ts`) remains the single-DB transport for the deterministic unit test.

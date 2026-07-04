@@ -1,7 +1,7 @@
 # Post-GWAS colocalization — the two-pillar flagship (walking skeleton)
 
-This is the **fruitfulness-in-real-research** proof of the bet: post-GWAS colocalization (the shape of
-[`~/PostGWAS` + `~/coloclize`](../../docs/refinments.md)) solved as a **manifest** — the DATA and COMPUTE pillars
+This is the **fruitfulness-in-real-research** proof of the bet: post-GWAS colocalization (the `PostGWAS` +
+`coloclize` shape) solved as a **manifest** — the DATA and COMPUTE pillars
 composed, not a bespoke pipeline. The agent asks *"do this GWAS signal and this eQTL signal share a causal
 variant?"* and the substrate answers with provenance.
 

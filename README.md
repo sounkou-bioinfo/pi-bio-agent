@@ -50,7 +50,7 @@ behavior in data plus injected effect ports:
 - a new **data format** is a *DuckDB extension* (`duckhts`, `anndata`,
   `duckdb_zarr`, `plinking_duck`, …);
 - a new **API** is an `ncurl_table` call over
-  **[ducknng](https://github.com/sounkou-bioinfo/ducknng)**, the owned
+  **[ducknng](https://github.com/sounkou-bioinfo/ducknng)**, an
   Arrow-native DuckDB extension for NNG/HTTP/RPC transport;
 - a new **compute backend** (SLURM, Modal, an NNG pool) is one injected
   `JobDispatch`;
@@ -75,7 +75,7 @@ DuckDB:
 | **Data**               | `duckdb.sql_materialize`: any read-only query over everything DuckDB reaches (local files, object stores, other DBs, lakes). A new format is a DuckDB *extension*, not new code: VCF/BAM ([`duckhts`](https://duckdb.org/community_extensions/extensions/duckhts)), single-cell ([`anndata`](https://duckdb.org/community_extensions/extensions/anndata)), [`duckdb_zarr`](https://duckdb.org/community_extensions/extensions/duckdb_zarr), [`plinking_duck`](https://duckdb.org/community_extensions/extensions/plinking_duck), even HTML or git history. |
 | **Network**            | `ducknng_ncurl_table`: an HTTP endpoint *is* a table function, URL/headers/body composed in SQL and JSON parsed into columns, no TypeScript. Plus `ducknng_run_rpc` (a live DB many processes write through) and NNG worker pools (push/pull, pub/sub, survey). `http.get` is the fallback where a build lacks ducknng.                                                                                                                                                                                                                                    |
 | **Compute**            | `process.compute`: what SQL is poor at (an `lm()` fit, a model) runs out-of-process over Arrow IPC. Only the data contract is SQL/Arrow; the computation is a contained child, not FFI.                                                                                                                                                                                                                                                                                                                                                                    |
-| **Knowledge + memory** | one SemanticSQL graph (`bio_edges` + its `entailed_edge` closure), so subsumption and graph-walks are one indexed join. Grounding runs deterministically first, abstains below threshold, and never invents a CURIE. Memory is *study notes* projected into the same graph, not prompt-only context that becomes stale.                                                                                                                                                                                                                                      |
+| **Knowledge + memory** | one SemanticSQL graph (`bio_edges` + its `entailed_edge` closure), so subsumption and graph-walks are one indexed join. Grounding runs deterministically first, abstains below threshold, and never invents a CURIE. Memory is *study notes* projected into the same graph, not prompt-only context that becomes stale.                                                                                                                                                                                                                                    |
 
 **The spine.** Facts, memory, `job:<id>:status`, and runs are not
 separate systems. They are rows in one append-only `bio_observations`
@@ -163,15 +163,15 @@ pi-bio-agent query examples/connectors/clinvar-region.json \
 ``` json
 {
   "ok": true,
-  "runId": "query-1783036619502-c9bb9958",
+  "runId": "query-1783166558031-4c3104ed",
   "status": "succeeded",
   "rowCount": 8,
   "artifacts": {
-    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783036619502-c9bb9958/run.json",
-    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783036619502-c9bb9958/result.json",
-    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783036619502-c9bb9958/receipts.json"
+    "run": ".pi/bio-agent/runs/query-1783166558031-4c3104ed/run.json",
+    "result": ".pi/bio-agent/runs/query-1783166558031-4c3104ed/result.json",
+    "receipts": ".pi/bio-agent/runs/query-1783166558031-4c3104ed/receipts.json"
   },
-  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783036619502-c9bb9958",
+  "runDir": ".pi/bio-agent/runs/query-1783166558031-4c3104ed",
   "rows": [
     {
       "sig": "Pathogenic",
@@ -228,15 +228,15 @@ pi-bio-agent query examples/run-ledger/manifest.json \
 ``` json
 {
   "ok": true,
-  "runId": "query-1783036621974-7dd169d2",
+  "runId": "query-1783166560381-e8365042",
   "status": "succeeded",
   "rowCount": 1,
   "artifacts": {
-    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783036621974-7dd169d2/run.json",
-    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783036621974-7dd169d2/result.json",
-    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783036621974-7dd169d2/receipts.json"
+    "run": ".pi/bio-agent/runs/query-1783166560381-e8365042/run.json",
+    "result": ".pi/bio-agent/runs/query-1783166560381-e8365042/result.json",
+    "receipts": ".pi/bio-agent/runs/query-1783166560381-e8365042/receipts.json"
   },
-  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783036621974-7dd169d2",
+  "runDir": ".pi/bio-agent/runs/query-1783166560381-e8365042",
   "rows": [
     {
       "tool": "ad-hoc.query",
@@ -271,15 +271,15 @@ node scripts/nng-job-runner.mjs
 
     Distributed compute over ducknng: a separate worker reports job status into the shared ledger
 
-      [coordinator pid 3172922] job ledger up; 'wgs-annotate-chr22' recorded as queued
-      [worker nng-worker-1 pid 3172992] reported 'running' over ducknng RPC
-      [worker nng-worker-1 pid 3172992] reported 'succeeded' over ducknng RPC
+      [coordinator pid 752008] job ledger up; 'wgs-annotate-chr22' recorded as queued
+      [worker nng-worker-1 pid 752093] reported 'running' over ducknng RPC
+      [worker nng-worker-1 pid 752093] reported 'succeeded' over ducknng RPC
       [coordinator] 'wgs-annotate-chr22' final status, read back from the shared slot: "succeeded"
 
     A separate worker process wrote the job's status (running, then succeeded) into the coordinator's
     job:<id>:status slot over ducknng RPC, and the coordinator read it back with the same as-of query it
     uses for any observation. The job-store code did not change, and the worker can be any language that
-    speaks NNG. The owned ducknng extension keeps status as queryable ledger data.
+    speaks NNG. ducknng RPC keeps status as queryable ledger data.
 
 **And files, not just status — because this is bioinformatics.** A job
 produces a *file* (a plot, a VCF), and another agent has to read it.
@@ -295,9 +295,9 @@ node scripts/nng-file-handoff.mjs
 
     Distributed file I/O over ducknng: one agent plots a file, another reads it back by digest
 
-      [coordinator pid 3173106] job ledger + ducknng server up; shared CAS at /tmp/pi-bio-handoff-cas-3173095
-      [agent:producer pid 3173191] plotted coverage.png (8354 B) -> CAS sha256:80c6dd525767…; recorded the digest in the ledger
-      [agent:reader pid 3173289] read the ledger, fetched 'coverage.png' from CAS by digest: 8354 B, PNG=true, sha256:80c6dd525767…
+      [coordinator pid 752208] job ledger + ducknng server up; shared CAS at /tmp/pi-bio-handoff-cas-752197
+      [agent:producer pid 752311] plotted coverage.png (8354 B) -> CAS sha256:80c6dd525767…; recorded the digest in the ledger
+      [agent:reader pid 752409] read the ledger, fetched 'coverage.png' from CAS by digest: 8354 B, PNG=true, sha256:80c6dd525767…
 
     The producer wrote a real PNG into a content-addressed store and recorded only its DIGEST in the
     shared ledger over ducknng RPC. A SEPARATE reader process read that digest and fetched the exact bytes
@@ -318,16 +318,16 @@ pi --model gpt-5.3-codex-spark -e extensions/pi-coding-agent/index-compute.ts -p
   "produced: its name and byte size."
 ```
 
-> Done. I ran `bio_query` with:
+> I ran:
 >
-> - `manifestPath`: `examples/process-artifacts/manifest.json`
-> - `sql`: `SELECT * FROM summary`
-> - resolved resources: `values`, `summary` (so `summary` could execute)
+> `bio_query(dbPath=":memory:", manifestPath="examples/process-artifacts/manifest.json", sql="SELECT * FROM summary")`
 >
-> From the run receipt, the captured output artifacts were:
+> Resulting `summary`-resolver artifacts were:
 >
-> - `rows_csv`: **14 bytes**
-> - `report`: **37 bytes**
+> - `rows_csv` (`rows.csv`): **14 bytes**
+> - `report` (`report.txt`): **37 bytes**
+>
+> (run ID: `query-1783166579931-728302ce`)
 
 Then a *separate*, read-only reader agent discovers those artifacts
 through the run graph, follows the content address into CAS, and reads
@@ -343,21 +343,24 @@ pi --model gpt-5.3-codex-spark -e extensions/pi-coding-agent/index.ts -p \
   "the report says."
 ```
 
-> Latest run: `query-1783036643571-c8af3cee`  
-> (run file: `.pi/bio-agent/runs/query-1783036643571-c8af3cee/run.json`)
+> The most recent run under `.pi/bio-agent/runs/` is:
 >
-> Artifacts produced (with byte sizes):
+> - **`.pi/bio-agent/runs/query-1783166579931-728302ce/run.json`** (run
+>   id `query-1783166579931-728302ce`)
 >
-> - `result.json` (run output artifact at
->   `runs/query-1783036643571-c8af3cee/result.json`) — size not recorded
->   in `run.json` (content at CAS hash `sha256:bd3897...` is 34 bytes)
-> - `rows_csv` — **14 bytes** (`sha256:ce1d...`)
-> - `report` — **37 bytes** (`sha256:d352...`)
+> Artifacts produced:
 >
-> I followed the report’s content address and read:
+> 1.  `runs/query-1783166579931-728302ce/result.json` (run output
+>     artifact; size not recorded in run metadata)
+> 2.  `rows_csv` (from `process.compute`, size **14 bytes**, digest
+>     `sha256:ce1d093f3a0b68e60b17e7953ce95317fadda2e7f683ea5cc9caee6bbe2ae1c4`)
+> 3.  `report` (from `process.compute`, size **37 bytes**, digest
+>     `sha256:d352a4705f21c9cb6939f924a60041c6e9c9da59897e220e353a88841752911a`)
+>
+> Following the `report` content address:
 > `.pi/bio-agent/cas/sha256/d352a4705f21c9cb6939f924a60041c6e9c9da59897e220e353a88841752911a`
 >
-> Exact report text:
+> Report content is exactly:
 >
 >     # summarize report
 >     rows: 5
@@ -381,15 +384,15 @@ pi-bio-agent query examples/connectors/uniprot.json \
 ``` json
 {
   "ok": true,
-  "runId": "query-1783036685473-a437b77c",
+  "runId": "query-1783166625566-3822e52f",
   "status": "succeeded",
   "rowCount": 1,
   "artifacts": {
-    "run": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783036685473-a437b77c/run.json",
-    "result": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783036685473-a437b77c/result.json",
-    "receipts": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783036685473-a437b77c/receipts.json"
+    "run": ".pi/bio-agent/runs/query-1783166625566-3822e52f/run.json",
+    "result": ".pi/bio-agent/runs/query-1783166625566-3822e52f/result.json",
+    "receipts": ".pi/bio-agent/runs/query-1783166625566-3822e52f/receipts.json"
   },
-  "runDir": "/root/pi-bio-agent/.pi/bio-agent/runs/query-1783036685473-a437b77c",
+  "runDir": ".pi/bio-agent/runs/query-1783166625566-3822e52f",
   "rows": [
     {
       "primaryAccession": "P04637",
@@ -516,15 +519,14 @@ closes over](docs/closes-over.md) makes that argument with citations.
 Prior art and lineage:
 
 - **ClawBio**, the origin corpus this factors into manifests, resolvers,
-  and operations:
-  <https://github.com/ClawBio/ClawBio>
+  and operations: <https://github.com/ClawBio/ClawBio>
 - **Machine studying** (Li, Battle, Khattab, 2026):
   <https://jacobxli.com/blog/2026/machine-studying/>
-- **Sakana Fugu** (learned orchestration; we own the substrate it
-  conducts): <https://sakana.ai/fugu/>
+- **Sakana Fugu** (learned orchestration over shared memory and access
+  lists): <https://sakana.ai/fugu/>
 - **Recursive Language Models / RLM** (REPL-over-context; `bio_query` is
   the SQL REPL): <https://arxiv.org/abs/2512.24601>
-- **ducknng**, the owned Arrow-native DuckDB extension for NNG/HTTP/RPC
+- **ducknng**, an Arrow-native DuckDB extension for NNG/HTTP/RPC
   transport, in the lineage of R’s `nanonext` + `mirai`:
   <https://github.com/sounkou-bioinfo/ducknng> ·
   [NNG](https://nng.nanomsg.org/) ·

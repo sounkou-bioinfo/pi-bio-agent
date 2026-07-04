@@ -18,7 +18,7 @@ but it is the wrong substrate for concurrent agents. This page is the map of how
 |---|---|---|
 | **Single project, serial** | `openBioStore(cwd)` (default) | the project-local file. Owner's open: **throws** on a lock conflict (a memory write must not be silently dropped). Runs share it open→write→close in sequence. |
 | **Best-effort read under contention** | `tryOpenBioStore(cwd)` | returns **null** on a lock conflict (a concurrent agent holds it) so a reader/logger degrades instead of failing; a *real* error (corruption/permissions) still throws. Used by the always-on recall index and the run-log: they are conveniences, not hard dependencies. `isBioStoreLocked(err)` is the discriminator. |
-| **Cross-process sharing** | a **server-backed store** injected via the extension's `openStore` seam | one **DuckDB server** is the single writer; many clients read/write through it over RPC: **no file lock, so no contention**. This is how inter-project / inter-agent / inter-process / inter-machine memory works. Safe today for **distinct slugs** and **serialized** writers; concurrent **same-slug** writes are not yet linearizable (see the residue below). |
+| **Cross-process sharing** | a **server-backed store** injected via the extension's `openStore` seam | one **DuckDB server** is the single writer; many clients read/write through it over RPC: **no file lock, so no contention**. This is how inter-project / inter-agent / inter-process / inter-machine memory works. Distinct slugs are straightforward; concurrent same-slug writes are linearized only when the server uses the serialized execution model described below. |
 
 `tryOpenBioStore` only makes a *single-file* deployment degrade gracefully. It is **not** how you get real
 concurrency: for that you move the store to a server.
@@ -33,8 +33,8 @@ createBioExtension({ author: "agent:worker-3", openStore: myServerStore });
 
 `openStore(cwd)` returns a `BioStore` = `{ conn: SqlConn, close() }`. Because every memory op (`remember`,
 `recall`, `listMemory`, …) and every run recorder is written against the `SqlConn` port (`all` / `run`), a
-server-backed `conn` is a drop-in: route its `run(sql)` and `all(sql)` through the **owned ducknng** RPC
-(`ducknng_run_rpc` / `ducknng_query_rpc`) to a `ducknng_start_server` (or any other host-supplied server `SqlConn`: this repo owns/maintains/backports **ducknng**; **quack** was dropped, but a host may still bring its own server conn). The
+server-backed `conn` is a drop-in: route its `run(sql)` and `all(sql)` through **ducknng** RPC
+(`ducknng_run_rpc` / `ducknng_query_rpc`) to a `ducknng_start_server`, or through any other host-supplied server `SqlConn`. The
 client opens only a throwaway `:memory:` DuckDB to reach the RPC functions: it owns **no** shared state, holds
 **no** file lock; the *server* is the single writer.
 
@@ -62,7 +62,7 @@ Because every row carries its **author** (`source`, part of observation identity
 store stays attributed: two agents writing the same memory slug become two attributed revisions, not a silent
 clobber. That is Fugu's inter-workflow shared memory (report §3.2.2) made literal.
 
-> **Concurrent same-slug writes are linearized by a compare-and-set (was the open residue).** `remember`/`forget`
+> **Concurrent same-slug writes are linearized by a compare-and-set.** `remember`/`forget`
 > write the note/tombstone with `insertObservationIfSlotMax` (`src/duckdb/observations.ts`): a single
 > `INSERT … SELECT … WHERE NOT EXISTS(a row for the slot at recorded_at ≥ the computed instant) … RETURNING`. Because
 > it is **one atomic statement**, on the server's serialized execution lane (ducknng's default
@@ -89,4 +89,4 @@ The transport is dogfooded end to end:
   the coordinator reads back with the same `observationAsOfKey`: a language-agnostic distributed backend.
 
 So: the local file is the default for one project; a ducknng **server** (or other host-supplied server conn) is the store when memory must be
-shared across projects, processes, agents, or machines: the same owned ducknng extension the topology scripts already use.
+shared across projects, processes, agents, or machines: the same ducknng extension the topology scripts already use.

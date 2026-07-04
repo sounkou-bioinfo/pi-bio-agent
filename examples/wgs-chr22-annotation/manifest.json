@@ -10,9 +10,9 @@
     ],
     "resources": [
       { "id": "vcf_raw", "title": "Sample variants (chr22)", "kind": "virtual", "resolver": "duckhts.read_bcf",
-        "params": { "path": "/root/WG010.vcf.gz", "region": "chr22:23000000-24000000", "table": "vcf_raw" } },
+        "params": { "path": "data/WG010.vcf.gz", "region": "chr22:23000000-24000000", "table": "vcf_raw" } },
       { "id": "clinvar", "title": "ClinVar (chr22)", "kind": "virtual", "resolver": "duckhts.read_bcf",
-        "params": { "path": "/root/duckhts/clinvar.vcf.gz", "region": "22:23000000-24000000", "table": "clinvar" } }
+        "params": { "path": "data/clinvar.vcf.gz", "region": "22:23000000-24000000", "table": "clinvar" } }
     ]
   }
 }

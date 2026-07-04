@@ -76,7 +76,7 @@ async function orchestrate() {
   console.log("\nA separate worker process wrote the job's status (running, then succeeded) into the coordinator's");
   console.log("job:<id>:status slot over ducknng RPC, and the coordinator read it back with the same as-of query it");
   console.log("uses for any observation. The job-store code did not change, and the worker can be any language that");
-  console.log("speaks NNG. The owned ducknng extension keeps status as queryable ledger data.");
+  console.log("speaks NNG. ducknng RPC keeps status as queryable ledger data.");
 }
 
 const [mode, label] = process.argv.slice(2);

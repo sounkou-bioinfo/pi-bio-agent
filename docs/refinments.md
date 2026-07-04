@@ -31,7 +31,7 @@ core convenience only when repeated application implementations expose a shared 
    *performance* at scale (the proof is a locus extract, as intended).
 3. **Ledger → training dataset.** A `SELECT`/view over `bio_observations` joined to the Phase-4
    approval slots (contested = a `WHERE` over decisions), producing a stable dataset schema. A documented query, not
-   a new pipeline. The data plane a differentiated-intelligence fine-tune consumes; we own it, not the training loop.
+   a new pipeline. The data plane a differentiated-intelligence fine-tune consumes is the product surface, not the training loop.
 
 Also app/host, not library: unique-key dedup (a SQL `DISTINCT` idiom); scoring weights + ACMG points + calibration
 (authored rules, app producers with tests); PII de-id + license gating (host port decorators — the one small
@@ -350,7 +350,7 @@ body. Overfitting: a real skill doesn't bake the query data into the manifest. T
   - **The fetch itself is SQL via ducknng.** Earlier notes said "ducknng isn't
     installable here." It is: built for DuckDB v1.5.2 (community/local build); our node-api ships v1.5.4: a
     version LAG, not unavailability (node-api `1.5.2-r.2`/`1.5.3-r.3` exist). In a version-matched scratch env
-    (`@duckdb/node-api@1.5.2-r.2` + `LOAD '~/ducknng/build/release/ducknng.duckdb_extension'`), this ran:
+    (`@duckdb/node-api@1.5.2-r.2` + `LOAD '/path/to/ducknng.duckdb_extension'`), this ran:
     `SELECT * FROM ducknng_ncurl_table('http://httpbin.org/' || url_encode(getvariable('path')), 'GET', NULL,
     NULL, 12000, 0::UBIGINT)`: fetched + parsed the JSON body into a table, URL composed in pure SQL. So with
     ducknng version-matched, HTTP needs NO `http.get` TS resolver at all: it's `ducknng_ncurl_table` (+ chunking
@@ -549,13 +549,13 @@ ProcessRunner (never a manifest param). Open decision (reproducibility trade-off
 redact `process.compute` env values in the persisted snapshot (keys kept for replay structure, values omitted): closes the leak with no leaky denylist, but loses faithful replay of legit non-secret env values. Parallels the
 initSql digest choice (reduced fidelity for secret-safety). Decide before building.
 
-**(2) Server-side atomic monotonic writes ([[reproducibility-and-longrunning-lane]] residue #2).** Concurrent
-same-slug `remember`/`forget` over separate RPC clients are not linearizable: `withSlotLock` serializes only
-in-process; two clients read the same latest revision, compute the same `recorded_at`, insert competing revisions,
-and current-as-of ties on `observation_id DESC` (not write order). Now documented as an open residue in
-`docs/concurrency.md`. Fix direction: the ducknng server serializes per `statement_key`: a server-side lock / single-writer
-transaction / atomic advance-then-insert procedure exposed as an RPC method. Needs the ducknng RPC harness stood
-up (a focused build). Until built: server-backed store is safe for distinct slugs / serialized access only.
+**(2) Server-side atomic monotonic writes ([[reproducibility-and-longrunning-lane]] residue #2).** The earlier
+residue was real: `withSlotLock` serialized only in-process, so separate RPC clients could compute the same
+`recorded_at` for a same-slug `remember`/`forget`. The current fix is the compare-and-set insert path
+(`insertObservationIfSlotMax`) plus the ducknng server's serialized execution lane: one atomic
+`INSERT ... SELECT ... WHERE NOT EXISTS ... RETURNING` commits only if the slot max has not advanced. Keep this
+as a hard constraint, not a vague concurrency claim: a concurrent connection pool can reintroduce stale-snapshot
+behavior, so shared same-slug writes require the serialized server model documented in `docs/concurrency.md`.
 
 ## Network opt-in hardening: prior-review follow-ups
 
@@ -607,16 +607,16 @@ enforces allow/block lists. Both are documented at the opt-in site so a reader d
 
 The compute pillar for the ClawBio factoring: the data/lookup/annotation/query skills are the SQL-REPL + resolver
 tiers, but ClawBio's compute skills (Ancestry PCA, Fine-Mapping SuSiE/ABF, scRNA, nf-core/Galaxy wrappers,
-R/shell) need to run external code. Design grounded in two local prior-art projects (`~/nf-r-ipc`, `~/DuckTinyCC`):
+R/shell) need to run external code. Design grounded in two prior-art projects (`nf-r-ipc`, `DuckTinyCC`):
 
 - **Spawn external processes from Node** (`child_process`; detached for long-running): not in-DuckDB FFI
-  (`~/DuckTinyCC` JIT-compiles C into SQL UDFs at runtime, but that is the wrong risk surface
+  (`DuckTinyCC` JIT-compiles C into SQL UDFs at runtime, but that is the wrong risk surface
   for the process path) and not a JVM/Nextflow plugin. The host owns process spawning = a host-injected effect,
   matching the doctrine; it is sandboxable and simple. (DuckTinyCC stays a niche later option for hot-path UDFs.)
 - **Arrow IPC as the interchange** (the lingua franca): DuckDB exports Arrow natively; R reads via
   `nanoarrow`/`arrow`, Python via `pyarrow`. DuckDB -> Arrow -> process -> Arrow -> DuckDB (read via arrow scan).
-  This is exactly `~/nf-r-ipc`'s transport (Nextflow<->R over Arrow IPC), but Node-hosted.
-- **A strict contract** modeled on `~/nf-r-ipc/CONTRACT.md`: the invocation is data in a manifest (a "process
+  This is exactly `nf-r-ipc`'s transport (Nextflow<->R over Arrow IPC), but Node-hosted.
+- **A strict contract** modeled on `nf-r-ipc`'s contract: the invocation is data in a manifest (a "process
   operation": `{executable, script: path|inline, inputs: [table], output: schema|kind, args}`); typed request/
   response; typed error classes; fail-closed. Provenance receipt (same model as resolvers): script digest +
   input digests + exit code + stdout/stderr + output digest + wall time.
@@ -624,9 +624,9 @@ R/shell) need to run external code. Design grounded in two local prior-art proje
   Non-tabular R values -> adopt nf-r-ipc's `value_graph` (a flat Arrow table encoding a tree via
   `value_id/parent_id/key/index/tag/v_*`, with distinct typed-NA tags + R-class normalization): the same
   flat-table-encodes-a-tree pattern as our SemanticSQL statements (a real convergence, not a new abstraction).
-- **Out-of-process is the robust choice (third confirming instance, `~/mangoro`):** R<->Go IPC over nanomsg
+- **Out-of-process is the robust choice (third confirming instance, `mangoro`):** R<->Go IPC over nanomsg
   (mangos) + Arrow (nanoarrow), explicitly avoiding in-process FFI (cgo c-shared's multiple-runtime problems): the same call as avoiding DuckTinyCC. Spawn-per-call and a persistent worker are runner implementations under the same replay/receipt/job lifecycle, not separate semantics. A held-open worker messaged via nanomsg+Arrow amortizes R/Python startup and fits long-running or per-tissue-repeated compute (e.g. coloc over GTEx tissues). Node-hosted: child_process + Arrow files/stdio, or a held-open worker over a socket.
-- **CLI composition layer (`~/BLIT`, [WangLabCSU/blit](https://github.com/WangLabCSU/blit)):** command-line
+- **CLI composition layer (`BLIT`, [WangLabCSU/blit](https://github.com/WangLabCSU/blit)):** command-line
   tools as composable objects, not strings: `exec()` -> a structured object; pipe translation (`|>` -> `|`);
   `cmd_run`/`cmd_parallel`; lifecycle hooks (`on_start`/`on_exit`/`on_succeed`/`on_fail`) -> adopt as receipt
   events + fault-tolerant branching; micromamba/Conda env management -> a process op should declare + pin its
@@ -638,7 +638,7 @@ R/shell) need to run external code. Design grounded in two local prior-art proje
   on a persistent DB a later failure can leave earlier side effects with no failed-run receipt. Fine for
   idempotent INSTALL/LOAD/SET (its intended use); keep DDL/DML out of init.
 
-### Flagship: post-GWAS colocalization (`~/PostGWAS` + `~/coloclize`), the two-pillar proof
+### Flagship: post-GWAS colocalization (`PostGWAS` + `coloclize` shape), the two-pillar proof
 PostGWAS independently arrives at our architecture: provider contracts (`SumstatProvider`, `LDProvider` returning
 a provenance-bearing `DatasetLD` object, `AncestryWeightsProvider`, `ColocEngine`, `FineMapResultProvider`) with
 DuckDB/PlinkingDuck/coloc/HyPrColoc/ColocBoost as adapters: i.e. our resolver/port + receipt model in R/S7. The
