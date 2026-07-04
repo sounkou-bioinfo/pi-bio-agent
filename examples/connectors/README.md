@@ -44,18 +44,17 @@ injects no `fetch`, so the `http.get` path fails closed until the host binds one
 
 These REST manifests hardcode a plain `Accept: application/json` header. Auth is still a host boundary, and the
 safe order is:
-- **token-gated APIs** — prefer the **`http.get` + `withAuth`** path when the host must keep a token out of SQL:
-  `withAuth` calls the host's auth supplier per request, so Pi-style `AuthStorage` / OAuth refresh can rotate the
-  access token immediately before use. When a DuckDB table function supports DuckDB's **`CREATE SECRET`** manager,
-  use that unreadable secret path. A host-authored declared operation may also compose `ducknng_ncurl_table`
-  headers from `SET VARIABLE` with `ducknng_http_headers_build` (proved against a local ducknng route in
-  `test/ducknng-sql-http.test.ts`), but that is composition, not secrecy: the same connection can read
-  `getvariable()`. The run-store now lets hosts declare protected session variables so arbitrary `bio_query` cannot
-  read those names or enumerate `duckdb_variables()`, while declared operations can intentionally consume them. This
-  is a guardrail, not the final ducknng auth model. The needed ducknng primitive is a scoped credential profile:
-  SQL supplies only a profile id plus non-secret request fields, ducknng resolves/refreshes the secret inside the
-  HTTP client, verifies the URL/method is allowed for that profile, merges auth headers after agent headers, and
-  exposes only profile identity/digest in introspection and receipts;
+- **token-gated APIs** — prefer a **host-commissioned ducknng HTTP profile** for SQL-native connectors. The host
+  registers the profile on the DuckDB connection (for local hosts, use `registerDucknngHttpProfile`), pins its
+  scheme/host/port/path/method/TLS scope, and keeps the secret header value inside ducknng. Agent-visible SQL
+  supplies only the non-secret `profile_id` to
+  `ducknng_ncurl(...)`, `ducknng_ncurl_aio(...)`, or `ducknng_ncurl_table(...)`. The profile resolver injects the
+  credential after scope checks and rejects caller headers that collide with the injected auth header. For hosts that
+  need OAuth refresh or a provider-specific token lifecycle before ducknng profile rotation exists, keep using the
+  **`http.get` + `withAuth`** fallback: `withAuth` calls the host's auth supplier per request, so Pi-style
+  `AuthStorage` / OAuth refresh can rotate the access token immediately before use. `SET VARIABLE` header
+  composition is no longer the recommended auth integration point; it is SQL-visible and should stay limited to
+  legacy isolated host-authored operations;
 - **MCP servers** — an MCP `initialize` / `tools/list` / `tools/call` (JSON-RPC 2.0 over HTTP) **is an `ncurl`
   POST** — see [`mcp.json`](mcp.json). The manifest is structurally validated without network
   (`test/connectors-example.test.ts`), and `test/ducknng-sql-http.test.ts` proves the local session-header loop:

@@ -217,10 +217,11 @@ export function validateReadOnlySelect(sql: string): string {
 /** The ad-hoc agent query boundary is narrower than the declared-operation boundary: it may use ordinary
  *  agent bindings (`getvariable('query')`) but must not read host-declared protected session variables into
  *  result.json. This is not a sandbox and not egress control; it closes the known SQL-visible protected-variable
- *  exfiltration paths while keeping host-authored declared operations as the sealed escape hatch. */
+ *  exfiltration paths. SQL-native authenticated HTTP should use ducknng profiles; declared operations remain the
+ *  host-authored path for deliberate non-profile connection state. */
 export function validateAdHocBioQuerySelect(sql: string, opts: { protectedVariables?: readonly string[] } = {}): string {
   const trimmed = validateReadOnlySelect(sql);
   const hit = protectedVariableSurface(trimmed, opts.protectedVariables ?? []);
-  if (hit) throw new Error(`ad-hoc bio_query must not read host-declared protected session variables (${hit}); use a host-authored declared operation or injected fetch auth`);
+  if (hit) throw new Error(`ad-hoc bio_query must not read host-declared protected session variables (${hit}); use a host-commissioned ducknng HTTP profile, injected fetch auth, or a host-authored declared operation`);
   return trimmed;
 }

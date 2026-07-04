@@ -28,6 +28,15 @@ describe("ncurl-retry: the recursive-CTE SQL builder", () => {
     assert.match(sql, /'http:\/\/x\/y\?q=1''2'/, "the query string is preserved and the single quote is escaped; nothing appended");
     assert.doesNotMatch(sql, /attempt=/, "no attempt param appended to the URL");
   });
+  test("threads an optional ducknng HTTP profile id without embedding a secret header", () => {
+    const sql = buildNcurlRetrySql({
+      url: "http://x/secure",
+      headersJson: '[{"name":"Accept","value":"application/json"}]',
+      profileId: "host-profile",
+    });
+    assert.match(sql, /ducknng_ncurl\('http:\/\/x\/secure', 'GET', '\[\{"name":"Accept","value":"application\/json"\}\]', NULL, 30000 \+ 1, 0::UBIGINT, 'host-profile'\)/);
+    assert.doesNotMatch(sql, /Authorization|Bearer|token/i, "profile id is not a secret-bearing header");
+  });
 });
 
 // --- integration: a 503,503,200 counting fixture ---

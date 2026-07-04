@@ -660,8 +660,8 @@ executable middle is ours; semantic judgment and human/policy workflows are deli
 *computed*).
 
 **The boundary is narrower than "services/auth/streaming are out."** Much of what looks non-SQL is already in
-reach by composition: API **credentials/auth** = host auth storage/token-refresh, DuckDB `CREATE SECRET` where the
-target table function can consume an unreadable secret, and ducknng mTLS/peer-allowlists; **stateful-async**
+reach by composition: API **credentials/auth** = host auth storage/token-refresh plus scoped ducknng HTTP profiles
+for SQL-native calls, DuckDB `CREATE SECRET` where a table function can consume an unreadable secret, and ducknng mTLS/peer-allowlists; **stateful-async**
 interactions = ducknng query **sessions** (`open_query`/`fetch`/`close`, result handles, incremental chunks);
 **streaming / SSE / websockets** = ducknng stream routes plus `ws`/`wss` transport; a **GraphQL** endpoint is an
 HTTP POST + JSON that `ncurl_table` hits SQL-native (subscriptions = wss/sessions). So the genuinely irreducible
@@ -671,17 +671,15 @@ borrowable.
 
 Validation status matters here. The library already exercises SQL-native HTTP, POST bodies, AIO fanout/retry,
 ducknng RPC state mutation, NNG socket reachability, a local MCP-style session-header loop, an SSE route served by
-ducknng and consumed with `ducknng_ncurl`, and a host-composed `SET VARIABLE` →
-`ducknng_http_headers_build` → `ducknng_ncurl_table` Authorization header against a local ducknng route. That last
-pattern is composition, not secrecy: the same connection can read `getvariable`, so use it only behind a
-host-authored declared operation or isolated run connection. The host-auth pattern to reuse from Pi is locked
-`AuthStorage` plus OAuth refresh: resolve a short-lived token immediately before the operation and persist only
-digests/config provenance, never token values. The current `http.get` `withAuth` wrapper is dynamic in that
-sense: it calls the host auth supplier per request and host headers override colliding manifest headers. But it is
-still a coarse fetch-wide wrapper, not a connector-scoped credential profile with URL/method policy, tenant/cache
-scope, redacted receipts, and ducknng-native SQL execution. The remaining gaps are `wss`/server-push app
-subscriptions, TLS/mTLS auth fixtures in this repo, and an unreadable DuckDB-secret/host-secret handle that
-ducknng can turn into headers without exposing the raw token to agent SQL.
+ducknng and consumed with `ducknng_ncurl`, and the new credential integration point: the host registers a scoped
+ducknng HTTP profile through `registerDucknngHttpProfile`, SQL supplies only `profile_id`, and ducknng injects the
+secret header after scope checks.
+The host-auth pattern to reuse from Pi is locked `AuthStorage` plus OAuth refresh: resolve a short-lived token
+before commissioning or rotating the profile and persist only digests/config provenance, never token values. The
+current `http.get` `withAuth` wrapper remains the fallback for dynamic refresh when no ducknng profile is
+available. The remaining gaps are `wss`/server-push app subscriptions, TLS/mTLS auth fixtures in this repo, profile
+rotation/refresh hooks, host admission for which run may use which `profile_id`, and receipts that record
+profile id/scope/version without token values.
 
 ## Progressive disclosure
 

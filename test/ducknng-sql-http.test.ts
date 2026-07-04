@@ -2,16 +2,19 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { duckdbNodeConn } from "../src/duckdb/node-api.js";
+import { ducknngHttpProfilesAvailable, registerDucknngHttpProfile } from "../src/duckdb/http-profiles.js";
 
-// The SQL-native HTTP path, DETERMINISTIC — because ducknng ships the SERVER too, the fixture is a local ducknng
-// HTTP server (no external network, no injected fetch). The whole grounding skill is SQL: SET VARIABLE params,
-// url composed with getvariable + url_encode, the fetch + JSON->table by ducknng_ncurl_table, the grounding one
-// SQL line. This is what `http.get` (TS) + a mock fetch stands in for when DuckDB's version has no ducknng build.
+const ducknngExtensionPath = process.env.DUCKNNG_EXTENSION_PATH;
+const ducknngLoadSql = ducknngExtensionPath ? `LOAD '${ducknngExtensionPath.replace(/'/g, "''")}'` : "LOAD ducknng";
+
+// The SQL-native HTTP path uses a local ducknng HTTP server as the fixture, so these tests exercise the same
+// SQL table functions without external network or injected fetch. `http.get` + a mock fetch is the fallback
+// fixture shape for DuckDB builds that cannot load ducknng.
 const ducknngAvailable = await (async () => {
   try {
     const c = await (await DuckDBInstance.create(":memory:", { allow_unsigned_extensions: "true" })).connect();
-    await c.run("INSTALL ducknng FROM community");
-    await c.run("LOAD ducknng");
+    if (!ducknngExtensionPath) await c.run("INSTALL ducknng FROM community");
+    await c.run(ducknngLoadSql);
     return true;
   } catch { return false; }
 })();
@@ -20,7 +23,7 @@ describe("SQL-native HTTP grounding via ducknng (a local ducknng server is the d
   test("server serves JSON -> ncurl_table fetches+parses -> agent grounds, all SQL, no external network", async () => {
     const inst = await DuckDBInstance.create(":memory:", { allow_unsigned_extensions: "true" });
     const conn = duckdbNodeConn(await inst.connect());
-    await conn.run("LOAD ducknng");
+    await conn.run(ducknngLoadSql);
 
     // FIXTURE: a ducknng HTTP server serving a canned OLS4-shaped search response from a SQL route handler.
     // Bind port 0 (OS-assigned) and DISCOVER the real port via ducknng_list_servers — a fixed port races under
@@ -45,39 +48,63 @@ describe("SQL-native HTTP grounding via ducknng (a local ducknng server is the d
     inst.closeSync(); // tears down the server
   });
 
-  test("host SET VARIABLE composes an Authorization header for ncurl_table against a ducknng route", async () => {
+  test("host-commissioned HTTP profile injects auth without exposing the token to SQL", async (t) => {
     const inst = await DuckDBInstance.create(":memory:", { allow_unsigned_extensions: "true" });
     const conn = duckdbNodeConn(await inst.connect());
-    await conn.run("LOAD ducknng");
+    await conn.run(ducknngLoadSql);
+    if (!(await ducknngHttpProfilesAvailable(conn))) {
+      inst.closeSync();
+      t.skip("ducknng HTTP profiles unavailable in this build");
+      return;
+    }
 
     await conn.run(`SELECT ducknng_start_server('auth_fixture', 'http://127.0.0.1:0/_ducknng', 1, 134217728, 300000, 0::UBIGINT)`);
     const BASE = (await conn.all<{ listen: string }>("SELECT listen FROM ducknng_list_servers() WHERE name='auth_fixture'"))[0]!.listen.replace(/\/_ducknng.*$/, "");
+    const baseUrl = new URL(BASE);
     await conn.run(`SELECT ducknng_register_http_route('auth_fixture', 'GET', '/secure',
       'SELECT * FROM ducknng_http_json(
         CASE WHEN ducknng_http_header(''authorization'') = ''Bearer host-token'' THEN 200 ELSE 401 END,
         json_array(json_object(''ok'', ducknng_http_header(''authorization'') = ''Bearer host-token''))::VARCHAR
       )')`);
 
-    // SET VARIABLE is a host-authored composition pattern, not a secrecy boundary: the same SQL connection can
-    // read it back. Keep this pattern behind a declared operation / isolated connection, not arbitrary bio_query.
-    await conn.run("SET VARIABLE host_token = 'host-token'");
-    const visible = await conn.all<{ token: string }>("SELECT getvariable('host_token')::VARCHAR AS token");
-    assert.equal(visible[0]!.token, "host-token");
+    // The host commissions the profile on this connection. The agent-visible SQL below receives only the
+    // non-secret profile id; ducknng resolves the secret after URL/method scope checks and before send.
+    await registerDucknngHttpProfile(conn, {
+      profileId: "auth-fixture-profile",
+      scheme: "http",
+      host: "127.0.0.1",
+      port: Number(baseUrl.port),
+      pathPrefix: "/secure",
+      method: "GET",
+      authHeaderName: "Authorization",
+      authHeaderValue: "Bearer host-token",
+    });
 
     const rows = await conn.all<{ ok: boolean }>(
       `SELECT ok FROM ducknng_ncurl_table(
         '${BASE}/secure',
         'GET',
-        ducknng_http_headers_build(['Authorization'], ['Bearer ' || getvariable('host_token')::VARCHAR]),
+        NULL,
         NULL,
         5000,
-        0::UBIGINT
+        0::UBIGINT,
+        'auth-fixture-profile'
       )`,
     );
     assert.deepEqual(rows, [{ ok: true }]);
+    const listed = await conn.all<{ auth_header_names_json: string; token_absent: boolean }>(
+      `SELECT auth_header_names_json,
+              position('host-token' IN profile_id || scheme || host || path_prefix || method || auth_header_names_json) = 0 AS token_absent
+       FROM ducknng_list_http_profiles()
+       WHERE profile_id = 'auth-fixture-profile'`,
+    );
+    assert.deepEqual(listed, [{ auth_header_names_json: "[\"Authorization\"]", token_absent: true }]);
     await assert.rejects(() => conn.all(
       `SELECT * FROM ducknng_ncurl_table('${BASE}/secure', 'GET', NULL, NULL, 5000, 0::UBIGINT)`,
     ), /HTTP status 401/);
+    await assert.rejects(() => conn.all(
+      `SELECT * FROM ducknng_ncurl_table('${BASE}/securez', 'GET', NULL, NULL, 5000, 0::UBIGINT, 'auth-fixture-profile')`,
+    ), /HTTP profile scope rejected URL path/);
 
     inst.closeSync();
   });
@@ -85,7 +112,7 @@ describe("SQL-native HTTP grounding via ducknng (a local ducknng server is the d
   test("MCP-style initialize captures a session header and tools/list threads it through ncurl", async () => {
     const inst = await DuckDBInstance.create(":memory:", { allow_unsigned_extensions: "true" });
     const conn = duckdbNodeConn(await inst.connect());
-    await conn.run("LOAD ducknng");
+    await conn.run(ducknngLoadSql);
 
     await conn.run(`SELECT ducknng_start_server('mcp_fixture', 'http://127.0.0.1:0/_ducknng', 1, 134217728, 300000, 0::UBIGINT)`);
     const BASE = (await conn.all<{ listen: string }>("SELECT listen FROM ducknng_list_servers() WHERE name='mcp_fixture'"))[0]!.listen.replace(/\/_ducknng.*$/, "");
@@ -150,7 +177,7 @@ describe("SQL-native HTTP grounding via ducknng (a local ducknng server is the d
   test("SSE-style streaming route is served by ducknng and consumed with ncurl", async () => {
     const inst = await DuckDBInstance.create(":memory:", { allow_unsigned_extensions: "true" });
     const conn = duckdbNodeConn(await inst.connect());
-    await conn.run("LOAD ducknng");
+    await conn.run(ducknngLoadSql);
 
     await conn.run(`SELECT ducknng_start_server('sse_fixture', 'http://127.0.0.1:0/_ducknng', 1, 134217728, 300000, 0::UBIGINT)`);
     const BASE = (await conn.all<{ listen: string }>("SELECT listen FROM ducknng_list_servers() WHERE name='sse_fixture'"))[0]!.listen.replace(/\/_ducknng.*$/, "");

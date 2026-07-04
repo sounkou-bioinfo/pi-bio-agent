@@ -17,6 +17,8 @@ export interface NcurlRetryOptions {
   method?: string; // default GET
   /** ducknng header array JSON, e.g. '[{"name":"Accept","value":"application/json"}]'; default none */
   headersJson?: string | null;
+  /** ducknng outbound HTTP profile id. Host-commissioned and non-secret; ducknng injects the credential. */
+  profileId?: string | null;
   /** request body for POST/PUT (BLOB); default none */
   body?: string | null;
   timeoutMs?: number; // per request; default 30000
@@ -50,7 +52,7 @@ export async function ncurlRowAvailable(conn: SqlConn): Promise<boolean> {
 }
 
 function validated(opts: NcurlRetryOptions): {
-  url: string; method: string; sep: string; headers: string; body: string; timeout: number; tls: number; maxAttempts: number;
+  url: string; method: string; sep: string; headers: string; body: string; timeout: number; tls: number; maxAttempts: number; profile: string;
 } {
   const method = (opts.method ?? "GET").toUpperCase();
   if (!METHOD.test(method)) throw new Error(`ncurlRetry: invalid method '${method}'`);
@@ -63,6 +65,7 @@ function validated(opts: NcurlRetryOptions): {
     headers: opts.headersJson != null ? `'${esc(opts.headersJson)}'` : "NULL",
     body: opts.body != null ? `'${esc(opts.body)}'::BLOB` : "NULL",
     timeout, tls, maxAttempts,
+    profile: opts.profileId != null ? `'${esc(opts.profileId)}'` : "NULL",
   };
 }
 
@@ -76,7 +79,9 @@ export function buildNcurlRetrySql(opts: NcurlRetryOptions): string {
   // re-evaluates it per row rather than hoisting it once. Carry that correlation in the TIMEOUT (`timeout + attempt`
   // ms) — a negligible, harmless bump that never touches the URL/method/headers/body the caller requested.
   const call = (attemptSql: string): string =>
-    `ducknng_ncurl('${esc(v.url)}', '${v.method}', ${v.headers}, ${v.body}, ${v.timeout} + ${attemptSql}, ${v.tls}::UBIGINT)`;
+    opts.profileId != null
+      ? `ducknng_ncurl('${esc(v.url)}', '${v.method}', ${v.headers}, ${v.body}, ${v.timeout} + ${attemptSql}, ${v.tls}::UBIGINT, ${v.profile})`
+      : `ducknng_ncurl('${esc(v.url)}', '${v.method}', ${v.headers}, ${v.body}, ${v.timeout} + ${attemptSql}, ${v.tls}::UBIGINT)`;
   return `WITH RECURSIVE attempts(attempt, status, body_text) AS (
   SELECT 1, status, body_text FROM ${call("1")}
   UNION ALL
@@ -106,8 +111,12 @@ export async function ncurlRetry(conn: SqlConn, opts: NcurlRetryOptions): Promis
   while (attempt < v.maxAttempts) {
     attempt++;
     const rows = await conn.all<{ status: number | null; body_text: string | null }>(
-      "SELECT status, body_text FROM ducknng_ncurl(?, ?, ?, ?::BLOB, ?, ?::UBIGINT)",
-      [v.url, v.method, opts.headersJson ?? null, opts.body ?? null, v.timeout, v.tls],
+      opts.profileId != null
+        ? "SELECT status, body_text FROM ducknng_ncurl(?, ?, ?, ?::BLOB, ?, ?::UBIGINT, ?)"
+        : "SELECT status, body_text FROM ducknng_ncurl(?, ?, ?, ?::BLOB, ?, ?::UBIGINT)",
+      opts.profileId != null
+        ? [v.url, v.method, opts.headersJson ?? null, opts.body ?? null, v.timeout, v.tls, opts.profileId]
+        : [v.url, v.method, opts.headersJson ?? null, opts.body ?? null, v.timeout, v.tls],
     );
     status = rows[0]?.status ?? null;
     bodyText = rows[0]?.body_text ?? null;

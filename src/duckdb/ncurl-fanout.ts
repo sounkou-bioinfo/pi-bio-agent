@@ -17,7 +17,7 @@ import type { SqlConn } from "../core/ports.js";
 //   out  `resultsTable`  : (batch_id BIGINT, status INTEGER, body_text VARCHAR) — one row per batch that
 //                          succeeded (2xx). Terminal failures (permanent status, or transient exhausted after
 //                          maxRounds) are NOT here; they are returned in `failures` with their last status.
-// The host owns url/method/headers/tls (composed in, never agent params); the data args are parameter-bound.
+// The host owns url/method/headers/profile/tls (composed in, never agent params); the data args are parameter-bound.
 
 const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
@@ -38,6 +38,8 @@ export interface NcurlFanoutOptions {
   url: string;
   /** ducknng canonical header array, e.g. '[{"name":"Content-Type","value":"application/json"}]' */
   headersJson: string;
+  /** ducknng outbound HTTP profile id. Host-commissioned and non-secret; ducknng injects the credential. */
+  profileId?: string | null;
   method?: string; // default POST
   /** tls_config_id (bound, not interpolated). Host-owned. Default 0 (no TLS / plain http). */
   tlsConfigId?: number;
@@ -71,7 +73,7 @@ const defaultTransient = (status: number | null, ok: boolean): boolean => !ok ||
  * abandoned in-flight handle is never left racing a relaunch. ducknng must already be LOADed on `conn`.
  */
 export async function ncurlFanout(conn: SqlConn, opts: NcurlFanoutOptions): Promise<NcurlFanoutResult> {
-  const { batchesTable, resultsTable, url, headersJson } = opts;
+  const { batchesTable, resultsTable, url, headersJson, profileId } = opts;
   for (const [label, id] of [["batchesTable", batchesTable], ["resultsTable", resultsTable]] as const) {
     if (!IDENT.test(id)) throw new Error(`ncurlFanout: ${label} '${id}' must be a SQL identifier`);
   }
@@ -109,9 +111,14 @@ export async function ncurlFanout(conn: SqlConn, opts: NcurlFanoutOptions): Prom
     // take a concurrency-capped wave and launch one async request per row (scalar launcher, per-row column body)
     await conn.run(`CREATE OR REPLACE TABLE ${wave} AS SELECT batch_id, body, attempts_left FROM ${queue} ORDER BY batch_id LIMIT ${maxInFlight}`);
     await conn.run(
-      `CREATE OR REPLACE TABLE ${launched} AS
-       SELECT batch_id, ducknng_ncurl_aio(?, ?, ?, body::BLOB, ?, ?::UBIGINT) AS h FROM ${wave}`,
-      [url, method, headersJson, timeoutMs, tlsConfigId],
+      profileId != null
+        ? `CREATE OR REPLACE TABLE ${launched} AS
+           SELECT batch_id, ducknng_ncurl_aio(?, ?, ?, body::BLOB, ?, ?::UBIGINT, ?) AS h FROM ${wave}`
+        : `CREATE OR REPLACE TABLE ${launched} AS
+           SELECT batch_id, ducknng_ncurl_aio(?, ?, ?, body::BLOB, ?, ?::UBIGINT) AS h FROM ${wave}`,
+      profileId != null
+        ? [url, method, headersJson, timeoutMs, tlsConfigId, profileId]
+        : [url, method, headersJson, timeoutMs, tlsConfigId],
     );
     await conn.run(`CREATE OR REPLACE TABLE ${collected} (aio_id UBIGINT, ok BOOLEAN, status INTEGER, body_text VARCHAR)`);
     const [{ need }] = await conn.all<{ need: bigint }>(`SELECT count(*) need FROM ${launched}`);

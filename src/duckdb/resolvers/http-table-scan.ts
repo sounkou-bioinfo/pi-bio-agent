@@ -71,13 +71,12 @@ export function httpTableResolver(fetchImpl: FetchLike): BioResolverImpl {
       throw new Error("http.get: params.headers must be an object of string values");
     }
     const headers = (p.headers ?? {}) as Record<string, string>;
-    // SECURITY: a manifest is agent-authorable DATA, so it must not carry SECRETS. Use an ALLOWLIST of clearly
-    // non-secret headers (a denylist can never be complete — Private-Token, Ocp-Apim-Subscription-Key, X-Foo-Auth,
-    // … would slip through). Anything else — including any auth/custom header that might bear a secret — is refused
-    // and must be injected by a host fetch policy (withAuth). Fail closed.
+    // SECURITY: a manifest is agent-authorable data, so it must not carry secrets. Use an allowlist of clearly
+    // non-secret headers; a denylist can never be complete. Anything else is refused and must be supplied through
+    // a host boundary: fetch policy (`withAuth`) for this resolver, or a ducknng HTTP profile for SQL-native calls.
     const SAFE_MANIFEST_HEADERS = new Set(["accept", "accept-language", "accept-encoding", "content-type", "content-language", "user-agent", "referer", "if-none-match", "if-modified-since", "cache-control"]);
     for (const [name, value] of Object.entries(headers)) {
-      if (!SAFE_MANIFEST_HEADERS.has(name.toLowerCase())) throw new Error(`http.get: header '${name}' is not allowed from a manifest — a manifest must not carry secrets. Only non-secret headers (Accept, Content-Type, …) are permitted; inject auth/custom headers via a host fetch policy (withAuth).`);
+      if (!SAFE_MANIFEST_HEADERS.has(name.toLowerCase())) throw new Error(`http.get: header '${name}' is not allowed from a manifest — a manifest must not carry secrets. Only non-secret headers (Accept, Content-Type, …) are permitted; inject auth/custom headers via a host fetch policy (withAuth), or use a host-commissioned ducknng HTTP profile for SQL-native connectors.`);
       if (typeof value !== "string") throw new Error(`http.get: header '${name}' must be a string value (fail closed, not coerced)`);
     }
     // This resolver materializes a response BODY into a table, so it allows the BODY-RETURNING READ methods:
