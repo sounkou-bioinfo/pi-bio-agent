@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, test } from "node:test";
-import piBioAgentExtension from "../extensions/pi-coding-agent/index.js";
+import piBioAgentExtension, { createBioExtension } from "../extensions/pi-coding-agent/index.js";
 import { openBioStore } from "../src/hosts/bio-store.js";
 import { recallSkill } from "../src/hosts/skill-store.js";
 
@@ -12,7 +12,7 @@ interface RegisteredTool {
   execute: (...args: any[]) => Promise<any>;
 }
 
-function loadExtension() {
+function loadExtension(extension = piBioAgentExtension) {
   const handlers = new Map<string, Function[]>();
   const tools: RegisteredTool[] = [];
   const pi = {
@@ -23,7 +23,7 @@ function loadExtension() {
       tools.push(tool);
     },
   };
-  piBioAgentExtension(pi as any);
+  extension(pi as any);
   return { handlers, tools };
 }
 
@@ -70,6 +70,57 @@ describe("Pi coding-agent extension", () => {
     } });
     assert.equal(projection.details.valid, true);
     assert.match(projection.details.sql, /CREATE OR REPLACE TABLE "bio_edges"/);
+  });
+
+  test("host-protected session bindings are not tool params: bio_query cannot read them, declared operations can", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "pi-bio-ext-protected-"));
+    const manifestPath = join(cwd, "manifest.json");
+    await writeFile(manifestPath, JSON.stringify({
+      schema: "pi-bio.manifest.v1",
+      id: "pi-protected-session",
+      version: "0.1.0",
+      title: "Pi protected session",
+      description: "Host-owned protected session binding regression.",
+      provides: {
+        operations: [{
+          id: "host_auth.read",
+          version: "0.1.0",
+          title: "Host auth read",
+          description: "Declared operation intentionally consumes host protected state.",
+          transport: "duckdb.sql",
+          inputSchema: { type: "object" },
+          sql: { sqlTemplate: "SELECT getvariable('api_token') AS token", readOnly: true },
+        }],
+      },
+    }), "utf8");
+
+    const { tools } = loadExtension(createBioExtension({
+      protectedSessionBindings: { api_token: "Bearer pi-token" },
+    }));
+    const byName = new Map(tools.map((tool) => [tool.name, tool]));
+    const ctx = { cwd };
+
+    await assert.rejects(
+      () => byName.get("bio_query")!.execute("id", {
+        dbPath: ":memory:",
+        manifestPath,
+        sql: "SELECT getvariable('api_token') AS token",
+        runId: "pi-protected-query",
+      }, undefined, undefined, ctx),
+      /protected session variables.*getvariable\('api_token'\)/,
+    );
+
+    const op = await byName.get("bio_run_operation")!.execute("id", {
+      dbPath: ":memory:",
+      manifestPath,
+      operationId: "host_auth.read",
+      runId: "pi-protected-operation",
+    }, undefined, undefined, ctx);
+    assert.equal(op.details.ok, true, op.details.ok ? "" : op.details.error);
+    const result = JSON.parse(await readFile(join(op.details.runDir, "result.json"), "utf8")) as { rows: Array<{ token: string }> };
+    assert.equal(result.rows[0]!.token, "Bearer pi-token");
+    const replayText = await readFile(join(op.details.runDir, "replay.json"), "utf8");
+    assert.doesNotMatch(replayText, /pi-token/, "protected binding value must not leak into replay.json through Pi");
   });
 
   test("memory and skill tools persist to the store + a legible file view", async () => {

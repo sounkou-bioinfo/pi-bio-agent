@@ -181,6 +181,13 @@ export interface BioExtensionOptions {
   /** CAS grant: a content-addressed store so `process.compute` can capture declared FILE outputs by digest, and
    *  runs can serialize result/receipts/replay bytes outside the DB. Absent => file outputs fail closed. */
   cas?: CasStore;
+  /** Host-owned DuckDB session variables, bound after ordinary agent `bindings`, digested but not serialized in
+   *  replay.json, and blocked from ad-hoc `bio_query` reads by name. This is a host composition hook, never a tool
+   *  parameter; declared operations may intentionally consume these values. */
+  protectedSessionBindings?: Record<string, unknown>;
+  /** Additional protected session variable names, for values established by host init/profile code outside this
+   *  extension. This only declares the ad-hoc query guard surface; it does not bind values by itself. */
+  protectedSessionVariables?: string[];
   /** The authoring agent id stamped on runs/memory this instance records (shared-store attribution). */
   author?: string;
   /** How to open the ONE store. Default: the project-local file (`openBioStore(cwd)`), a process-exclusive writer
@@ -195,6 +202,8 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
   const network = options.network;
   const processGrant = options.process; // the out-of-process compute grant (threaded into runs so process.compute can bind)
   const cas = options.cas; // the CAS grant (file outputs + byte serialization); absent => file outputs fail closed
+  const protectedSessionBindings = options.protectedSessionBindings;
+  const protectedSessionVariables = options.protectedSessionVariables;
   const author = options.author ?? "agent:local";
   const openStore: OpenStore = options.openStore ?? ((cwd) => openBioStore(cwd));
   return function piBioAgentExtension(pi: ExtensionAPI): void {
@@ -256,7 +265,7 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
       // not strip unknown keys. network/signal are host-composed, never agent-supplied.
       const { dbPath, manifestPath, operationId, runId } = params;
       return text(await withRunLog(openStore, ctx.cwd, dbPath, (storeConn) =>
-        runBioOperationFromManifest({ cwd: ctx.cwd, dbPath, manifestPath, operationId, runId, network, process: processGrant, cas, signal, store: storeConn, author })));
+        runBioOperationFromManifest({ cwd: ctx.cwd, dbPath, manifestPath, operationId, runId, network, process: processGrant, cas, protectedSessionBindings, protectedSessionVariables, signal, store: storeConn, author })));
     },
   });
 
@@ -276,7 +285,7 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
       // Only schema-approved fields (see bio_run_operation): never spread untrusted params into the host runner.
       const { dbPath, manifestPath, sql, resources, bindings, runId } = params;
       return text(await withRunLog(openStore, ctx.cwd, dbPath, (storeConn) =>
-        runBioQueryFromManifest({ cwd: ctx.cwd, dbPath, manifestPath, sql, resources, bindings, runId, network, process: processGrant, cas, signal, store: storeConn, author })));
+        runBioQueryFromManifest({ cwd: ctx.cwd, dbPath, manifestPath, sql, resources, bindings, runId, network, process: processGrant, cas, protectedSessionBindings, protectedSessionVariables, signal, store: storeConn, author })));
     },
   });
 

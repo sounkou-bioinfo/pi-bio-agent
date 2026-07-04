@@ -264,6 +264,9 @@ fails closed unless the host explicitly injects the capability:
   out-of-process code runtime (`process.compute` — the ProcessRunner grant)
   extension INSTALL + egress config on the connection (host-owned `duckdbInitSql`
     / `duckdbConfig`, never an agent tool param)
+  protected session bindings (`protectedSessionBindings` / `protectedSessionVariables`,
+    host-owned and never exposed as Pi tool params; ad-hoc `bio_query` cannot read them,
+    declared operations may intentionally consume them)
 ```
 
 Precise on extension loading: the host-owned `duckdbInitSql`/`duckdbConfig` (connection bootstrap,
