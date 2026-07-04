@@ -39,7 +39,7 @@ library-adjacent item is letting the resolver receipt carry `license` + de-id st
 so the host can gate on provenance). Net: the clinical-genomics work should happen outside core, in the
 application.
 
-Dogfood requirement: BioConnect-style application code that fetches, normalizes, or scores around the substrate is
+Dogfood requirement: downstream application code that fetches, normalizes, or scores around the substrate is
 technical debt unless it is proving a missing primitive. The expected route is application manifest or operation
 spec -> resolver or adapter -> DuckDB table -> recorded run.
 

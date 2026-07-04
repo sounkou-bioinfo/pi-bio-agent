@@ -87,7 +87,7 @@ question-level builders in core.)
 > with tests (DuckDB sync/report, Pi extension, CLI, project helpers). Everything else is removed until a
 > real consumer demands it.
 
-Application code has the same obligation. BioConnect-style connectors or case workflows that fetch, normalize, or
+Application code has the same obligation. Downstream connectors or case workflows that fetch, normalize, or
 score data beside the substrate are integration debt unless they are deliberately proving a missing primitive. The
 default path is application manifest or operation spec -> resolver/adapter -> DuckDB table -> recorded run. If
 application code keeps running around that path, the framework is not dogfooding itself.

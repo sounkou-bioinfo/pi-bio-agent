@@ -42,7 +42,7 @@ Instructions for coding agents working in this repository.
 
 - The point of dogfooding is to reveal immanent primitives and exercise the library.
 - A primitive is justified by concrete instances already in the repo, ideally two or three of them. Name those instances before adding the abstraction.
-- BioConnect-style applications should run through the substrate: manifest or operation spec -> resolver/adapter -> DuckDB table -> recorded run -> observations/receipts.
+- Downstream applications should run through the substrate: manifest or operation spec -> resolver/adapter -> DuckDB table -> recorded run -> observations/receipts.
 - If application code bypasses the runner, ledger, receipts, or CAS without a deliberate reason, call that out as integration debt.
 
 ## Pillars And Compute Modes
