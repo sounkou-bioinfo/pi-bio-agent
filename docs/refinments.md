@@ -27,8 +27,10 @@ core convenience only when repeated application implementations expose a shared 
    `ATTACH` read-only + a `subject/predicate/object → from_id/predicate/to_id` SELECT + the existing
    `materializeEntailedEdges` (which already takes any source table). The script's closure derives the 2-hop
    subsumption and the gene→has_phenotype→ancestor walk; the real remote `monarch-kg.duckdb` ATTACHes over httpfs
-   and is biolink-shaped. It is application SQL over existing primitives. The open question is full-KG closure
-   *performance* at scale (the proof is a locus extract, as intended).
+   and is biolink-shaped. It is application SQL over existing primitives. The opt-in live benchmark
+   (`node scripts/foreign-graph-closure.mjs --bench-remote-subclass`) materializes the remote Monarch
+   `biolink:subclass_of` slice and closes it at run time. Treat the output as a regression benchmark, not a
+   pinned artifact or a universal guarantee for every predicate policy or source snapshot.
 3. **Ledger → training dataset.** A `SELECT`/view over `bio_observations` joined to the Phase-4
    approval slots (contested = a `WHERE` over decisions), producing a stable dataset schema. A documented query, not
    a new pipeline. The data plane a differentiated-intelligence fine-tune consumes is the product surface, not the training loop.
@@ -691,7 +693,7 @@ The restricted-runtime contract (build before exposing powerful execution):
 
 ## KG and ontology substrate
 
-**Direction settled: port the [SemanticSQL](https://github.com/INCATools/semantic-sql) source spec into DuckDB.**
+**Direction settled: project the [SemanticSQL](https://github.com/INCATools/semantic-sql) source-spec shape into DuckDB.**
 The upstream source of truth is LinkML: `statements(subject,predicate,object,value,datatype,language)`,
 `prefix(prefix,base)`, `entailed_edge(subject,predicate,object)`, plus generated views such as `edge`. Our local
 compiled graph is `bio_edges(from_id, predicate, to_id)` plus `entailed_edge` / `entailed_edge_as_of`. The same
@@ -703,10 +705,15 @@ JOIN, not a walker. See [`design.md`](./design.md#the-semanticsql-shape-source-s
 - Done: ordinal scales as data (`scale_members` from a ranked `TermSet`): total order to the graph's partial
   order; `decideGrounding` membership unchanged.
 - Source-spec gap audit from `INCATools/semantic-sql`:
-  - **No schema-port generator yet.** Current tests hand-create `statements` and `bio_edges`; we do not yet parse
-    SemanticSQL LinkML or generate DuckDB DDL/views from the source spec.
-  - **`prefix` is missing as a first-class table.** CURIE/IRI expansion, prefix validation, and cross-database
-    identifier hygiene are still ad hoc.
+  - **No generated SemanticSQL compatibility layer yet.** Current tests and demos hand-create the staging
+    `statements` / `edge` / `bio_edges` shape or project a foreign SQL graph directly. We do not parse the
+    SemanticSQL LinkML source to generate the full DuckDB DDL/view set. That is source-spec parity work, not a
+    blocker for foreign KG projection or closure.
+  - **No SemanticSQL-style CURIE-prefix registry yet.** Here `prefix(prefix, base)` means namespace expansion
+    (`HP` -> an HPO base IRI, `biolink` -> a Biolink base IRI), not run-id prefixes, observation-key prefixes, or
+    a traversal primitive. The graph currently stores CURIE strings as node/predicate ids and works without
+    expansion; first-class prefixes would improve CURIE/IRI validation, canonicalization, receipts, and
+    cross-database identifier hygiene.
   - **Generated views are not modeled.** We only exercise label/synonym statements and direct edge rows, not the
     generated `rdfs_*`, OMO synonym/mapping, OWL restriction/axiom, RO edge, subgraph, taxon-constraint,
     similarity, or term-association views.
@@ -721,14 +728,19 @@ JOIN, not a walker. See [`design.md`](./design.md#the-semanticsql-shape-source-s
     flattened away.
   - **Multi-ontology attachment is not dogfooded.** SemanticSQL's SQLite pattern supports attached databases and
     cross-ontology joins; we have not yet shown the DuckDB equivalent over attached/staged ontology artifacts.
-- Next (deferred until a real grounding/traversal consumer): a thin ontology-ingest resolver that ports the
-  SemanticSQL source schema into DuckDB staging tables and projects its `edge` view into our `bio_edges` shape.
+- Next (deferred until a real grounding/traversal consumer): a thin ontology-ingest resolver that stages the
+  SemanticSQL source-spec shape in DuckDB and projects its `edge` view into our `bio_edges` shape.
   No DuckDB sqlite extension is required: ingest from a native-readable format such as OBO Graphs JSON via
   `read_json`, generated TSVs / triple parquet via `duckdb.file_scan`, or an optional one-time `sqlite3` CLI dump
   -> parquet. Compute the closure with `materializeEntailedEdges` unless a pinned upstream `entailed_edge`
   artifact is deliberately accepted. Pin a build date as provenance, honor per-ontology CC-BY. OLS4 REST only for
   fresh text→CURIE misses (judgment tier); cached CURIEs + FTS are the deterministic projection tier; abstain
   below threshold.
+- Immanent refinement exposed by the gap audit: a **graph projection profile**, not a convenience tool zoo. A
+  profile is data that says how a foreign source becomes the compiled graph: source tables/columns, CURIE-prefix
+  registry, generated-view policy (`edge`, labels, synonyms, restrictions), transitive-predicate policy, closure
+  source (`relation-graph` artifact vs local CTE), and provenance/license fields. The existing resolver + SQL +
+  closure primitives execute that profile; the profile makes the projection repeatable, reviewable, and receipted.
 - Add bounded graph-walk semantics with expansion handles so high-degree neighborhoods do not flood context
   (now a bounded SQL query over `entailed_edge`, not a custom walker).
 - Add trust/provenance fields consistently across facts, edges, and artifacts (`bio_edges.trust` exists; keep

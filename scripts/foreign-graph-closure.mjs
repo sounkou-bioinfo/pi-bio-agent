@@ -10,10 +10,12 @@ import { materializeEntailedEdges } from "../dist/duckdb/graph-closure.js";
 // Monarch-shaped external DuckDB (a "locus extract": a biolink `denormalized_edges` table with an is_a hierarchy +
 // gene→phenotype + gene→disease→phenotype), ATTACH it read-only, project it into `bio_edges`, run the real library
 // closure, and assert both a direct projected edge and transitive hops the closure had to derive. A best-effort probe
-// then shows the REAL remote Monarch KG (a remote .duckdb over httpfs) is ATTACH-able and biolink-shaped; it is
-// skip-reported on failure, since full-KG closure is the deliberately-unproven hedge — this proves the MECHANISM.
+// then shows the REAL remote Monarch KG (a remote .duckdb over httpfs) is ATTACH-able and biolink-shaped. With
+// --bench-remote-subclass, the script also materializes the real remote biolink:subclass_of slice and closes it with
+// the same library primitive; that path is intentionally opt-in because it is a live network benchmark.
 //
 // Run:  npm run build && node scripts/foreign-graph-closure.mjs
+// Bench: npm run build && node scripts/foreign-graph-closure.mjs --bench-remote-subclass
 
 const assert = (cond, msg) => { if (!cond) { console.error("FAIL:", msg); process.exit(1); } };
 
@@ -36,7 +38,30 @@ async function makeMonarchShapedExtract(path) {
   c.closeSync(); inst.closeSync();
 }
 
+async function benchRemoteSubclassClosure(raw, conn) {
+  const t0 = performance.now();
+  const dt = () => `${((performance.now() - t0) / 1000).toFixed(2)}s`;
+  console.log(`  REAL Monarch subclass closure benchmark: start`);
+  await raw.run(
+    "CREATE OR REPLACE TABLE bio_edges AS SELECT subject AS from_id, predicate, object AS to_id FROM monarch.denormalized_edges WHERE predicate='biolink:subclass_of'",
+  );
+  const [sourceStats] = await conn.all(
+    "SELECT count(*) AS edges, count(DISTINCT from_id) AS subjects, count(DISTINCT to_id) AS objects FROM bio_edges",
+  );
+  console.log(
+    `    [${dt()}] source: ${sourceStats.edges} subclass edges, ${sourceStats.subjects} subjects, ${sourceStats.objects} objects`,
+  );
+  const entailed = await materializeEntailedEdges(conn, ["biolink:subclass_of"]);
+  const [closureStats] = await conn.all(
+    "SELECT count(DISTINCT from_id) AS subjects, count(DISTINCT to_id) AS objects FROM entailed_edge",
+  );
+  console.log(
+    `    [${dt()}] closure: ${entailed} entailed rows, ${closureStats.subjects} subjects, ${closureStats.objects} objects`,
+  );
+}
+
 async function main() {
+  const benchRemoteSubclass = process.argv.includes("--bench-remote-subclass");
   const extPath = join(tmpdir(), `monarch-extract-${process.pid}.duckdb`);
   await makeMonarchShapedExtract(extPath);
 
@@ -82,13 +107,14 @@ async function main() {
   await fs.rm(extPath, { force: true });
 
   // 5) best-effort: the REAL remote Monarch KG is a remote .duckdb, ATTACH-able + biolink-shaped. Skip-report on
-  //    failure (no httpfs / network / too slow) — full-KG closure at scale is the deliberately-unproven hedge.
+  //    failure (no httpfs / network / too slow). Use --bench-remote-subclass to exercise the real remote closure.
   try {
     await raw.run("INSTALL httpfs; LOAD httpfs;");
     await raw.run("ATTACH 'https://data.monarchinitiative.org/monarch-kg/latest/monarch-kg.duckdb' AS monarch (READ_ONLY)");
     const cols = await conn.all("SELECT column_name FROM information_schema.columns WHERE table_catalog='monarch' AND table_name='denormalized_edges' AND column_name IN ('subject','predicate','object') ORDER BY 1");
     const sample = await conn.all("SELECT predicate FROM monarch.denormalized_edges LIMIT 1");
     console.log(`  REAL Monarch remote ATTACH: reachable; denormalized_edges has ${cols.length}/3 of subject/predicate/object; sample predicate='${sample[0]?.predicate}'. Same projection applies.`);
+    if (benchRemoteSubclass) await benchRemoteSubclassClosure(raw, conn);
   } catch (e) {
     console.log(`  REAL Monarch remote ATTACH: skipped (${String(e).replace(/\s+/g, " ").slice(0, 90)}). Mechanism proven on the extract above.`);
   }
