@@ -2,9 +2,12 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { summarizeBioContext, type BioContext } from "../../src/core/context.js";
 import { validateReadOnlySelect } from "../../src/core/knowledge-graph.js";
+import { graphProjectionPolicyWarnings, graphProjectionSql, validateGraphProjectionProfile, type GraphProjectionProfile } from "../../src/core/graph-projection.js";
 import { deriveStudyPlan, normalizeStudySlug, walkMemoryGraph, type StudyArtifactKind, type StudyCorpus, type StudyNote } from "../../src/core/study.js";
 import { deleteStudyNote, makeStudyNote, runtimeSkillRoot, runtimeStudyRoot, validateSkillInput, writeProjectSkill, writeStudyNote } from "../../src/hosts/pi-project.js";
 import { defaultDuckDbExtensionCatalog, findDuckDbExtensions } from "../../src/duckdb/extensions.js";
+import { queryGraphWindow } from "../../src/duckdb/graph-window.js";
+import { entailedEdgesAsOf, materializeBioEdgesAsOf } from "../../src/duckdb/observations.js";
 import { describeBioManifestFromPath, isRunDbOpenError, runBioOperationFromManifest, runBioQueryFromManifest } from "../../src/hosts/run-store.js";
 import type { CasStore } from "../../src/core/cas.js";
 import { bioStorePath, isBioStoreLocked, openBioStore, type BioStore } from "../../src/hosts/bio-store.js";
@@ -57,6 +60,8 @@ const BIO_ORIENTATION = [
   "  / `bio_walk_memory` (walk the graph) / `bio_recall`. list/read take an `asOf` time (time-travel), and",
   "  `bio_forget` is a RETRACTION (recall as-of earlier still sees it) — memory is never erased. Prefer",
   "  walking your own memory over re-reading the corpus. Promote a stable workflow to a skill with `bio_create_skill`.",
+  "- GRAPH: validate graph projection profiles with `bio_validate_graph_projection`; inspect bounded graph context",
+  "  with `bio_graph_window` instead of dumping high-degree neighborhoods into the prompt.",
 ].join("\n");
 
 // The always-on RECALL INDEX: a compact, current list of memory notes (slug — hook) injected into the system
@@ -297,6 +302,56 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
     }),
     async execute(_id, params: { sql: string }) {
       return text({ ok: true, sql: validateReadOnlySelect(params.sql) });
+    },
+  });
+
+  pi.registerTool({
+    name: "bio_validate_graph_projection",
+    label: "Validate graph projection",
+    description: "Validate a graph projection profile and preview the generated source->bio_edges SQL. This is a dry-run only: it does not execute the projection. Use it when turning a foreign KG table, SemanticSQL edge view, producer output, memory link table, or observation projection into the shared graph shape.",
+    parameters: Type.Object({
+      profile: Type.Unknown({ description: "A pi-bio.graph_projection_profile.v1 object." }),
+    }),
+    async execute(_id, params: { profile: unknown }) {
+      const profile = params.profile as GraphProjectionProfile;
+      const errors = validateGraphProjectionProfile(profile);
+      const warnings = errors.length === 0 ? graphProjectionPolicyWarnings(profile) : [];
+      return text({ valid: errors.length === 0, errors, warnings, sql: errors.length === 0 ? graphProjectionSql(profile, { allowPolicyFields: true }) : undefined });
+    },
+  });
+
+  pi.registerTool({
+    name: "bio_graph_window",
+    label: "Window graph context",
+    description: "Return a bounded one-hop window over the compiled project graph, with total/omitted counts and a continuation handle. Defaults to the temporal `bio_edges_as_of` projection from the shared ledger. Use this instead of asking for a full high-degree graph neighborhood.",
+    parameters: Type.Object({
+      startId: Type.String({ description: "Graph node id, e.g. agent:memory:<slug>, MONDO:..., HP:..., run:<id>." }),
+      table: Type.Optional(Type.String({ description: "Graph table to query. Defaults to bio_edges_as_of. Common: bio_edges_as_of, entailed_edge_as_of, bio_edges, entailed_edge." })),
+      direction: Type.Optional(Type.Union([Type.Literal("out"), Type.Literal("in"), Type.Literal("both")], { description: "Edge direction relative to startId. Default out." })),
+      predicates: Type.Optional(Type.Array(Type.String(), { description: "Optional predicate filter." })),
+      transitivePredicates: Type.Optional(Type.Array(Type.String(), { description: "Required when table is entailed_edge_as_of; used to materialize the as-of closure." })),
+      limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 10000, description: "Max rows to return. Default 100." })),
+      offset: Type.Optional(Type.Integer({ minimum: 0, description: "Pagination offset. Default 0." })),
+      asOf: Type.Optional(Type.String({ description: "ISO time for temporal graph projections. Default now." })),
+    }),
+    async execute(_id, params: { startId: string; table?: string; direction?: "out" | "in" | "both"; predicates?: string[]; transitivePredicates?: string[]; limit?: number; offset?: number; asOf?: string }, _signal, _onUpdate, ctx) {
+      const table = params.table ?? "bio_edges_as_of";
+      return text(await withStore(openStore, ctx.cwd, async (conn) => {
+        if (table === "bio_edges_as_of") {
+          await materializeBioEdgesAsOf(conn, normalizeAsOf(params.asOf));
+        } else if (table === "entailed_edge_as_of") {
+          if (!params.transitivePredicates?.length) throw new Error("bio_graph_window: transitivePredicates is required for entailed_edge_as_of");
+          await entailedEdgesAsOf(conn, normalizeAsOf(params.asOf), params.transitivePredicates);
+        }
+        return queryGraphWindow(conn, {
+          table,
+          startId: params.startId,
+          direction: params.direction,
+          predicates: params.predicates,
+          limit: params.limit,
+          offset: params.offset,
+        });
+      }));
     },
   });
 

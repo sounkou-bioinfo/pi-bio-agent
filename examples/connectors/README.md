@@ -42,12 +42,24 @@ injects no `fetch`, so the `http.get` path fails closed until the host binds one
 
 ## Auth, MCP, and streaming (the reach)
 
-These REST manifests hardcode a plain `Accept: application/json` header, but the `headers` argument of
-`ducknng_ncurl_table` is a SQL value — so it *can be composed from a host-owned variable*. That opens the same
-pattern to:
-- **token-gated APIs** — the host supplies the `Authorization` header via the **`http.get` + `withAuth`** path (a fetch header that never touches SQL) or a DuckDB **`CREATE SECRET`** (function-scoped, not `getvariable`-readable), never an agent param. **Do NOT** put a secret token in a `SET VARIABLE` / bound variable: it lives in the SAME DuckDB session as agent-written SQL, so a `bio_query` (agent SQL) can read it straight back with `getvariable()`. (Bound variables are for non-secret query params — e.g. a search term — only.) If an `ncurl_table` connector must be token-gated, expose it solely through a host-authored **declared operation** (SQL the agent can't extend with `getvariable`), not `bio_query`;
-- **MCP servers** — an MCP `initialize` / `tools/list` / `tools/call` (JSON-RPC 2.0 over HTTP) **is an `ncurl` POST** — see [`mcp.json`](mcp.json); this example is **structurally validated** here (the manifest is a valid PROGRAM, no network — `test/connectors-example.test.ts`), and live execution is host-gated (needs ducknng + egress). The session id `initialize` returns threads through as a header, and only server-*pushed* notifications need `wss`;
-- **streaming** — SSE / websockets via ducknng `wss`.
+These REST manifests hardcode a plain `Accept: application/json` header. Auth is still a host boundary, and the
+safe order is:
+- **token-gated APIs** — prefer the **`http.get` + `withAuth`** path when the host must keep a token out of SQL:
+  `withAuth` calls the host's auth supplier per request, so Pi-style `AuthStorage` / OAuth refresh can rotate the
+  access token immediately before use. When a DuckDB table function supports DuckDB's **`CREATE SECRET`** manager,
+  use that unreadable secret path. A host-authored declared operation may also compose `ducknng_ncurl_table`
+  headers from `SET VARIABLE` with `ducknng_http_headers_build` (proved against a local ducknng route in
+  `test/ducknng-sql-http.test.ts`), but that is composition, not secrecy: the same connection can read
+  `getvariable()`. Keep that pattern behind an isolated operation connection; never expose it through agent params
+  or arbitrary `bio_query`;
+- **MCP servers** — an MCP `initialize` / `tools/list` / `tools/call` (JSON-RPC 2.0 over HTTP) **is an `ncurl`
+  POST** — see [`mcp.json`](mcp.json). The manifest is structurally validated without network
+  (`test/connectors-example.test.ts`), and `test/ducknng-sql-http.test.ts` proves the local session-header loop:
+  `initialize` returns `Mcp-Session-Id`, and the following `tools/list` call threads it back as a header. Live
+  external execution remains host-gated;
+- **streaming** — `test/ducknng-sql-http.test.ts` proves an SSE route served by ducknng and consumed with
+  `ducknng_ncurl`; bidirectional `wss` / server-pushed app subscriptions remain a ducknng conformance lane until
+  this repo directly needs that transport.
 
 Two connectors go beyond REST: [`mcp.json`](mcp.json) (MCP over SQL) and
 [`clinvar-region.json`](clinvar-region.json) — a **ClinVar VCF region read live over HTTP by `duckhts`** (an

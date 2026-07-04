@@ -469,6 +469,8 @@ calls (`npm run readme:tools`); `npm run check` fails if it drifts.
 - `bio_query` — Run an ad-hoc bio query
 - `bio_list_duckdb_extensions` — List bio DuckDB extensions
 - `bio_validate_select` — Validate bio SQL SELECT
+- `bio_validate_graph_projection` — Validate graph projection
+- `bio_graph_window` — Window graph context
 - `bio_create_skill` — Create bio skill
 - `bio_study_plan` — Plan bio study
 - `bio_remember` — Remember (memory note)

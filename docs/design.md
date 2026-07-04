@@ -641,13 +641,25 @@ executable middle is ours; semantic judgment and human/policy workflows are deli
 *computed*).
 
 **The boundary is narrower than "services/auth/streaming are out."** Much of what looks non-SQL is already in
-reach by composition: API **credentials/auth** = DuckDB's `CREATE SECRET` secret manager (host-owned, the same
-path as our `cache_httpfs`/S3 config) + ducknng mTLS/peer-allowlists + Pi's auth storage/token-refresh;
-**stateful-async** interactions = ducknng query **sessions** (`open_query`/`fetch`/`close`, result handles,
-incremental chunks); **streaming / SSE / websockets** = ducknng `wss` + Pi-mono patterns; a **GraphQL** endpoint
-is an HTTP POST + JSON that `ncurl_table` hits SQL-native (subscriptions = wss/sessions). So the genuinely
-irreducible residue is just the two non-mechanical acts, the **judgment** (the model/human decision) and the **approval** (the policy gate), which the substrate records and gates, never computes. Everything executable is
-in the middle or borrowable.
+reach by composition: API **credentials/auth** = host auth storage/token-refresh, DuckDB `CREATE SECRET` where the
+target table function can consume an unreadable secret, and ducknng mTLS/peer-allowlists; **stateful-async**
+interactions = ducknng query **sessions** (`open_query`/`fetch`/`close`, result handles, incremental chunks);
+**streaming / SSE / websockets** = ducknng stream routes plus `ws`/`wss` transport; a **GraphQL** endpoint is an
+HTTP POST + JSON that `ncurl_table` hits SQL-native (subscriptions = wss/sessions). So the genuinely irreducible
+residue is just the two non-mechanical acts, the **judgment** (the model/human decision) and the **approval** (the
+policy gate), which the substrate records and gates, never computes. Everything executable is in the middle or
+borrowable.
+
+Validation status matters here. The library already exercises SQL-native HTTP, POST bodies, AIO fanout/retry,
+ducknng RPC state mutation, NNG socket reachability, a local MCP-style session-header loop, an SSE route served by
+ducknng and consumed with `ducknng_ncurl`, and a host-composed `SET VARIABLE` →
+`ducknng_http_headers_build` → `ducknng_ncurl_table` Authorization header against a local ducknng route. That last
+pattern is composition, not secrecy: the same connection can read `getvariable`, so use it only behind a
+host-authored declared operation or isolated run connection. The host-auth pattern to reuse from Pi is locked
+`AuthStorage` plus OAuth refresh: resolve a short-lived token immediately before the operation and persist only
+digests/config provenance, never token values. The remaining gaps are `wss`/server-push app subscriptions,
+TLS/mTLS auth fixtures in this repo, and an unreadable DuckDB-secret/host-secret handle that ducknng can turn into
+headers without exposing the raw token to agent SQL.
 
 ## Progressive disclosure
 

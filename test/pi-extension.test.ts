@@ -39,6 +39,7 @@ describe("Pi coding-agent extension", () => {
       "bio_create_skill",
       "bio_describe_model",
       "bio_forget",
+      "bio_graph_window",
       "bio_list_duckdb_extensions",
       "bio_list_memory",
       "bio_query",
@@ -46,6 +47,7 @@ describe("Pi coding-agent extension", () => {
       "bio_remember",
       "bio_run_operation",
       "bio_study_plan",
+      "bio_validate_graph_projection",
       "bio_validate_select",
       "bio_walk_memory",
     ]);
@@ -59,6 +61,15 @@ describe("Pi coding-agent extension", () => {
     const valid = await byName.get("bio_validate_select")!.execute("id", { sql: "SELECT * FROM bio_nodes;" });
     assert.deepEqual(valid.details, { ok: true, sql: "SELECT * FROM bio_nodes" });
     await assert.rejects(() => byName.get("bio_validate_select")!.execute("id", { sql: "DROP TABLE bio_nodes" }), /SELECT/);
+    const projection = await byName.get("bio_validate_graph_projection")!.execute("id", { profile: {
+      schema: "pi-bio.graph_projection_profile.v1",
+      id: "edge-raw",
+      title: "Edge raw projection",
+      source: { kind: "semantic_sql", table: "edge_raw" },
+      columns: { from: "subject", predicate: "predicate", to: "object" },
+    } });
+    assert.equal(projection.details.valid, true);
+    assert.match(projection.details.sql, /CREATE OR REPLACE TABLE "bio_edges"/);
   });
 
   test("memory and skill tools persist to the store + a legible file view", async () => {
@@ -85,12 +96,23 @@ describe("Pi coding-agent extension", () => {
     // #4: bio_list_memory rejects an invalid limit (negative/fractional) rather than doing a surprising slice()
     await assert.rejects(() => byName.get("bio_list_memory")!.execute("id", { limit: -1 }, undefined, undefined, ctx), /non-negative integer/);
     await assert.rejects(() => byName.get("bio_list_memory")!.execute("id", { limit: 1.5 }, undefined, undefined, ctx), /non-negative integer/);
+    await assert.rejects(() => byName.get("bio_graph_window")!.execute("id", {
+      table: "entailed_edge_as_of",
+      startId: "agent:memory:opentargets-identifiers",
+    }, undefined, undefined, ctx), /transitivePredicates is required/);
 
     const wrote = await byName.get("bio_remember")!.execute("id", {
       kind: "cheatsheet",
       title: "OpenTargets identifiers",
       hook: "Use before GraphQL evidence queries.",
-      body: "Resolve target and disease IDs first.",
+      body: "Resolve target and disease IDs first. See [[opentargets-target-node]].",
+      tags: ["opentargets"],
+    }, undefined, undefined, ctx);
+    await byName.get("bio_remember")!.execute("id", {
+      kind: "concept_map",
+      title: "OpenTargets target node",
+      hook: "Use when traversing OpenTargets target concept links.",
+      body: "Target concept node.",
       tags: ["opentargets"],
     }, undefined, undefined, ctx);
     assert.equal(wrote.details.note.slug, "opentargets-identifiers");
@@ -101,6 +123,14 @@ describe("Pi coding-agent extension", () => {
     assert.equal(listed.details.notes[0].slug, wrote.details.note.slug);
     const read = await byName.get("bio_recall")!.execute("id", { id: "opentargets-identifiers" }, undefined, undefined, ctx);
     assert.equal(read.details.title, "OpenTargets identifiers");
+    const graphWindow = await byName.get("bio_graph_window")!.execute("id", {
+      startId: "agent:memory:opentargets-identifiers",
+      direction: "out",
+      predicates: ["references"],
+      limit: 10,
+    }, undefined, undefined, ctx);
+    assert.equal(graphWindow.details.rows.length, 1);
+    assert.equal(graphWindow.details.rows[0].to_id, "agent:memory:opentargets-target-node");
 
     // forget = temporal retraction: gone from recall(now), but the store keeps the history
     const forgotten = await byName.get("bio_forget")!.execute("id", { slug: "opentargets-identifiers" }, undefined, undefined, ctx);

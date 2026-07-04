@@ -116,14 +116,16 @@ including a bus round-trip; the bus *mesh* demo is still pending. See the [desig
 
 **Reach: authenticated HTTP, MCP, and streaming.** ducknng's HTTP side (`ncurl_table` / `ncurl_aio`) takes
 **host-provided headers**, so the network leg reaches anything HTTP-shaped *as SQL* while auth stays host-owned:
-an authenticated REST/GraphQL API (the host injects the `Authorization` header: never an agent param), an
-[**MCP**](https://modelcontextprotocol.io/) server (JSON-RPC over HTTP + SSE), and **streaming** transports
-(SSE / websockets via ducknng `wss`). **MCP is an `ncurl` call**: an `initialize` handshake to a live MCP server
-(`initialize` / `tools/list` / `tools/call` are JSON-RPC 2.0 over HTTP) is a single `ncurl_table` POST: *verified
-against a public MCP server*, see [`examples/connectors/mcp.json`](../examples/connectors/mcp.json); the session
-id it returns threads through as a header on the next call. And server-*pushed* notifications and live streams
-are **ducknng `wss`**, covered by the same transport, with secrets never leaving the host boundary. So "call
-an MCP tool," "hit a token-gated database," and "subscribe to a stream" are all SQL.
+an authenticated REST/GraphQL API, an [**MCP**](https://modelcontextprotocol.io/) server (JSON-RPC over HTTP),
+and SSE-style streaming routes. **MCP is an `ncurl` call**: `initialize` / `tools/list` / `tools/call` are JSON-RPC
+2.0 POSTs. The repo proves this locally: [`examples/connectors/mcp.json`](../examples/connectors/mcp.json) is
+structurally validated, and `test/ducknng-sql-http.test.ts` runs a ducknng MCP-style route where `initialize`
+returns `Mcp-Session-Id` and the following `tools/list` request threads it back as a header. The same test also
+serves an SSE route and consumes it with `ducknng_ncurl`. Auth is the careful part: host `SET VARIABLE` header
+composition is proven only as an isolated declared-operation pattern, not a secrecy boundary for arbitrary agent
+SQL. Real rotation/refresh should reuse host auth storage and, where available, DuckDB secrets or a ducknng
+secret-handle-to-header primitive. Bidirectional `wss` / server-pushed app subscriptions remain the next
+transport conformance target.
 
 **And the inverse holds: pi-bio-agent can *be* an MCP server, not just call one.** `ducknng` mounts an HTTP
 server (*verified*: a POST to an `http://` ducknng mount returns a framed reply), so the substrate's declared

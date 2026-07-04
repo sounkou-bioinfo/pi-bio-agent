@@ -308,8 +308,8 @@ Resolutions (these are ADDRESSABLE via known machinery, not open research):
   `readCapped(stream, maxBytes)`, applied by the default networked adapter (`cappedFetchLike`). DuckDB-native
   equivalent: `ducknng_ncurl`.
 - **SSE** (server-sent events: LLM token streams, progress): parse `data:` frames off the same chunked stream.
-  **pi-mono** ([github.com/badlogic/pi-mono](https://github.com/badlogic/pi-mono)) has these exact parsing
-  patterns (it streams LLM output): adopt them for an SSE transport.
+  Pi's LLM streaming code already carries the practical parser/lifecycle pattern; adopt that shape without
+  adding another connector-specific stream stack.
 - **Bidirectional / server-push / live subscriptions** -> **wss over nng** (ducknng's `ws://`/`wss://`
   transport). The tie-in: the pub/sub blackboard's `awaitNote` currently polls (SELECT loop); over wss-over-nng
   it becomes a push subscription. ducknng unifies `ncurl` (HTTP) + ws/wss + the nng
@@ -736,22 +736,80 @@ JOIN, not a walker. See [`design.md`](./design.md#the-semanticsql-shape-source-s
   artifact is deliberately accepted. Pin a build date as provenance, honor per-ontology CC-BY. OLS4 REST only for
   fresh text→CURIE misses (judgment tier); cached CURIEs + FTS are the deterministic projection tier; abstain
   below threshold.
-- Immanent refinement exposed by the gap audit: a **graph projection profile**, not a convenience tool zoo. A
+- Built at the library-helper level: **graph projection profiles**, not a convenience tool zoo. A
   profile is data that says how any source relation becomes a graph projection: foreign KGs (`monarch.denormalized_edges`),
   SemanticSQL staging tables (`statements` / generated `edge`), internal producers, memory links, and
   `bio_observations` as-of views all compile through the same contract. The profile declares source
   tables/columns, CURIE-prefix registry, generated-view policy (`edge`, labels, synonyms, restrictions),
   transitive-predicate policy, closure source (`relation-graph` artifact vs local CTE), temporal/as-of policy,
-  and provenance/license fields. The existing resolver + SQL + closure primitives execute that profile; the
-  profile makes the projection repeatable, reviewable, and receipted.
-- Add bounded graph-query windows so high-degree neighborhoods do not flood context. This is not a new graph
-  runtime: it is a result shape over the same projections (`bio_edges`, `bio_edges_as_of`, `entailed_edge`,
-  `entailed_edge_as_of`) that returns rows plus omitted-counts/frontier summaries and, when needed, a continuation
-  resource handle. It applies symmetrically to foreign KGs and our own graph; `bio_walk_memory` is the current
-  small in-memory affordance, while large/as-of walks should be SQL windows over the compiled graph.
+  and provenance/license fields. `src/core/graph-projection.ts` validates this contract and emits the projection
+  SQL; the existing resolver + SQL + closure primitives execute it. Still pending: manifest/operation integration
+  and a real SemanticSQL-generated-view profile over a non-fixture ontology artifact.
+- Built at the library-helper level: **bounded graph-query windows** so high-degree neighborhoods do not flood
+  context. This is not a new graph runtime: `src/duckdb/graph-window.ts` returns bounded rows plus omitted counts
+  and, when needed, a continuation resource handle over the same projections (`bio_edges`, `bio_edges_as_of`,
+  `entailed_edge`, `entailed_edge_as_of`). It applies symmetrically to foreign KGs and our own graph;
+  `bio_walk_memory` is the current small in-memory affordance, while large/as-of walks should use SQL windows over
+  the compiled graph. Exposed in the Pi extension as `bio_graph_window`; still pending: CLI/operation integration
+  and continuation-resume ergonomics.
 - Add trust/provenance fields consistently across facts, edges, and artifacts (`bio_edges.trust` exists; keep
   it uniform with receipts/artifacts).
 - Add as-of/known-at time lenses where variant reanalysis or changing knowledge releases matter.
+
+## Competitive pressure and remaining library questions
+
+Public science-agent products now advertise reproducible artifacts with code/environment/conversation history,
+scientific renderers, managed local/HPC/GPU compute, persistent Python/R kernels, domain specialists, and large
+database/connector catalogs. Our answer cannot be "more bespoke connectors"; it has to be fewer, stronger
+substrate contracts: DuckDB/ducknng as the connector plane, CAS/replay as the reproducibility plane, and the graph
+ledger as the memory/provenance plane.
+
+Open library questions to resolve before claiming that position:
+
+- **Connector plane:** how far can `duckdb.sql_materialize` + ducknng `ncurl_table` + file scans cover the
+  "connector zoo" before a source-specific resolver is justified? Rule: if a connector only returns rows, keep it
+  SQL/table-shaped. Auth, egress, TLS, session tokens, and sandboxing are host policy, but they should still prefer
+  SQL-native carriers first where the carrier can keep secrets unreadable: DuckDB `CREATE SECRET`, ducknng
+  TLS/mTLS/peer allowlists, and host-authored declared operations. TypeScript is justified for a missing host
+  boundary, audit hook, token-refresh policy, or policy injector; not for routine per-API clients.
+- **ducknng auth/state validation:** already exercised in-tree: `ducknng_ncurl_table` against local HTTP fixtures,
+  scalar AIO fanout/retry, `ducknng_run_rpc` / `ducknng_query_rpc` mutable shared state, and NNG socket
+  reachability. Also checked: local MCP-style `initialize` -> `Mcp-Session-Id` -> `tools/list` header threading,
+  an SSE route served by ducknng and consumed with `ducknng_ncurl`, and host `SET VARIABLE` ->
+  `ducknng_http_headers_build` -> `ducknng_ncurl_table` Authorization header against a local ducknng route. Treat
+  that last header path as a host-authored declared operation / isolated-connection pattern, because the same
+  connection can read `getvariable`; it is not a secrecy boundary. Still unproven and should be a conformance
+  target before product claims: `wss`/server-push subscriptions, TLS/mTLS auth fixtures in this repo, and an
+  unreadable DuckDB-secret/host-secret handle that ducknng can turn into headers without exposing the raw token to
+  agent SQL.
+- **Token rotation/refresh boundary:** reuse the Pi pattern rather than inventing manifest config. Pi's
+  `AuthStorage` stores API keys/OAuth credentials in a locked 0600 file, refreshes OAuth under lock, and returns an
+  access token only at request time. `http.get` already supports this because `withAuth` calls `getAuthHeaders` per
+  request and host auth wins over manifest headers. The ducknng SQL path needs one of three explicit shapes:
+  `withAuth` fallback when secrecy matters more than SQL-native execution; an isolated declared operation that sets
+  a short-lived session variable and never exposes arbitrary SQL on that connection; or a ducknng/DuckDB-secret
+  handle-to-header primitive we add upstream/backport so SQL never sees the raw token.
+- **NNG compute mode:** the pending mode is `nngProcessRunner` / `process.nng_compute`: Arrow-over-NNG to a
+  remote or persistent worker, shared run directory/CAS, same receipts, same `JobRunner` status/collect/cancel
+  semantics. It should not become a separate reproducibility model.
+- **Stateful kernels:** persistent Python/R/Julia sessions are useful for iteration, but they need explicit session
+  handles, environment attestation, variable/artifact capture, and replay boundaries. A stateful REPL is a host
+  service over the compute ports, not a reason to let ambient interpreter state leak into runs.
+- **Conversation as graph:** chat threads, tool calls, code edits, artifacts, and approvals should be projectable
+  into `bio_observations` as provenance facts. The open question is the minimal message/tool schema that is useful
+  without turning the graph into a transcript dump.
+- **Direct Pi-core use:** some projects may use the Pi agent loop directly with this library as tools/resources,
+  rather than a separate application wrapper. The boundary to settle is which capabilities belong in Pi skills/tools
+  versus manifests/operations that can run outside Pi.
+- **Renderer/artifact surface:** proteins, molecules, alignments, genomic tracks, notebooks, figures, and PDFs need
+  artifact handles plus provenance and optional renderers. The core should own handles/receipts, not UI widgets.
+- **Reproducibility proof:** competitors can claim "fully reproducible" at the UX layer. Our stricter claim should
+  be machine-checkable: replay spec + input/output digests + env attestation + graph-recorded conversation/tool
+  provenance, with explicit `not_reproducible` when a live source is not pinned.
+- **Ambitious application projects:** choose applications that force these contracts: one graph-heavy app, one
+  connector-heavy app, one long-running compute app, one artifact/renderer-heavy app, and one chat-thread-as-graph
+  app. Each should be allowed to fail the abstraction and feed back into the library only when it proves a missing
+  primitive.
 
 ## Retrieval and semantic search
 

@@ -196,6 +196,12 @@ FUSE host-port) and **execution/control** (pure NNG process calling, slotting be
 `ProcessRunner` port: no new core type). Order: `nngProcessRunner` (shared run dir/CAS, contract
 unchanged) → `process.nng_compute` (pure Arrow-over-NNG, cross-machine) → `ducknng-fs` host-port.
 
+The specific pending compute mode is therefore **NNG-backed process compute**, not a new operation semantics:
+Arrow IPC payloads over ducknng to a remote or persistent worker, declared outputs captured to CAS, environment
+attestation recorded, and durable status/result/cancel exposed through the same `JobRunner` ledger. A persistent
+Python/R/Julia kernel is a sessionful runner implementation with explicit session handles and replay boundaries;
+it must not smuggle ambient REPL variables into a run receipt.
+
 **Guardrail:** process calling must not depend on the filesystem conceptually. The fs is a staging
 convenience; the execution model stays manifest-declares → host-injects-runner → runner-executes →
 resolver-materializes → records what happened.

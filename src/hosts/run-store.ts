@@ -476,9 +476,10 @@ async function runAndPersist(
     // limit) run ONCE on this connection before any resolution — AFTER agent bindings, so host values win on any
     // name clash. A failure here is a config/pre-flight error (thrown, not a failed run): the run never started.
     // SECRETS BOUNDARY: session variables set here live in the SAME session as agent-written SQL (bio_query), which
-    // can read them with getvariable() — so a `SET VARIABLE token='…'` would be exfiltratable into result.json. Do
-    // NOT put secrets in SET VARIABLE: use the fetch-layer auth (withAuth headers, never touch SQL) or DuckDB
-    // `CREATE SECRET` (function-scoped, not getvariable-readable). SET VARIABLE is for NON-secret config only.
+    // can read them with getvariable() — so a `SET VARIABLE token='…'` would be exfiltratable into result.json on
+    // this generic run path. Use fetch-layer auth (withAuth headers, refreshed per request) or DuckDB `CREATE
+    // SECRET` when the table function can consume it. A host may use SET VARIABLE to compose ducknng headers only
+    // inside an isolated declared operation where the agent cannot run arbitrary SQL on that connection.
     if (initSql) for (const stmt of initSql) await conn.run(stmt);
     try {
       const { run, result, receipts } = await body(conn);

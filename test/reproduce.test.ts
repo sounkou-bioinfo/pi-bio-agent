@@ -103,7 +103,9 @@ describe("C2: reproduce() compares deterministic receipt content, not wall-clock
 
   test("SECURITY: duckdbInitSql is NOT persisted verbatim (secret leak) — only its digest is pinned; reproduce re-supplies + verifies", async () => {
     const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-repro-init-"));
-    const duckdbInitSql = ["SET VARIABLE secret_token = 'Bearer super-secret-xyz'"]; // host bootstrap that carries a secret
+    // Deliberately secret-shaped to prove replay redaction. This is not a recommended auth shape for generic
+    // agent SQL: the same connection can read getvariable('secret_token').
+    const duckdbInitSql = ["SET VARIABLE secret_token = 'Bearer super-secret-xyz'"];
     const out = await runBioQueryFromManifest({ cwd, dbPath: ":memory:", manifestPath: MANIFEST, sql: SQL, duckdbInitSql, runId: "originit", now: "2026-07-01T00:00:00Z" });
     assert.equal(out.ok, true, out.ok ? "" : `run failed: ${(out as { error?: unknown }).error}`);
     const replayText = await fs.readFile(join((out as { runDir: string }).runDir, "replay.json"), "utf8");

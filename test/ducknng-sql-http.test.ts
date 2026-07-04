@@ -44,4 +44,133 @@ describe("SQL-native HTTP grounding via ducknng (a local ducknng server is the d
 
     inst.closeSync(); // tears down the server
   });
+
+  test("host SET VARIABLE composes an Authorization header for ncurl_table against a ducknng route", async () => {
+    const inst = await DuckDBInstance.create(":memory:", { allow_unsigned_extensions: "true" });
+    const conn = duckdbNodeConn(await inst.connect());
+    await conn.run("LOAD ducknng");
+
+    await conn.run(`SELECT ducknng_start_server('auth_fixture', 'http://127.0.0.1:0/_ducknng', 1, 134217728, 300000, 0::UBIGINT)`);
+    const BASE = (await conn.all<{ listen: string }>("SELECT listen FROM ducknng_list_servers() WHERE name='auth_fixture'"))[0]!.listen.replace(/\/_ducknng.*$/, "");
+    await conn.run(`SELECT ducknng_register_http_route('auth_fixture', 'GET', '/secure',
+      'SELECT * FROM ducknng_http_json(
+        CASE WHEN ducknng_http_header(''authorization'') = ''Bearer host-token'' THEN 200 ELSE 401 END,
+        json_array(json_object(''ok'', ducknng_http_header(''authorization'') = ''Bearer host-token''))::VARCHAR
+      )')`);
+
+    // SET VARIABLE is a host-authored composition pattern, not a secrecy boundary: the same SQL connection can
+    // read it back. Keep this pattern behind a declared operation / isolated connection, not arbitrary bio_query.
+    await conn.run("SET VARIABLE host_token = 'host-token'");
+    const visible = await conn.all<{ token: string }>("SELECT getvariable('host_token')::VARCHAR AS token");
+    assert.equal(visible[0]!.token, "host-token");
+
+    const rows = await conn.all<{ ok: boolean }>(
+      `SELECT ok FROM ducknng_ncurl_table(
+        '${BASE}/secure',
+        'GET',
+        ducknng_http_headers_build(['Authorization'], ['Bearer ' || getvariable('host_token')::VARCHAR]),
+        NULL,
+        5000,
+        0::UBIGINT
+      )`,
+    );
+    assert.deepEqual(rows, [{ ok: true }]);
+    await assert.rejects(() => conn.all(
+      `SELECT * FROM ducknng_ncurl_table('${BASE}/secure', 'GET', NULL, NULL, 5000, 0::UBIGINT)`,
+    ), /HTTP status 401/);
+
+    inst.closeSync();
+  });
+
+  test("MCP-style initialize captures a session header and tools/list threads it through ncurl", async () => {
+    const inst = await DuckDBInstance.create(":memory:", { allow_unsigned_extensions: "true" });
+    const conn = duckdbNodeConn(await inst.connect());
+    await conn.run("LOAD ducknng");
+
+    await conn.run(`SELECT ducknng_start_server('mcp_fixture', 'http://127.0.0.1:0/_ducknng', 1, 134217728, 300000, 0::UBIGINT)`);
+    const BASE = (await conn.all<{ listen: string }>("SELECT listen FROM ducknng_list_servers() WHERE name='mcp_fixture'"))[0]!.listen.replace(/\/_ducknng.*$/, "");
+    await conn.run(`SELECT ducknng_register_http_route('mcp_fixture', 'POST', '/mcp',
+      'SELECT * FROM ducknng_http_response(
+         CASE
+           WHEN json_extract_string((SELECT body_text FROM ducknng_http_request_body()), ''$.method'') = ''initialize'' THEN 200
+           WHEN json_extract_string((SELECT body_text FROM ducknng_http_request_body()), ''$.method'') = ''tools/list'' AND ducknng_http_header(''mcp-session-id'') = ''session-1'' THEN 200
+           ELSE 401
+         END,
+         ducknng_http_headers_build([''Mcp-Session-Id''], [''session-1'']),
+         ''application/json'',
+         NULL::BLOB,
+         CASE
+           WHEN json_extract_string((SELECT body_text FROM ducknng_http_request_body()), ''$.method'') = ''initialize'' THEN json_object(''jsonrpc'', ''2.0'', ''id'', 1, ''result'', json_object(''protocolVersion'', ''2025-06-18''))::VARCHAR
+           WHEN json_extract_string((SELECT body_text FROM ducknng_http_request_body()), ''$.method'') = ''tools/list'' AND ducknng_http_header(''mcp-session-id'') = ''session-1'' THEN json_object(''jsonrpc'', ''2.0'', ''id'', 2, ''result'', json_object(''tools'', json_array(json_object(''name'', ''echo''))))::VARCHAR
+           ELSE json_object(''jsonrpc'', ''2.0'', ''id'', 2, ''error'', json_object(''code'', -32001, ''message'', ''missing session''))::VARCHAR
+         END
+       )')`);
+
+    await conn.run(`SET VARIABLE mcp_url = '${BASE}/mcp'`);
+    await conn.run(`CREATE TEMP TABLE mcp_initialize AS
+      SELECT * FROM ducknng_ncurl(
+        getvariable('mcp_url')::VARCHAR,
+        'POST',
+        ducknng_http_headers_build(['Content-Type','Accept'], ['application/json','application/json']),
+        json_object('jsonrpc','2.0','id',1,'method','initialize')::VARCHAR::BLOB,
+        5000,
+        0::UBIGINT
+      )`);
+    await conn.run(`SET VARIABLE mcp_session_id = (
+      SELECT ducknng_http_headers_get(headers_json, 'Mcp-Session-Id') FROM mcp_initialize WHERE status = 200
+    )`);
+    const session = await conn.all<{ sid: string }>("SELECT getvariable('mcp_session_id')::VARCHAR AS sid");
+    assert.equal(session[0]!.sid, "session-1");
+
+    const tools = await conn.all<{ name: string }>(`SELECT unnest(result.tools).name AS name
+      FROM ducknng_ncurl_table(
+        getvariable('mcp_url')::VARCHAR,
+        'POST',
+        ducknng_http_headers_build(
+          ['Content-Type','Accept','Mcp-Session-Id'],
+          ['application/json','application/json', getvariable('mcp_session_id')::VARCHAR]
+        ),
+        json_object('jsonrpc','2.0','id',2,'method','tools/list')::VARCHAR::BLOB,
+        5000,
+        0::UBIGINT
+      )`);
+    assert.deepEqual(tools, [{ name: "echo" }]);
+    await assert.rejects(() => conn.all(`SELECT * FROM ducknng_ncurl_table(
+      getvariable('mcp_url')::VARCHAR,
+      'POST',
+      ducknng_http_headers_build(['Content-Type','Accept'], ['application/json','application/json']),
+      json_object('jsonrpc','2.0','id',2,'method','tools/list')::VARCHAR::BLOB,
+      5000,
+      0::UBIGINT
+    )`), /HTTP status 401/);
+
+    inst.closeSync();
+  });
+
+  test("SSE-style streaming route is served by ducknng and consumed with ncurl", async () => {
+    const inst = await DuckDBInstance.create(":memory:", { allow_unsigned_extensions: "true" });
+    const conn = duckdbNodeConn(await inst.connect());
+    await conn.run("LOAD ducknng");
+
+    await conn.run(`SELECT ducknng_start_server('sse_fixture', 'http://127.0.0.1:0/_ducknng', 1, 134217728, 300000, 0::UBIGINT)`);
+    const BASE = (await conn.all<{ listen: string }>("SELECT listen FROM ducknng_list_servers() WHERE name='sse_fixture'"))[0]!.listen.replace(/\/_ducknng.*$/, "");
+    await conn.run(`SELECT ducknng_add_stream_route(
+      'sse_fixture',
+      'GET',
+      '/events',
+      'SELECT ducknng_format_sse(''row '' || i::VARCHAR) AS chunk FROM generate_series(1,3) t(i)'
+    )`);
+    const route = await conn.all<{ is_stream: boolean; stream_content_type: string }>(
+      "SELECT is_stream, stream_content_type FROM ducknng_list_http_routes() WHERE service_name = 'sse_fixture' AND path = '/events'",
+    );
+    assert.deepEqual(route, [{ is_stream: true, stream_content_type: "text/event-stream; charset=utf-8" }]);
+
+    const rows = await conn.all<{ status: number; body_text: string }>(
+      `SELECT status, body_text FROM ducknng_ncurl('${BASE}/events', 'GET', ducknng_http_headers_build(['Accept'], ['text/event-stream']), NULL, 5000, 0::UBIGINT)`,
+    );
+    assert.equal(rows[0]!.status, 200);
+    assert.equal(rows[0]!.body_text, "data: row 1\n\ndata: row 2\n\ndata: row 3\n\n");
+
+    inst.closeSync();
+  });
 });
