@@ -59,7 +59,7 @@ knitr::knit_engines$set(biocli = function(options) {
 
 # custom knitr engine: run an NNG-topology dogfeed (real separate OS processes coordinating over ducknng) and show
 # its stdout. Fail the render on a non-zero exit — never bake a broken topology demo as if it had worked. Needs the
-# maintained ducknng extension provisioned (`npm run provision:ducknng-owned`) and process spawning.
+# owned ducknng extension provisioned (`npm run provision:ducknng-owned`) and process spawning.
 knitr::knit_engines$set(nng = function(options) {
   script <- paste(options$code, collapse = " ")
   out <- suppressWarnings(system(paste("node", script, "2>&1"), intern = TRUE))
@@ -99,7 +99,7 @@ workflow-specific behavior in data plus injected effect ports:
 - a new **question** is a manifest and SQL, never a new `.ts`;
 - a new **data format** is a *DuckDB extension* (`duckhts`, `anndata`, `duckdb_zarr`, `plinking_duck`, …);
 - a new **API** is an `ncurl_table` call over **[ducknng](https://github.com/sounkou-bioinfo/ducknng)**, the
-  Arrow-native NNG transport maintained alongside this project;
+  owned Arrow-native DuckDB extension for NNG/HTTP/RPC transport;
 - a new **compute backend** (SLURM, Modal, an NNG pool) is one injected `JobDispatch`;
 - a new **model** is an injected judge.
 
@@ -318,7 +318,7 @@ that argument with citations. Prior art and lineage:
 - **Machine studying** (Li, Battle, Khattab, 2026): <https://jacobxli.com/blog/2026/machine-studying/>
 - **Sakana Fugu** (learned orchestration; we own the substrate it conducts): <https://sakana.ai/fugu/>
 - **Recursive Language Models / RLM** (REPL-over-context; `bio_query` is the SQL REPL): <https://arxiv.org/abs/2512.24601>
-- **ducknng**, the Arrow-native NNG transport maintained alongside this project, in the lineage of R's
+- **ducknng**, the owned Arrow-native DuckDB extension for NNG/HTTP/RPC transport, in the lineage of R's
   `nanonext` + `mirai`: <https://github.com/sounkou-bioinfo/ducknng> · [NNG](https://nng.nanomsg.org/) ·
   [`nanonext`](https://github.com/r-lib/nanonext) · [`mirai`](https://mirai.r-lib.org/)
 - **SemanticSQL** (the `bio_edges` + `entailed_edge` graph shape): <https://github.com/INCATools/semantic-sql>

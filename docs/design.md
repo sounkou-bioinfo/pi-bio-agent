@@ -19,11 +19,11 @@ operations, skills, and study notes compose those primitives for particular work
    manifest, SQL, or adapter, the design has failed at its own boundary and should be redesigned as data.
 
 2. **In SQL we trust: four legs on one DuckDB substrate.**
-   - **Data**: files and formats as SQL (`file_scan`, `duckhts` for VCF/BAM/BED/…).
+   - **Data**: files and formats as SQL (`file_scan`, `duckhts` for VCF/BAM/BED/…). The bet includes the large DuckDB community extension ecosystem: new formats should usually arrive as extensions/table functions, not bespoke framework parsers.
    - **Network**: HTTP, cross-process shared state, and multi-agent coordination as SQL, via **ducknng**:
      `ncurl_table` (HTTP is a table function), `run_rpc` (a live shared mutable DB many processes write through),
-     and NNG topologies (pub/sub, push/pull, survey, bus, pair). ducknng is part of the substrate, not an
-     incidental transport.
+     and NNG topologies (pub/sub, push/pull, survey, bus, pair). ducknng is the owned DuckDB extension that this
+     repo uses to push the network/RPC/topology leg forward.
    - **Compute (code execution)**: code SQL is poor at (an `lm()` fit, an R/Python/Go tool) runs **out-of-process over Arrow IPC** (`process.compute`); only the data contract is SQL/Arrow, the computation is a contained child.
    - **Knowledge + memory**: ontologies and our own KG share one shape (`bio_edges` + `entailed_edge` closure, from SemanticSQL); grounding is deterministic-SQL-first with fail-closed model fallback. **Memory is machine studying**: the agent studies a corpus before a task is known and retains expertise as *study notes* projected into the KG: data it queries, distinct from *skills* (activated behavior) and *facts* (measured, tool-derived).
 
@@ -54,8 +54,8 @@ Core contracts
 Execution adapters
   DuckDB read-only SQL                          (the substrate)
   ducknng    network as SQL (ncurl_table/_aio), cross-process shared-DB RPC (run_rpc),
-             and NNG topologies (pub/sub, push/pull, survey, bus, pair) — the maintained
-             extension that makes network/distributed/multi-agent coordination SQL-native
+             and NNG topologies (pub/sub, push/pull, survey, bus, pair) — the owned
+             DuckDB extension that makes network/distributed/multi-agent coordination SQL-native
   duckhts    HTS readers (VCF/BCF, BAM/CRAM, BED/GFF, tabix) as SQL table functions
   process    out-of-process R / Python / Go / shell over Arrow IPC (the compute pillar)
   http.get   TS resolver + injected fetch — the fallback where a DuckDB build has no ducknng

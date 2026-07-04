@@ -33,8 +33,8 @@ createBioExtension({ author: "agent:worker-3", openStore: myServerStore });
 
 `openStore(cwd)` returns a `BioStore` = `{ conn: SqlConn, close() }`. Because every memory op (`remember`,
 `recall`, `listMemory`, …) and every run recorder is written against the `SqlConn` port (`all` / `run`), a
-server-backed `conn` is a drop-in: route its `run(sql)` and `all(sql)` through the **maintained ducknng** RPC
-(`ducknng_run_rpc` / `ducknng_query_rpc`) to a `ducknng_start_server` (or any other host-supplied server `SqlConn`: this repo maintains/backports **ducknng**; **quack** was dropped, but a host may still bring its own server conn). The
+server-backed `conn` is a drop-in: route its `run(sql)` and `all(sql)` through the **owned ducknng** RPC
+(`ducknng_run_rpc` / `ducknng_query_rpc`) to a `ducknng_start_server` (or any other host-supplied server `SqlConn`: this repo owns/maintains/backports **ducknng**; **quack** was dropped, but a host may still bring its own server conn). The
 client opens only a throwaway `:memory:` DuckDB to reach the RPC functions: it owns **no** shared state, holds
 **no** file lock; the *server* is the single writer.
 
@@ -89,4 +89,4 @@ The transport is dogfooded end to end:
   the coordinator reads back with the same `observationAsOfKey`: a language-agnostic distributed backend.
 
 So: the local file is the default for one project; a ducknng **server** (or other host-supplied server conn) is the store when memory must be
-shared across projects, processes, agents, or machines: the same maintained transport the topology scripts already use.
+shared across projects, processes, agents, or machines: the same owned ducknng extension the topology scripts already use.

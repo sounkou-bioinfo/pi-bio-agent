@@ -7,7 +7,7 @@ Instructions for coding agents working in this repository.
 - This repository exists as a response to skill sprawl. The motivating ClawBio / ConversationalGenome exchange is concrete: a reasonable question like "how many rare high-impact variants are there?" failed until a new per-question skill was added. `pi-bio-agent` should make that class of work manifest + SQL over declared resources, not another bespoke skill every time.
 - The model is not the source of biomedical facts. The agent may route, compose, inspect schemas, write SQL, and ask for a typed judgment at the boundary; facts must come from declared resources, deterministic computation, receipts, and recorded approvals.
 - Code is the interpreter and host boundary. Manifests, SQL, resources, ontology data, operation specs, and observations are the program. Add TypeScript only when it reveals a reusable primitive or adapter that existing examples already demand.
-- In SQL we trust. DuckDB is the execution substrate for files, formats, joins, graph closure, HTTP-shaped data through ducknng, and exact reductions. Prefer a query, table function, or extension over a new parser or prompt.
+- In SQL we trust. DuckDB is the execution substrate for files, formats, joins, graph closure, HTTP-shaped data through ducknng, and exact reductions. The larger bet is the DuckDB ecosystem and its community extensions; `ducknng` is the owned extension where this repo pushes network/RPC/topology capability forward. Prefer a query, table function, or extension over a new parser or prompt.
 - CAS and receipts are not optional polish. Runs must be explainable by content digests, resolver receipts, replay specs, and durable observations wherever the host supplies the store/CAS.
 - SemanticSQL is the graph answer to skill sprawl: `bio_edges`, `bio_edges_as_of`, and `entailed_edge` make ontology traversal, facts, memory links, and domain relations queryable as one SQL graph instead of scattered tool logic.
 - Reproducibility is a design constraint, not a tagline. Be honest about live sources, volatile functions, host-provisioned effects, and memoization eligibility.
@@ -49,7 +49,7 @@ Instructions for coding agents working in this repository.
 
 - The current pillars are data, network, compute, and knowledge/memory over DuckDB-centered provenance.
 - Data: files, formats, table functions, and SQL materialization.
-- Network: `ducknng_ncurl_table` and related ducknng primitives when available; `http.get` is the host-injected fallback.
+- Network: `ducknng_ncurl_table` and related primitives from the owned `ducknng` extension when available; `http.get` is the host-injected fallback.
 - Compute today: `process.compute` is a one-shot out-of-process Arrow IPC resolver, enabled only when the host injects a `ProcessRunner`.
 - Long-running work today: `JobRunner`/ledger status records model durable job lifecycle; concrete dispatch is host-owned.
 - Gap to be explicit about: NNG can become a compute mode for stateful, non-DuckDB REPL-style workers and interactive services. Do not pretend that is already a general operation transport; define it only when a real consumer exercises it.

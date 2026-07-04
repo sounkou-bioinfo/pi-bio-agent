@@ -23,7 +23,7 @@ process-exclusive-writer lock that blocks concurrent *file* access never applies
 
 `agent:B` (a distinct process) read `agent:A`'s memory, carrying `agent:A` as the author (`source` is part of
 observation identity) — shared and attributed across processes. Writes are exec-opt-in on the server
-(`ducknng_register_exec_method`), the host security boundary. This is the same owned transport the topology
+(`ducknng_register_exec_method`), the host security boundary. This is the same owned ducknng extension the topology
 scripts (`blackboard-shared`, `ducknng-rpc-mutate`, `nng-job-runner`) use.
 
 Params are inlined into the RPC SQL string with escaping here (a dogfood); a production `openStore` over ducknng

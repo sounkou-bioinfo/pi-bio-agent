@@ -50,8 +50,8 @@ behavior in data plus injected effect ports:
 - a new **data format** is a *DuckDB extension* (`duckhts`, `anndata`,
   `duckdb_zarr`, `plinking_duck`, …);
 - a new **API** is an `ncurl_table` call over
-  **[ducknng](https://github.com/sounkou-bioinfo/ducknng)**, the
-  Arrow-native NNG transport maintained alongside this project;
+  **[ducknng](https://github.com/sounkou-bioinfo/ducknng)**, the owned
+  Arrow-native DuckDB extension for NNG/HTTP/RPC transport;
 - a new **compute backend** (SLURM, Modal, an NNG pool) is one injected
   `JobDispatch`;
 - a new **model** is an injected judge.
@@ -279,7 +279,7 @@ node scripts/nng-job-runner.mjs
     A separate worker process wrote the job's status (running, then succeeded) into the coordinator's
     job:<id>:status slot over ducknng RPC, and the coordinator read it back with the same as-of query it
     uses for any observation. The job-store code did not change, and the worker can be any language that
-    speaks NNG. The transport is language-agnostic, and status remains queryable ledger data.
+    speaks NNG. The owned ducknng extension keeps status as queryable ledger data.
 
 **And files, not just status — because this is bioinformatics.** A job
 produces a *file* (a plot, a VCF), and another agent has to read it.
@@ -524,8 +524,8 @@ Prior art and lineage:
   conducts): <https://sakana.ai/fugu/>
 - **Recursive Language Models / RLM** (REPL-over-context; `bio_query` is
   the SQL REPL): <https://arxiv.org/abs/2512.24601>
-- **ducknng**, the Arrow-native NNG transport maintained alongside this
-  project, in the lineage of R’s `nanonext` + `mirai`:
+- **ducknng**, the owned Arrow-native DuckDB extension for NNG/HTTP/RPC
+  transport, in the lineage of R’s `nanonext` + `mirai`:
   <https://github.com/sounkou-bioinfo/ducknng> ·
   [NNG](https://nng.nanomsg.org/) ·
   [`nanonext`](https://github.com/r-lib/nanonext) ·

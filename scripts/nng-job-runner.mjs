@@ -5,13 +5,11 @@ import { DuckDBInstance } from "@duckdb/node-api";
 import { duckdbNodeConn } from "../dist/duckdb/node-api.js";
 import { createBioObservationSchema, observationAsOfKey } from "../dist/duckdb/observations.js";
 
-// DOGFOOD: distributed compute as a TOPOLOGY over the job ledger. A long-running job's status flows back over
-// ducknng RPC into the SAME `job:<runId>:status` observation slot the job-store polls. The coordinator owns a
-// shared DuckDB (the job ledger); a SEPARATE worker PROCESS runs the job and reports each phase by executing
-// recordObservation-shaped SQL over `ducknng_run_rpc` against that shared db. The job-store code is UNCHANGED:
-// only the dispatch and the worker are new, and the worker can be any language that speaks NNG (node here, R via
-// nanonext/mirai, Python, …). This is the language-agnostic alternative to an SSH-to-SLURM / Modal backend, over
-// our owned transport.
+// Dogfood: distributed compute as a topology over the job ledger. A long-running job's status flows back over
+// ducknng RPC into the same `job:<runId>:status` observation slot the job-store polls. The coordinator owns a
+// shared DuckDB ledger; a separate worker process reports each phase by executing recordObservation-shaped SQL over
+// `ducknng_run_rpc` against that shared DB. The job-store code does not change. Only dispatch and the worker are
+// new, and the worker can be any language that speaks NNG (Node here, R via nanonext/mirai, Python, ...).
 //
 // Run:  npm run build && node scripts/nng-job-runner.mjs
 
@@ -75,10 +73,10 @@ async function orchestrate() {
   await new Promise((r) => setTimeout(r, 1500)); // let the coordinator bind + register exec
   await spawnChild(["worker", "nng-worker-1"]); // a separate process; could equally be an R (nanonext) worker
   await server;
-  console.log("\nA SEPARATE worker process wrote the job's status (running, then succeeded) into the coordinator's");
+  console.log("\nA separate worker process wrote the job's status (running, then succeeded) into the coordinator's");
   console.log("job:<id>:status slot over ducknng RPC, and the coordinator read it back with the same as-of query it");
   console.log("uses for any observation. The job-store code did not change, and the worker can be any language that");
-  console.log("speaks NNG. A language-agnostic distributed backend over our owned transport, not an opaque runtime.");
+  console.log("speaks NNG. The owned ducknng extension keeps status as queryable ledger data.");
 }
 
 const [mode, label] = process.argv.slice(2);

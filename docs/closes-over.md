@@ -7,7 +7,7 @@ tags: [topologies, fugu, rlm, machine-studying, positioning]
 
 # What the substrate closes over
 
-Several frontier ideas in agent research, learned orchestration, REPL-over-context, multi-agent topologies, and studying-before-the-task are usually shipped as separate systems. In this substrate they are consequences of one property: **addressable data + SQL + a maintained transport**. We do not claim to implement those papers directly; the claim is that the substrate exposes the lower-level machinery they rely on.
+Several frontier ideas in agent research, learned orchestration, REPL-over-context, multi-agent topologies, and studying-before-the-task are usually shipped as separate systems. In this substrate they are consequences of one property: **addressable data + SQL + an owned DuckDB extension for transport**. We do not claim to implement those papers directly; the claim is that the substrate exposes the lower-level machinery they rely on.
 
 ## Agent topologies: NNG protocols as agent patterns
 
@@ -107,7 +107,7 @@ task is known and retaining the expertise. Here that retention is **study notes 
 ## The unifying claim
 
 Learned orchestration, REPL-over-context, every topology, and studying-as-memory all reduce to **addressable data
-+ SQL + a maintained transport**. That is why "a new question is a manifest," "a new format is a DuckDB extension,"
++ SQL + an owned DuckDB extension for transport**. That is why "a new question is a manifest," "a new format is a DuckDB extension,"
 "a new compute backend is a `JobDispatch`," and "memory, compute, and facts are one temporal ledger" are the same
 sentence.
 
@@ -127,6 +127,6 @@ what it learns as queryable notes, not prompt context.
 - Sakana Fugu (learned orchestration): <https://sakana.ai/fugu/> · report <https://arxiv.org/html/2606.21228v1>
 - Recursive Language Models / RLM (REPL over context, OOLONG): <https://arxiv.org/abs/2512.24601>
 - NNG scalability protocols: <https://nng.nanomsg.org/> · the R lineage `nanonext` <https://github.com/r-lib/nanonext> · `mirai` <https://mirai.r-lib.org/> (a Python worker could bind NNG via `pynng`, a factual binding, not part of the lineage)
-- ducknng (owned Arrow-native NNG transport): <https://github.com/sounkou-bioinfo/ducknng>
+- ducknng (owned Arrow-native DuckDB extension for NNG/HTTP/RPC transport): <https://github.com/sounkou-bioinfo/ducknng>
 - SemanticSQL (the `bio_edges` + `entailed_edge` graph shape): <https://github.com/INCATools/semantic-sql>
 - LinkedIn design thread (sounkou-bioinfo × Manuel): [comment thread](https://www.linkedin.com/feed/update/urn:li:activity:7473824764575436800?commentUrn=urn%3Ali%3Acomment%3A%28activity%3A7473824764575436800%2C7473848362723680256%29&replyUrn=urn%3Ali%3Acomment%3A%28activity%3A7473824764575436800%2C7476647053071114241%29)
