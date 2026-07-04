@@ -34,6 +34,22 @@ operations, skills, and study notes compose those primitives for particular work
    back as inert keys. The **judgment / approval decision** (model or human) is the one irreducible boundary: the
    substrate records and gates it, never computes it.
 
+4. **Actions over prompts for graph inference.** The ICLR 2026 study
+   ["Actions Speak Louder than Prompts"](https://arxiv.org/abs/2509.18487) is directly aligned with the
+   substrate bet: LLMs do better on text-rich graph inference when they generate executable code over graph state
+   than when graph neighborhoods are serialized into a prompt. That is exactly this repo's graph posture:
+   keep nodes, edges, labels, memory, and provenance in DuckDB/SemanticSQL/CAS, then let the agent write bounded
+   SQL or host-approved code to inspect them. Prompt text is for intent and judgment boundaries, not for carrying
+   high-degree neighborhoods, long features, ontology closures, or the run ledger.
+
+5. **Metacurator's determinism gradient closes over the same shape.** Its implementation splits publication
+   metadata curation into deterministic tools for lookup, archive, acquire, table loading, ontology grounding,
+   diffing, and reporting, plus a narrow `judge` boundary for table classification, schema mapping, and ontology
+   disambiguation. The code-level contract is the important part: models do not mint identifiers or values; they
+   emit typed choices that deterministic code validates, applies, records, or rejects. That reconciles with this
+   library without adding a new primitive: deterministic work is resolver/materialization/SQL, while the
+   irreducible model call is a typed judgment recorded and validated by the substrate.
+
 ## Hard-Learned Lessons
 
 These are not slogans; they are constraints learned in implementation and tests. Keep them visible when changing
@@ -52,6 +68,16 @@ the related code.
 - **`duckdb.sql_materialize` is the materialization primitive.** It generalized `file_scan`, `read_bcf`, and
   HTTP-shaped resources into "declared read -> table"; it is not a generic escape hatch for writes. See
   `src/duckdb/resolvers/duckdb-sql-materialize.ts` and `test/duckdb-sql-materialize.test.ts`.
+- **Graph inference should be graph-as-SQL/code, not graph-as-prompt.** Prompting can work when the relevant
+  neighborhood is small enough to fit in context, but long text, high degree, noisy structure, and partial labels
+  favor generated code over typed graph state. For this repo, the generated program should usually be SQL over
+  `bio_edges_as_of`, `entailed_edge`, resolver-materialized tables, and run/memory observations. This is why the
+  graph substrate must stay queryable and receipted instead of becoming prose context.
+- **A typed judgment boundary is the model's proper home.** Metacurator's `judge` shape is a useful constraint:
+  table choice, column mapping, candidate disambiguation, and clinical interpretation may need judgment, but the
+  model emits typed objects from bounded candidates and deterministic code validates, applies, records, or rejects
+  them. Its grounding path performs lookup, round-trip confirmation, branch checks, and obsolete checks before a
+  candidate can be chosen. Do not let a model invent identifiers or silently mutate tables.
 - **ducknng HTTP fanout is a real boundary, not an implementation detail.** `ducknng_ncurl_table` is right for one
   response table. Whole-VCF or paginated annotation needs per-row scalar AIO launch, repeated any-ready drain, and
   status-as-value retry logic; permanent `4xx` terminates, transient `429`/`5xx` retries. See

@@ -37,6 +37,24 @@ In `pi-bio-agent`, this is **not** a biomedical study, cohort, trial, GWAS, or p
 6. **Evaluation should prefer cost curves over one-off pass/fail.** Future expertise probes or workflow fixtures should track whether notes reduce tool calls/tokens or improve accuracy at the same budget, not merely whether a final answer is possible.
 7. **Weight-update studying is out of scope for now.** The current substrate focuses on harness-level studying: notes, indexes, operation specs, guarded SQL, resources, and runs. That is compatible with future model-side studying but should not be conflated with it.
 
+## Local exercise points
+
+The machine-studying claim is exercised as harness state, not as a model-training loop:
+
+- `src/core/study.ts` defines `StudyNote`, validates the hook as the retrieval contract, projects note links into
+  `agent:memory:<slug>` graph nodes, and derives `StudyScaffold` DAGs with access lists.
+- `test/study-scaffold.test.ts` checks that those access lists only point backward, so a study plan is acyclic and
+  each produced note carries the same `depends_on` edges.
+- `src/core/study-exec.ts` and `test/study-exec.test.ts` run the scaffold with a deterministic worker and verify
+  the cost-saving shape: each worker sees only its access-list notes, later steps see previous notes as shared
+  memory, and invalid scaffolds fail before any worker runs.
+- `src/core/blackboard.ts` and `test/blackboard.test.ts` remove the central coordinator: all steps launch
+  concurrently and synchronize only by publishing/awaiting notes on a blackboard.
+
+That is the repo's first machine-studying implementation: a corpus turns into hooks, notes, note links, access
+lists, and graph edges that make later retrieval cheaper. It is deliberately not a claim that the model's weights
+changed.
+
 ## Study and the graph bet (the deeper link)
 
 The study/memory framing is the visible half of a deeper choice: see

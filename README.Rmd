@@ -21,6 +21,10 @@ sanitize_paths <- function(txt) {
   wd <- normalizePath(getwd(), winslash = "/", mustWork = FALSE)
   txt <- gsub(paste0(wd, "/"), "", txt, fixed = TRUE)
   txt <- gsub(wd, ".", txt, fixed = TRUE)
+  txt <- gsub("rare_high_impact\\.report-[0-9]+-[0-9a-f]+", "rare_high_impact.report-<run>", txt, perl = TRUE)
+  txt <- gsub("query-[0-9]+-[0-9a-f]+", "query-<run>", txt, perl = TRUE)
+  txt <- gsub("pid[ =][0-9]+", "pid <pid>", txt, perl = TRUE)
+  txt <- gsub("/tmp/pi-bio-handoff-cas-[0-9]+", "/tmp/pi-bio-handoff-cas-<run>", txt, perl = TRUE)
   txt <- gsub("[ \t]+(?=\n|$)", "", txt, perl = TRUE)
   txt
 }
@@ -110,6 +114,17 @@ workflow-specific behavior in data plus injected effect ports:
 - a new **compute backend** (SLURM, Modal, an NNG pool) is one injected `JobDispatch`;
 - a new **model** is an injected judge.
 
+The same rule holds for graph inference. The graph is not a prompt payload; it is typed state that the agent acts
+on. The ICLR 2026 study [Actions Speak Louder than Prompts](https://arxiv.org/abs/2509.18487) makes that point
+empirically: generated code over graph state beats serialized graph prompts when text is long, degree is high, or
+the useful signal shifts between structure, features, and labels. Here that means graph-as-SQL over DuckDB,
+SemanticSQL edges, memory, and run ledgers.
+
+The judgment boundary follows the same discipline. [`metacurator`](https://github.com/seandavi/metacurator)
+is useful here because its implementation separates deterministic curation stages from exactly typed model calls
+for table choice, column mapping, and candidate disambiguation. That closes over the same shape: deterministic
+stores produce identifiers and candidates; models choose or abstain inside a validated contract.
+
 The interpreter stays thin. Application code can compose manifests, operations, producers, and host policy around
 the core; those compositions stay outside the core library unless repeated use exposes a missing primitive.
 
@@ -154,7 +169,7 @@ Using examples/connectors/clinvar-region.json, how many ClinVar variants are the
 The **same query with no agent**, the deterministic CLI path for scripts and CI. Identical numbers, no model in
 the loop:
 
-```{biocli}
+```{biocli, cache=TRUE}
 query examples/connectors/clinvar-region.json --db :memory: --init-sql "LOAD duckhts;" --sql "SELECT sig, count(*) n FROM (SELECT unnest(INFO_CLNSIG) sig FROM clinvar) WHERE sig IS NOT NULL GROUP BY 1 ORDER BY n DESC LIMIT 8"
 ```
 
@@ -165,7 +180,7 @@ by digest (bytes in CAS); the per-run `run.json` / `receipts.json` / `result.jso
 substrate's own provenance is queryable with the same SQL it uses for data. This is the live run graph produced
 *by this very render*:
 
-```{biocli}
+```{biocli, cache=TRUE}
 query examples/run-ledger/manifest.json --db :memory: --sql "SELECT tool, status, count(*) n FROM run_ledger GROUP BY 1, 2 ORDER BY n DESC"
 ```
 
@@ -181,7 +196,7 @@ status as inspectable data rather than opaque runtime state. Real separate proce
 (the push/pull, pub/sub, and survey topologies are exercised the same way in [`scripts/`](scripts/) and
 [`test/`](test/)):
 
-```{nng}
+```{nng, cache=TRUE}
 scripts/nng-job-runner.mjs
 ```
 
@@ -190,7 +205,7 @@ another agent has to read it. Here one process plots a real PNG into a content-a
 only the **digest** in the shared ledger over ducknng RPC; a *separate* reader process reads that digest and
 fetches the exact bytes. A shared CAS covers the common HPC case; otherwise the bytes ship over the same transport.
 
-```{nng}
+```{nng, cache=TRUE}
 scripts/nng-file-handoff.mjs
 ```
 
@@ -198,14 +213,14 @@ scripts/nng-file-handoff.mjs
 same substrate. A producer agent, granted the compute and CAS ports by its entrypoint, runs an out-of-process R
 compute and captures the file outputs:
 
-```{pi, entrypoint="extensions/pi-coding-agent/index-compute.ts", timeout=300}
+```{pi, entrypoint="extensions/pi-coding-agent/index-compute.ts", timeout=300, cache=TRUE}
 Using examples/process-artifacts/manifest.json, run bio_query with SQL 'SELECT * FROM summary' (resolving the 'summary' resource runs the R compute and captures its file outputs). Report each output artifact the run produced: its name and byte size.
 ```
 
 Then a *separate*, read-only reader agent discovers those artifacts through the run graph, follows the content
 address into CAS, and reads the bytes back:
 
-```{pi, timeout=300}
+```{pi, timeout=300, cache=TRUE}
 A previous run wrote output artifacts under .pi/bio-agent/runs/. Find the most recent run's run.json, list the artifacts it produced (name and byte size), then read the bytes of the 'report' artifact by following its content address, and tell me exactly what the report says.
 ```
 
@@ -214,7 +229,7 @@ are, here, one file each: [`examples/connectors/`](examples/connectors/) ships U
 Reactome, and a new one is a new URL. The manifest declares *where* the data is; the agent discovers the schema
 and composes *what* to pull:
 
-```{biocli}
+```{biocli, cache=TRUE}
 query examples/connectors/uniprot.json --db :memory: --init-sql "LOAD ducknng; SET VARIABLE tls = ducknng_tls_config_from_pem(NULL, NULL, NULL, '', 1)" --bindings '{"uniprot_acc":"P04637"}' --sql "SELECT primaryAccession, uniProtkbId, sequence.length aa FROM uniprot_entry"
 ```
 
@@ -322,6 +337,8 @@ that argument with citations. Prior art and lineage:
 
 - **ClawBio**, the origin corpus this factors into manifests, resolvers, and operations:
   <https://github.com/ClawBio/ClawBio>
+- **metacurator**, deterministic curation stages plus a typed judgment boundary:
+  <https://github.com/seandavi/metacurator>
 - **Machine studying** (Li, Battle, Khattab, 2026): <https://jacobxli.com/blog/2026/machine-studying/>
 - **Sakana Fugu** (learned orchestration over shared memory and access lists): <https://sakana.ai/fugu/>
 - **Recursive Language Models / RLM** (REPL-over-context; `bio_query` is the SQL REPL): <https://arxiv.org/abs/2512.24601>

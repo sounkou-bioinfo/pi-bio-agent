@@ -72,18 +72,26 @@ to justify *patterns*, not to import their nouns.
   Factors into shared format resolvers + declared SQL operations + term sets + one generic runner. Its
   `rhi_01` bench case is our flagship's ground truth.
 - **[metacurator](https://github.com/seandavi/metacurator)**: a **deterministic spine + a narrow typed
-  judgment boundary**: the LLM may only emit typed objects that deterministic code validates, and
-  `disambiguate` may return only one of the provided grounded CURIEs or `None`. That is term-set
-  membership + fail-closed + abstention: our resolver discipline with a model behind one impl. The
-  judgment boundary is a *manifest-level pattern*, not a core noun.
+  judgment boundary** for publication metadata curation. Its mechanical stages (`resolve`, `archive`, `acquire`,
+  `tables`, `dictionary`, `ground`, `diff`, `report`) sharpened our resolver/materialization/receipt pattern; its
+  `judge` operations (`classify_tables`, `propose_mapping`, `disambiguate`) sharpened the typed judgment pattern.
+  The LLM may only emit typed objects that deterministic code validates, `propose_mapping` rejects unknown schema
+  fields, and `disambiguate` may return only a grounded candidate or `None`. Its grounding code first performs
+  lookup, round-trip confirmation, branch checking, and obsolete-term handling. That is term-set membership +
+  fail-closed + abstention: our resolver discipline with a model behind one impl. The reconciliation is the point:
+  no metacurator-specific core primitive is needed.
 - **[cu-research-intelligence](https://github.com/seandavi/cu-research-intelligence)**. OpenAlex →
   Parquet → DuckDB with per-partition watermarks and a storage backend that swaps local→R2 with no code
   change. Reinforces **CAS/raw→curated layering**, snapshot temporality, and DuckDB as the query layer.
 - **[biomedical-agent-kg](https://github.com/seandavi/biomedical-agent-kg)**: "nodes are what you
   traverse *through*; attributes are what you filter *on*", fully generated, "fix the generator, not the
   record", provenance on every expensive edge. That is our typed KG + generated-not-prose + rules-as-data.
+- **[Actions Speak Louder than Prompts](https://arxiv.org/abs/2509.18487)**: a controlled ICLR 2026 graph-inference
+  study showing that generated code over graph state is the strongest LLM interaction mode, especially when long
+  text or high-degree neighborhoods exceed prompt budgets. That is the external benchmark version of our
+  graph-as-SQL posture.
 
-The shared spine across all four, **DuckDB as query/index substrate · generated/spec-first contracts · provenance/receipts · fail-closed resolvers over opaque stable ids · deterministic spine + typed judgment · CAS/raw→curated layering**, is evidence the primitives are discovered, not invented.
+The shared spine across these systems, **DuckDB as query/index substrate · generated/spec-first contracts · graph-as-code/SQL over graph-as-prompt · provenance/receipts · fail-closed resolvers over opaque stable ids · deterministic spine + typed judgment · CAS/raw→curated layering**, is evidence the primitives are discovered, not invented.
 
 ## Load-bearing primitives
 

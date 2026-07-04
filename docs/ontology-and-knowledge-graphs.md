@@ -118,6 +118,19 @@ Every fact-like node or edge should be able to answer:
 
 For counts, joins, trends, provenance, and lineage, use one scoped read-only SQL query over the graph contract. This avoids context bloat and keeps the agent honest: the answer is computed from exposed facts, not inferred from prose.
 
+This is also the graph-inference bet behind the repo. The ICLR 2026 paper
+["Actions Speak Louder than Prompts"](https://arxiv.org/abs/2509.18487) found that graph-as-code outperforms
+prompt serialization on text-rich graph tasks, especially when long features or high-degree neighborhoods exhaust
+the context budget. In `pi-bio-agent`, graph-as-code should normally mean graph-as-SQL: the model writes a bounded
+query over `bio_edges_as_of`, `entailed_edge`, ontology tables, resolver-materialized resources, run observations,
+or memory notes. The graph remains outside the prompt, and the executable action is small, inspectable, and
+receipted.
+
+Do not collapse typed predicates into "neighbors" unless the operation really only needs adjacency. A biomedical
+edge may encode subclass, part-of, evidence, support, contradiction, derivation, activation, containment, or
+temporal supersession. Keeping those predicates queryable is what lets an agent adapt its reliance between
+structure, features, labels, evidence, and provenance instead of assuming one graph homophily pattern.
+
 ## Concepts vs ontologies
 
 Concept nodes are local handles for user-facing themes. Ontology terms are external controlled vocabulary identifiers. Connect them with explicit `maps_to` or `about` edges instead of pretending a local label is a global ontology identifier.

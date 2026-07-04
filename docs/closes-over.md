@@ -9,6 +9,90 @@ tags: [topologies, fugu, rlm, machine-studying, positioning]
 
 Several frontier ideas in agent research, learned orchestration, REPL-over-context, multi-agent topologies, and studying-before-the-task are usually shipped as separate systems. In this substrate they are consequences of one property: **addressable data + SQL + DuckDB-native transport**. We do not claim to implement those papers directly; the claim is that the substrate exposes the lower-level machinery they rely on.
 
+Read this argument in this order:
+
+1. **Machine studying**: a corpus becomes harness expertise before the downstream task is known.
+2. **Fugu**: learned orchestration needs access lists, isolated workers, shared memory, and tool-call state.
+3. **RLM**: long context becomes a program over an external REPL instead of prompt text.
+4. **Local dogfood**: the scripts and tests exercise those primitives as ordinary repo code.
+
+## Machine studying: memory as data
+
+["Machine studying"](https://jacobxli.com/blog/2026/machine-studying/) is studying a corpus *before* a downstream
+task is known and retaining the expertise. The useful part for this library is not weight-update studying; it is
+the harness-side residue: source maps, hooks, notes, indexes, concept links, and probes that shift later work to
+lower tool/token budgets.
+
+Here that retention is **study notes projected into the same `bio_edges` / `entailed_edge` graph** as facts and
+ontologies: addressable data the agent queries, distinct from *skills* (activated behavior) and *facts*
+(measured, provenanced). The local exercise points are `src/core/study.ts`, `src/core/study-exec.ts`,
+`src/core/blackboard.ts`, `test/study-scaffold.test.ts`, `test/study-exec.test.ts`, and `test/blackboard.test.ts`.
+They prove hooks as retrieval contracts, access-list DAGs, per-worker isolation, shared note memory, and
+blackboard coordination without needing a live model. See [`machine-studying-lineage`](./machine-studying-lineage.md).
+
+## Fugu: learned orchestration
+
+[Sakana Fugu](https://sakana.ai/fugu/) ([release](https://sakana.ai/fugu-release/),
+[technical report](https://arxiv.org/html/2606.21228v1); ICLR-2026 papers *TRINITY* and *The Conductor*) is a
+trained orchestrator for model collectives. The important source section for this repo is §3.2.2,
+"Function Calling Agentic Workflows." It identifies a real tension:
+
+- In a single-agent tool loop, the message transcript can carry function-call context.
+- In a multi-agent workflow, sharing every worker's tool transcript causes **orchestration collapse**: later
+  workers are steered by the first worker's path and repeat it.
+- Fully isolating workers is also bad, because agents need memory of earlier environment interactions to avoid
+  redundant tool calls and rediscovering the same artifacts.
+
+Fugu resolves that with two mechanisms: **access lists** for current-workflow isolation, and **persistent shared
+memory** across workflows so later agents can observe prior tool calling when useful. That maps directly onto this
+substrate:
+
+- `StudyScaffold.accessList` is the access-list contract. Tests prove each worker sees only the upstream notes it
+  was granted, while tree and survey/debate topologies fan in through an aggregator.
+- `bio_observations` plus run facts are the shared memory/tool-call cache. Runs, results, receipts, job status,
+  and memory notes are queryable as-of facts; an agent can ask what already ran before repeating an expensive
+  lookup or compute.
+- `src/core/blackboard.ts` and `src/hosts/sql-blackboard.ts` are the current blackboard shapes;
+  `scripts/blackboard-shared.mjs` shows the same publish/await pattern across OS processes through a
+  ducknng-served DuckDB table.
+- `scripts/nng-job-runner.mjs` records a worker's durable async status into the same observation slot a local
+  job store reads.
+- `scripts/nng-file-handoff.mjs` records a produced file by CAS digest, then a separate reader follows the ledger
+  to exact bytes.
+- `scripts/pipeline-fanout.mjs`, `scripts/nng-survey.mjs`, and `scripts/nng-pair.mjs` exercise bounded worker
+  pools, survey/quorum, and proposer-verifier communication.
+
+What we deliberately *lack* is the trained orchestrator. The library provides the data plane a Fugu-like
+orchestrator would conduct: manifests, access lists, observations, CAS, jobs, and DuckDB/ducknng transport.
+
+## RLM: a REPL over context
+
+[Recursive Language Models](https://arxiv.org/abs/2512.24601) treat a near-infinite prompt as a **persistent
+variable inside a REPL**: the model writes code to slice, search, partition, and summarize an external context,
+so prompt size is decoupled from the context window. It is evaluated on order-sensitive long-context tasks like
+the **OOLONG** benchmark, which punishes RAG and approximate attention.
+
+`bio_query` / DuckDB **is** that REPL: and a stronger one for the tasks that matter here:
+
+- data lives **addressably outside the prompt** (a table, a CAS handle), so there is no context to rot;
+- an OOLONG-style *count / order / join* is a `GROUP BY` / `ORDER BY` / `JOIN`: **exact and deterministic**,
+  where an attention-based reader is only approximate. **Counting beats the model; it doesn't ask it.**
+
+RLM writes Python to navigate text; we write SQL to query data. Same move (a program over external context), but
+ours is a declarative, indexed, provenance-carrying substrate rather than string-slicing.
+
+The local dogfood is deliberately honest about map versus reduce:
+
+- `examples/long-context-aggregate/manifest.json` and `test/long-context-aggregate-example.test.ts` exercise the
+  deterministic reduce: once labels exist, the distributional question is a bounded `GROUP BY`.
+- `test/map-reduce-labeling.test.ts` and `scripts/rlm-map-reduce.mjs` exercise the missing semantic map shape:
+  partitions are labeled by isolated workers, workers write no shared state, the host merges label artifacts as
+  the single writer, and only then does SQL aggregate. The live model would sit at that labeling boundary; the
+  tests use a rule so the topology is reproducible.
+- `ducknng_run_rpc` / `ducknng_query_rpc` provide the stateful cross-process DuckDB REPL when the host explicitly
+  opts into remote execution. The RLM control plane becomes durable, shared, and inspectable instead of prompt
+  text.
+
 ## Agent topologies: NNG protocols as agent patterns
 
 [ducknng](https://github.com/sounkou-bioinfo/ducknng) binds the [NNG](https://nng.nanomsg.org/) scalability
@@ -47,62 +131,57 @@ operations can be **served over HTTP**. Wrapping them as MCP tools, a thin `init
 mirror of the [`mcp.json`](../examples/connectors/mcp.json) client. (The HTTP-serve primitive is proven; the
 JSON-RPC facade is the next build, not a claim of done.)
 
-## Fugu: learned orchestration
+## Actions Speak Louder Than Prompts: graph-as-code
 
-[Sakana Fugu](https://sakana.ai/fugu/) ([release](https://sakana.ai/fugu-release/),
-[technical report](https://arxiv.org/html/2606.21228v1); ICLR-2026 papers *TRINITY* and *The Conductor*) is a
-trained ~7B **conductor** that learns which expert models to activate, what roles they take (Thinker / Worker /
-Verifier), how they communicate, and how to combine their work: orchestration *learned*, not hand-designed.
+[Actions Speak Louder than Prompts](https://arxiv.org/abs/2509.18487) (Finkelshtein, Cucerzan, Jauhar, and
+White; ICLR 2026) is a direct external version of the same bet for graph inference. It compares prompting,
+tool-use, and graph-as-code for text-rich node classification across domains, homophily regimes, feature lengths,
+model sizes, and ablations over features, edges, and labels. The load-bearing finding for this repo is simple:
+when graph context is large or information is distributed across structure, features, and labels, generated code
+over graph state is the strongest interaction mode.
 
-We have every **substrate** piece a conductor needs, as data. The report's §3.2.2 ("Function Calling Agentic
-Workflows") names two mechanisms explicitly, and each has a direct substrate analogue:
-- **"persistent shared memory"**. Fugu keeps *inter-workflow shared memory* so agents "observe tool calling from
-  previous workflows" and "not make redundant, repeated tool calls." Our **`bio_observations` temporal ledger is
-  exactly that**: every run and tool call is a queryable, as-of fact (the run-graph), so a later agent/workflow
-  reads what already happened instead of repeating it, and now **memory notes live in the same store** (`agent:memory:`
-  namespace, append-only revisions + as-of), so shared memory spans facts *and* learned notes, persisted in a DB
-  (better semantics than a prompt), shareable across processes via ducknng RPC / CAS.
-- **"access list"**. Fugu's plan "specifies … an access list indexing which subtask solutions from the previous
-  steps to include in the worker's context," with intra-workflow isolation to avoid "orchestration collapse." Our
-  **study-scaffold worker access-lists** (`accessList` in `src/core/study.ts`) route exactly which prior notes each
-  worker sees: the same selective-visibility model.
-- **workflow-as-data**: manifests + study scaffolds are the plan the conductor would route.
+This is not only a benchmark result; it is an architectural constraint. A graph should not be primarily carried as
+prompt text. It should be represented as addressable tables and edges, with the model writing a small program over
+that state:
 
-What we deliberately *lack* is the **trained orchestrator**: the agent is an *un-trained* conductor over the same
-substrate. That is a policy on top, not a different architecture: Fugu *learns* the routing over its persistent
-shared memory + access lists; we make that memory and routing inspectable, as-of-queryable data. (A hosted product
-ships the learned conductor; this library provides the substrate it conducts.)
+- Prompting is acceptable for a small neighborhood or a human-facing summary, but it is not the substrate.
+- Tool-use is a useful intermediate form, but fixed tools become another skill surface if they are too narrow.
+- Graph-as-code is the stable shape: here, usually graph-as-SQL over DuckDB, `bio_edges_as_of`, `entailed_edge`,
+  resolver-materialized tables, and the temporal run/memory ledger.
 
-## RLM: a REPL over context
+The paper's heterophily result also matters. The graph substrate must not assume simple neighborhood homophily or
+label propagation. Biomedical graphs are often mixed: an edge can mean similarity, causality, containment,
+contradiction, evidence, derivation, or regulatory relation. The correct agent posture is therefore adaptive:
+inspect structure, features, labels, evidence, and provenance as separate queryable signals, then use whichever
+signal is informative for the current operation. That is exactly why this library keeps graph semantics as typed
+predicates and provenance rather than a neighborhood blob in a prompt.
 
-[Recursive Language Models](https://arxiv.org/abs/2512.24601) treat a near-infinite prompt as a **persistent
-variable inside a REPL**: the model writes code to slice, search, partition, and summarize an external context,
-so prompt size is decoupled from the context window. It is evaluated on order-sensitive long-context tasks like
-the **OOLONG** benchmark, which punishes RAG and approximate attention.
+## Metacurator: deterministic spine plus typed judgment
 
-`bio_query` / DuckDB **is** that REPL: and a stronger one for the tasks that matter here:
-- data lives **addressably outside the prompt** (a table, a CAS handle), so there is no context to rot;
-- an OOLONG-style *count / order / join* is a `GROUP BY` / `ORDER BY` / `JOIN`: **exact and deterministic**,
-  where an attention-based reader is only approximate. **Counting beats the model; it doesn't ask it.**
+[metacurator](https://github.com/seandavi/metacurator) is not just prior art; reconciling it is a closes-over
+point. It independently arrives at the same split for a different scientific workflow: sample-level publication
+metadata curation. The useful evidence is in the code, not the README: [`models.py`](https://github.com/seandavi/metacurator/blob/main/src/metacurator/models.py)
+marks accession maps and grounded terms as deterministic outputs, [`ground.py`](https://github.com/seandavi/metacurator/blob/main/src/metacurator/ground.py)
+does lookup -> round-trip -> branch -> obsolete checks, and [`judge.py`](https://github.com/seandavi/metacurator/blob/main/src/metacurator/judge.py)
+contains the only model boundary: `classify_tables`, `propose_mapping`, and `disambiguate`.
 
-RLM writes Python to navigate text; we write SQL to query data. Same move (a program over external context),
-but ours is a declarative, indexed, provenance-carrying substrate rather than string-slicing.
+That maps cleanly onto this substrate:
 
-And it need not be one-shot. Against a `ducknng` server the agent holds a **persistent, cross-process DuckDB REPL
-over RPC**: state built in one call is there in the next. *Verified*: a table `CREATE`d + `INSERT`ed via
-`ducknng_run_rpc`, then read back with `ducknng_query_rpc`, returned `count=3, total=42`; the server-side session
-persisted across calls. For a large result there are proper cursor SESSIONS: `ducknng_open_query` returns a
-`session_id` + `session_token`, then `fetch_query` / `close_query` / `cancel_query` stream batches. Statefulness
-and the full write surface are **exec-gated**: the host opts in with `ducknng_register_exec_method` (per-method
-auth, peer/mTLS allowlists), so the agent gets a real stateful REPL *only* where the host grants it. That is RLM's
-control plane, but durable, shared, and inspectable, not a prompt.
+- `resolve · archive · acquire · tables · dictionary · ground · diff · report` are resolver/materialization/SQL
+  stages with receipts.
+- `classify_tables`, `propose_mapping`, and `disambiguate` are typed judgment operations: the model chooses among
+  bounded candidates or emits a typed object that deterministic code validates. Unknown mapping targets and
+  out-of-candidate CURIEs are contract errors; low-confidence or out-of-range choices become explicit review
+  states rather than trusted facts.
+- LinkML/schema contracts are the same family as manifests and operation specs: executable behavior is driven by
+  declared contracts, not prose prompts.
+- Ontology grounding belongs in the graph/SQL tier. The model may rank or choose a candidate, but CURIEs and
+  mappings come from deterministic stores.
 
-## Machine studying: memory as data
-
-["Machine studying"](https://jacobxli.com/blog/2026/machine-studying/) is studying a corpus *before* a downstream
-task is known and retaining the expertise. Here that retention is **study notes projected into the same
-`bio_edges` / `entailed_edge` graph** as facts and ontologies: addressable data the agent queries, distinct from
-*skills* (activated behavior) and *facts* (measured, provenanced). See [`machine-studying-lineage`](./machine-studying-lineage.md).
+The important consolidation lesson is that metacurator does **not** require a metacurator-shaped primitive in core.
+It closes over existing pieces: declared resources, SQL materialization, ontology tables, typed judgments,
+receipts, and the temporal ledger. If a future curation application needs more, it should first prove that need as
+application code, not as a new core abstraction.
 
 ## The unifying claim
 
@@ -123,7 +202,10 @@ what it learns as queryable notes, not prompt context.
 
 ### References
 - **ClawBio** (the origin corpus this substrate factors): <https://github.com/ClawBio/ClawBio>
+- **metacurator** (deterministic curation spine + typed judgment boundary): <https://github.com/seandavi/metacurator>
 - **Machine studying** (Li, Battle, Khattab, 2026): <https://jacobxli.com/blog/2026/machine-studying/>
+- Actions Speak Louder than Prompts (Finkelshtein, Cucerzan, Jauhar, White; graph-as-code over graph prompts):
+  <https://arxiv.org/abs/2509.18487>
 - Sakana Fugu (learned orchestration): <https://sakana.ai/fugu/> · report <https://arxiv.org/html/2606.21228v1>
 - Recursive Language Models / RLM (REPL over context, OOLONG): <https://arxiv.org/abs/2512.24601>
 - NNG scalability protocols: <https://nng.nanomsg.org/> · the R lineage `nanonext` <https://github.com/r-lib/nanonext> · `mirai` <https://mirai.r-lib.org/> (a Python worker could bind NNG via `pynng`, a factual binding, not part of the lineage)

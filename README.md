@@ -28,14 +28,11 @@ pi --model gpt-5.3-codex-spark -e extensions/pi-coding-agent/index.ts -p \
   "short table."
 ```
 
-> Here are the variant counts by consequence in
-> `examples/variant-counts/manifest.json`:
->
-> | consequence | variants |
-> |-------------|----------|
-> | missense    | 2        |
-> | stop_gained | 2        |
-> | synonymous  | 1        |
+> | consequence | variant_count |
+> |-------------|--------------:|
+> | missense    |             2 |
+> | stop_gained |             2 |
+> | synonymous  |             1 |
 
 The agent discovers the schema and composes the `GROUP BY`; the answer
 is not canned.
@@ -55,6 +52,23 @@ behavior in data plus injected effect ports:
 - a new **compute backend** (SLURM, Modal, an NNG pool) is one injected
   `JobDispatch`;
 - a new **model** is an injected judge.
+
+The same rule holds for graph inference. The graph is not a prompt
+payload; it is typed state that the agent acts on. The ICLR 2026 study
+[Actions Speak Louder than Prompts](https://arxiv.org/abs/2509.18487)
+makes that point empirically: generated code over graph state beats
+serialized graph prompts when text is long, degree is high, or the
+useful signal shifts between structure, features, and labels. Here that
+means graph-as-SQL over DuckDB, SemanticSQL edges, memory, and run
+ledgers.
+
+The judgment boundary follows the same discipline.
+[`metacurator`](https://github.com/seandavi/metacurator) is useful here
+because its implementation separates deterministic curation stages from
+exactly typed model calls for table choice, column mapping, and
+candidate disambiguation. That closes over the same shape: deterministic
+stores produce identifiers and candidates; models choose or abstain
+inside a validated contract.
 
 The interpreter stays thin. Application code can compose manifests,
 operations, producers, and host policy around the core; those
@@ -113,42 +127,31 @@ pi --model gpt-5.3-codex-spark -e extensions/pi-coding-agent/index.ts -p \
   "rows."
 ```
 
-> Used `examples/connectors/clinvar-region.json` and queried `clinvar`
-> like this:
+> Used `examples/connectors/clinvar-region.json` and ran this SQL:
 >
 > ``` sql
 > SELECT
->   sig AS clinical_significance,
+>   COALESCE(t.clinical_significance, 'missing') AS clinical_significance,
 >   COUNT(*) AS variant_count
-> FROM clinvar
-> CROSS JOIN UNNEST(INFO_CLNSIG) AS u(sig)
-> GROUP BY sig
-> ORDER BY variant_count DESC;
+> FROM clinvar AS c
+> LEFT JOIN UNNEST(c.INFO_CLNSIG) AS t(clinical_significance) ON TRUE
+> WHERE c.POS BETWEEN 43044295 AND 43125483
+> GROUP BY clinical_significance
+> ORDER BY variant_count DESC, clinical_significance;
 > ```
 >
-> **Top few rows (descending):**
+> Top rows:
 >
 > | clinical_significance                        | variant_count |
 > |----------------------------------------------|--------------:|
-> | Pathogenic                                   |          3593 |
+> | Pathogenic                                   |          3590 |
 > | Conflicting_classifications_of_pathogenicity |          2918 |
 > | Likely_benign                                |          2891 |
 > | Uncertain_significance                       |          2445 |
 > | Benign                                       |           704 |
 >
-> **Full counts:**
->
-> - Pathogenic: 3593  
-> - Conflicting_classifications_of_pathogenicity: 2918  
-> - Likely_benign: 2891  
-> - Uncertain_significance: 2445  
-> - Benign: 704  
-> - Likely_pathogenic: 263  
-> - Pathogenic/Likely_pathogenic: 226  
-> - Benign/Likely_benign: 94  
-> - not_provided: 49  
-> - no_classification_for_the_single_variant: 2  
-> - no_classifications_from_unflagged_records: 1
+> (There are additional categories below these; I can list the full
+> breakdown if you want.)
 
 The **same query with no agent**, the deterministic CLI path for scripts
 and CI. Identical numbers, no model in the loop:
@@ -163,15 +166,15 @@ pi-bio-agent query examples/connectors/clinvar-region.json \
 ``` json
 {
   "ok": true,
-  "runId": "query-1783166558031-4c3104ed",
+  "runId": "query-<run>",
   "status": "succeeded",
   "rowCount": 8,
   "artifacts": {
-    "run": ".pi/bio-agent/runs/query-1783166558031-4c3104ed/run.json",
-    "result": ".pi/bio-agent/runs/query-1783166558031-4c3104ed/result.json",
-    "receipts": ".pi/bio-agent/runs/query-1783166558031-4c3104ed/receipts.json"
+    "run": ".pi/bio-agent/runs/query-<run>/run.json",
+    "result": ".pi/bio-agent/runs/query-<run>/result.json",
+    "receipts": ".pi/bio-agent/runs/query-<run>/receipts.json"
   },
-  "runDir": ".pi/bio-agent/runs/query-1783166558031-4c3104ed",
+  "runDir": ".pi/bio-agent/runs/query-<run>",
   "rows": [
     {
       "sig": "Pathogenic",
@@ -228,19 +231,24 @@ pi-bio-agent query examples/run-ledger/manifest.json \
 ``` json
 {
   "ok": true,
-  "runId": "query-1783166560381-e8365042",
+  "runId": "query-<run>",
   "status": "succeeded",
-  "rowCount": 1,
+  "rowCount": 2,
   "artifacts": {
-    "run": ".pi/bio-agent/runs/query-1783166560381-e8365042/run.json",
-    "result": ".pi/bio-agent/runs/query-1783166560381-e8365042/result.json",
-    "receipts": ".pi/bio-agent/runs/query-1783166560381-e8365042/receipts.json"
+    "run": ".pi/bio-agent/runs/query-<run>/run.json",
+    "result": ".pi/bio-agent/runs/query-<run>/result.json",
+    "receipts": ".pi/bio-agent/runs/query-<run>/receipts.json"
   },
-  "runDir": ".pi/bio-agent/runs/query-1783166560381-e8365042",
+  "runDir": ".pi/bio-agent/runs/query-<run>",
   "rows": [
     {
       "tool": "ad-hoc.query",
       "status": "succeeded",
+      "n": 12
+    },
+    {
+      "tool": "ad-hoc.query",
+      "status": "failed",
       "n": 1
     }
   ]
@@ -271,9 +279,9 @@ node scripts/nng-job-runner.mjs
 
     Distributed compute over ducknng: a separate worker reports job status into the shared ledger
 
-      [coordinator pid 752008] job ledger up; 'wgs-annotate-chr22' recorded as queued
-      [worker nng-worker-1 pid 752093] reported 'running' over ducknng RPC
-      [worker nng-worker-1 pid 752093] reported 'succeeded' over ducknng RPC
+      [coordinator pid <pid>] job ledger up; 'wgs-annotate-chr22' recorded as queued
+      [worker nng-worker-1 pid <pid>] reported 'running' over ducknng RPC
+      [worker nng-worker-1 pid <pid>] reported 'succeeded' over ducknng RPC
       [coordinator] 'wgs-annotate-chr22' final status, read back from the shared slot: "succeeded"
 
     A separate worker process wrote the job's status (running, then succeeded) into the coordinator's
@@ -295,9 +303,9 @@ node scripts/nng-file-handoff.mjs
 
     Distributed file I/O over ducknng: one agent plots a file, another reads it back by digest
 
-      [coordinator pid 752208] job ledger + ducknng server up; shared CAS at /tmp/pi-bio-handoff-cas-752197
-      [agent:producer pid 752311] plotted coverage.png (8354 B) -> CAS sha256:80c6dd525767…; recorded the digest in the ledger
-      [agent:reader pid 752409] read the ledger, fetched 'coverage.png' from CAS by digest: 8354 B, PNG=true, sha256:80c6dd525767…
+      [coordinator pid <pid>] job ledger + ducknng server up; shared CAS at /tmp/pi-bio-handoff-cas-<run>
+      [agent:producer pid <pid>] plotted coverage.png (8354 B) -> CAS sha256:80c6dd525767…; recorded the digest in the ledger
+      [agent:reader pid <pid>] read the ledger, fetched 'coverage.png' from CAS by digest: 8354 B, PNG=true, sha256:80c6dd525767…
 
     The producer wrote a real PNG into a content-addressed store and recorded only its DIGEST in the
     shared ledger over ducknng RPC. A SEPARATE reader process read that digest and fetched the exact bytes
@@ -318,16 +326,13 @@ pi --model gpt-5.3-codex-spark -e extensions/pi-coding-agent/index-compute.ts -p
   "produced: its name and byte size."
 ```
 
-> I ran:
+> Run completed as `query-<run>`.
 >
-> `bio_query(dbPath=":memory:", manifestPath="examples/process-artifacts/manifest.json", sql="SELECT * FROM summary")`
+> Output artifacts from the `summary` resource (`process.compute`), with
+> byte sizes:
 >
-> Resulting `summary`-resolver artifacts were:
->
-> - `rows_csv` (`rows.csv`): **14 bytes**
-> - `report` (`report.txt`): **37 bytes**
->
-> (run ID: `query-1783166579931-728302ce`)
+> - `rows_csv`: **14 bytes**
+> - `report`: **37 bytes**
 
 Then a *separate*, read-only reader agent discovers those artifacts
 through the run graph, follows the content address into CAS, and reads
@@ -343,28 +348,29 @@ pi --model gpt-5.3-codex-spark -e extensions/pi-coding-agent/index.ts -p \
   "the report says."
 ```
 
-> The most recent run under `.pi/bio-agent/runs/` is:
+> Most recent run is:
 >
-> - **`.pi/bio-agent/runs/query-1783166579931-728302ce/run.json`** (run
->   id `query-1783166579931-728302ce`)
+> - `.pi/bio-agent/runs/query-<run>/run.json`
 >
-> Artifacts produced:
+> Artifacts and sizes found from that run:
 >
-> 1.  `runs/query-1783166579931-728302ce/result.json` (run output
->     artifact; size not recorded in run metadata)
-> 2.  `rows_csv` (from `process.compute`, size **14 bytes**, digest
->     `sha256:ce1d093f3a0b68e60b17e7953ce95317fadda2e7f683ea5cc9caee6bbe2ae1c4`)
-> 3.  `report` (from `process.compute`, size **37 bytes**, digest
->     `sha256:d352a4705f21c9cb6939f924a60041c6e9c9da59897e220e353a88841752911a`)
+> - `rows_csv` (from `process.compute`, file `rows.csv`) — **14 bytes**
+>   - Digest:
+>     `sha256:ce1d093f3a0b68e60b17e7953ce95317fadda2e7f683ea5cc9caee6bbe2ae1c4`
+> - `report` (from `process.compute`, file `report.txt`) — **37 bytes**
+>   - Digest:
+>     `sha256:d352a4705f21c9cb6939f924a60041c6e9c9da59897e220e353a88841752911a`
+> - Run output artifact listed in `run.json`:
+>   `runs/query-<run>/result.json` (size not stored in run metadata)
 >
-> Following the `report` content address:
-> `.pi/bio-agent/cas/sha256/d352a4705f21c9cb6939f924a60041c6e9c9da59897e220e353a88841752911a`
+> Report bytes (read via content-addressed path
+> `.pi/bio-agent/cas/sha256/d352a4705f21c9cb6939f924a60041c6e9c9da59897e220e353a88841752911a`):
 >
-> Report content is exactly:
->
->     # summarize report
->     rows: 5
->     mean_x: 3
+> ``` text
+> # summarize report
+> rows: 5
+> mean_x: 3
+> ```
 
 **A database connector is a manifest, not a client.** The “60+ connected
 databases” a hosted workbench advertises are, here, one file each:
@@ -384,15 +390,15 @@ pi-bio-agent query examples/connectors/uniprot.json \
 ``` json
 {
   "ok": true,
-  "runId": "query-1783166625566-3822e52f",
+  "runId": "query-<run>",
   "status": "succeeded",
   "rowCount": 1,
   "artifacts": {
-    "run": ".pi/bio-agent/runs/query-1783166625566-3822e52f/run.json",
-    "result": ".pi/bio-agent/runs/query-1783166625566-3822e52f/result.json",
-    "receipts": ".pi/bio-agent/runs/query-1783166625566-3822e52f/receipts.json"
+    "run": ".pi/bio-agent/runs/query-<run>/run.json",
+    "result": ".pi/bio-agent/runs/query-<run>/result.json",
+    "receipts": ".pi/bio-agent/runs/query-<run>/receipts.json"
   },
-  "runDir": ".pi/bio-agent/runs/query-1783166625566-3822e52f",
+  "runDir": ".pi/bio-agent/runs/query-<run>",
   "rows": [
     {
       "primaryAccession": "P04637",
@@ -520,6 +526,8 @@ Prior art and lineage:
 
 - **ClawBio**, the origin corpus this factors into manifests, resolvers,
   and operations: <https://github.com/ClawBio/ClawBio>
+- **metacurator**, deterministic curation stages plus a typed judgment
+  boundary: <https://github.com/seandavi/metacurator>
 - **Machine studying** (Li, Battle, Khattab, 2026):
   <https://jacobxli.com/blog/2026/machine-studying/>
 - **Sakana Fugu** (learned orchestration over shared memory and access

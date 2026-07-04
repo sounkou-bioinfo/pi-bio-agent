@@ -14,6 +14,8 @@ DuckDB is the default tabular and graph substrate for `pi-bio-agent`.
 - SQL gives the agent a compact, inspectable execution language.
 - Table functions expose bio formats without one-off parsers.
 - Query plans, projection pushdown, filters, joins, and indexes reduce context pressure.
+- Code/SQL over graph tables is the preferred LLM-graph interaction mode; large graph neighborhoods should be
+  queried, not serialized into prompts.
 - Results can be surfaced to R, Python, CLI, Pi tools, or future services.
 
 ## Useful extensions
@@ -54,3 +56,5 @@ ontology_mappings
 3. Do not hide semantics in filenames or JSON blobs when a typed edge/table should exist.
 4. Always record assembly and coordinate system for genomic spans.
 5. Always preserve provenance for derived facts.
+6. For graph inference, prefer graph-as-SQL/code over graph-as-prompt. Prompt text is the instruction channel, not
+   the graph transport.
