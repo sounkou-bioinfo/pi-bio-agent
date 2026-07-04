@@ -97,8 +97,8 @@ export function processComputeResolver(runner: ProcessRunner): BioResolverImpl {
     // (replay.json / CAS), so it must hold ONLY non-secret knobs (e.g. OMP_NUM_THREADS, a locale). A credential
     // here (AWS_SECRET_ACCESS_KEY, a token) would leak in cleartext into replay/CAS — the same reason host
     // `duckdbInitSql` is digested, not stored verbatim. Host-owned SECRET env reaches the child through the
-    // host-injected ProcessRunner (it merges its own secret env at spawn), NEVER a manifest param — mirroring the
-    // network `withAuth` boundary. (We do NOT denylist "secret-shaped" keys: that's the leaky-guard anti-pattern.)
+    // host-injected ProcessRunner (it merges its own protected env at spawn), NEVER a manifest param — mirroring the
+    // network `withAuth` boundary. The resolver validates ownership boundary, not variable-name folklore.
     let env: Record<string, string> = {};
     if (p.env != null) {
       if (typeof p.env !== "object" || Array.isArray(p.env)) throw new Error("process.compute: params.env must be an object of string values");

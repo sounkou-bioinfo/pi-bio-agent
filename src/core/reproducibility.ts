@@ -211,6 +211,12 @@ export interface RunReplaySpec {
    *  reproduce requires the host to re-supply the same duckdbInitSql and verifies this digest, exactly like
    *  duckdbConfigDigest. */
   duckdbInitSqlDigest?: string;
+  /** DIGEST of host-owned protected session bindings. Values are parameter-bound at runtime and never serialized
+   *  into replay.json; reproduce requires the host to re-supply the same protected bindings and verifies this digest. */
+  protectedSessionBindingsDigest?: string;
+  /** DIGEST of additional host-declared protected session-variable names (for values set by init SQL/profiles).
+   *  Names are pinned by digest so the ad-hoc query boundary is reproduced without serializing the declaration. */
+  protectedSessionVariablesDigest?: string;
   duckdbConfigDigest?: string;
   /** the RESOLVED process execution facts (what actually ran on this host). */
   process?: { resourceId?: string; table?: string; command?: readonly string[]; inputSql?: string; resultTable?: "arrow" | "artifacts"; outputs?: Array<{ name: string; path: string; kind?: string }> };

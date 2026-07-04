@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { duckdbNodeConn } from "../src/duckdb/node-api.js";
-import { validateReadOnlySelect, sqlCallsDynamicSqlAst } from "../src/core/sql-guard.js";
+import { validateReadOnlySelect, validateAdHocBioQuerySelect, sqlCallsDynamicSqlAst } from "../src/core/sql-guard.js";
 
 // runOperation enforces the operation's declared sql.readOnly at execution time via this shared guard
 // (the same one knowledge-graph queries use — one definition of "safe", no divergence).
@@ -89,5 +89,48 @@ describe("validateReadOnlySelect: the single read-only SQL guard", () => {
   test("accepts ordinary analytic SQL over already-materialized tables", () => {
     const sql = "WITH classified AS (SELECT variant_key, CASE WHEN allele_frequency IS NULL THEN 'no_frequency' ELSE 'included' END AS bucket FROM annotated_variants) SELECT bucket, count(*) AS n FROM classified GROUP BY bucket";
     assert.equal(validateReadOnlySelect(sql), sql);
+  });
+
+  test("ad-hoc bio_query blocks only host-declared protected session variables, not name shapes", () => {
+    assert.equal(
+      validateAdHocBioQuerySelect("SELECT getvariable('query') AS q", { protectedVariables: ["api_token"] }),
+      "SELECT getvariable('query') AS q",
+      "ordinary agent parameters stay usable",
+    );
+    assert.equal(
+      validateAdHocBioQuerySelect("SELECT getvariable('secret_looking_but_not_declared') AS v", { protectedVariables: ["api_token"] }),
+      "SELECT getvariable('secret_looking_but_not_declared') AS v",
+      "the guard does not guess from variable-name shape",
+    );
+    assert.throws(
+      () => validateAdHocBioQuerySelect("SELECT getvariable('api_token') AS token", { protectedVariables: ["API_TOKEN"] }),
+      /protected session variables.*getvariable\('api_token'\)/,
+      "declared protected names are case-insensitive",
+    );
+    assert.throws(
+      () => validateAdHocBioQuerySelect('SELECT main."getvariable"(\'API_TOKEN\') AS token', { protectedVariables: ["api_token"] }),
+      /protected session variables.*getvariable\('API_TOKEN'\)/,
+      "quoted/catalog-qualified spelling is still the same getvariable function",
+    );
+    assert.throws(
+      () => validateAdHocBioQuerySelect("SELECT getvariable('api_' || 'token') AS token", { protectedVariables: ["api_token"] }),
+      /getvariable\(<dynamic-name>\)/,
+      "dynamic getvariable names are refused when protected variables exist",
+    );
+    assert.throws(
+      () => validateAdHocBioQuerySelect("SELECT * FROM duckdb_variables()", { protectedVariables: ["api_token"] }),
+      /duckdb_variables\(\)/,
+      "duckdb_variables() can enumerate protected values, so it is blocked only when protected vars exist",
+    );
+    assert.equal(
+      validateAdHocBioQuerySelect("SELECT * FROM duckdb_variables()"),
+      "SELECT * FROM duckdb_variables()",
+      "without host-declared protected variables, the ad-hoc guard adds no extra catalog restriction",
+    );
+    assert.equal(
+      validateAdHocBioQuerySelect("SELECT 'getvariable(''api_token'')' AS literal /* duckdb_variables() */", { protectedVariables: ["api_token"] }),
+      "SELECT 'getvariable(''api_token'')' AS literal /* duckdb_variables() */",
+      "literals/comments are not treated as function calls",
+    );
   });
 });

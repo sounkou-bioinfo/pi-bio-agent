@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { runBioQueryFromManifest } from "../src/hosts/run-store.js";
+import { runBioOperationFromManifest, runBioQueryFromManifest } from "../src/hosts/run-store.js";
 import { reproduceRun } from "../src/hosts/reproduce.js";
 import { fsCasStore } from "../src/hosts/fs-cas.js";
 import { nodeProcessRunner } from "../src/process/node-process-runner.js";
@@ -103,8 +103,8 @@ describe("C2: reproduce() compares deterministic receipt content, not wall-clock
 
   test("SECURITY: duckdbInitSql is NOT persisted verbatim (secret leak) — only its digest is pinned; reproduce re-supplies + verifies", async () => {
     const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-repro-init-"));
-    // Deliberately secret-shaped to prove replay redaction. This is not a recommended auth shape for generic
-    // agent SQL: the same connection can read getvariable('secret_token').
+    // Deliberately credential-like to prove replay redaction. This is not a recommended auth shape for generic
+    // agent SQL: the same connection can read getvariable('secret_token') unless the host declares it protected.
     const duckdbInitSql = ["SET VARIABLE secret_token = 'Bearer super-secret-xyz'"];
     const out = await runBioQueryFromManifest({ cwd, dbPath: ":memory:", manifestPath: MANIFEST, sql: SQL, duckdbInitSql, runId: "originit", now: "2026-07-01T00:00:00Z" });
     assert.equal(out.ok, true, out.ok ? "" : `run failed: ${(out as { error?: unknown }).error}`);
@@ -118,6 +118,51 @@ describe("C2: reproduce() compares deterministic receipt content, not wall-clock
     await assert.rejects(() => reproduceRun({ cwd, replay, duckdbInitSql: ["SET VARIABLE secret_token = 'other'"] }), /does not match the pinned duckdbInitSqlDigest/); // wrong -> refuse
     const rep = await reproduceRun({ cwd, replay, duckdbInitSql }); // matching init SQL -> reproduces
     assert.equal(rep.matched, true);
+  });
+
+  test("SECURITY: protectedSessionBindings are not persisted verbatim; reproduce re-supplies + verifies their digest", async () => {
+    const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-repro-protected-"));
+    const cas = fsCasStore(await fs.mkdtemp(join(tmpdir(), "pi-bio-cas-")));
+    const manifestPath = join(cwd, "manifest.json");
+    const manifest = {
+      schema: "pi-bio.manifest.v1",
+      id: "protected-repro",
+      version: "0.1.0",
+      title: "Protected replay",
+      description: "Declared operation over host-owned protected session state.",
+      provides: {
+        operations: [{
+          id: "host_auth.read",
+          version: "0.1.0",
+          title: "Host auth read",
+          description: "Reads a host-owned protected binding in a declared operation.",
+          transport: "duckdb.sql",
+          inputSchema: { type: "object" },
+          sql: { sqlTemplate: "SELECT getvariable('api_token') AS token", readOnly: true },
+        }],
+      },
+    };
+    await fs.writeFile(manifestPath, JSON.stringify(manifest), "utf8");
+    const protectedSessionBindings = { api_token: "Bearer reproduce-token" };
+    const out = await runBioOperationFromManifest({
+      cwd, dbPath: ":memory:", manifestPath, operationId: "host_auth.read",
+      protectedSessionBindings, cas, runId: "origprotected", now: "2026-07-01T00:00:00Z",
+    });
+    assert.equal(out.ok, true, out.ok ? "" : `run failed: ${(out as { error?: unknown }).error}`);
+    const replayText = await fs.readFile(join((out as { runDir: string }).runDir, "replay.json"), "utf8");
+    assert.doesNotMatch(replayText, /reproduce-token/, "protected binding value must not leak into replay.json");
+    const replay = JSON.parse(replayText) as RunReplaySpec;
+    assert.match(replay.protectedSessionBindingsDigest ?? "", /^sha256:/, "only the protected binding digest is pinned");
+    assert.match(replay.resultDigest ?? "", /^sha256:/, "CAS pins the output content for this resource-free op");
+
+    await assert.rejects(() => reproduceRun({ cwd, replay, cas }), /re-supply the same protectedSessionBindings/);
+    await assert.rejects(
+      () => reproduceRun({ cwd, replay, cas, protectedSessionBindings: { api_token: "Bearer wrong" } }),
+      /do not match the pinned protectedSessionBindingsDigest/,
+    );
+    const rep = await reproduceRun({ cwd, replay, cas, protectedSessionBindings });
+    assert.equal(rep.matched, true);
+    assert.equal(rep.resultMatched, true);
   });
 
   test("NOT_REPRODUCIBLE (never fake confidence): an un-snapshotted live source with no result pin does not falsely 'match'", async () => {

@@ -269,7 +269,7 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
       manifestPath: Type.String({ description: "Path to a manifest JSON file (relative to cwd or absolute)." }),
       sql: Type.String({ description: "A single read-only SELECT/WITH over the manifest's resolved resource tables." }),
       resources: Type.Optional(Type.Array(Type.String(), { description: "Which declared resource ids to resolve first. Defaults to ALL declared; pass the subset your SQL uses to avoid resolving unrelated resources (e.g. a remote one you don't need)." })),
-      bindings: Type.Optional(Type.Record(Type.String(), Type.Unknown(), { description: "Agent params as DuckDB session variables: each becomes `SET VARIABLE name = value`, so a resource's url (a SQL expression) composes it via getvariable('name') — e.g. {\"query\":\"asthma\"} for a url like `'...?q=' || getvariable('query')`. The manifest declares the API shape in SQL; you supply the query." })),
+      bindings: Type.Optional(Type.Record(Type.String(), Type.Unknown(), { description: "Non-secret agent params as DuckDB session variables: each becomes `SET VARIABLE name = value`, so a resource's url (a SQL expression) composes it via getvariable('name') — e.g. {\"query\":\"asthma\"} for a url like `'...?q=' || getvariable('query')`. Do not put API tokens here; host-owned auth belongs in injected fetch policy, protected host bindings, or declared operations." })),
       runId: Type.Optional(Type.String({ description: "Stable run id; generated when omitted." })),
     }),
     async execute(_id, params: { dbPath: string; manifestPath: string; sql: string; resources?: string[]; bindings?: Record<string, unknown>; runId?: string }, signal, _onUpdate, ctx) {

@@ -772,6 +772,35 @@ Open library questions to resolve before claiming that position:
   SQL-native carriers first where the carrier can keep secrets unreadable: DuckDB `CREATE SECRET`, ducknng
   TLS/mTLS/peer allowlists, and host-authored declared operations. TypeScript is justified for a missing host
   boundary, audit hook, token-refresh policy, or policy injector; not for routine per-API clients.
+- **ducknng credentialed HTTP gap (investigated against `~/ducknng`; upstream issue:
+  [`ducknng#5`](https://github.com/sounkou-bioinfo/ducknng/issues/5)).** Current `ducknng_ncurl`,
+  `ducknng_ncurl_aio`, and `ducknng_ncurl_table` all take `headers_json` as ordinary SQL input and pass it through
+  `ducknng_http_transact`; `ducknng_http_headers_build` returns an ordinary SQL string; there is no current
+  ducknng secret/profile registry or DuckDB `CREATE SECRET` integration in the extension. Therefore a bearer header
+  built from `getvariable()` is SQL-visible. The primitives needed in ducknng are:
+  - an opaque HTTP credential/profile registry held in the ducknng runtime, with list/drop/rotate/update functions
+    that expose names, allowed scopes, version/digest, and expiry metadata but never secret values;
+  - scoped ncurl variants or an additive optional profile argument for sync/table/AIO paths
+    (`ducknng_ncurl*`), applied inside `ducknng_http_transact` after SQL has supplied only URL/method/body and
+    non-secret headers;
+  - profile-bound allow rules (scheme/host/port/path prefix/method, TLS requirement, optional header allow/deny) so
+    an agent cannot send an API token to an arbitrary URL by choosing a different `url`;
+  - per-request dynamic resolution/refresh (host callback, provider hook, or DuckDB secret-manager lookup when the
+    extension supports it), with host auth winning over caller-supplied colliding headers;
+  - sanitized audit outputs: profile id/version/digest and allowed-scope decision in receipts/logs, never the
+    resolved token or full injected header;
+  - cache/replay scoping: profile identity/digest becomes part of the remote cache scope and replay/action-cache
+    input, while the secret value remains redacted.
+  DuckDB's Secret Manager is the right target contract (typed secrets, providers, scopes, redacted listing), but
+  ducknng is currently a C extension over the vendored DuckDB C API, and that C header does not expose the C++
+  `SecretManager` registration/lookup surface used by C++ extensions. So the implementation path is either a small
+  C++ bridge, new/unstable C API entries, or a ducknng-owned runtime profile registry with a resolver hook that can
+  later call DuckDB secrets without changing the SQL surface. Secret Manager integration still needs ducknng-side
+  URL/method/header scoping; otherwise an agent can ask the HTTP client to send an otherwise unreadable credential
+  to the wrong endpoint.
+  Until those land, use `http.get` + host `withAuth` for ad-hoc authenticated APIs, or a host-authored declared
+  operation/resource with protected session variables for a deliberately sealed SQL path. DuckDB data-at-rest
+  encryption protects persisted DB/WAL/temp files; it does not make SQL-readable session variables safe.
 - **ducknng auth/state validation:** already exercised in-tree: `ducknng_ncurl_table` against local HTTP fixtures,
   scalar AIO fanout/retry, `ducknng_run_rpc` / `ducknng_query_rpc` mutable shared state, and NNG socket
   reachability. Also checked: local MCP-style `initialize` -> `Mcp-Session-Id` -> `tools/list` header threading,

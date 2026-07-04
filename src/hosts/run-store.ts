@@ -79,6 +79,29 @@ export function runsRoot(cwd: string): string {
 // and is filename-safe on the Linux/macOS targets. Keeping this in sync with run-spec/job-store is the invariant —
 // a job/replay id accepted there MUST persist/execute/reproduce here.
 const RUN_DIR_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+const SESSION_VARIABLE_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+function assertSessionVariableName(name: string, label: string): void {
+  if (!SESSION_VARIABLE_RE.test(name)) throw new Error(`${label} '${name}' must be a SQL identifier`);
+}
+
+function protectedSessionVariableNames(protectedSessionBindings?: Record<string, unknown>, protectedSessionVariables?: readonly string[]): string[] {
+  const names = new Set<string>();
+  if (protectedSessionBindings) for (const name of Object.keys(protectedSessionBindings)) {
+    assertSessionVariableName(name, "protected session binding name");
+    names.add(name.toLowerCase());
+  }
+  if (protectedSessionVariables) for (const name of protectedSessionVariables) {
+    assertSessionVariableName(name, "protected session variable name");
+    names.add(name.toLowerCase());
+  }
+  return [...names].sort();
+}
+
+function protectedSessionVariablesDigest(protectedSessionVariables?: readonly string[]): `sha256:${string}` | undefined {
+  if (!protectedSessionVariables || protectedSessionVariables.length === 0) return undefined;
+  return canonicalDigest(protectedSessionVariableNames(undefined, protectedSessionVariables));
+}
 
 // Ad-hoc SQL that pulls data NOT captured by a resolver receipt makes a run NON-HERMETIC, so it must not be memoized
 // in the ActionCache (a hit could serve stale bytes). Broad + fail-closed: a false match only over-skips memoization
@@ -112,21 +135,32 @@ export function isRunDbOpenError(err: unknown): boolean {
 // null), undefined (dropped), a function/symbol, a non-plain object (Date etc.) — would make the re-read replay key
 // DIFFER from the original run's, so recall misses or (worse) collides two distinct runs. Reject such bindings at the
 // entry, before the run, so bindings are always JSON-round-trippable and the input key is stable across serialization.
-function assertJsonSafeBindings(bindings: Record<string, unknown> | undefined): void {
+function assertJsonSafeBindings(bindings: Record<string, unknown> | undefined, label = "binding", reason = "bindings must be JSON-serializable so they round-trip through replay.json"): void {
   if (bindings === undefined) return;
   const check = (v: unknown, path: string): void => {
     if (v === null) return;
     const t = typeof v;
     if (t === "string" || t === "boolean") return;
-    if (t === "number") { if (!Number.isFinite(v as number)) throw new Error(`binding '${path}' is a non-finite number (NaN/Infinity) — bindings must be JSON-serializable so they round-trip through replay.json`); return; }
-    if (t === "bigint") throw new Error(`binding '${path}' is a bigint — bindings must be JSON-serializable (a bigint does not round-trip through replay.json, breaking reproduce/recall keys); pass it as a string`);
-    if (t === "function" || t === "symbol" || t === "undefined") throw new Error(`binding '${path}' is a ${t} — bindings must be JSON-serializable values`);
+    if (t === "number") { if (!Number.isFinite(v as number)) throw new Error(`${label} '${path}' is a non-finite number (NaN/Infinity) — ${reason}`); return; }
+    if (t === "bigint") throw new Error(`${label} '${path}' is a bigint — ${reason}; pass it as a string`);
+    if (t === "function" || t === "symbol" || t === "undefined") throw new Error(`${label} '${path}' is a ${t} — ${reason}`);
     if (Array.isArray(v)) { v.forEach((e, i) => check(e, `${path}[${i}]`)); return; }
     const proto = Object.getPrototypeOf(v);
-    if (proto !== Object.prototype && proto !== null) throw new Error(`binding '${path}' is a non-plain object (${proto?.constructor?.name ?? "unknown"}) — bindings must be JSON-serializable`);
+    if (proto !== Object.prototype && proto !== null) throw new Error(`${label} '${path}' is a non-plain object (${proto?.constructor?.name ?? "unknown"}) — ${reason}`);
     for (const [k, val] of Object.entries(v as Record<string, unknown>)) check(val, `${path}.${k}`);
   };
   for (const [k, v] of Object.entries(bindings)) check(v, k);
+}
+
+async function bindSessionVariables(conn: SqlConn, vars: Record<string, unknown> | undefined, label: string): Promise<void> {
+  if (!vars) return;
+  for (const [name, value] of Object.entries(vars)) {
+    assertSessionVariableName(name, label);
+    // QUOTE the identifier: a binding whose name is a reserved keyword (e.g. `select`, `order`) passes the regex
+    // but `SET VARIABLE select = ?` is a syntax error. Quoting makes any valid-identifier name work; the logical
+    // name is unchanged, so `getvariable('select')` still resolves it. The regex already forbids `"`, so no escape.
+    await conn.run(`SET VARIABLE "${name}" = ?`, [value as never]);
+  }
 }
 
 /** Resolve a run's directory, refusing a runId that could escape runsRoot. Centralized so every persistence
@@ -258,6 +292,12 @@ export interface RunOperationRequest {
   duckdbInitSql?: string[];
   /** Agent params as DuckDB session variables: each becomes `SET VARIABLE name = value`, so a resource url/body composes them with plain SQL (getvariable(name)) and upstream data with subqueries — no bespoke template DSL. */
   bindings?: Record<string, unknown>;
+  /** Host-owned protected session variables. Bound like `bindings`, but after them (host wins), not serialized into
+   *  replay.json, and guarded from ad-hoc bio_query reads by name. Declared operations may intentionally consume
+   *  them because they are host-authored. */
+  protectedSessionBindings?: Record<string, unknown>;
+  /** Additional protected session variable names, for values established by duckdbInitSql or a host profile. */
+  protectedSessionVariables?: string[];
   /** Host DuckDB instance config set at db open (host-owned, never an agent param) — the home for credentials +
    *  startup settings: S3/object-store secrets, cache_httpfs cache dir, extension_directory, and
    *  allow_unsigned_extensions (for a cached/local dev extension build; community builds are signed). */
@@ -421,7 +461,7 @@ async function recordRun(
 
 async function runAndPersist(
   cwd: string, dbPath: string, runId: string, identity: string, kind: "query" | "operation",
-  body: (conn: SqlConn) => Promise<{ run: BioRunRecord; result: OperationResult; receipts: ResolutionReceipt[] }>,
+  body: (conn: SqlConn, protectedSessionVariables: readonly string[]) => Promise<{ run: BioRunRecord; result: OperationResult; receipts: ResolutionReceipt[] }>,
   // The INJECTED clock (req.now) or undefined. Resolution/receipts use the caller's start-time `now` (captured in
   // `body`); the run:<id> ledger fact + ActionCache are stamped with a COMPLETION time (systemClock() at record time)
   // so a long run isn't visible as succeeded/failed BEFORE it finished. When `injectedNow` is set (deterministic
@@ -429,6 +469,8 @@ async function runAndPersist(
   injectedNow: string | undefined,
   initSql?: string[],
   bindings?: Record<string, unknown>,
+  protectedSessionBindings?: Record<string, unknown>,
+  protectedSessionVariables?: readonly string[],
   duckdbConfig?: Record<string, string>,
   replay?: RunReplaySpec,
   runLog?: { store: SqlConn; author?: string },
@@ -438,6 +480,7 @@ async function runAndPersist(
   // Fail closed: lean mode drops result/receipts/replay FILES, so without a CAS to hold those bytes they would be
   // lost entirely (data loss). Refuse rather than silently discard outputs/provenance.
   if (serialize === false && !cas) throw new Error("serialize:false requires a cas — refusing to skip result/receipts/replay files with nowhere else to store the bytes");
+  const protectedVariableNames = protectedSessionVariableNames(protectedSessionBindings, protectedSessionVariables);
   let instance: DuckDBInstance;
   try {
     instance = await DuckDBInstance.create(resolveInCwd(cwd, dbPath), duckdbConfig);
@@ -465,24 +508,20 @@ async function runAndPersist(
     // resource url/body composes them with plain SQL (`'…?q=' || getvariable('query')`). Values are parameter-bound
     // (no injection). These go FIRST so host init below is AUTHORITATIVE: an agent binding must NOT be able to
     // override a host-owned session variable (e.g. re-point an `api_base`/`tls` the host provisioned) — host wins.
-    if (bindings) for (const [name, value] of Object.entries(bindings)) {
-      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) throw new Error(`binding name '${name}' must be a SQL identifier`);
-      // QUOTE the identifier: a binding whose name is a reserved keyword (e.g. `select`, `order`) passes the regex
-      // but `SET VARIABLE select = ?` is a syntax error. Quoting makes any valid-identifier name work; the logical
-      // name is unchanged, so `getvariable('select')` still resolves it. The regex already forbids `"`, so no escape.
-      await conn.run(`SET VARIABLE "${name}" = ?`, [value as never]);
-    }
+    await bindSessionVariables(conn, bindings, "binding name");
+    // Host-owned protected session bindings are still DuckDB variables, but they are not agent params: they are
+    // bound after ordinary bindings (host wins name clashes), digested not serialized in replay, and ad-hoc
+    // bio_query cannot read their declared names or enumerate duckdb_variables().
+    await bindSessionVariables(conn, protectedSessionBindings, "protected session binding name");
     // Host-owned connection bootstrap: INSTALL/LOAD/SET (e.g. httpfs + cache_httpfs, an extension dir, a memory
     // limit) run ONCE on this connection before any resolution — AFTER agent bindings, so host values win on any
     // name clash. A failure here is a config/pre-flight error (thrown, not a failed run): the run never started.
-    // SECRETS BOUNDARY: session variables set here live in the SAME session as agent-written SQL (bio_query), which
-    // can read them with getvariable() — so a `SET VARIABLE token='…'` would be exfiltratable into result.json on
-    // this generic run path. Use fetch-layer auth (withAuth headers, refreshed per request) or DuckDB `CREATE
-    // SECRET` when the table function can consume it. A host may use SET VARIABLE to compose ducknng headers only
-    // inside an isolated declared operation where the agent cannot run arbitrary SQL on that connection.
+    // PROTECTED-VARIABLE BOUNDARY: if init SQL sets session variables that agent-written SQL must not read, the host
+    // must declare their names in `protectedSessionVariables`. The ad-hoc query path then blocks getvariable(name)
+    // and duckdb_variables(); declared operations remain the host-authored path for intentional use.
     if (initSql) for (const stmt of initSql) await conn.run(stmt);
     try {
-      const { run, result, receipts } = await body(conn);
+      const { run, result, receipts } = await body(conn, protectedVariableNames);
       let enriched = replay ? enrichReplay(replay, receipts) : undefined;
       // result rows -> CAS FIRST (needed to retarget the artifact below); the run:<id> fact references it by digest.
       const resultDigest = await putCas(result.rows);
@@ -616,6 +655,8 @@ export async function runBioOperationFromManifest(req: RunOperationRequest): Pro
     throw new Error("runId must start with a letter/number and contain only [A-Za-z0-9._:-] (no path traversal)"); // SAME regex as persistRun -> fail BEFORE effects, not after
   }
   assertJsonSafeBindings(req.bindings); // bindings must round-trip through replay.json (see the helper) — fail before any effect
+  assertJsonSafeBindings(req.protectedSessionBindings, "protected session binding", "protected session bindings must be JSON-serializable so their digest is stable across reproduce/recall keys");
+  const protectedNamesDigest = protectedSessionVariablesDigest(req.protectedSessionVariables);
   const { registry, raw, manifest, manifestDigest } = await prepareRegistry(req);
   const op = registry.getOperation(req.operationId);
   if (!op) throw new Error(`operation '${req.operationId}' is not declared in the manifest`);
@@ -634,10 +675,12 @@ export async function runBioOperationFromManifest(req: RunOperationRequest): Pro
     manifest: { digest: manifestDigest, snapshot: raw, path: req.manifestPath },
     operationId: req.operationId, sql: op.sql.sqlTemplate,
     ...(req.bindings ? { bindings: req.bindings } : {}), ...(req.duckdbInitSql ? { duckdbInitSqlDigest: canonicalDigest(req.duckdbInitSql) } : {}), // pin WHICH init SQL (digest, not the possibly-secret-bearing SQL itself)
+    ...(req.protectedSessionBindings ? { protectedSessionBindingsDigest: canonicalDigest(req.protectedSessionBindings) } : {}), // pin WHICH protected bindings (digest only; values are not replayed)
+    ...(protectedNamesDigest ? { protectedSessionVariablesDigest: protectedNamesDigest } : {}), // pin additional protected names declared by the host
     ...(req.duckdbConfig ? { duckdbConfigDigest: canonicalDigest(req.duckdbConfig) } : {}), // pin WHICH config (digest, not the secret-bearing config itself)
     ...(proc ? { process: proc } : {}),
   };
-  return runAndPersist(req.cwd, req.dbPath, runId, req.operationId, "operation", (conn) => runOperation(registry, conn, { operationId: req.operationId, runId, now, signal: req.signal, cas: req.cas }), req.now, req.duckdbInitSql, req.bindings, req.duckdbConfig, replay, req.store ? { store: req.store, author: req.author } : undefined, req.cas, req.serialize);
+  return runAndPersist(req.cwd, req.dbPath, runId, req.operationId, "operation", (conn) => runOperation(registry, conn, { operationId: req.operationId, runId, now, signal: req.signal, cas: req.cas }), req.now, req.duckdbInitSql, req.bindings, req.protectedSessionBindings, req.protectedSessionVariables, req.duckdbConfig, replay, req.store ? { store: req.store, author: req.author } : undefined, req.cas, req.serialize);
 }
 
 export interface RunQueryRequest {
@@ -667,6 +710,12 @@ export interface RunQueryRequest {
   duckdbInitSql?: string[];
   /** Agent params as DuckDB session variables: each becomes `SET VARIABLE name = value`, so a resource url/body composes them with plain SQL (getvariable(name)) and upstream data with subqueries — no bespoke template DSL. */
   bindings?: Record<string, unknown>;
+  /** Host-owned protected session variables. Bound after ordinary bindings, not serialized into replay.json, and
+   *  blocked from ad-hoc bio_query reads by name. Use this for host-authored credentialed resources/operations, not
+   *  for agent parameters. */
+  protectedSessionBindings?: Record<string, unknown>;
+  /** Additional protected session variable names, for values established by duckdbInitSql or a host profile. */
+  protectedSessionVariables?: string[];
   /** Host DuckDB instance config set at db open (host-owned, never an agent param) — the home for credentials +
    *  startup settings: S3/object-store secrets, cache_httpfs cache dir, extension_directory, and
    *  allow_unsigned_extensions (for a cached/local dev extension build; community builds are signed). */
@@ -685,6 +734,8 @@ export async function runBioQueryFromManifest(req: RunQueryRequest): Promise<Run
     throw new Error("runId must start with a letter/number and contain only [A-Za-z0-9._:-] (no path traversal)"); // SAME regex as persistRun -> fail BEFORE effects, not after
   }
   assertJsonSafeBindings(req.bindings); // bindings must round-trip through replay.json (see the helper) — fail before any effect
+  assertJsonSafeBindings(req.protectedSessionBindings, "protected session binding", "protected session bindings must be JSON-serializable so their digest is stable across reproduce/recall keys");
+  const protectedNamesDigest = protectedSessionVariablesDigest(req.protectedSessionVariables);
   const { registry, manifest, raw, manifestDigest } = await prepareRegistry(req);
   const resources = req.resources ?? (manifest.provides?.resources ?? []).map((r) => r.id);
   const now = req.now ?? systemClock();
@@ -695,8 +746,10 @@ export async function runBioQueryFromManifest(req: RunQueryRequest): Promise<Run
     manifest: { digest: manifestDigest, snapshot: raw, path: req.manifestPath },
     sql: req.sql, resources,
     ...(req.bindings ? { bindings: req.bindings } : {}), ...(req.duckdbInitSql ? { duckdbInitSqlDigest: canonicalDigest(req.duckdbInitSql) } : {}), // pin WHICH init SQL (digest, not the possibly-secret-bearing SQL itself)
+    ...(req.protectedSessionBindings ? { protectedSessionBindingsDigest: canonicalDigest(req.protectedSessionBindings) } : {}), // pin WHICH protected bindings (digest only; values are not replayed)
+    ...(protectedNamesDigest ? { protectedSessionVariablesDigest: protectedNamesDigest } : {}), // pin additional protected names declared by the host
     ...(req.duckdbConfig ? { duckdbConfigDigest: canonicalDigest(req.duckdbConfig) } : {}), // pin WHICH config (digest, not the secret-bearing config itself)
     ...(proc ? { process: proc } : {}),
   };
-  return runAndPersist(req.cwd, req.dbPath, runId, "ad-hoc.query", "query", (conn) => runQuery(registry, conn, { sql: req.sql, resources, runId, now, signal: req.signal, cas: req.cas }), req.now, req.duckdbInitSql, req.bindings, req.duckdbConfig, replay, req.store ? { store: req.store, author: req.author } : undefined, req.cas, req.serialize);
+  return runAndPersist(req.cwd, req.dbPath, runId, "ad-hoc.query", "query", (conn, protectedSessionVariables) => runQuery(registry, conn, { sql: req.sql, resources, runId, now, signal: req.signal, cas: req.cas, protectedSessionVariables }), req.now, req.duckdbInitSql, req.bindings, req.protectedSessionBindings, req.protectedSessionVariables, req.duckdbConfig, replay, req.store ? { store: req.store, author: req.author } : undefined, req.cas, req.serialize);
 }

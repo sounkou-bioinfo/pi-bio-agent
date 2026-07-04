@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { BioArtifact } from "./types.js";
 import { appendRunEvent, newRunRecord, type BioRunRecord, type BioRunSpec } from "./run-spec.js";
-import { validateReadOnlySelect, sqlCallsDynamicSqlAst } from "./sql-guard.js";
+import { validateReadOnlySelect, validateAdHocBioQuerySelect, sqlCallsDynamicSqlAst } from "./sql-guard.js";
 import { materializeScaleMembers } from "./scales.js";
 import type { BioRegistry, ResolutionReceipt, SourceSnapshot } from "./manifest.js";
 import type { CasStore } from "./cas.js";
@@ -63,12 +63,16 @@ export async function runQuery(
     signal?: AbortSignal;
     /** CAS mode, forwarded to each resolver's context (byte snapshot + cross-db reuse). */
     cas?: CasStore;
+    /** Host-declared protected session variables that ad-hoc agent SQL must not read with getvariable() or enumerate. */
+    protectedSessionVariables?: readonly string[];
   },
 ): Promise<{ result: OperationResult; run: BioRunRecord; receipts: ResolutionReceipt[] }> {
   const { resources, runId, now, params = [], signal, cas } = opts;
   const id = opts.id ?? "ad-hoc.query";
   const isNamed = opts.id !== undefined;
-  const safeSql = validateReadOnlySelect(opts.sql); // enforced before we touch the conn; run the validated text
+  const safeSql = isNamed
+    ? validateReadOnlySelect(opts.sql)
+    : validateAdHocBioQuerySelect(opts.sql, { protectedVariables: opts.protectedSessionVariables });
   // Defense-in-depth over the string guard: re-check the dynamic-SQL executors (query()/query_table()) via DuckDB's
   // OWN parser (json_serialize_sql), which normalizes quoted/qualified spellings a string scan can miss. Pre-flight
   // (a config error, not a failed run) — a pure parse with no side effects on the fresh run conn.

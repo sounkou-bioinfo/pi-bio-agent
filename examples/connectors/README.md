@@ -50,8 +50,12 @@ safe order is:
   use that unreadable secret path. A host-authored declared operation may also compose `ducknng_ncurl_table`
   headers from `SET VARIABLE` with `ducknng_http_headers_build` (proved against a local ducknng route in
   `test/ducknng-sql-http.test.ts`), but that is composition, not secrecy: the same connection can read
-  `getvariable()`. Keep that pattern behind an isolated operation connection; never expose it through agent params
-  or arbitrary `bio_query`;
+  `getvariable()`. The run-store now lets hosts declare protected session variables so arbitrary `bio_query` cannot
+  read those names or enumerate `duckdb_variables()`, while declared operations can intentionally consume them. This
+  is a guardrail, not the final ducknng auth model. The needed ducknng primitive is a scoped credential profile:
+  SQL supplies only a profile id plus non-secret request fields, ducknng resolves/refreshes the secret inside the
+  HTTP client, verifies the URL/method is allowed for that profile, merges auth headers after agent headers, and
+  exposes only profile identity/digest in introspection and receipts;
 - **MCP servers** — an MCP `initialize` / `tools/list` / `tools/call` (JSON-RPC 2.0 over HTTP) **is an `ncurl`
   POST** — see [`mcp.json`](mcp.json). The manifest is structurally validated without network
   (`test/connectors-example.test.ts`), and `test/ducknng-sql-http.test.ts` proves the local session-header loop:

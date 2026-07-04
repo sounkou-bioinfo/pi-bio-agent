@@ -55,6 +55,110 @@ function usesDynamicSqlFn(sql: string): boolean {
   return DYNAMIC_SQL_FN.test(stripLiteralsAndComments(sql, false));
 }
 
+function skipWhitespace(sql: string, i: number): number {
+  while (/\s/.test(sql[i] ?? "")) i++;
+  return i;
+}
+
+function skipStringLiteral(sql: string, i: number): number {
+  i++;
+  while (i < sql.length) {
+    if (sql[i] === "'") {
+      if (sql[i + 1] === "'") { i += 2; continue; }
+      return i + 1;
+    }
+    i++;
+  }
+  return i;
+}
+
+function skipLineComment(sql: string, i: number): number {
+  i += 2;
+  while (i < sql.length && sql[i] !== "\n") i++;
+  return i;
+}
+
+function skipBlockComment(sql: string, i: number): number {
+  i += 2;
+  while (i < sql.length && !(sql[i] === "*" && sql[i + 1] === "/")) i++;
+  return Math.min(sql.length, i + 2);
+}
+
+function readQuotedIdent(sql: string, i: number): { value: string; next: number } | null {
+  if (sql[i] !== "\"") return null;
+  let value = "";
+  i++;
+  while (i < sql.length) {
+    if (sql[i] === "\"") {
+      if (sql[i + 1] === "\"") { value += "\""; i += 2; continue; }
+      return { value, next: i + 1 };
+    }
+    value += sql[i++];
+  }
+  return { value, next: i };
+}
+
+function readBareIdent(sql: string, i: number): { value: string; next: number } | null {
+  if (!/[A-Za-z_]/.test(sql[i] ?? "")) return null;
+  const start = i++;
+  while (/[A-Za-z0-9_$]/.test(sql[i] ?? "")) i++;
+  return { value: sql.slice(start, i), next: i };
+}
+
+function readIdent(sql: string, i: number): { value: string; next: number } | null {
+  return readQuotedIdent(sql, i) ?? readBareIdent(sql, i);
+}
+
+function readQualifiedFunctionName(sql: string, i: number): { fn: string; next: number } | null {
+  const first = readIdent(sql, i);
+  if (!first) return null;
+  let last = first.value;
+  let next = skipWhitespace(sql, first.next);
+  while (sql[next] === ".") {
+    const part = readIdent(sql, skipWhitespace(sql, next + 1));
+    if (!part) break;
+    last = part.value;
+    next = skipWhitespace(sql, part.next);
+  }
+  return sql[next] === "(" ? { fn: last.toLowerCase(), next } : null;
+}
+
+function readSingleQuotedString(sql: string, i: number): { value: string; next: number } | null {
+  if (sql[i] !== "'") return null;
+  let value = "";
+  i++;
+  while (i < sql.length) {
+    if (sql[i] === "'") {
+      if (sql[i + 1] === "'") { value += "'"; i += 2; continue; }
+      return { value, next: i + 1 };
+    }
+    value += sql[i++];
+  }
+  return null;
+}
+
+function protectedVariableSurface(sql: string, protectedVariables: readonly string[]): string | undefined {
+  const protectedSet = new Set(protectedVariables.map((v) => v.toLowerCase()));
+  if (protectedSet.size === 0) return undefined;
+  for (let i = 0; i < sql.length;) {
+    const c = sql[i], c2 = sql[i + 1];
+    if (c === "'") { i = skipStringLiteral(sql, i); continue; }
+    if (c === "-" && c2 === "-") { i = skipLineComment(sql, i); continue; }
+    if (c === "/" && c2 === "*") { i = skipBlockComment(sql, i); continue; }
+    const call = readQualifiedFunctionName(sql, i);
+    if (!call) { i++; continue; }
+    if (call.fn === "duckdb_variables") return "duckdb_variables()";
+    if (call.fn === "getvariable") {
+      const arg = readSingleQuotedString(sql, skipWhitespace(sql, call.next + 1));
+      if (!arg) return "getvariable(<dynamic-name>)";
+      if (sql[skipWhitespace(sql, arg.next)] !== ")") return "getvariable(<dynamic-name>)";
+      if (protectedSet.has(arg.value.toLowerCase())) return `getvariable('${arg.value}')`;
+    }
+    i = call.next + 1;
+  }
+  return undefined;
+}
+
 // Fixture SQL (approval-harness test setup) legitimately needs multi-statement DDL to seed in-memory test data
 // (CREATE TABLE / INSERT / SELECT), so it is NOT read-only — but it must not reach OUTSIDE the throwaway sandbox db:
 // ATTACH/DETACH (another db), COPY / EXPORT / IMPORT (file I/O), INSTALL / LOAD (extensions, incl. network-capable),
@@ -108,4 +212,15 @@ export function validateReadOnlySelect(sql: string): string {
   // resolves to the dynamic-SQL function that would run a write hidden in its (blanked) string argument.
   if (usesDynamicSqlFn(trimmed)) throw new Error("query contains a dynamic-SQL table function (query()/query_table()) — forbidden");
   return trimmed; // return the ORIGINAL sql (literals intact) — only the SCAN copy was stripped
+}
+
+/** The ad-hoc agent query boundary is narrower than the declared-operation boundary: it may use ordinary
+ *  agent bindings (`getvariable('query')`) but must not read host-declared protected session variables into
+ *  result.json. This is not a sandbox and not egress control; it closes the known SQL-visible protected-variable
+ *  exfiltration paths while keeping host-authored declared operations as the sealed escape hatch. */
+export function validateAdHocBioQuerySelect(sql: string, opts: { protectedVariables?: readonly string[] } = {}): string {
+  const trimmed = validateReadOnlySelect(sql);
+  const hit = protectedVariableSurface(trimmed, opts.protectedVariables ?? []);
+  if (hit) throw new Error(`ad-hoc bio_query must not read host-declared protected session variables (${hit}); use a host-authored declared operation or injected fetch auth`);
+  return trimmed;
 }

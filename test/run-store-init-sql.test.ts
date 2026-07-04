@@ -4,7 +4,7 @@ import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { BioManifest } from "../src/core/manifest.js";
-import { runBioQueryFromManifest } from "../src/hosts/run-store.js";
+import { runBioOperationFromManifest, runBioQueryFromManifest } from "../src/hosts/run-store.js";
 
 // The runner connection-init hook (pal #8's gap): a host bootstraps the DuckDB connection ONCE before
 // resolution — the place to INSTALL/LOAD/SET httpfs + cache_httpfs (so file_scan/sql_materialize remote reads
@@ -56,6 +56,88 @@ describe("run-store connection-init hook (duckdbInitSql)", () => {
     if (!out.ok) return;
     const result = JSON.parse(await fs.readFile(join(out.runDir, "result.json"), "utf8")) as { rows: Array<{ v: string }> };
     assert.equal(result.rows[0]!.v, "https://approved.example", "host init runs AFTER bindings — the host value wins the clash");
+  });
+
+  test("protected session bindings are host-owned: ad-hoc bio_query cannot read or enumerate them", async () => {
+    const { cwd, manifestPath } = await writeManifest();
+    const ok = await runBioQueryFromManifest({
+      cwd, dbPath: ":memory:", manifestPath,
+      bindings: { query: "asthma" },
+      protectedSessionBindings: { api_token: "Bearer host-token" },
+      sql: "SELECT getvariable('query') AS q",
+      runId: "protected-param-ok", now: "T1",
+    });
+    assert.equal(ok.ok, true);
+    if (!ok.ok) return;
+    const result = JSON.parse(await fs.readFile(join(ok.runDir, "result.json"), "utf8")) as { rows: Array<{ q: string }> };
+    assert.equal(result.rows[0]!.q, "asthma", "ordinary agent params still work");
+    const replayText = await fs.readFile(join(ok.runDir, "replay.json"), "utf8");
+    assert.doesNotMatch(replayText, /host-token/, "protected binding values are not serialized into replay.json");
+    assert.match(replayText, /protectedSessionBindingsDigest/, "replay pins only a digest of protected bindings");
+
+    await assert.rejects(
+      () => runBioQueryFromManifest({
+        cwd, dbPath: ":memory:", manifestPath,
+        protectedSessionBindings: { api_token: "Bearer host-token" },
+        sql: "SELECT getvariable('api_token') AS token",
+        runId: "protected-token-read", now: "T1",
+      }),
+      /protected session variables.*getvariable\('api_token'\)/,
+    );
+    await assert.rejects(
+      () => runBioQueryFromManifest({
+        cwd, dbPath: ":memory:", manifestPath,
+        protectedSessionBindings: { api_token: "Bearer host-token" },
+        sql: "SELECT * FROM duckdb_variables()",
+        runId: "protected-token-enum", now: "T1",
+      }),
+      /protected session variables.*duckdb_variables\(\)/,
+    );
+  });
+
+  test("protectedSessionVariables covers host init variables, and declared operations may intentionally consume them", async () => {
+    const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-init-op-"));
+    const manifestPath = join(cwd, "manifest.json");
+    const opManifest: BioManifest = {
+      ...manifest,
+      provides: {
+        operations: [{
+          id: "host_auth.read",
+          version: "0.1.0",
+          title: "Host-authored protected variable read",
+          description: "A declared operation may consume host-declared protected session state.",
+          transport: "duckdb.sql",
+          inputSchema: { type: "object" },
+          sql: { sqlTemplate: "SELECT getvariable('api_token') AS token", readOnly: true },
+        }],
+      },
+    };
+    await fs.writeFile(manifestPath, JSON.stringify(opManifest), "utf8");
+
+    await assert.rejects(
+      () => runBioQueryFromManifest({
+        cwd, dbPath: ":memory:", manifestPath,
+        duckdbInitSql: ["SET VARIABLE api_token = 'Bearer init-token'"],
+        protectedSessionVariables: ["api_token"],
+        sql: "SELECT getvariable('api_token') AS token",
+        runId: "protected-init-read", now: "T1",
+      }),
+      /protected session variables.*getvariable\('api_token'\)/,
+      "ad-hoc SQL cannot read a protected init variable",
+    );
+
+    const out = await runBioOperationFromManifest({
+      cwd, dbPath: ":memory:", manifestPath,
+      protectedSessionBindings: { api_token: "Bearer op-token" },
+      operationId: "host_auth.read",
+      runId: "protected-op-read", now: "T1",
+    });
+    assert.equal(out.ok, true, out.ok ? "" : `run failed: ${(out as { error?: unknown }).error}`);
+    if (!out.ok) return;
+    const result = JSON.parse(await fs.readFile(join(out.runDir, "result.json"), "utf8")) as { rows: Array<{ token: string }> };
+    assert.equal(result.rows[0]!.token, "Bearer op-token", "declared operations are the host-authored path");
+    const replayText = await fs.readFile(join(out.runDir, "replay.json"), "utf8");
+    assert.doesNotMatch(replayText, /op-token/, "protected operation binding values are not serialized into replay.json");
   });
 
   test("a failing init statement is a pre-flight config error (throws), not a failed run", async () => {

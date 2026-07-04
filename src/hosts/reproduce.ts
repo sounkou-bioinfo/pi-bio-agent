@@ -66,6 +66,10 @@ export interface ReproduceRequest {
   /** the host re-supplies the connection-init SQL (it may bear secrets, so it is NOT stored in the replay — only
    *  its digest is). reproduce re-applies it and verifies it matches the pinned `duckdbInitSqlDigest`, failing closed. */
   duckdbInitSql?: string[];
+  /** Host-owned protected session bindings. Values are not stored in replay; a pinned digest must be re-supplied. */
+  protectedSessionBindings?: Record<string, unknown>;
+  /** Additional host-declared protected session variable names, e.g. for variables set by duckdbInitSql. */
+  protectedSessionVariables?: string[];
   now?: string;
 }
 
@@ -80,6 +84,10 @@ function assertReproducible(replay: RunReplaySpec): void {
   if (!hasReceiptPins && !replay.resultDigest) {
     throw new Error("reproduce: replay pins neither sourceReceiptDigests nor a resultDigest to verify against (fail closed). A resource-free run must carry a resultDigest — run it with a CAS so the output content is pinned.");
   }
+}
+
+function normalizeProtectedSessionVariables(names: readonly string[]): string[] {
+  return [...new Set(names.map((n) => n.toLowerCase()))].sort();
 }
 
 export async function reproduceRun(req: ReproduceRequest): Promise<ReproduceResult> {
@@ -97,6 +105,14 @@ export async function reproduceRun(req: ReproduceRequest): Promise<ReproduceResu
   if (replay.duckdbInitSqlDigest) {
     if (!req.duckdbInitSql) throw new Error("reproduce: this run pinned a duckdbInitSqlDigest — re-supply the same duckdbInitSql to reproduce it faithfully (fail closed)");
     if (canonicalDigest(req.duckdbInitSql) !== replay.duckdbInitSqlDigest) throw new Error("reproduce: the supplied duckdbInitSql does not match the pinned duckdbInitSqlDigest (would not be a faithful reproduction)");
+  }
+  if (replay.protectedSessionBindingsDigest) {
+    if (!req.protectedSessionBindings) throw new Error("reproduce: this run pinned a protectedSessionBindingsDigest — re-supply the same protectedSessionBindings to reproduce it faithfully (fail closed)");
+    if (canonicalDigest(req.protectedSessionBindings) !== replay.protectedSessionBindingsDigest) throw new Error("reproduce: the supplied protectedSessionBindings do not match the pinned protectedSessionBindingsDigest (would not be a faithful reproduction)");
+  }
+  if (replay.protectedSessionVariablesDigest) {
+    if (!req.protectedSessionVariables) throw new Error("reproduce: this run pinned a protectedSessionVariablesDigest — re-supply the same protectedSessionVariables to reproduce it faithfully (fail closed)");
+    if (canonicalDigest(normalizeProtectedSessionVariables(req.protectedSessionVariables)) !== replay.protectedSessionVariablesDigest) throw new Error("reproduce: the supplied protectedSessionVariables do not match the pinned protectedSessionVariablesDigest (would not be a faithful reproduction)");
   }
   // VERIFY the manifest hasn't changed: reproduce re-runs from replay.manifest.path (by operationId or sql), so a
   // manifest edited since the original run would execute DIFFERENT logic yet could still 'match' if receipts happen
@@ -120,7 +136,7 @@ export async function reproduceRun(req: ReproduceRequest): Promise<ReproduceResu
   const shortId = replay.runId.slice(0, Math.max(1, budget));
   const base = {
     cwd: req.cwd, dbPath: req.dbPath ?? ":memory:", manifestPath: replay.manifest!.path!,
-    bindings: replay.bindings, duckdbInitSql: req.duckdbInitSql, duckdbConfig: req.duckdbConfig,
+    bindings: replay.bindings, duckdbInitSql: req.duckdbInitSql, protectedSessionBindings: req.protectedSessionBindings, protectedSessionVariables: req.protectedSessionVariables, duckdbConfig: req.duckdbConfig,
     network: req.network, process: req.process, cas: req.cas,
     runId: `reproduce-${shortId}${suffix}`, now: req.now,
   };
