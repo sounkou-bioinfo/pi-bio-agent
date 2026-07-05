@@ -7,6 +7,7 @@ import { latestValuesByPrefix } from "../duckdb/observations.js";
 import { runsRoot } from "./run-store.js";
 
 const LEDGER_FUTURE = "9999-12-31T23:59:59.999Z"; // sentinel: "the LATEST run:<id> facts regardless of clock"
+const LEDGER_CAS_ROOT_PREFIXES = ["run:", "session:", "cas:"];
 
 // Garbage collection for the substrate's two unbounded stores: the CAS (content-addressed bytes) and the run
 // directory. The model: the CAS is a HEAP; a run's receipts are its ROOTS; MARK-AND-SWEEP deletes CAS entries
@@ -202,11 +203,14 @@ export async function collectGarbage(cwd: string, opts: CollectGarbageOpts = {})
     fs.readFile(join(runsDir, name, "cas-refs.json"), "utf8").catch(() => ""),
     fs.readFile(join(runsDir, name, "run.json"), "utf8").catch(() => ""),
   ])));
-  // LEDGER roots: a live `run:<id>` fact references CAS bytes by digest and outlives the run DIR — so when a store
-  // is supplied, root from the latest run:<id> facts too. Without this, pruning a run dir whose ledger fact is still
-  // live would strand its result/receipts/replay bytes (rooted by nothing on disk) and the sweep would delete them,
-  // dangling the fact's digest reference. (The run-fact JSON carries every digest field, so liveDigests roots them.)
-  if (opts.store) rootJsons.push(...(await latestValuesByPrefix(opts.store, "run:", LEDGER_FUTURE)));
+  // LEDGER roots: live facts can reference CAS bytes and outlive their source files. `run:<id>` facts root results /
+  // receipts / replay. `session:<id>` facts root raw session JSONL. `cas:<digest>` artifact facts root graphics and
+  // other session-imported artifacts. Without this, pruning local files would leave live ledger facts dangling.
+  if (opts.store) {
+    for (const prefix of LEDGER_CAS_ROOT_PREFIXES) {
+      rootJsons.push(...(await latestValuesByPrefix(opts.store, prefix, LEDGER_FUTURE)));
+    }
+  }
   const live = liveDigests(rootJsons);
   // cross-writer roots: the union of all writers' live digests — lowercased so an uppercase-hex root still matches
   // the lowercase CAS files (else it would fail to protect live bytes and the sweep would delete them).

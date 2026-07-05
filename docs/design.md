@@ -581,8 +581,11 @@ Artifacts are resources. A report, JSON evidence pack, SQL result, plot, or adde
 
 ### 7. Agent sessions and turns
 
-Agent/user chat sessions are part of the audit substrate, not UI transcript storage. The canonical shape is still
-`bio_observations`, not new `session_*` base tables:
+Agent/user chat sessions are part of the audit substrate, not UI transcript storage. There is no cross-agent session
+standard mature enough to own this boundary; the concrete source format is Pi's project-local JSONL session log
+(`~/.pi/agent/sessions/...`). Public or redacted datasets such as `pi-share-hf` are derived JSONL views that can be
+ingested later, not the private source of truth. The canonical substrate shape is still `bio_observations`, not new
+`session_*` base tables:
 
 ```text
 raw session JSONL -> CAS
@@ -590,6 +593,12 @@ session facts / turn facts / tool facts -> bio_observations
 message/tool/artifact/run links -> edge-like observations -> bio_edges_as_of
 redacted/public/training exports -> derived views or artifacts
 ```
+
+`value_json` stays the storage contract for now. DuckDB `VARIANT` is a good future fit for these payloads because it
+keeps semi-structured values typed and binary, supports per-row heterogeneous objects, field extraction, and Parquet
+shredding. Do not migrate the base ledger yet: the current Node API path can execute `VARIANT` expressions but does
+not return raw `VARIANT` values cleanly, and our export/redaction/projection helpers still assume JSON text. The
+right migration is a compatible projection/storage refinement after the client and Parquet paths are boring.
 
 A session line, message, tool call, compaction, image, plot, report, or review label is an observation under a stable
 namespace such as `session:`, `turn:`, `msg:`, `toolcall:`, `cas:`, and `run:`. Edges such as `has_message`,

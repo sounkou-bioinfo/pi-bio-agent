@@ -857,8 +857,10 @@ Open library questions to resolve before claiming that position:
   service over the compute ports, not a reason to let ambient interpreter state leak into runs.
 - **Conversation/run trace as substrate data:** chat threads, user/assistant turns, tool calls, code edits, images,
   plots, artifacts, approvals, and review labels are not UI logs. They are the audit trail and later
-  training/evaluation corpus. The correct shape is a session ingester, not a new session table family: raw session
-  JSONL goes to CAS; `session:`, `turn:`, `msg:`, `toolcall:`, `cas:`, and `run:` subjects plus edge-like
+  training/evaluation corpus. The concrete input format is Pi's JSONL session log; public/redacted exports such as
+  `pi-share-hf` are downstream JSONL views, not a replacement source of truth. The correct shape is a session
+  ingester, not a new session table family: raw session JSONL goes to CAS; `session:`, `turn:`, `msg:`,
+  `toolcall:`, `cas:`, and `run:` subjects plus edge-like
   observations express containment, input/output, calls, writes, citations, produced artifacts, and displayed
   graphics. Projection helpers can materialize timeline, tool-trajectory, artifact, graphic, and training-example
   views when a UI/export needs them, but the source of truth remains `bio_observations`.
@@ -867,9 +869,15 @@ Open library questions to resolve before claiming that position:
   are host/model effects with live output, not `runBioQueryFromManifest` or `runBioOperationFromManifest` payloads.
   The turn records context/model/tool-registry/message digests and a live-source-style reproducibility verdict.
   Child scientific queries/operations it calls remain normal `run:<id>` facts with receipts/replay/CAS. Remaining
-  work: implement `ingestSessionJsonl(...)` against `recordObservation`, define the statement-key convention, add
-  projection views/helpers, and enrich graphics artifacts with `media_type`, `semantic_role`, `producer_run`,
-  source/spec digest, and plotting-system metadata.
+  work after the first `ingestSessionJsonl(...)` slice: harden the statement-key convention across real Pi session
+  variants, add richer training-example projections, and expand graphics metadata beyond embedded images to plots,
+  reports, notebooks, and rendered scientific views.
+- **DuckDB `VARIANT` fit for observation/session payloads:** keep `value_json` as the contract today, but track
+  `VARIANT` as the likely typed payload representation once the ecosystem settles. It fits because each observation
+  or session event can carry a different typed object, nested fields can be extracted without reparsing text, and
+  Parquet shredding can make exported corpora efficient. Do not migrate early: client bindings, redaction/export
+  helpers, as-of projections, and CAS-root scans must all handle `VARIANT` values without casts or hidden text
+  assumptions first.
 - **Direct Pi-core use:** some projects may use the Pi agent loop directly with this library as tools/resources,
   rather than a separate application wrapper. The boundary to settle is which capabilities belong in Pi skills/tools
   versus manifests/operations that can run outside Pi.
