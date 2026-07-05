@@ -98,11 +98,11 @@
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^0.78.0",
-    "@types/node": "^24.0.0",
-    "typebox": "^1.1.38",
-    "typescript": "^5.8.3"
+    "typebox": "^1.1.38"
   },
   "dependencies": {
-    "@duckdb/node-api": "1.5.2-r.2"
+    "@duckdb/node-api": "1.5.2-r.2",
+    "@types/node": "^24.0.0",
+    "typescript": "^5.8.3"
   }
 }
