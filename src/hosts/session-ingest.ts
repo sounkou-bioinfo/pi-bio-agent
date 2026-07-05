@@ -390,7 +390,7 @@ export async function ingestSessionJsonl(req: IngestSessionJsonlRequest): Promis
           statementKey: toolNode,
           subjectId: toolNode,
           predicate: "tool_call",
-          value: { name: name ?? null, args_digest: argsDigest, status: "submitted", line_number: lineNumber, index: idx },
+          value: { name: name ?? null, args_digest: argsDigest, line_number: lineNumber, index: idx },
           recordedAt,
           source,
           digest: argsDigest,
