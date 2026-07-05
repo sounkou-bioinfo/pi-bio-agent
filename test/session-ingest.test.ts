@@ -139,6 +139,63 @@ describe("session JSONL ingestion into the observation ledger", () => {
     assert.equal(Number(rows[0]!.n), 0);
   });
 
+  test("projects compaction and extension session entries as graph observations", async () => {
+    const dir = await tmp("pi-bio-session-control-");
+    const sessionFile = join(dir, "session.jsonl");
+    const cas = fsCasStore(join(dir, "cas"));
+    const c = await conn();
+    await fs.writeFile(sessionFile, `${[
+      { type: "session", id: "control", timestamp: "2026-07-05T10:00:00.000Z", cwd: dir },
+      { type: "message", id: "u1", parentId: null, timestamp: "2026-07-05T10:00:01.000Z", message: { role: "user", content: "start" } },
+      { type: "custom_message", id: "cm1", parentId: "u1", timestamp: "2026-07-05T10:00:02.000Z", customType: "other-extension.steer-note", content: "steer accepted", display: true, details: { delivery: "steer" } },
+      { type: "custom", id: "c1", parentId: "cm1", timestamp: "2026-07-05T10:00:03.000Z", customType: "other-extension.audit", data: { event: "transformed-input" } },
+      { type: "model_change", id: "m1", parentId: "c1", timestamp: "2026-07-05T10:00:04.000Z", provider: "openai", modelId: "gpt-test" },
+      { type: "thinking_level_change", id: "th1", parentId: "m1", timestamp: "2026-07-05T10:00:05.000Z", thinkingLevel: "high" },
+      { type: "label", id: "l1", parentId: "th1", timestamp: "2026-07-05T10:00:06.000Z", targetId: "u1", label: "important" },
+      { type: "session_info", id: "si1", parentId: "l1", timestamp: "2026-07-05T10:00:07.000Z", name: "Control session" },
+      { type: "compaction", id: "k1", parentId: "si1", timestamp: "2026-07-05T10:00:08.000Z", summary: "Kept start", firstKeptEntryId: "u1", tokensBefore: 1234, fromHook: false, details: { reason: "manual" } },
+      { type: "branch_summary", id: "b1", parentId: "k1", timestamp: "2026-07-05T10:00:09.000Z", fromId: "u1", summary: "Branch summary", fromHook: true, details: { target: "u1" } },
+    ].map((line) => JSON.stringify(line)).join("\n")}\n`);
+
+    const out = await ingestSessionJsonl({ conn: c, cas, sessionPath: sessionFile, sessionId: "control", now: "2026-07-05T10:00:00.000Z", source: "test" });
+    assert.equal(out.entries, 10);
+    assert.equal(out.messages, 2);
+
+    const timeline = await sessionTimeline(c, "control");
+    assert.deepEqual(timeline.map((row) => row.role), ["user", "custom"]);
+
+    const facts = await c.all<{ predicate: string; subject_id: string; value_json: string | null }>(
+      `SELECT predicate, subject_id, value_json FROM bio_observations
+       WHERE subject_id LIKE 'entry:control:%'
+         AND predicate IN ('compaction', 'branch_summary', 'extension_event', 'model_change', 'thinking_level_change', 'label', 'session_info')
+       ORDER BY predicate`,
+    );
+    assert.deepEqual(facts.map((row) => row.predicate).sort(), [
+      "branch_summary",
+      "compaction",
+      "extension_event",
+      "label",
+      "model_change",
+      "session_info",
+      "thinking_level_change",
+    ]);
+    const compaction = facts.find((row) => row.predicate === "compaction");
+    assert.equal(JSON.parse(compaction!.value_json!).first_kept_entry, "entry:control:u1");
+
+    await materializeBioEdgesAsOf(c, "2026-07-05T10:00:10.000Z");
+    const edges = await c.all<{ from_id: string; predicate: string; to_id: string }>(
+      `SELECT from_id, predicate, to_id FROM bio_edges_as_of
+       WHERE from_id = 'session:control' OR from_id IN ('entry:control:k1', 'entry:control:b1', 'entry:control:l1')
+       ORDER BY from_id, predicate, to_id`,
+    );
+    assert.ok(edges.some((e) => e.from_id === "session:control" && e.predicate === "has_extension_message" && e.to_id === "msg:control:cm1"));
+    assert.ok(edges.some((e) => e.from_id === "session:control" && e.predicate === "has_extension_event" && e.to_id === "entry:control:c1"));
+    assert.ok(edges.some((e) => e.from_id === "session:control" && e.predicate === "has_compaction" && e.to_id === "entry:control:k1"));
+    assert.ok(edges.some((e) => e.from_id === "entry:control:k1" && e.predicate === "first_kept_entry" && e.to_id === "entry:control:u1"));
+    assert.ok(edges.some((e) => e.from_id === "entry:control:b1" && e.predicate === "summarizes_from" && e.to_id === "entry:control:u1"));
+    assert.ok(edges.some((e) => e.from_id === "entry:control:l1" && e.predicate === "labels" && e.to_id === "entry:control:u1"));
+  });
+
   test("GC roots live session raw JSONL and graphics through ledger facts", async () => {
     const dir = await tmp("pi-bio-session-gc-");
     const sessionFile = join(dir, "session.jsonl");

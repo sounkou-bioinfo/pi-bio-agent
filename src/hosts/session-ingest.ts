@@ -235,6 +235,157 @@ async function recordImageArtifacts(args: {
   }
 }
 
+async function recordControlEntry(args: {
+  conn: SqlConn;
+  counts: { observations: number };
+  sessionId: string;
+  sessionNode: string;
+  entryNode: string;
+  entry: JsonObject;
+  entryType: string;
+  entryDigest: `sha256:${string}`;
+  recordedAt: string;
+  source: string;
+  lineNumber: number;
+}): Promise<void> {
+  const commonAttrs = { session_id: args.sessionId, line_number: args.lineNumber, entry_type: args.entryType };
+  if (args.entryType === "compaction") {
+    const firstKeptEntryId = stringProp(args.entry, "firstKeptEntryId");
+    const value = {
+      summary_digest: digestJson(args.entry.summary ?? null),
+      first_kept_entry: firstKeptEntryId ? node("entry", args.sessionId, firstKeptEntryId) : null,
+      tokens_before: typeof args.entry.tokensBefore === "number" ? args.entry.tokensBefore : null,
+      from_hook: typeof args.entry.fromHook === "boolean" ? args.entry.fromHook : false,
+      details_digest: args.entry.details === undefined ? null : digestJson(args.entry.details),
+    };
+    await record(args.conn, {
+      statementKey: `${args.entryNode}:compaction`,
+      subjectId: args.entryNode,
+      predicate: "compaction",
+      value,
+      recordedAt: args.recordedAt,
+      source: args.source,
+      digest: args.entryDigest,
+      attrs: commonAttrs,
+    }, args.counts);
+    await recordEdge(args.conn, args.counts, args.sessionNode, "has_compaction", args.entryNode, args.recordedAt, args.source, commonAttrs);
+    if (firstKeptEntryId) {
+      await recordEdge(args.conn, args.counts, args.entryNode, "first_kept_entry", node("entry", args.sessionId, firstKeptEntryId), args.recordedAt, args.source);
+    }
+    return;
+  }
+
+  if (args.entryType === "branch_summary") {
+    const fromId = stringProp(args.entry, "fromId");
+    const value = {
+      summary_digest: digestJson(args.entry.summary ?? null),
+      from_entry: fromId ? node("entry", args.sessionId, fromId) : null,
+      from_hook: typeof args.entry.fromHook === "boolean" ? args.entry.fromHook : false,
+      details_digest: args.entry.details === undefined ? null : digestJson(args.entry.details),
+    };
+    await record(args.conn, {
+      statementKey: `${args.entryNode}:branch_summary`,
+      subjectId: args.entryNode,
+      predicate: "branch_summary",
+      value,
+      recordedAt: args.recordedAt,
+      source: args.source,
+      digest: args.entryDigest,
+      attrs: commonAttrs,
+    }, args.counts);
+    await recordEdge(args.conn, args.counts, args.sessionNode, "has_branch_summary", args.entryNode, args.recordedAt, args.source, commonAttrs);
+    if (fromId) await recordEdge(args.conn, args.counts, args.entryNode, "summarizes_from", node("entry", args.sessionId, fromId), args.recordedAt, args.source);
+    return;
+  }
+
+  if (args.entryType === "custom") {
+    const customType = stringProp(args.entry, "customType") ?? "unknown";
+    await record(args.conn, {
+      statementKey: `${args.entryNode}:extension_event`,
+      subjectId: args.entryNode,
+      predicate: "extension_event",
+      value: {
+        custom_type: customType,
+        data_digest: args.entry.data === undefined ? null : digestJson(args.entry.data),
+        line_number: args.lineNumber,
+      },
+      recordedAt: args.recordedAt,
+      source: args.source,
+      digest: args.entryDigest,
+      attrs: { ...commonAttrs, custom_type: customType },
+    }, args.counts);
+    await recordEdge(args.conn, args.counts, args.sessionNode, "has_extension_event", args.entryNode, args.recordedAt, args.source, { ...commonAttrs, custom_type: customType });
+    return;
+  }
+
+  if (args.entryType === "model_change") {
+    await record(args.conn, {
+      statementKey: `${args.entryNode}:model_change`,
+      subjectId: args.entryNode,
+      predicate: "model_change",
+      value: {
+        provider: stringProp(args.entry, "provider") ?? null,
+        model_id: stringProp(args.entry, "modelId") ?? null,
+      },
+      recordedAt: args.recordedAt,
+      source: args.source,
+      digest: args.entryDigest,
+      attrs: commonAttrs,
+    }, args.counts);
+    await recordEdge(args.conn, args.counts, args.sessionNode, "has_model_change", args.entryNode, args.recordedAt, args.source, commonAttrs);
+    return;
+  }
+
+  if (args.entryType === "thinking_level_change") {
+    await record(args.conn, {
+      statementKey: `${args.entryNode}:thinking_level_change`,
+      subjectId: args.entryNode,
+      predicate: "thinking_level_change",
+      value: { thinking_level: stringProp(args.entry, "thinkingLevel") ?? null },
+      recordedAt: args.recordedAt,
+      source: args.source,
+      digest: args.entryDigest,
+      attrs: commonAttrs,
+    }, args.counts);
+    await recordEdge(args.conn, args.counts, args.sessionNode, "has_thinking_level_change", args.entryNode, args.recordedAt, args.source, commonAttrs);
+    return;
+  }
+
+  if (args.entryType === "label") {
+    const targetId = stringProp(args.entry, "targetId");
+    await record(args.conn, {
+      statementKey: `${args.entryNode}:label`,
+      subjectId: args.entryNode,
+      predicate: "label",
+      value: {
+        target_entry: targetId ? node("entry", args.sessionId, targetId) : null,
+        label: typeof args.entry.label === "string" ? args.entry.label : null,
+      },
+      recordedAt: args.recordedAt,
+      source: args.source,
+      digest: args.entryDigest,
+      attrs: commonAttrs,
+    }, args.counts);
+    await recordEdge(args.conn, args.counts, args.sessionNode, "has_label", args.entryNode, args.recordedAt, args.source, commonAttrs);
+    if (targetId) await recordEdge(args.conn, args.counts, args.entryNode, "labels", node("entry", args.sessionId, targetId), args.recordedAt, args.source);
+    return;
+  }
+
+  if (args.entryType === "session_info") {
+    await record(args.conn, {
+      statementKey: `${args.entryNode}:session_info`,
+      subjectId: args.entryNode,
+      predicate: "session_info",
+      value: { name: stringProp(args.entry, "name") ?? null },
+      recordedAt: args.recordedAt,
+      source: args.source,
+      digest: args.entryDigest,
+      attrs: commonAttrs,
+    }, args.counts);
+    await recordEdge(args.conn, args.counts, args.sessionNode, "has_session_info", args.entryNode, args.recordedAt, args.source, commonAttrs);
+  }
+}
+
 function parseJsonLine(line: string, lineNumber: number): JsonObject {
   const parsed = JSON.parse(line) as unknown;
   if (!isObject(parsed)) throw new Error(`ingestSessionJsonl: line ${lineNumber} is not a JSON object`);
@@ -293,6 +444,52 @@ export async function ingestSessionJsonl(req: IngestSessionJsonlRequest): Promis
       attrs: { session_id: sessionId, line_number: lineNumber },
     }, counts);
     await recordEdge(req.conn, counts, sessionNode, "has_entry", entryNode, recordedAt, source, { line_number: lineNumber, type: entryType });
+
+    await recordControlEntry({
+      conn: req.conn, counts, sessionId, sessionNode, entryNode, entry, entryType, entryDigest, recordedAt, source, lineNumber,
+    });
+
+    if (entryType === "custom_message") {
+      const customType = stringProp(entry, "customType") ?? "unknown";
+      const mid = messageId(entry, lineNumber);
+      const msgNode = node("msg", sessionId, mid);
+      const parentId = stringProp(entry, "parentId");
+      const parentNode = parentId ? node("msg", sessionId, parentId) : undefined;
+      const contentDigest = digestJson(entry.content ?? null);
+      const detailsDigest = entry.details === undefined ? null : digestJson(entry.details);
+      messages++;
+      await record(req.conn, {
+        statementKey: msgNode,
+        subjectId: msgNode,
+        predicate: "message",
+        value: {
+          role: "custom",
+          custom_type: customType,
+          content_digest: contentDigest,
+          details_digest: detailsDigest,
+          parent_message: parentNode ?? null,
+          provider: null,
+          model: null,
+          api: null,
+          display: typeof entry.display === "boolean" ? entry.display : null,
+          line_number: lineNumber,
+        },
+        recordedAt,
+        source,
+        digest: contentDigest,
+        attrs: { session_id: sessionId, role: "custom", custom_type: customType, line_number: lineNumber, local_id: mid },
+      }, counts);
+      await recordEdge(req.conn, counts, sessionNode, "has_message", msgNode, recordedAt, source, { role: "custom", custom_type: customType, line_number: lineNumber });
+      await recordEdge(req.conn, counts, sessionNode, "has_extension_message", msgNode, recordedAt, source, { custom_type: customType, line_number: lineNumber });
+      await recordEdge(req.conn, counts, entryNode, "materializes_message", msgNode, recordedAt, source, { custom_type: customType });
+      if (parentNode) await recordEdge(req.conn, counts, msgNode, "parent", parentNode, recordedAt, source);
+      await recordImageArtifacts({
+        conn: req.conn, cas: req.cas, counts, sessionId, source, recordedAt,
+        seenArtifacts,
+        ownerNode: msgNode, ownerPredicate: "displays", value: entry.content, lineNumber,
+      });
+      continue;
+    }
 
     const msg = topMessage(entry);
     if (entryType !== "message" || !msg) continue;

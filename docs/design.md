@@ -607,6 +607,15 @@ namespace such as `session:`, `turn:`, `msg:`, `toolcall:`, `cas:`, and `run:`. 
 `input`, `output`, `calls`, `writes`, `cites`, `produces`, and `displays` are ordinary edge-like observations and
 therefore walk through `bio_edges_as_of` with the same as-of and provenance machinery as facts and memory.
 
+Control-plane events use the same rule. A steer or follow-up that Pi consumes becomes a normal user/custom message
+in the session path; the ingester records the message and its parentage, while any "delivered as steer" annotation
+must come from Pi or another extension as a `custom`/`custom_message` entry. Compactions, branch summaries,
+model/thinking changes, labels, session-info entries, and other extension-owned `customType` payloads project as
+typed observations over the same `entry:<session>:<id>` nodes. This keeps other Pi extensions composable: they can
+persist namespaced session entries and the substrate records them without knowing their schema. Interruptions are
+represented when Pi persists them as assistant/tool stop reasons or errors; an interrupt with no persisted event is a
+host-event gap, not something to infer from transcript text.
+
 Pi JSONL ingestion is an adapter, not the workflow model. The local extension default writes to the project-local
 store and CAS for single-machine use. Distributed resume, fork trees, fugu-style swarms, and service-mediated agents
 must inject the shared store and shared CAS together; otherwise the ledger would contain references to bytes that
