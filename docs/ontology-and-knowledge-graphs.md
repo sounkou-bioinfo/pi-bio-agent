@@ -157,6 +157,13 @@ query over `bio_edges_as_of`, `entailed_edge`, ontology tables, resolver-materia
 or memory notes. The graph remains outside the prompt, and the executable action is small, inspectable, and
 receipted.
 
+First-answer latency is another graph-projection problem. The PVLDB 2026 LFS work on first-sight summaries
+constructs compact subgraphs from query logs so exploratory SPARQL queries can return early exact answers without
+scanning the full KG. Locally, that pattern should be expressed as a workload-derived projection profile over
+`bio_edges_as_of`, `entailed_edge`, and resolver-materialized KG tables: sampled answer-supporting edges become
+ordinary graph rows with receipts, budgets are materialized-view policy, and fallback to the full source remains an
+explicit host choice. It is not a prompt summary and not a new per-question skill.
+
 Do not collapse typed predicates into "neighbors" unless the operation really only needs adjacency. A biomedical
 edge may encode subclass, part-of, evidence, support, contradiction, derivation, activation, containment, or
 temporal supersession. Keeping those predicates queryable is what lets an agent adapt its reliance between
