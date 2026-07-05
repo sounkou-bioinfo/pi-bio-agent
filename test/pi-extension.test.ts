@@ -178,9 +178,10 @@ describe("Pi coding-agent extension", () => {
       getSessionId: () => "trace-session",
     };
     const ctx = { cwd, sessionManager };
+    const toolCallId = "call_trace_session|fc_bio_query_01";
     const { handlers, tools } = loadExtension(createBioExtension({ author: "agent:test" }));
     const byName = new Map(tools.map((tool) => [tool.name, tool]));
-    const result = await byName.get("bio_query")!.execute("tc-bio", {
+    const result = await byName.get("bio_query")!.execute(toolCallId, {
       dbPath: ":memory:",
       manifestPath,
       sql: "SELECT 1 AS answer",
@@ -191,8 +192,8 @@ describe("Pi coding-agent extension", () => {
     await writeFile(sessionFile, `${[
       { type: "session", version: 3, id: "trace-session", timestamp: "2026-07-05T14:00:00.000Z", cwd },
       { type: "message", id: "u1", parentId: null, timestamp: "2026-07-05T14:00:01.000Z", message: { role: "user", content: "run the query" } },
-      { type: "message", id: "a1", parentId: "u1", timestamp: "2026-07-05T14:00:02.000Z", message: { role: "assistant", provider: "openai", model: "codex", content: [{ type: "toolCall", id: "tc-bio", name: "bio_query", arguments: { dbPath: ":memory:", manifestPath, sql: "SELECT 1 AS answer", runId: "trace-run" } }] } },
-      { type: "message", id: "tr1", parentId: "a1", timestamp: "2026-07-05T14:00:03.000Z", message: { role: "toolResult", toolCallId: "tc-bio", toolName: "bio_query", isError: false, content: result.content } },
+      { type: "message", id: "a1", parentId: "u1", timestamp: "2026-07-05T14:00:02.000Z", message: { role: "assistant", provider: "openai", model: "codex", content: [{ type: "toolCall", id: toolCallId, name: "bio_query", arguments: { dbPath: ":memory:", manifestPath, sql: "SELECT 1 AS answer", runId: "trace-run" } }] } },
+      { type: "message", id: "tr1", parentId: "a1", timestamp: "2026-07-05T14:00:03.000Z", message: { role: "toolResult", toolCallId, toolName: "bio_query", isError: false, content: result.content } },
     ].map((line) => JSON.stringify(line)).join("\n")}\n`, "utf8");
     const shutdown = handlers.get("session_shutdown")?.[0];
     assert.ok(shutdown, "session_shutdown handler registered");
@@ -205,8 +206,8 @@ describe("Pi coding-agent extension", () => {
          WHERE object_id = 'run:trace-run' OR subject_id = 'run:trace-run'
          ORDER BY subject_id, predicate`,
       );
-      assert.ok(edges.some((edge) => edge.subject_id === "toolcall:trace-session:tc-bio" && edge.predicate === "executes"));
-      assert.ok(edges.some((edge) => edge.subject_id === "run:trace-run" && edge.predicate === "invoked_by" && edge.object_id === "toolcall:trace-session:tc-bio"));
+      assert.ok(edges.some((edge) => edge.subject_id === `toolcall:trace-session:${toolCallId}` && edge.predicate === "executes"));
+      assert.ok(edges.some((edge) => edge.subject_id === "run:trace-run" && edge.predicate === "invoked_by" && edge.object_id === `toolcall:trace-session:${toolCallId}`));
       const runRows = await store.conn.all<{ value_json: string | null }>(
         "SELECT value_json FROM bio_observations WHERE subject_id = 'run:trace-run' AND predicate = 'run'",
       );
