@@ -1,0 +1,120 @@
+{
+  "schema": "pi-bio.manifest.v1",
+  "id": "clinical-genomics-workbench",
+  "version": "0.1.0",
+  "title": "Clinical genomics workbench binding",
+  "description": "Direct and inverted rare-disease evidence passes over one declared case resource set. This binding routes evidence; it is not a complete ACMG/AMP kernel.",
+  "provides": {
+    "resolvers": [
+      {
+        "id": "duckdb.file_scan",
+        "version": "0.1.0",
+        "title": "DuckDB file scan",
+        "description": "Read a local file into a DuckDB table.",
+        "output": { "mode": "table" }
+      }
+    ],
+    "resources": [
+      {
+        "id": "case_variants",
+        "title": "Case variants",
+        "kind": "virtual",
+        "resolver": "duckdb.file_scan",
+        "params": { "path": "data/case_variants.csv", "table": "case_variants" }
+      },
+      {
+        "id": "so_loss_of_function",
+        "title": "Loss-of-function Sequence Ontology terms",
+        "kind": "virtual",
+        "resolver": "duckdb.file_scan",
+        "params": { "path": "data/so_loss_of_function.csv", "table": "so_loss_of_function" }
+      },
+      {
+        "id": "case_hpo",
+        "title": "Observed case HPO terms",
+        "kind": "virtual",
+        "resolver": "duckdb.file_scan",
+        "params": { "path": "data/case_hpo.csv", "table": "case_hpo" }
+      },
+      {
+        "id": "gene_phenotype",
+        "title": "Gene phenotype curation",
+        "kind": "virtual",
+        "resolver": "duckdb.file_scan",
+        "params": { "path": "data/gene_phenotype.csv", "table": "gene_phenotype" }
+      },
+      {
+        "id": "prior_assessment",
+        "title": "Prior case assessment",
+        "kind": "virtual",
+        "resolver": "duckdb.file_scan",
+        "params": { "path": "data/prior_assessment.csv", "table": "prior_assessment" }
+      }
+    ],
+    "operations": [
+      {
+        "id": "clinical.direct_variant_triage",
+        "version": "0.1.0",
+        "title": "Direct variant-first rare-disease triage",
+        "description": "Bucket observed variants into candidate, abstention, and exclusion groups. Unknown frequency is abstained, not counted as rare.",
+        "transport": "duckdb.sql",
+        "inputSchema": {
+          "type": "object",
+          "properties": { "case_id": { "type": "string" } },
+          "required": ["case_id"]
+        },
+        "notes": [
+          "Direct lane: genotype/variant first.",
+          "Unknown allele frequency is abstained from, not counted as rare.",
+          "Benign-annotated variants are excluded even when rare and high impact."
+        ],
+        "sql": {
+          "readOnly": true,
+          "requiredResources": ["case_variants", "so_loss_of_function"],
+          "sqlTemplate": "WITH classified AS (SELECT case_id, variant_key, gene, consequence, TRY_CAST(allele_frequency AS DOUBLE) AS allele_frequency, clinical_significance, zygosity, inheritance, CASE WHEN TRY_CAST(allele_frequency AS DOUBLE) IS NULL THEN 'abstain_no_frequency' WHEN lower(clinical_significance) = 'benign' THEN 'excluded_benign' WHEN consequence NOT IN (SELECT id FROM so_loss_of_function) THEN 'excluded_not_high_impact' WHEN TRY_CAST(allele_frequency AS DOUBLE) >= 0.01 THEN 'excluded_not_rare' ELSE 'candidate' END AS bucket FROM case_variants WHERE case_id = getvariable('case_id')) SELECT *, CASE WHEN bucket = 'candidate' AND clinical_significance IN ('Pathogenic', 'Likely Pathogenic') THEN 'curated_plp_candidate' WHEN bucket = 'candidate' THEN 'candidate_needs_review' WHEN bucket = 'abstain_no_frequency' THEN 'needs_frequency_evidence' ELSE 'not_reportable_by_screen' END AS evidence_status FROM classified ORDER BY CASE bucket WHEN 'candidate' THEN 0 WHEN 'abstain_no_frequency' THEN 1 ELSE 2 END, gene, variant_key"
+        }
+      },
+      {
+        "id": "clinical.inverted_phenotype_hypotheses",
+        "version": "0.1.0",
+        "title": "Inverted phenotype-first rare-disease hypotheses",
+        "description": "Start from observed phenotypes, rank gene/disease hypotheses, then inspect the case genome for supporting or missing variants.",
+        "transport": "duckdb.sql",
+        "inputSchema": {
+          "type": "object",
+          "properties": { "case_id": { "type": "string" } },
+          "required": ["case_id"]
+        },
+        "notes": [
+          "Inverted lane: phenotype/disease first, then interrogate the genome.",
+          "A phenotype-supported gene with no supporting variant is retained as a gap, not silently dropped."
+        ],
+        "sql": {
+          "readOnly": true,
+          "requiredResources": ["case_variants", "so_loss_of_function", "case_hpo", "gene_phenotype"],
+          "sqlTemplate": "WITH observed AS (SELECT case_id, hpo_id FROM case_hpo WHERE case_id = getvariable('case_id') AND status = 'observed'), gene_score AS (SELECT o.case_id, gp.gene, gp.disease_id, gp.validity, gp.mode, COUNT(*)::INTEGER AS phenotype_score FROM observed o JOIN gene_phenotype gp USING (hpo_id) GROUP BY o.case_id, gp.gene, gp.disease_id, gp.validity, gp.mode), variant_buckets AS (SELECT case_id, variant_key, gene, consequence, TRY_CAST(allele_frequency AS DOUBLE) AS allele_frequency, clinical_significance, CASE WHEN TRY_CAST(allele_frequency AS DOUBLE) IS NULL THEN 'abstain_no_frequency' WHEN lower(clinical_significance) = 'benign' THEN 'excluded_benign' WHEN consequence NOT IN (SELECT id FROM so_loss_of_function) THEN 'excluded_not_high_impact' WHEN TRY_CAST(allele_frequency AS DOUBLE) >= 0.01 THEN 'excluded_not_rare' ELSE 'candidate' END AS direct_bucket FROM case_variants WHERE case_id = getvariable('case_id')), ranked_variants AS (SELECT *, ROW_NUMBER() OVER (PARTITION BY case_id, gene ORDER BY CASE direct_bucket WHEN 'candidate' THEN 0 WHEN 'abstain_no_frequency' THEN 1 ELSE 2 END, variant_key) AS rn FROM variant_buckets) SELECT gs.case_id, gs.gene, gs.disease_id, gs.validity, gs.mode, gs.phenotype_score, rv.variant_key, rv.consequence, rv.allele_frequency, rv.clinical_significance, rv.direct_bucket, CASE WHEN rv.variant_key IS NULL THEN 'hypothesis_without_variant' WHEN rv.direct_bucket = 'candidate' THEN 'genotype_supports_hypothesis' WHEN rv.direct_bucket = 'abstain_no_frequency' THEN 'hypothesis_variant_abstained' ELSE 'variant_does_not_support_hypothesis' END AS hypothesis_bucket FROM gene_score gs LEFT JOIN ranked_variants rv ON rv.case_id = gs.case_id AND rv.gene = gs.gene AND rv.rn = 1 ORDER BY gs.phenotype_score DESC, CASE hypothesis_bucket WHEN 'genotype_supports_hypothesis' THEN 0 WHEN 'hypothesis_variant_abstained' THEN 1 WHEN 'hypothesis_without_variant' THEN 2 ELSE 3 END, gs.gene"
+        }
+      },
+      {
+        "id": "clinical.reanalysis_diff",
+        "version": "0.1.0",
+        "title": "Reanalysis diff",
+        "description": "Compare the current direct-lane evidence status with a prior case status and surface new, upgraded, downgraded, unchanged, and dropped variants.",
+        "transport": "duckdb.sql",
+        "inputSchema": {
+          "type": "object",
+          "properties": { "case_id": { "type": "string" } },
+          "required": ["case_id"]
+        },
+        "notes": [
+          "Reanalysis is a delta over durable prior results, not another prompt."
+        ],
+        "sql": {
+          "readOnly": true,
+          "requiredResources": ["case_variants", "so_loss_of_function", "prior_assessment"],
+          "sqlTemplate": "WITH current AS (SELECT case_id, variant_key, CASE WHEN TRY_CAST(allele_frequency AS DOUBLE) IS NULL THEN 'needs_frequency_evidence' WHEN lower(clinical_significance) = 'benign' THEN 'not_reportable_by_screen' WHEN consequence NOT IN (SELECT id FROM so_loss_of_function) THEN 'not_reportable_by_screen' WHEN TRY_CAST(allele_frequency AS DOUBLE) >= 0.01 THEN 'not_reportable_by_screen' WHEN clinical_significance IN ('Pathogenic', 'Likely Pathogenic') THEN 'curated_plp_candidate' ELSE 'candidate_needs_review' END AS current_status FROM case_variants WHERE case_id = getvariable('case_id')), prior AS (SELECT case_id, variant_key, prior_status FROM prior_assessment WHERE case_id = getvariable('case_id')), both_sides AS (SELECT COALESCE(c.case_id, p.case_id) AS case_id, COALESCE(c.variant_key, p.variant_key) AS variant_key, p.prior_status, c.current_status FROM current c FULL OUTER JOIN prior p USING (case_id, variant_key)), ranked AS (SELECT *, CASE prior_status WHEN 'not_reportable_by_screen' THEN 0 WHEN 'needs_frequency_evidence' THEN 1 WHEN 'candidate_needs_review' THEN 2 WHEN 'curated_plp_candidate' THEN 3 WHEN 'confirmed' THEN 4 ELSE -1 END AS prior_rank, CASE current_status WHEN 'not_reportable_by_screen' THEN 0 WHEN 'needs_frequency_evidence' THEN 1 WHEN 'candidate_needs_review' THEN 2 WHEN 'curated_plp_candidate' THEN 3 WHEN 'confirmed' THEN 4 ELSE -1 END AS current_rank FROM both_sides) SELECT case_id, variant_key, prior_status, current_status, CASE WHEN prior_status IS NULL THEN 'new' WHEN current_status IS NULL THEN 'dropped' WHEN current_rank > prior_rank THEN 'upgraded' WHEN current_rank < prior_rank THEN 'downgraded' ELSE 'unchanged' END AS status FROM ranked ORDER BY CASE status WHEN 'upgraded' THEN 0 WHEN 'new' THEN 1 WHEN 'downgraded' THEN 2 WHEN 'dropped' THEN 3 ELSE 4 END, variant_key"
+        }
+      }
+    ]
+  }
+}

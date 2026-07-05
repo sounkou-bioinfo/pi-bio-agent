@@ -1,0 +1,4 @@
+case_id,hpo_id,label,status
+CASE-RD-001,HP:0001263,Global developmental delay,observed
+CASE-RD-001,HP:0001252,Hypotonia,observed
+CASE-RD-001,HP:0001250,Seizure,adjudication
