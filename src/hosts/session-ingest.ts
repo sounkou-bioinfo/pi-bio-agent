@@ -301,9 +301,9 @@ async function recordControlEntry(args: {
   if (args.entryType === "custom") {
     const customType = stringProp(args.entry, "customType") ?? "unknown";
     await record(args.conn, {
-      statementKey: `${args.entryNode}:extension_event`,
+      statementKey: `${args.entryNode}:custom_entry`,
       subjectId: args.entryNode,
-      predicate: "extension_event",
+      predicate: "custom_entry",
       value: {
         custom_type: customType,
         data_digest: args.entry.data === undefined ? null : digestJson(args.entry.data),
@@ -314,7 +314,7 @@ async function recordControlEntry(args: {
       digest: args.entryDigest,
       attrs: { ...commonAttrs, custom_type: customType },
     }, args.counts);
-    await recordEdge(args.conn, args.counts, args.sessionNode, "has_extension_event", args.entryNode, args.recordedAt, args.source, { ...commonAttrs, custom_type: customType });
+    await recordEdge(args.conn, args.counts, args.sessionNode, "has_custom_entry", args.entryNode, args.recordedAt, args.source, { ...commonAttrs, custom_type: customType });
     return;
   }
 
@@ -480,7 +480,7 @@ export async function ingestSessionJsonl(req: IngestSessionJsonlRequest): Promis
         attrs: { session_id: sessionId, role: "custom", custom_type: customType, line_number: lineNumber, local_id: mid },
       }, counts);
       await recordEdge(req.conn, counts, sessionNode, "has_message", msgNode, recordedAt, source, { role: "custom", custom_type: customType, line_number: lineNumber });
-      await recordEdge(req.conn, counts, sessionNode, "has_extension_message", msgNode, recordedAt, source, { custom_type: customType, line_number: lineNumber });
+      await recordEdge(req.conn, counts, sessionNode, "has_custom_message", msgNode, recordedAt, source, { custom_type: customType, line_number: lineNumber });
       await recordEdge(req.conn, counts, entryNode, "materializes_message", msgNode, recordedAt, source, { custom_type: customType });
       if (parentNode) await recordEdge(req.conn, counts, msgNode, "parent", parentNode, recordedAt, source);
       await recordImageArtifacts({

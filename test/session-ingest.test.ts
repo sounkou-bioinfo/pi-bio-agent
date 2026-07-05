@@ -139,7 +139,7 @@ describe("session JSONL ingestion into the observation ledger", () => {
     assert.equal(Number(rows[0]!.n), 0);
   });
 
-  test("projects compaction and extension session entries as graph observations", async () => {
+  test("projects compaction and Pi custom session entries as graph observations", async () => {
     const dir = await tmp("pi-bio-session-control-");
     const sessionFile = join(dir, "session.jsonl");
     const cas = fsCasStore(join(dir, "cas"));
@@ -167,13 +167,13 @@ describe("session JSONL ingestion into the observation ledger", () => {
     const facts = await c.all<{ predicate: string; subject_id: string; value_json: string | null }>(
       `SELECT predicate, subject_id, value_json FROM bio_observations
        WHERE subject_id LIKE 'entry:control:%'
-         AND predicate IN ('compaction', 'branch_summary', 'extension_event', 'model_change', 'thinking_level_change', 'label', 'session_info')
+         AND predicate IN ('compaction', 'branch_summary', 'custom_entry', 'model_change', 'thinking_level_change', 'label', 'session_info')
        ORDER BY predicate`,
     );
     assert.deepEqual(facts.map((row) => row.predicate).sort(), [
       "branch_summary",
       "compaction",
-      "extension_event",
+      "custom_entry",
       "label",
       "model_change",
       "session_info",
@@ -188,8 +188,8 @@ describe("session JSONL ingestion into the observation ledger", () => {
        WHERE from_id = 'session:control' OR from_id IN ('entry:control:k1', 'entry:control:b1', 'entry:control:l1')
        ORDER BY from_id, predicate, to_id`,
     );
-    assert.ok(edges.some((e) => e.from_id === "session:control" && e.predicate === "has_extension_message" && e.to_id === "msg:control:cm1"));
-    assert.ok(edges.some((e) => e.from_id === "session:control" && e.predicate === "has_extension_event" && e.to_id === "entry:control:c1"));
+    assert.ok(edges.some((e) => e.from_id === "session:control" && e.predicate === "has_custom_message" && e.to_id === "msg:control:cm1"));
+    assert.ok(edges.some((e) => e.from_id === "session:control" && e.predicate === "has_custom_entry" && e.to_id === "entry:control:c1"));
     assert.ok(edges.some((e) => e.from_id === "session:control" && e.predicate === "has_compaction" && e.to_id === "entry:control:k1"));
     assert.ok(edges.some((e) => e.from_id === "entry:control:k1" && e.predicate === "first_kept_entry" && e.to_id === "entry:control:u1"));
     assert.ok(edges.some((e) => e.from_id === "entry:control:b1" && e.predicate === "summarizes_from" && e.to_id === "entry:control:u1"));
