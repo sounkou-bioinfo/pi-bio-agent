@@ -13,9 +13,9 @@ The first binding is clinical genomics. It demonstrates the two rare-disease dir
 Both directions produce one evidence packet, recorded in the same `bio_observations` ledger as the scientific runs.
 The packet is an app convention, not a substrate primitive.
 
-This is not a complete ACMG/AMP classifier. The earlier BioConnect prototypes surfaced real kernel edge cases
-that must become fixtures before any clinical kernel claim: carrier guards for recessive genes, SNV/CNV unification,
-CNV dosage tracks, PVS1 entry gates, BA1/BS1 exception lists, PM1 benign blocking, family QC, and phenotype
+This is not a complete clinical classification kernel. Known clinical-kernel edge cases must become fixtures before
+any classifier claim: carrier guards for recessive genes, SNV/CNV unification, CNV dosage tracks, loss-of-function
+entry gates, common-pathogenic exception lists, benign blocking for hotspot evidence, family QC, and phenotype
 information-content denominators. This repo starts one layer above that: it routes evidence, abstentions, gaps, and
 review targets through the substrate.
 

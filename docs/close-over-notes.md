@@ -5,7 +5,7 @@ promote a new primitive after a second concrete use proves it.
 
 ## First binding
 
-The clinical-genomics example is an evidence workflow, not a completed ACMG/AMP classifier.
+The clinical-genomics example is an evidence workflow, not a completed clinical classification kernel.
 
 - Direct lane: observed variants -> candidate / abstention / exclusion buckets.
 - Inverted lane: observed phenotypes -> gene/disease hypotheses -> supporting variant, abstained variant, or gap.
@@ -34,6 +34,6 @@ No new substrate primitive was needed for this first slice.
 
 ## Clinical Kernel Boundary
 
-Do not claim ACMG completion here. BioConnect sprint work surfaced fixtures still needed before a clinical kernel
-claim: recessive carrier guards, SNV/CNV unification, CNV dosage, PVS1 entry gates, BA1/BS1 exceptions, PM1 benign
-blocking, family QC, and phenotype information-content denominators.
+Do not claim clinical-kernel completion here. Fixtures still needed before a classifier claim include recessive
+carrier guards, SNV/CNV unification, CNV dosage, loss-of-function entry gates, common-pathogenic exception lists,
+benign blocking for hotspot evidence, family QC, and phenotype information-content denominators.
