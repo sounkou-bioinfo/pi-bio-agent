@@ -579,6 +579,37 @@ BioRunSpec -> BioRunRecord -> BioRunEvent[] -> BioArtifact[]
 
 Artifacts are resources. A report, JSON evidence pack, SQL result, plot, or addendum should be registered with a handle and provenance rather than only pasted into chat.
 
+### 7. Agent sessions and turns
+
+Agent/user chat sessions are part of the audit substrate, not UI transcript storage. The canonical shape is still
+`bio_observations`, not new `session_*` base tables:
+
+```text
+raw session JSONL -> CAS
+session facts / turn facts / tool facts -> bio_observations
+message/tool/artifact/run links -> edge-like observations -> bio_edges_as_of
+redacted/public/training exports -> derived views or artifacts
+```
+
+A session line, message, tool call, compaction, image, plot, report, or review label is an observation under a stable
+namespace such as `session:`, `turn:`, `msg:`, `toolcall:`, `cas:`, and `run:`. Edges such as `has_message`,
+`input`, `output`, `calls`, `writes`, `cites`, `produces`, and `displays` are ordinary edge-like observations and
+therefore walk through `bio_edges_as_of` with the same as-of and provenance machinery as facts and memory.
+
+An assistant turn has run anatomy, but it is not a deterministic scientific operation run. It is an audit-replayable
+turn node: it records the prior context digest, model/provider/config digest, tool registry digest, produced message
+digest, child tool calls, child scientific runs, artifacts, graphics, memory writes, and review labels. The
+reproducibility verdict is live-source-like: the context can be reconstructed, but a provider/model call is not
+content-guaranteed to emit the same text. Do not force model/provider calls through `runBioQueryFromManifest` or
+`runBioOperationFromManifest`; those remain the deterministic SQL/operation lanes. A turn that calls a scientific
+query or compute operation links to the normal `run:<id>` fact for that child run.
+
+Graphics are first-class artifacts in this model. A rendered PNG/SVG/PDF/HTML plot should be CAS-addressed and
+linked from the turn or child run with metadata such as `media_type`, `semantic_role`, `producer_run`, source table
+or SQL digest, and plotting system. The generative spec or source script belongs in the producing run's inputs or
+artifacts. This keeps the R-lineage graphics surface auditable, replayable where possible, and usable for later
+review or training views.
+
 ## Skills: proper use
 
 Skills are procedural memory, not primitives. They should say **when and how to compose capabilities**.

@@ -855,9 +855,21 @@ Open library questions to resolve before claiming that position:
 - **Stateful kernels:** persistent Python/R/Julia sessions are useful for iteration, but they need explicit session
   handles, environment attestation, variable/artifact capture, and replay boundaries. A stateful REPL is a host
   service over the compute ports, not a reason to let ambient interpreter state leak into runs.
-- **Conversation as graph:** chat threads, tool calls, code edits, artifacts, and approvals should be projectable
-  into `bio_observations` as provenance facts. The open question is the minimal message/tool schema that is useful
-  without turning the graph into a transcript dump.
+- **Conversation/run trace as substrate data:** chat threads, user/assistant turns, tool calls, code edits, images,
+  plots, artifacts, approvals, and review labels are not UI logs. They are the audit trail and later
+  training/evaluation corpus. The correct shape is a session ingester, not a new session table family: raw session
+  JSONL goes to CAS; `session:`, `turn:`, `msg:`, `toolcall:`, `cas:`, and `run:` subjects plus edge-like
+  observations express containment, input/output, calls, writes, citations, produced artifacts, and displayed
+  graphics. Projection helpers can materialize timeline, tool-trajectory, artifact, graphic, and training-example
+  views when a UI/export needs them, but the source of truth remains `bio_observations`.
+
+  A chat turn has run anatomy but should not be recorded as a deterministic `RunObservation`: provider/model calls
+  are host/model effects with live output, not `runBioQueryFromManifest` or `runBioOperationFromManifest` payloads.
+  The turn records context/model/tool-registry/message digests and a live-source-style reproducibility verdict.
+  Child scientific queries/operations it calls remain normal `run:<id>` facts with receipts/replay/CAS. Remaining
+  work: implement `ingestSessionJsonl(...)` against `recordObservation`, define the statement-key convention, add
+  projection views/helpers, and enrich graphics artifacts with `media_type`, `semantic_role`, `producer_run`,
+  source/spec digest, and plotting-system metadata.
 - **Direct Pi-core use:** some projects may use the Pi agent loop directly with this library as tools/resources,
   rather than a separate application wrapper. The boundary to settle is which capabilities belong in Pi skills/tools
   versus manifests/operations that can run outside Pi.
