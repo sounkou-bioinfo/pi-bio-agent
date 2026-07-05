@@ -594,11 +594,13 @@ message/tool/artifact/run links -> edge-like observations -> bio_edges_as_of
 redacted/public/training exports -> derived views or artifacts
 ```
 
-`value_json` stays the storage contract for now. DuckDB `VARIANT` is a good future fit for these payloads because it
-keeps semi-structured values typed and binary, supports per-row heterogeneous objects, field extraction, and Parquet
-shredding. Do not migrate the base ledger yet: the current Node API path can execute `VARIANT` expressions but does
-not return raw `VARIANT` values cleanly, and our export/redaction/projection helpers still assume JSON text. The
-right migration is a compatible projection/storage refinement after the client and Parquet paths are boring.
+`value_json` stays the base-ledger storage contract for now. DuckDB `VARIANT` is still a strong fit, but the split
+matters: it is not ready for the read/round-trip contract because the current Node API path can execute `VARIANT`
+expressions but does not materialize raw `VARIANT` values into JavaScript cleanly. The export/corpus lane is different:
+`VARIANT` Parquet works now and can shred regular payload fields into typed columns. Training, review, and public
+dataset exports should target partitioned `VARIANT`-shredded Parquet views when that export path is built; the live
+ledger should stay JSON until client bindings, redaction helpers, as-of projections, and CAS-root scans can handle
+typed payloads without casts or hidden text assumptions.
 
 A session line, message, tool call, compaction, image, plot, report, or review label is an observation under a stable
 namespace such as `session:`, `turn:`, `msg:`, `toolcall:`, `cas:`, and `run:`. Edges such as `has_message`,

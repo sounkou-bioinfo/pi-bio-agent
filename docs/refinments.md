@@ -872,12 +872,13 @@ Open library questions to resolve before claiming that position:
   work after the first `ingestSessionJsonl(...)` slice: harden the statement-key convention across real Pi session
   variants, add richer training-example projections, and expand graphics metadata beyond embedded images to plots,
   reports, notebooks, and rendered scientific views.
-- **DuckDB `VARIANT` fit for observation/session payloads:** keep `value_json` as the contract today, but track
-  `VARIANT` as the likely typed payload representation once the ecosystem settles. It fits because each observation
-  or session event can carry a different typed object, nested fields can be extracted without reparsing text, and
-  Parquet shredding can make exported corpora efficient. Do not migrate early: client bindings, redaction/export
-  helpers, as-of projections, and CAS-root scans must all handle `VARIANT` values without casts or hidden text
-  assumptions first.
+- **DuckDB `VARIANT` fit for observation/session payloads:** keep `value_json` as the live ledger contract, but do
+  not reduce `VARIANT` to a someday storage swap. The immediate fit is the export/training-corpus path: partitioned
+  Parquet views can store payloads as typed `VARIANT` values and let DuckDB shred common fields, making agent
+  trajectories, tool calls, graphics metadata, and later review labels columnar and pushdown-friendly. The live
+  ledger should not migrate yet because the current Node API path does not cleanly materialize raw `VARIANT` values
+  back into JS, and core helpers still assume JSON text for redaction, as-of projections, and CAS-root scans. Build
+  export first; migrate the base ledger only after the round-trip path is ordinary.
 - **Direct Pi-core use:** some projects may use the Pi agent loop directly with this library as tools/resources,
   rather than a separate application wrapper. The boundary to settle is which capabilities belong in Pi skills/tools
   versus manifests/operations that can run outside Pi.
