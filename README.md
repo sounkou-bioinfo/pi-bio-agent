@@ -284,6 +284,16 @@ pi-bio-agent query examples/run-ledger/manifest.json \
 }
 ```
 
+For the full live Pi path, run `npm run dogfood:pi-session-trace` after
+installing the extension and configuring an image-capable `openai-codex`
+model. It drives a saved Pi session through an image read, a successful
+shell call, an intentional shell error, manifest discovery, SQL
+validation, and `bio_query`, then queries the project ledger for the
+session summary, tool trajectory, raw-session CAS root, and
+`toolcall:<id> executes run:<id>` link. Current Pi JSONL records the
+image read in the raw session; it only becomes a `cas:` image artifact
+when Pi persists image bytes as structured image content.
+
 Because the graph is a table, a chart is a query and a UI is a thin SQL
 client: a grammar-of-graphics layer like posit’s
 [ggsql](https://github.com/posit-dev/ggsql) draws the run timeline
