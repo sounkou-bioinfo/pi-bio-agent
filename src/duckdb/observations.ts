@@ -42,6 +42,23 @@ export interface BioObservationInput {
   observationId?: string;
 }
 
+export interface BioObservationLinkInput {
+  /** Edge source node. The node namespace is caller-owned (`turn:…`, `run:…`, `job:…`, `workflow:…`). */
+  subjectId: string;
+  /** Edge predicate. Prefer stable domain verbs such as `calls`, `produces`, `part_of`, `parent_session`. */
+  predicate: string;
+  /** Edge target node. */
+  objectId: string;
+  recordedAt: string;
+  source?: string;
+  digest?: string;
+  attrs?: Record<string, unknown>;
+  trust?: TrustBlock;
+  /** Optional state slot. Defaults to the stable edge slot `subject:predicate:object`. */
+  statementKey?: string;
+  observationId?: string;
+}
+
 export async function createBioObservationSchema(conn: SqlConn, opts: { ifNotExists?: boolean } = {}): Promise<void> {
   const ine = opts.ifNotExists === false ? "" : "IF NOT EXISTS ";
   await conn.run(
@@ -90,6 +107,27 @@ export async function recordObservation(conn: SqlConn, obs: BioObservationInput)
       obs.source ?? null, obs.digest ?? null, obs.attrs ? JSON.stringify(obs.attrs) : null, obs.trust ? JSON.stringify(obs.trust) : null],
   );
   return id;
+}
+
+/** Record a graph edge in the temporal observation ledger. This is only a typed convenience over
+ * `recordObservation(... objectId ...)`, but it is the shared primitive for stitching sessions, turns, tool calls,
+ * scientific runs, jobs, workflow steps, artifacts, and caller-owned workflow nodes into one trace graph. */
+export async function recordObservationLink(conn: SqlConn, link: BioObservationLinkInput): Promise<string> {
+  if (!link.subjectId || !link.predicate || !link.objectId) {
+    throw new Error("recordObservationLink: subjectId, predicate, and objectId are required");
+  }
+  return recordObservation(conn, {
+    statementKey: link.statementKey ?? `${link.subjectId}:${link.predicate}:${link.objectId}`,
+    subjectId: link.subjectId,
+    predicate: link.predicate,
+    objectId: link.objectId,
+    recordedAt: link.recordedAt,
+    source: link.source,
+    digest: link.digest,
+    attrs: link.attrs,
+    trust: link.trust,
+    observationId: link.observationId,
+  });
 }
 
 /**

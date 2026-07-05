@@ -607,13 +607,27 @@ namespace such as `session:`, `turn:`, `msg:`, `toolcall:`, `cas:`, and `run:`. 
 `input`, `output`, `calls`, `writes`, `cites`, `produces`, and `displays` are ordinary edge-like observations and
 therefore walk through `bio_edges_as_of` with the same as-of and provenance machinery as facts and memory.
 
+Pi JSONL ingestion is an adapter, not the workflow model. The local extension default writes to the project-local
+store and CAS for single-machine use. Distributed resume, fork trees, fugu-style swarms, and service-mediated agents
+must inject the shared store and shared CAS together; otherwise the ledger would contain references to bytes that
+exist only on one machine. Shared workflows use ordinary edge-like observations to caller-owned nodes: a host may
+assert `part_of`, `runs_step`, `has_member`, or a domain predicate between `session:`, `turn:`, `run:`, `job:`,
+`step:`, and `workflow:` nodes. Parentage is a `parent_session` edge only when the host supplies a stable parent id
+or the Pi adapter can read one from the parent file's JSON header. Host-local file paths remain provenance metadata,
+never the session identity.
+
 An assistant turn has run anatomy, but it is not a deterministic scientific operation run. It is an audit-replayable
 turn node: it records the prior context digest, model/provider/config digest, tool registry digest, produced message
 digest, child tool calls, child scientific runs, artifacts, graphics, memory writes, and review labels. The
 reproducibility verdict is live-source-like: the context can be reconstructed, but a provider/model call is not
 content-guaranteed to emit the same text. Do not force model/provider calls through `runBioQueryFromManifest` or
 `runBioOperationFromManifest`; those remain the deterministic SQL/operation lanes. A turn that calls a scientific
-query or compute operation links to the normal `run:<id>` fact for that child run.
+query or compute operation links to the normal `run:<id>` fact for that child run. The generic helper
+`recordObservationLink` is the trace-stitching primitive: Pi's bio tools record `toolcall:<id> executes run:<id>` and
+`run:<id> invoked_by toolcall:<id>` when the run is created, while the session ingester records the transcript
+structure (`session -> turn -> toolcall`). Do not reconstruct these links by scanning arbitrary transcript text for
+run-looking strings; either record the link at the controlled host boundary or assert a caller-owned workflow edge
+explicitly.
 
 Graphics are first-class artifacts in this model. A rendered PNG/SVG/PDF/HTML plot should be CAS-addressed and
 linked from the turn or child run with metadata such as `media_type`, `semantic_role`, `producer_run`, source table

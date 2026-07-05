@@ -29,7 +29,7 @@ describe("session JSONL ingestion into the observation ledger", () => {
     const c = await conn();
     const toolCallId = "call_plot";
     const lines = [
-      { type: "session", id: "s-head", timestamp: "2026-07-05T10:00:00.000Z", cwd: dir },
+      { type: "session", id: "s-head", timestamp: "2026-07-05T10:00:00.000Z", cwd: dir, parentSession: join(dir, "2026-07-05T09-00-00-000Z_parent-session.jsonl") },
       { type: "message", id: "u1", timestamp: "2026-07-05T10:00:01.000Z", message: { role: "user", content: "Plot this table" } },
       {
         type: "message", id: "a1", parentId: "u1", timestamp: "2026-07-05T10:00:02.000Z",
@@ -47,7 +47,7 @@ describe("session JSONL ingestion into the observation ledger", () => {
     ];
     await fs.writeFile(sessionFile, `${lines.map((l) => JSON.stringify(l)).join("\n")}\n`);
 
-    const out = await ingestSessionJsonl({ conn: c, cas, sessionPath: sessionFile, sessionId: "s1", now: "2026-07-05T10:00:00.000Z", source: "test" });
+    const out = await ingestSessionJsonl({ conn: c, cas, sessionPath: sessionFile, sessionId: "s1", parentSessionId: "parent-session", now: "2026-07-05T10:00:00.000Z", source: "test" });
     assert.equal(out.entries, 4);
     assert.equal(out.messages, 3);
     assert.equal(out.turns, 1);
@@ -82,6 +82,7 @@ describe("session JSONL ingestion into the observation ledger", () => {
     );
     assert.ok(edges.some((e) => e.from_id === "session:s1" && e.predicate === "has_message" && e.to_id === "msg:s1:a1"));
     assert.ok(edges.some((e) => e.from_id === "session:s1" && e.predicate === "has_turn" && e.to_id === "turn:s1:a1"));
+    assert.ok(edges.some((e) => e.from_id === "session:s1" && e.predicate === "parent_session" && e.to_id === "session:parent-session"));
     assert.ok(edges.some((e) => e.from_id === "turn:s1:a1" && e.predicate === "calls" && e.to_id === `toolcall:s1:${toolCallId}`));
     assert.ok(edges.some((e) => e.from_id === `toolcall:s1:${toolCallId}` && e.predicate === "produces" && e.to_id.startsWith("cas:sha256:")));
   });
@@ -96,6 +97,46 @@ describe("session JSONL ingestion into the observation ledger", () => {
       () => ingestSessionJsonl({ conn: c, cas, sessionPath: sessionFile, now: "2026-07-05T10:00:00.000Z" }),
       /DuckDB-castable TIMESTAMPTZ/,
     );
+  });
+
+  test("session snapshot facts are idempotent across host clocks when JSONL content is unchanged", async () => {
+    const dir = await tmp("pi-bio-session-idem-");
+    const sessionFile = join(dir, "session.jsonl");
+    const cas = fsCasStore(join(dir, "cas"));
+    const c = await conn();
+    await fs.writeFile(sessionFile, `${JSON.stringify({ type: "session", id: "idem", timestamp: "2026-07-05T10:00:00.000Z", cwd: dir })}\n${JSON.stringify({
+      type: "message", id: "u1", timestamp: "2026-07-05T10:00:01.000Z",
+      message: { role: "user", content: "same bytes" },
+    })}\n`);
+
+    await ingestSessionJsonl({ conn: c, cas, sessionPath: sessionFile, sessionId: "idem", now: "2026-07-05T11:00:00.000Z", source: "test" });
+    await ingestSessionJsonl({ conn: c, cas, sessionPath: sessionFile, sessionId: "idem", now: "2026-07-05T12:00:00.000Z", source: "test" });
+
+    const rows = await c.all<{ predicate: string; n: bigint }>(
+      `SELECT predicate, count(*) AS n FROM bio_observations
+       WHERE subject_id = 'session:idem' AND predicate IN ('raw_jsonl', 'session')
+       GROUP BY predicate ORDER BY predicate`,
+    );
+    assert.deepEqual(rows.map((r) => [r.predicate, Number(r.n)]), [["raw_jsonl", 1], ["session", 1]]);
+  });
+
+  test("does not infer run links by scanning arbitrary tool text", async () => {
+    const dir = await tmp("pi-bio-session-no-run-scan-");
+    const sessionFile = join(dir, "session.jsonl");
+    const cas = fsCasStore(join(dir, "cas"));
+    const c = await conn();
+    await fs.writeFile(sessionFile, `${[
+      { type: "session", id: "no-scan", timestamp: "2026-07-05T10:00:00.000Z", cwd: dir },
+      { type: "message", id: "a1", timestamp: "2026-07-05T10:00:01.000Z", message: { role: "assistant", content: [{ type: "toolCall", id: "tc", name: "read", arguments: { path: "fixture.json" } }] } },
+      { type: "message", id: "r1", timestamp: "2026-07-05T10:00:02.000Z", message: { role: "toolResult", toolCallId: "tc", toolName: "read", isError: false, content: "{\"run_id\":\"phantom\"}" } },
+    ].map((line) => JSON.stringify(line)).join("\n")}\n`);
+
+    await ingestSessionJsonl({ conn: c, cas, sessionPath: sessionFile, now: "2026-07-05T10:00:00.000Z", source: "test" });
+
+    const rows = await c.all<{ n: bigint }>(
+      "SELECT count(*) AS n FROM bio_observations WHERE object_id = 'run:phantom' OR subject_id = 'run:phantom'",
+    );
+    assert.equal(Number(rows[0]!.n), 0);
   });
 
   test("GC roots live session raw JSONL and graphics through ledger facts", async () => {

@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, SessionShutdownEvent, SessionStartEvent } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { summarizeBioContext, type BioContext } from "../../src/core/context.js";
 import { validateReadOnlySelect } from "../../src/core/knowledge-graph.js";
@@ -7,14 +7,16 @@ import { deriveStudyPlan, normalizeStudySlug, walkMemoryGraph, type StudyArtifac
 import { deleteStudyNote, makeStudyNote, runtimeSkillRoot, runtimeStudyRoot, validateSkillInput, writeProjectSkill, writeStudyNote } from "../../src/hosts/pi-project.js";
 import { defaultDuckDbExtensionCatalog, findDuckDbExtensions } from "../../src/duckdb/extensions.js";
 import { queryGraphWindow } from "../../src/duckdb/graph-window.js";
-import { entailedEdgesAsOf, materializeBioEdgesAsOf } from "../../src/duckdb/observations.js";
+import { entailedEdgesAsOf, materializeBioEdgesAsOf, recordObservationLink } from "../../src/duckdb/observations.js";
 import { describeBioManifestFromPath, isRunDbOpenError, runBioOperationFromManifest, runBioQueryFromManifest } from "../../src/hosts/run-store.js";
 import type { CasStore } from "../../src/core/cas.js";
 import { bioStorePath, isBioStoreLocked, openBioStore, type BioStore } from "../../src/hosts/bio-store.js";
-import { isAbsolute, resolve } from "node:path";
-import { stat } from "node:fs/promises";
+import { isAbsolute, join, resolve } from "node:path";
+import { access, readFile, stat } from "node:fs/promises";
 import { forget, listMemory, recall, remember, memorySubjectId, normalizeAsOf, MEMORY_NOW, type MemoryContent } from "../../src/hosts/memory-store.js";
 import { recordSkill, skillSubjectId } from "../../src/hosts/skill-store.js";
+import { fsCasStore } from "../../src/hosts/fs-cas.js";
+import { ingestSessionJsonl, sessionArtifacts, sessionTimeline, sessionToolTrajectory } from "../../src/hosts/session-ingest.js";
 import { systemClock } from "../../src/core/clock.js";
 import type { SqlConn, ComputeRunner } from "../../src/core/ports.js";
 import type { FetchLike } from "../../src/duckdb/resolvers/http-table-scan.js";
@@ -60,6 +62,8 @@ const BIO_ORIENTATION = [
   "  / `bio_walk_memory` (walk the graph) / `bio_recall`. list/read take an `asOf` time (time-travel), and",
   "  `bio_forget` is a RETRACTION (recall as-of earlier still sees it) — memory is never erased. Prefer",
   "  walking your own memory over re-reading the corpus. Promote a stable workflow to a skill with `bio_create_skill`.",
+  "- SESSION: the extension syncs persisted Pi session JSONL into the same ledger/CAS at structural lifecycle",
+  "  boundaries, so chat/tool/artifact trajectories are auditable without a separate transcript store.",
   "- GRAPH: validate graph projection profiles with `bio_validate_graph_projection`; inspect bounded graph context",
   "  with `bio_graph_window` instead of dumping high-degree neighborhoods into the prompt.",
 ].join("\n");
@@ -172,6 +176,51 @@ async function tryOpen(open: OpenStore, cwd: string): Promise<BioStore | undefin
 
 type OpenStore = (cwd: string) => Promise<BioStore>;
 
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+interface SessionSyncSummary {
+  ok: boolean;
+  reason: string;
+  sessionFile?: string;
+  sessionId?: string;
+  rawDigest?: string;
+  rawCasUri?: string;
+  entries?: number;
+  messages?: number;
+  turns?: number;
+  toolCalls?: number;
+  artifacts?: number;
+  observations?: number;
+  timelineRows?: number;
+  toolRows?: number;
+  artifactRows?: number;
+}
+
+type SessionLifecycleEvent = SessionStartEvent | SessionShutdownEvent | { type: "session_compact" };
+
+function objectProp(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+}
+
+async function readSessionHeaderId(path: string | undefined): Promise<string | undefined> {
+  if (!path) return undefined;
+  try {
+    const text = await readFile(path, "utf8");
+    const line = text.split(/\r?\n/).find((candidate) => candidate.trim().length > 0);
+    if (!line) return undefined;
+    const header = objectProp(JSON.parse(line) as unknown);
+    return header?.type === "session" && typeof header.id === "string" && header.id.length > 0 ? header.id : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function parentSessionIdFromLifecycle(event: SessionLifecycleEvent): Promise<string | undefined> {
+  // `previousSessionFile` is lineage only for fork starts. For resume/new it is the previously active session,
+  // not necessarily a parent; shutdown targetSessionFile points away from the current session.
+  return event.type === "session_start" && event.reason === "fork" ? readSessionHeaderId(event.previousSessionFile) : undefined;
+}
+
 export interface BioExtensionOptions {
   network?: { fetch: FetchLike };
   /** COMPUTE grant: the host injects a ComputeRunner so a manifest's `compute.run` resources can execute.
@@ -204,11 +253,159 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
   const protectedSessionBindings = options.protectedSessionBindings;
   const protectedSessionVariables = options.protectedSessionVariables;
   const author = options.author ?? "agent:local";
+  const usesDefaultLocalStore = options.openStore === undefined;
   const openStore: OpenStore = options.openStore ?? ((cwd) => openBioStore(cwd));
   return function piBioAgentExtension(pi: ExtensionAPI): void {
+  let sessionSyncChain: Promise<unknown> = Promise.resolve();
+
+  async function openSessionSyncStore(cwd: string): Promise<BioStore | undefined> {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const store = await tryOpen(openStore, cwd);
+      if (store) return store;
+      if (attempt < 2) await sleep(100 * (attempt + 1));
+    }
+    return undefined;
+  }
+
+  async function syncCurrentSession(ctx: ExtensionContext, event: SessionLifecycleEvent): Promise<SessionSyncSummary> {
+    const reason = "reason" in event ? event.reason : event.type;
+    const sessionFile = ctx.sessionManager.getSessionFile();
+    const sessionId = ctx.sessionManager.getSessionId();
+    if (!sessionFile) return { ok: false, reason: "no persisted Pi session file", sessionId };
+    try {
+      await access(sessionFile);
+    } catch {
+      return { ok: false, reason: "Pi session file is not readable yet", sessionFile, sessionId };
+    }
+
+    const sessionCas = cas ?? (usesDefaultLocalStore ? fsCasStore(join(ctx.cwd, ".pi", "bio-agent", "cas")) : undefined);
+    if (!sessionCas) {
+      return {
+        ok: false,
+        reason: "session sync requires an explicit CAS when openStore is injected; refusing to write shared-ledger references to machine-local bytes",
+        sessionFile,
+        sessionId,
+      };
+    }
+
+    let store: BioStore | undefined;
+    try {
+      store = await openSessionSyncStore(ctx.cwd);
+    } catch (e) {
+      return { ok: false, reason: `observation store unavailable: ${e instanceof Error ? e.message : String(e)}`, sessionFile, sessionId };
+    }
+    if (!store) return { ok: false, reason: "observation store is locked; session sync will retry on a later hook", sessionFile, sessionId };
+
+    try {
+      const result = await ingestSessionJsonl({
+        conn: store.conn,
+        cas: sessionCas,
+        sessionPath: sessionFile,
+        sessionId,
+        parentSessionId: await parentSessionIdFromLifecycle(event),
+        source: author,
+        now: systemClock(),
+      });
+      const [timeline, tools, artifacts] = await Promise.all([
+        sessionTimeline(store.conn, result.sessionId),
+        sessionToolTrajectory(store.conn, result.sessionId),
+        sessionArtifacts(store.conn, result.sessionId),
+      ]);
+      return {
+        ok: true,
+        reason,
+        sessionFile,
+        sessionId: result.sessionId,
+        rawDigest: result.rawDigest,
+        rawCasUri: result.rawCasUri,
+        entries: result.entries,
+        messages: result.messages,
+        turns: result.turns,
+        toolCalls: result.toolCalls,
+        artifacts: result.artifacts,
+        observations: result.observations,
+        timelineRows: timeline.length,
+        toolRows: tools.length,
+        artifactRows: artifacts.length,
+      };
+    } finally {
+      store.close();
+    }
+  }
+
+  function enqueueSessionSync(ctx: ExtensionContext, event: SessionLifecycleEvent): Promise<SessionSyncSummary> {
+    const next = sessionSyncChain.then(() => syncCurrentSession(ctx, event));
+    sessionSyncChain = next.catch(() => undefined);
+    return next;
+  }
+
+  async function syncSessionOrWarn(ctx: ExtensionContext, event: SessionLifecycleEvent): Promise<SessionSyncSummary> {
+    try {
+      const result = await enqueueSessionSync(ctx, event);
+      if (!result.ok && result.reason !== "no persisted Pi session file") {
+        console.warn(`bio-agent: session sync skipped (${result.reason})`);
+      }
+      return result;
+    } catch (e) {
+      const failure = { ok: false, reason: `session sync failed: ${e instanceof Error ? e.message : String(e)}` };
+      console.warn(`bio-agent: ${failure.reason}`);
+      return failure;
+    }
+  }
+
+  function toolcallNodeFromContext(ctx: ExtensionContext, toolCallId: unknown): { sessionId: string; node: string } | undefined {
+    const sessionId = ctx.sessionManager?.getSessionId?.();
+    if (typeof sessionId !== "string" || sessionId.length === 0 || typeof toolCallId !== "string" || toolCallId.length === 0) return undefined;
+    return { sessionId, node: `toolcall:${sessionId}:${toolCallId}` };
+  }
+
+  async function recordToolRunLink(storeConn: SqlConn | undefined, ctx: ExtensionContext, toolCallId: unknown, toolName: string, runId: string): Promise<void> {
+    if (!storeConn) return;
+    const toolcall = toolcallNodeFromContext(ctx, toolCallId);
+    if (!toolcall) return;
+    try {
+      const runSubject = `run:${runId}`;
+      const present = await storeConn.all<{ ok: number }>(
+        "SELECT 1 AS ok FROM bio_observations WHERE subject_id = ? AND predicate = 'run' LIMIT 1",
+        [runSubject],
+      );
+      if (present.length === 0) return;
+      const recordedAt = systemClock();
+      const attrs = { session_id: toolcall.sessionId, tool_name: toolName, run_id: runId, source: "pi_tool_execute" };
+      await recordObservationLink(storeConn, {
+        subjectId: toolcall.node,
+        predicate: "executes",
+        objectId: runSubject,
+        recordedAt,
+        source: author,
+        attrs,
+      });
+      await recordObservationLink(storeConn, {
+        subjectId: runSubject,
+        predicate: "invoked_by",
+        objectId: toolcall.node,
+        recordedAt,
+        source: author,
+        attrs,
+      });
+    } catch {
+      /* best-effort trace edge: never fail a completed scientific run because the chat/run link could not be logged */
+    }
+  }
+
   pi.on("resources_discover", (event) => ({
     skillPaths: [runtimeSkillRoot(event.cwd)],
   }));
+
+  pi.on("session_start", (event, ctx) => {
+    void syncSessionOrWarn(ctx, event);
+  });
+  pi.on("session_compact", (event, ctx) => {
+    void syncSessionOrWarn(ctx, event);
+  });
+  pi.on("session_shutdown", async (event, ctx) => {
+    await syncSessionOrWarn(ctx, event);
+  });
 
   // Give the agent a persistent, drift-resistant orientation to pi-bio-agent on every turn (the pi-coding-agent
   // way: append to the chained system prompt in before_agent_start). It points at DISCOVERY tools + the examples
@@ -258,13 +455,16 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
       operationId: Type.String({ description: "Operation id declared in the manifest." }),
       runId: Type.Optional(Type.String({ description: "Stable run id; generated when omitted." })),
     }),
-    async execute(_id, params: { dbPath: string; manifestPath: string; operationId: string; runId?: string }, signal, _onUpdate, ctx) {
+    async execute(id, params: { dbPath: string; manifestPath: string; operationId: string; runId?: string }, signal, _onUpdate, ctx) {
       // Pass ONLY schema-approved fields — never spread untrusted params. Spreading would let an agent smuggle
       // host-only capabilities the tool schema omits (duckdbInitSql / now / cwd) if the schema validator does
       // not strip unknown keys. network/signal are host-composed, never agent-supplied.
       const { dbPath, manifestPath, operationId, runId } = params;
-      return text(await withRunLog(openStore, ctx.cwd, dbPath, (storeConn) =>
-        runBioOperationFromManifest({ cwd: ctx.cwd, dbPath, manifestPath, operationId, runId, network, compute: computeGrant, cas, protectedSessionBindings, protectedSessionVariables, signal, store: storeConn, author })));
+      return text(await withRunLog(openStore, ctx.cwd, dbPath, async (storeConn) => {
+        const out = await runBioOperationFromManifest({ cwd: ctx.cwd, dbPath, manifestPath, operationId, runId, network, compute: computeGrant, cas, protectedSessionBindings, protectedSessionVariables, signal, store: storeConn, author });
+        await recordToolRunLink(storeConn, ctx, id, "bio_run_operation", out.runId);
+        return out;
+      }));
     },
   });
 
@@ -280,11 +480,14 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
       bindings: Type.Optional(Type.Record(Type.String(), Type.Unknown(), { description: "Non-secret agent params as DuckDB session variables: each becomes `SET VARIABLE name = value`, so a resource's url (a SQL expression) composes it via getvariable('name') — e.g. {\"query\":\"asthma\"} for a url like `'...?q=' || getvariable('query')`. Do not put API tokens here; host-owned auth belongs in injected fetch policy, protected host bindings, or declared operations." })),
       runId: Type.Optional(Type.String({ description: "Stable run id; generated when omitted." })),
     }),
-    async execute(_id, params: { dbPath: string; manifestPath: string; sql: string; resources?: string[]; bindings?: Record<string, unknown>; runId?: string }, signal, _onUpdate, ctx) {
+    async execute(id, params: { dbPath: string; manifestPath: string; sql: string; resources?: string[]; bindings?: Record<string, unknown>; runId?: string }, signal, _onUpdate, ctx) {
       // Only schema-approved fields (see bio_run_operation): never spread untrusted params into the host runner.
       const { dbPath, manifestPath, sql, resources, bindings, runId } = params;
-      return text(await withRunLog(openStore, ctx.cwd, dbPath, (storeConn) =>
-        runBioQueryFromManifest({ cwd: ctx.cwd, dbPath, manifestPath, sql, resources, bindings, runId, network, compute: computeGrant, cas, protectedSessionBindings, protectedSessionVariables, signal, store: storeConn, author })));
+      return text(await withRunLog(openStore, ctx.cwd, dbPath, async (storeConn) => {
+        const out = await runBioQueryFromManifest({ cwd: ctx.cwd, dbPath, manifestPath, sql, resources, bindings, runId, network, compute: computeGrant, cas, protectedSessionBindings, protectedSessionVariables, signal, store: storeConn, author });
+        await recordToolRunLink(storeConn, ctx, id, "bio_query", out.runId);
+        return out;
+      }));
     },
   });
 

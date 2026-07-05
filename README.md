@@ -12,8 +12,8 @@ v2+](https://img.shields.io/badge/License-GPL%20v2%2B-blue.svg)](LICENSE)
 A lean, provider-agnostic library for **agent-controlled scientific
 computation**. You point an agent at a manifest; it does schema
 discovery, writes read-only SQL over your data, and answers through
-recorded, reproducible runs on infrastructure you control. Pi is the
-first host adapter, not the boundary of the system.
+recorded, reproducible runs on infrastructure you control. The live
+transcript below runs through the Pi extension path.
 
 ## See it
 

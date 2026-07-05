@@ -89,7 +89,7 @@ knitr::knit_engines$set(nng = function(options) {
 
 A lean, provider-agnostic library for **agent-controlled scientific computation**. You point an agent at a
 manifest; it does schema discovery, writes read-only SQL over your data, and answers through recorded,
-reproducible runs on infrastructure you control. Pi is the first host adapter, not the boundary of the system.
+reproducible runs on infrastructure you control. The live transcript below runs through the Pi extension path.
 
 ## See it
 

@@ -5,7 +5,7 @@ import readline from "node:readline";
 import type { CasStore } from "../core/cas.js";
 import type { SqlConn } from "../core/ports.js";
 import { canonicalDigest } from "../core/reproducibility.js";
-import { createBioObservationSchema, recordObservation } from "../duckdb/observations.js";
+import { createBioObservationSchema, recordObservation, recordObservationLink } from "../duckdb/observations.js";
 
 type JsonObject = Record<string, unknown>;
 
@@ -17,6 +17,8 @@ export interface IngestSessionJsonlRequest {
   sessionPath: string;
   /** Stable public id for the imported session. Defaults to the JSONL basename without `.jsonl`. */
   sessionId?: string;
+  /** Optional stable parent session id. When omitted, Pi's header `parentSession` path is used only as metadata. */
+  parentSessionId?: string;
   /** Observation source/author. Defaults to `session-ingest`. */
   source?: string;
   /** Used only when a JSONL entry has no timestamp. A present but invalid timestamp fails closed. */
@@ -116,6 +118,17 @@ function digestJson(value: unknown): `sha256:${string}` {
   return canonicalDigest(value);
 }
 
+function firstSessionHeader(bytes: Buffer): JsonObject | undefined {
+  const firstLine = bytes.toString("utf8").split(/\r?\n/).find((line) => line.trim().length > 0);
+  if (!firstLine) return undefined;
+  try {
+    const parsed = JSON.parse(firstLine) as unknown;
+    return isObject(parsed) && parsed.type === "session" ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 async function putCas(cas: CasStore, bytes: Buffer | string): Promise<`sha256:${string}`> {
   const digest = sha256(bytes);
   await cas.put({ algorithm: "sha256", digest }, bytes);
@@ -141,15 +154,8 @@ async function recordEdge(
   source: string,
   attrs?: Record<string, unknown>,
 ): Promise<void> {
-  await record(conn, {
-    statementKey: `${subjectId}:${predicate}:${objectId}`,
-    subjectId,
-    predicate,
-    objectId,
-    recordedAt,
-    source,
-    attrs,
-  }, counts);
+  await recordObservationLink(conn, { subjectId, predicate, objectId, recordedAt, source, attrs });
+  counts.observations++;
 }
 
 function* walkImages(value: unknown): Generator<{ data: string; mimeType: string; indexPath: string }> {
@@ -244,26 +250,21 @@ export async function ingestSessionJsonl(req: IngestSessionJsonlRequest): Promis
   await createBioObservationSchema(req.conn, { ifNotExists: true });
   const source = req.source ?? "session-ingest";
   const fallbackNow = req.now ?? new Date().toISOString();
-  const sessionId = req.sessionId ?? stripJsonl(basename(req.sessionPath));
-  const sessionNode = node("session", sessionId);
   const raw = await fs.readFile(req.sessionPath);
+  const header = firstSessionHeader(raw);
+  const sessionId = req.sessionId ?? (header ? stringProp(header, "id") : undefined) ?? stripJsonl(basename(req.sessionPath));
+  const parentSessionId = req.parentSessionId?.trim();
+  if (req.parentSessionId !== undefined && !parentSessionId) throw new Error("ingestSessionJsonl: parentSessionId must be non-empty when provided");
+  const sessionNode = node("session", sessionId);
+  const headerParentSession = header ? stringProp(header, "parentSession") : undefined;
+  const inferredParentSessionId = parentSessionId;
   const rawDigest = await putCas(req.cas, raw);
   const rawCasUri = casNode(rawDigest);
   const counts = { observations: 0, artifacts: 0 };
   const seenArtifacts = new Set<string>();
   let entries = 0, messages = 0, turns = 0, toolCalls = 0;
   let previousUserMessageNode: string | undefined;
-
-  await record(req.conn, {
-    statementKey: `${sessionNode}:raw_jsonl`,
-    subjectId: sessionNode,
-    predicate: "raw_jsonl",
-    value: { digest: rawDigest, uri: rawCasUri, size_bytes: raw.length, format: "pi-session-jsonl", file: basename(req.sessionPath) },
-    recordedAt: fallbackNow,
-    source,
-    digest: rawDigest,
-    attrs: { session_id: sessionId, source_path: req.sessionPath },
-  }, counts);
+  let snapshotRecordedAt = fallbackNow;
 
   const input = createReadStream(req.sessionPath, { encoding: "utf8" });
   const reader = readline.createInterface({ input, crlfDelay: Infinity });
@@ -275,6 +276,7 @@ export async function ingestSessionJsonl(req: IngestSessionJsonlRequest): Promis
     const entry = parseJsonLine(line, lineNumber);
     entries++;
     const recordedAt = entryTime(entry, fallbackNow);
+    snapshotRecordedAt = recordedAt;
     const entryDigest = digestJson(entry);
     const entryId = localEntryId(entry, lineNumber);
     const entryNode = node("entry", sessionId, entryId);
@@ -425,11 +427,41 @@ export async function ingestSessionJsonl(req: IngestSessionJsonlRequest): Promis
   }
 
   await record(req.conn, {
+    statementKey: `${sessionNode}:raw_jsonl`,
+    subjectId: sessionNode,
+    predicate: "raw_jsonl",
+    value: { digest: rawDigest, uri: rawCasUri, size_bytes: raw.length, format: "pi-session-jsonl", file: basename(req.sessionPath) },
+    recordedAt: snapshotRecordedAt,
+    source,
+    digest: rawDigest,
+    attrs: { session_id: sessionId, source_path: req.sessionPath },
+  }, counts);
+
+  if (inferredParentSessionId) {
+    await recordEdge(req.conn, counts, sessionNode, "parent_session", node("session", inferredParentSessionId), snapshotRecordedAt, source, {
+      parent_session_id: inferredParentSessionId,
+      parent_session_ref: headerParentSession ?? null,
+      parent_session_ref_kind: "explicit_id",
+    });
+  }
+
+  await record(req.conn, {
     statementKey: sessionNode,
     subjectId: sessionNode,
     predicate: "session",
-    value: { session_id: sessionId, raw_digest: rawDigest, raw_uri: rawCasUri, entries, messages, turns, tool_calls: toolCalls, artifacts: counts.artifacts },
-    recordedAt: fallbackNow,
+    value: {
+      session_id: sessionId,
+      raw_digest: rawDigest,
+      raw_uri: rawCasUri,
+      entries,
+      messages,
+      turns,
+      tool_calls: toolCalls,
+      artifacts: counts.artifacts,
+      parent_session_id: inferredParentSessionId ?? null,
+      parent_session_ref: headerParentSession ?? null,
+    },
+    recordedAt: snapshotRecordedAt,
     source,
     digest: rawDigest,
     attrs: { session_id: sessionId, format: "pi-session-jsonl" },
