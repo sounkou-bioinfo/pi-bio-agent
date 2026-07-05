@@ -23,8 +23,8 @@ SELECT * FROM ducknng_ncurl_table(
 ```
 
 The same generic path serves OpenTargets, gnomAD's own REST, or any JSON endpoint — point a new manifest at a new
-URL with new params, **zero new TypeScript**. `http.get` (the TS resolver + injected fetch) remains the fallback
-when a DuckDB version has no ducknng build.
+URL with new params, **zero new TypeScript**. `http.get` is a separate TS resolver path for hosts that deliberately
+choose an injected JS `fetch` port.
 
 ## Single batch is pure SQL; chunking a whole VCF is request fanout (not a row-count limit)
 
@@ -62,8 +62,8 @@ defensively because a cached or local *dev* build may not be).
 
 Network is the **host's** capability, never the agent's. For the SQL-native path egress is whatever the host's
 DuckDB/sandbox allows (the library is not the egress firewall — enforce allow/block lists, internal-metadata-IP
-blocking, and a deny-by-default container at the host boundary). For the `http.get` fallback, the operator grants
-network by loading the explicit *networked* entrypoint (`pi -e extensions/pi-coding-agent/index-networked.ts`),
+blocking, and a deny-by-default container at the host boundary). For the separate `http.get` resolver path, the
+operator grants network by loading the explicit *networked* entrypoint (`pi -e extensions/pi-coding-agent/index-networked.ts`),
 which composes a `fetch` in; the default entrypoint injects none, so that path fails closed.
 
 The agent **unnests the response in SQL** and applies all three predicates (rare, high-impact, pathogenic) — the

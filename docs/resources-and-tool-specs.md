@@ -33,8 +33,8 @@ A `BioResolverSpec` declares a capability that turns a `VirtualResourceSpec` (an
 Many bio tools are just an HTTP request plus validation, and network is a SQL table function, so the **primary**
 shape is SQL-native: `ducknng_ncurl_table` inside `duckdb.sql_materialize`, with the URL/headers/body composed in
 SQL and the JSON parsed into columns: **no TS resolver at all** (the `ols4-grounding` GET, `variant-annotation`
-POST). A `BioResolverSpec` + `VirtualResourceSpec` backed by `http.get` (a TS resolver + injected `fetch`) is the
-**fallback** for a DuckDB build with no ducknng, plus the host-driven retry/fanout seam. Either way it is a
+POST). A `BioResolverSpec` + `VirtualResourceSpec` backed by `http.get` is a separate TS resolver path: the host
+injects `fetch` when an application chooses JS fetch policy instead of SQL-native ducknng. Either way it is a
 declared resource with a receipt, never custom framework code.
 
 ## Multi-agent by attribution; authorization stays the host's job

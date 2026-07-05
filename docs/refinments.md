@@ -263,8 +263,9 @@ looked outside the substrate:
   conductor step: composition, not a new transport.
 - **GraphQL**: a `POST` with a JSON query body to one endpoint, JSON back -> table: a `method`+`body`
   generalization of the http resolver.
-- **auth**: SQL-native HTTP should use a host-commissioned ducknng profile; fallback `http.get` uses host-injected
-  fetch auth. In both paths, secrets stay outside the manifest and outside agent-visible SQL.
+- **auth**: SQL-native HTTP should use a host-commissioned ducknng profile; the separate `http.get` resolver uses
+  host-injected fetch auth when an application deliberately chooses that port. In both paths, secrets stay outside
+  the manifest and outside agent-visible SQL.
 - **pagination**: follow `next` cursors in a bounded loop, `UNION` each page into the table: a resolver loop /
   conductor map.
 - **human/clinical sign-off**: a host gate around runs: out of executable scope by definition (the substrate
@@ -295,7 +296,7 @@ limit/streaming/write machinery is genuine work the process runtime + host capab
 Resolutions (these are ADDRESSABLE via known machinery, not open research):
 - **auth / OAuth refresh** -> lean on **pi's auth storage + token-refresh ops**. For SQL-native ducknng calls, the
   host resolves/refreshes credentials and commissions a scoped profile on the execution runtime; agent SQL receives
-  only `profile_id`. For fallback `http.get`, inject auth through `withAuth`, never the manifest.
+  only `profile_id`. For the `http.get` resolver path, inject auth through `withAuth`, never the manifest.
 - **rate limits** -> exponential backoff with `Retry-After`/`429` awareness in the resolver's retry policy.
 - **streaming / binary / SSE / websockets** -> **pi-mono has reusable patterns** for these transports; widen
   `FetchResponse` beyond `text()` to a byte stream and adopt them.
@@ -321,7 +322,7 @@ Resolutions (these are ADDRESSABLE via known machinery, not open research):
 - `method` + `body` params (POST/PUT; GraphQL = POST + JSON query body). Keep read-only INTENT explicit (a
   declared `mutates: false` or a separate `http.post` name) so the effect surface stays honest.
 - scoped auth profiles (never in the manifest): a host commissions a ducknng HTTP profile and SQL supplies only
-  `profile_id`; fallback `http.get` can still use injected `withAuth` headers.
+  `profile_id`; the `http.get` resolver path can use injected `withAuth` headers.
 - pagination: a `paginate` spec (`next` JSONPath / `Link` header) the resolver follows, UNION-ing pages.
 - a poll primitive: submit -> poll `status` until ready -> fetch, with bounded backoff (cancellable via the
   already-threaded `AbortSignal`). Drives stateful-async services.
@@ -357,8 +358,8 @@ body. Overfitting: a real skill doesn't bake the query data into the manifest. T
     timeout, tls, profile_id)`: SQL composes params and request bodies, ducknng fetches/parses JSON into columns,
     and credentialed calls use a host-commissioned profile id rather than a SQL-visible token. Plain HTTPS works by
     passing a host-created TLS config id; authenticated HTTPS works when the loaded ducknng build exposes HTTP
-    profiles. The `http.get` TypeScript resolver plus `withRetry`/`withAuth` remains the compatibility fallback
-    where a host cannot load ducknng/profile support or needs per-request refresh before profile rotation exists.
+    profiles. The `http.get` TypeScript resolver plus `withRetry`/`withAuth` is a separate JS-fetch path for hosts
+    that intentionally keep connector policy outside DuckDB.
 - **Batch HTTP = a chunked, rate-limited pipeline, not one request.** VEP caps the batch (~200-1000 ids) and
   rate-limits (~15 req/s, `429`+`Retry-After`, hourly quota). Annotating a real VCF: chunk the variant list (SQL)
   into batches <= the limit, run them through `runPipeline` (the push/pull pool) with `withRetry` (429/backoff),
@@ -396,8 +397,8 @@ body. Overfitting: a real skill doesn't bake the query data into the manifest. T
     one row, fragile" note misread this). Or drive the separate calls outside one SQL statement with
     `runPipeline` + `withRetry` (honoring `Retry-After`) and `UNION` the results.
   So: single GET/POST with scalar params (incl. an upstream-aggregated body) is the SQL-native path today (both
-  examples). The TS `http.get` resolver + `runPipeline` is the right tool only for the multi-REQUEST chunked-VCF
-  fanout, or as the fallback when a DuckDB version has no ducknng build.
+  examples). For multi-request chunked-VCF fanout, use scalar `ducknng_ncurl_aio(...)` plus the host drain/retry
+  loop in `src/duckdb/ncurl-fanout.ts`, or choose the separate TS `http.get` resolver path deliberately.
 - **Retry is error-as-value, and the loop is the AIO drain (not a recursive CTE): verified on 1.5.2.** Two
   building blocks are real: (a) `ducknng_ncurl(...)` and `ducknng_ncurl_aio_collect(...)` return `(ok, status,
   error, …)` ROWS: a non-2xx / `429` / `503` / connection failure is a VALUE you branch on, not a thrown
@@ -765,40 +766,41 @@ Open library questions to resolve before claiming that position:
   boundary, audit hook, token-refresh policy, or policy injector; not for routine per-API clients.
 - **ducknng credentialed HTTP integration point (landed in ducknng; keep lifecycle gaps explicit).** The right
   boundary is now: the host registers a scoped outbound HTTP profile on the DuckDB/ducknng runtime (local hosts use
-  `registerDucknngHttpProfile`), agent-visible SQL supplies only `profile_id`, and `ducknng_ncurl`,
-  `ducknng_ncurl_aio`, and `ducknng_ncurl_table` resolve the secret header inside ducknng after
-  scheme/host/port/path/method/TLS checks. Caller headers that collide with the injected profile auth header fail
-  rather than overriding the credential, and profile listing is redacted. This removes the old `SET VARIABLE token`
-  / `ducknng_http_headers_build(['Authorization'], ...)` integration pattern for generic authenticated SQL
-  connectors.
+  `registerDucknngHttpProfile`), optionally restricts it by execution subject, agent-visible SQL supplies only
+  `profile_id`, and `ducknng_ncurl`, `ducknng_ncurl_aio`, and `ducknng_ncurl_table` resolve the secret header
+  inside ducknng after scheme/host/port/path/method/TLS/admission checks. Caller headers that collide with the
+  injected profile auth header fail rather than overriding the credential, and profile listing is redacted. This
+  removes the old `SET VARIABLE token` / `ducknng_http_headers_build(['Authorization'], ...)` integration pattern
+  for generic authenticated SQL connectors.
 
   Remaining library/host work is narrower and should not be confused with the integration point:
-  - host commissioning/admission: which run, worker, or remote DuckDB server is allowed to use which `profile_id`;
   - rotation/refresh: host auth storage such as Pi `AuthStorage` should update/drop/re-register profiles through
     the same helper/runtime boundary without exposing the current token to SQL;
   - receipts/replay/action-cache: record profile id, scope, version/expiry, and scope decision, never token values;
+  - embedded-host subject bracketing: ducknng services install the execution subject; pure in-process hosts still
+    need a clean bracketing API if they want subject-restricted profiles without routing through ducknng service
+    dispatch;
   - whole-header ownership policy: if a deployment needs to forbid all caller-supplied headers except an allowlist,
     that must be explicit profile metadata, not a hardcoded taxonomy of auth-looking header names;
   - DuckDB Secret Manager integration remains useful as a future storage/provider backend, but ducknng still needs
     its own URL/method/header scoping at send time.
 
-  `http.get` + host `withAuth` remains the fallback when a DuckDB build lacks ducknng profiles or when dynamic
-  token refresh must happen per request before profile rotation support is available. DuckDB data-at-rest encryption
-  protects persisted DB/WAL/temp files; it does not make SQL-readable session variables safe.
+  `http.get` + host `withAuth` remains a separate JS-fetch resolver path. DuckDB data-at-rest encryption protects
+  persisted DB/WAL/temp files; it does not make SQL-readable session variables safe.
 - **ducknng auth/state validation:** already exercised in-tree: `ducknng_ncurl_table` against local HTTP fixtures,
   scalar AIO fanout/retry, `ducknng_run_rpc` / `ducknng_query_rpc` mutable shared state, and NNG socket
   reachability. Also checked: local MCP-style `initialize` -> `Mcp-Session-Id` -> `tools/list` header threading,
   an SSE route served by ducknng and consumed with `ducknng_ncurl`, and, when the loaded ducknng build supports it,
-  scoped HTTP profile auth where SQL passes only `profile_id`. Still unproven and should be a conformance target
-  before product claims: `wss`/server-push subscriptions, TLS/mTLS auth fixtures in this repo, profile
-  rotation/refresh hooks, and profile-aware receipts/replay/action-cache scoping.
+  scoped and subject-restricted HTTP profile auth where SQL passes only `profile_id`. Still unproven and should be a
+  conformance target before product claims: `wss`/server-push subscriptions, TLS/mTLS auth fixtures in this repo,
+  profile rotation/refresh hooks, embedded-host subject bracketing for non-service hosts, and profile-aware
+  receipts/replay/action-cache scoping.
 - **Token rotation/refresh boundary:** reuse the Pi pattern rather than inventing manifest config. Pi's
   `AuthStorage` stores API keys/OAuth credentials in a locked 0600 file, refreshes OAuth under lock, and returns an
-  access token only at request time. `http.get` already supports dynamic refresh because `withAuth` calls
-  `getAuthHeaders` per request and host auth wins over manifest headers. For the ducknng SQL path, the host should
-  resolve or refresh the token, register/update the scoped HTTP profile on the execution connection, and give agent
-  SQL only the profile id. Use `withAuth` as the fallback when secrecy matters more than SQL-native execution or
-  when the available ducknng build has no profile support.
+  access token only at request time. `http.get` supports dynamic refresh because `withAuth` calls `getAuthHeaders`
+  per request and host auth wins over manifest headers. For the ducknng SQL path, the host should resolve or refresh
+  the token, register/update the scoped HTTP profile on the execution connection, and give agent SQL only the
+  profile id.
 - **Downstream VM boundary:** if an application needs stronger execution isolation than local child-process compute or a
   bubblewrap-style wrapper, use a downstream microVM host such as
   [Gondolin](https://github.com/earendil-works/gondolin), not a new core sandbox model. Gondolin's useful pattern

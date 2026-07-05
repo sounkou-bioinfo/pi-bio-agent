@@ -109,8 +109,8 @@ Inverted from substrate-first: a thin flagship lands early and stays green as su
 
 **Current position:** the flagship is built (manifest #1); `runOperation` produces run records, results,
 and resolution receipts, persisted under `.pi/bio-agent/runs/`. Built out since: the SQL-native network
-path (`ducknng_ncurl_table`, `http.get` fallback), the compute pillar (`compute.run` over Arrow
-IPC), region-scoped `duckhts.read_bcf`, CAS-of-bytes, and the two-pillar coloc flagship
+path (`ducknng_ncurl_table` plus scoped/subject-admitted HTTP profiles), the compute pillar (`compute.run` over
+Arrow IPC), region-scoped `duckhts.read_bcf`, CAS-of-bytes, and the two-pillar coloc flagship
 (`examples/coloc`, multi-tissue post-GWAS colocalization).
 
 **Temporal memory + one Datomic/CAS store: built.** Notes, skills, facts, and runs are append-only,
@@ -124,7 +124,7 @@ Phase 0 (done)   Flagship skeleton: manifest #1, runOperation -> run/result/rece
 Phase 1 (done)   Run/provenance substrate: run+receipt persistence + CAS-of-bytes. Temporal anchoring +
                  KG-fact recording are consumed by Phase 4 (built with it, not speculative).
 Phase 2 (done)   Network is SQL-native: ducknng_ncurl_table composes URL/headers/body in SQL and parses
-                 JSON -> table with no TS resolver; http.get is the fallback + fanout/retry seam.
+                 JSON -> table with no TS resolver; ducknng HTTP profiles keep token headers host-owned.
 Phase 3 (done)   Out-of-process compute: compute.run (Arrow IPC) with timeout/output caps, process-
                  group kill, script-bytes provenance, fail-closed. Table, file, and files-only outputs
                  all built (declared outputs captured into CAS). The resolver materializes one result, but

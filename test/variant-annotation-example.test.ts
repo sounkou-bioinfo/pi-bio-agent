@@ -14,8 +14,7 @@ import { runBioQueryFromManifest } from "../src/hosts/run-store.js";
 // the NESTED VEP envelope (transcript_consequences[] + colocated_variants[]) into STRUCT(...)[] columns the
 // agent UNNESTs. A LOCAL ducknng server is the fixture: its POST route VALIDATES the {ids} body server-side
 // (returns 400 -> ncurl_table requires 2xx -> the run fails, if no ids body) and then returns a canned nested
-// envelope. No external network, no mock fetch. (http.get + a mock fetch is the fallback this stands in for
-// when a DuckDB version has no ducknng build.)
+// envelope. No external network, no mock fetch.
 const MANIFEST = resolve(process.cwd(), "examples", "variant-annotation", "manifest.json");
 const PROVISION = ["INSTALL ducknng FROM community", "LOAD ducknng"];
 

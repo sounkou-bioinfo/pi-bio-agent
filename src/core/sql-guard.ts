@@ -159,6 +159,25 @@ function protectedVariableSurface(sql: string, protectedVariables: readonly stri
   return undefined;
 }
 
+const AD_HOC_FORBIDDEN_DUCKNNG_PROFILE_MUTATION_FUNCTIONS = new Set([
+  "ducknng_register_http_profile",
+  "ducknng_drop_http_profile",
+]);
+
+function forbiddenDucknngProfileMutationSurface(sql: string): string | undefined {
+  for (let i = 0; i < sql.length;) {
+    const c = sql[i], c2 = sql[i + 1];
+    if (c === "'") { i = skipStringLiteral(sql, i); continue; }
+    if (c === "-" && c2 === "-") { i = skipLineComment(sql, i); continue; }
+    if (c === "/" && c2 === "*") { i = skipBlockComment(sql, i); continue; }
+    const call = readQualifiedFunctionName(sql, i);
+    if (!call) { i++; continue; }
+    if (AD_HOC_FORBIDDEN_DUCKNNG_PROFILE_MUTATION_FUNCTIONS.has(call.fn)) return `${call.fn}()`;
+    i = call.next + 1;
+  }
+  return undefined;
+}
+
 // Fixture SQL (approval-harness test setup) legitimately needs multi-statement DDL to seed in-memory test data
 // (CREATE TABLE / INSERT / SELECT), so it is NOT read-only — but it must not reach OUTSIDE the throwaway sandbox db:
 // ATTACH/DETACH (another db), COPY / EXPORT / IMPORT (file I/O), INSTALL / LOAD (extensions, incl. network-capable),
@@ -217,11 +236,15 @@ export function validateReadOnlySelect(sql: string): string {
 /** The ad-hoc agent query boundary is narrower than the declared-operation boundary: it may use ordinary
  *  agent bindings (`getvariable('query')`) but must not read host-declared protected session variables into
  *  result.json. This is not a sandbox and not egress control; it closes the known SQL-visible protected-variable
- *  exfiltration paths. SQL-native authenticated HTTP should use ducknng profiles; declared operations remain the
- *  host-authored path for deliberate non-profile connection state. */
+ *  exfiltration paths. It also cannot mutate ducknng's host-owned HTTP credential profile registry: profiles are
+ *  commissioned by host code, not by the agent-authored query language. SQL-native authenticated HTTP should use a
+ *  pre-commissioned ducknng profile; declared operations remain the host-authored path for deliberate non-profile
+ *  connection state. */
 export function validateAdHocBioQuerySelect(sql: string, opts: { protectedVariables?: readonly string[] } = {}): string {
   const trimmed = validateReadOnlySelect(sql);
   const hit = protectedVariableSurface(trimmed, opts.protectedVariables ?? []);
-  if (hit) throw new Error(`ad-hoc bio_query must not read host-declared protected session variables (${hit}); use a host-commissioned ducknng HTTP profile, injected fetch auth, or a host-authored declared operation`);
+  if (hit) throw new Error(`ad-hoc bio_query must not read host-declared protected session variables (${hit}); use a host-commissioned ducknng HTTP profile or a host-authored declared operation`);
+  const profileMutation = forbiddenDucknngProfileMutationSurface(trimmed);
+  if (profileMutation) throw new Error(`ad-hoc bio_query must not mutate host-owned ducknng HTTP profiles (${profileMutation}); commission profiles in host code and pass only non-secret ids to SQL`);
   return trimmed;
 }

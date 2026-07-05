@@ -1,18 +1,14 @@
 import type { SqlConn } from "../core/ports.js";
 
-// SINGLE-ENDPOINT, rate-limited retry over ducknng's HTTP client. Once the OWNED ducknng build (the
-// per-DuckDB-version backport) is loaded, `ducknng_ncurl` is backed by a VOLATILE scalar (`ducknng__ncurl_row`),
-// so a `WITH RECURSIVE` retry RE-FIRES the call per iteration and the whole retry loop collapses to ONE SQL
-// statement — provided the call DEPENDS ON THE RECURSIVE ROW (we put `attempt` in the URL), else DuckDB makes a
-// speculative extra call after the stop condition. The default community build lacks that fix, so we feature-probe
-// `ducknng__ncurl_row` and fall back to a host loop. (This is the single-endpoint sibling of ncurl-fanout.ts,
-// which handles MANY endpoints / chunk fanout; that still needs host code because the dynamic-schema
-// `ducknng_ncurl_table` can't be lateral-correlated per chunk.)
+// SINGLE-ENDPOINT, rate-limited retry over ducknng's HTTP client. With the owned ducknng build loaded,
+// `ducknng_ncurl` is backed by a VOLATILE scalar (`ducknng__ncurl_row`), so a `WITH RECURSIVE` retry RE-FIRES the
+// call per iteration and the whole retry loop is ONE SQL statement. The call must depend on the recursive row; we
+// carry that correlation in the timeout argument so the requested URL stays unchanged.
 
 const METHOD = /^[A-Z]+$/;
 
 export interface NcurlRetryOptions {
-  /** base URL; `attempt` is appended as a query param so the call depends on the recursive row (the KEY RULE) */
+  /** Base URL. It is passed unchanged; recursive row-correlation rides on timeoutMs. */
   url: string;
   method?: string; // default GET
   /** ducknng header array JSON, e.g. '[{"name":"Accept","value":"application/json"}]'; default none */
@@ -27,8 +23,6 @@ export interface NcurlRetryOptions {
   /** SQL predicate (over `status`) for "keep retrying"; default transient = null / 429 / 5xx (stops on 2xx and on
    *  permanent 4xx). Used by the recursive-CTE path. */
   retryWhileSql?: string;
-  /** JS mirror of retryWhileSql, used by the host-loop fallback; keep the two in agreement. */
-  isTransient?: (status: number | null) => boolean;
 }
 
 export interface NcurlRetryResult {
@@ -36,11 +30,10 @@ export interface NcurlRetryResult {
   status: number | null;
   bodyText: string | null;
   /** which path ran — useful for tests/telemetry */
-  via: "recursive-cte" | "host-loop";
+  via: "recursive-cte";
 }
 
 const DEFAULT_TRANSIENT_SQL = "(status IS NULL OR status = 429 OR status >= 500)";
-const defaultTransient = (status: number | null): boolean => status === null || status === 429 || status >= 500;
 const esc = (s: string): string => s.replace(/'/g, "''");
 
 /** Does the loaded ducknng have the volatile-scalar `ncurl` fix (the owned/backported build)? */
@@ -52,7 +45,7 @@ export async function ncurlRowAvailable(conn: SqlConn): Promise<boolean> {
 }
 
 function validated(opts: NcurlRetryOptions): {
-  url: string; method: string; sep: string; headers: string; body: string; timeout: number; tls: number; maxAttempts: number; profile: string;
+  url: string; method: string; headers: string; body: string; timeout: number; tls: number; maxAttempts: number; profile: string;
 } {
   const method = (opts.method ?? "GET").toUpperCase();
   if (!METHOD.test(method)) throw new Error(`ncurlRetry: invalid method '${method}'`);
@@ -61,7 +54,7 @@ function validated(opts: NcurlRetryOptions): {
   const maxAttempts = Number.isInteger(opts.maxAttempts) && (opts.maxAttempts as number) > 0 ? Number(opts.maxAttempts) : 5;
   if (tls < 0 || timeout <= 0) throw new Error("ncurlRetry: timeoutMs must be > 0 and tlsConfigId >= 0");
   return {
-    url: opts.url, method, sep: opts.url.includes("?") ? "&" : "?",
+    url: opts.url, method,
     headers: opts.headersJson != null ? `'${esc(opts.headersJson)}'` : "NULL",
     body: opts.body != null ? `'${esc(opts.body)}'::BLOB` : "NULL",
     timeout, tls, maxAttempts,
@@ -93,34 +86,15 @@ SELECT attempt, status, body_text FROM attempts ORDER BY attempt`;
 }
 
 /**
- * Retry a single HTTP endpoint until it stops being transient (or `maxAttempts`). Uses the SQL-native
- * recursive-CTE path when a ducknng build exposes `ducknng__ncurl_row` as VOLATILE, else a host loop.
+ * Retry a single HTTP endpoint until it stops being transient (or `maxAttempts`). This requires a ducknng build
+ * that exposes `ducknng__ncurl_row` as VOLATILE; older builds fail clearly instead of changing execution mode.
  * Returns the LAST attempt's outcome. `conn` must already have ducknng LOADed.
  */
 export async function ncurlRetry(conn: SqlConn, opts: NcurlRetryOptions): Promise<NcurlRetryResult> {
-  const v = validated(opts);
-  if (await ncurlRowAvailable(conn)) {
-    const rows = await conn.all<{ attempt: number | bigint; status: number | null; body_text: string | null }>(buildNcurlRetrySql(opts));
-    const last = rows[rows.length - 1]!;
-    return { attempts: Number(last.attempt), status: last.status, bodyText: last.body_text, via: "recursive-cte" };
+  if (!(await ncurlRowAvailable(conn))) {
+    throw new Error("ncurlRetry requires ducknng__ncurl_row to be registered VOLATILE; load the owned ducknng build");
   }
-  // fallback: the loaded ncurl constant-folds inside a recursive CTE, so loop in host code — each call is its own
-  // statement (no fold), so the URL is passed UNCHANGED (no `?attempt=N` — that would break signed/strict URLs).
-  const isTransient = opts.isTransient ?? defaultTransient;
-  let attempt = 0, status: number | null = null, bodyText: string | null = null;
-  while (attempt < v.maxAttempts) {
-    attempt++;
-    const rows = await conn.all<{ status: number | null; body_text: string | null }>(
-      opts.profileId != null
-        ? "SELECT status, body_text FROM ducknng_ncurl(?, ?, ?, ?::BLOB, ?, ?::UBIGINT, ?)"
-        : "SELECT status, body_text FROM ducknng_ncurl(?, ?, ?, ?::BLOB, ?, ?::UBIGINT)",
-      opts.profileId != null
-        ? [v.url, v.method, opts.headersJson ?? null, opts.body ?? null, v.timeout, v.tls, opts.profileId]
-        : [v.url, v.method, opts.headersJson ?? null, opts.body ?? null, v.timeout, v.tls],
-    );
-    status = rows[0]?.status ?? null;
-    bodyText = rows[0]?.body_text ?? null;
-    if (!isTransient(status)) break;
-  }
-  return { attempts: attempt, status, bodyText, via: "host-loop" };
+  const rows = await conn.all<{ attempt: number | bigint; status: number | null; body_text: string | null }>(buildNcurlRetrySql(opts));
+  const last = rows[rows.length - 1]!;
+  return { attempts: Number(last.attempt), status: last.status, bodyText: last.body_text, via: "recursive-cte" };
 }

@@ -18,6 +18,8 @@ export interface DucknngHttpProfileSpec {
   authHeaderValue: string;
   /** Optional wall-clock expiry in milliseconds since epoch, enforced by ducknng at send time. */
   expiresAtMs?: number | null;
+  /** Optional execution subjects admitted by ducknng. Non-empty means ad-hoc SQL without a subject fails closed. */
+  allowSubjects?: readonly string[] | null;
 }
 
 export interface DucknngHttpProfileInfo {
@@ -34,6 +36,7 @@ export interface DucknngHttpProfileInfo {
   createdMs: bigint;
   updatedMs: bigint;
   expiresAtMs: bigint;
+  allowSubjectsJson: string | null;
 }
 
 function cleanString(value: string, label: string): string {
@@ -55,7 +58,13 @@ function validExpiry(expiresAtMs: number | null | undefined): number | null {
   return expiresAtMs;
 }
 
-function validatedProfile(spec: DucknngHttpProfileSpec): Required<Omit<DucknngHttpProfileSpec, "port" | "expiresAtMs">> & { port: number | null; expiresAtMs: number | null } {
+function validAllowSubjects(subjects: readonly string[] | null | undefined): string | null {
+  if (subjects == null) return null;
+  if (!Array.isArray(subjects) || subjects.length === 0) throw new Error("ducknng HTTP profile allowSubjects must be a non-empty array when supplied");
+  return JSON.stringify(subjects.map((s) => cleanString(s, "ducknng HTTP profile allowSubject")));
+}
+
+function validatedProfile(spec: DucknngHttpProfileSpec): Required<Omit<DucknngHttpProfileSpec, "port" | "expiresAtMs" | "allowSubjects">> & { port: number | null; expiresAtMs: number | null; allowSubjectsJson: string | null } {
   const scheme = spec.scheme;
   if (scheme !== "http" && scheme !== "https") throw new Error("ducknng HTTP profile scheme must be http or https");
   const pathPrefix = cleanString(spec.pathPrefix, "ducknng HTTP profile pathPrefix");
@@ -75,6 +84,7 @@ function validatedProfile(spec: DucknngHttpProfileSpec): Required<Omit<DucknngHt
     authHeaderName,
     authHeaderValue: cleanString(spec.authHeaderValue, "ducknng HTTP profile authHeaderValue"),
     expiresAtMs: validExpiry(spec.expiresAtMs),
+    allowSubjectsJson: validAllowSubjects(spec.allowSubjects),
   };
 }
 
@@ -85,8 +95,18 @@ export async function ducknngHttpProfilesAvailable(conn: SqlConn): Promise<boole
   return Number(rows[0]?.n ?? 0) > 0;
 }
 
+export async function ducknngHttpProfileSubjectsAvailable(conn: SqlConn): Promise<boolean> {
+  const rows = await conn.all<{ n: bigint }>(
+    "SELECT count(*) n FROM duckdb_functions() WHERE function_name = 'ducknng_register_http_profile' AND array_length(parameter_types) = 11",
+  );
+  return Number(rows[0]?.n ?? 0) > 0;
+}
+
 export async function registerDucknngHttpProfile(conn: SqlConn, spec: DucknngHttpProfileSpec): Promise<void> {
   const p = validatedProfile(spec);
+  if (p.allowSubjectsJson != null && !(await ducknngHttpProfileSubjectsAvailable(conn))) {
+    throw new Error("ducknng HTTP profile allowSubjects requires ducknng_register_http_profile(..., allow_subjects_json)");
+  }
   const params: unknown[] = [
     p.profileId,
     p.scheme,
@@ -99,10 +119,12 @@ export async function registerDucknngHttpProfile(conn: SqlConn, spec: DucknngHtt
     p.authHeaderValue,
   ];
   const rows = await conn.all<{ ok: boolean }>(
-    p.expiresAtMs == null
+    p.allowSubjectsJson != null
+      ? `SELECT ducknng_register_http_profile(?, ?, ?, ?::INTEGER, ?, ?, ?, ?, ?, ?::UBIGINT, ?) AS ok`
+      : p.expiresAtMs == null
       ? `SELECT ducknng_register_http_profile(?, ?, ?, ?::INTEGER, ?, ?, ?, ?, ?) AS ok`
       : `SELECT ducknng_register_http_profile(?, ?, ?, ?::INTEGER, ?, ?, ?, ?, ?, ?::UBIGINT) AS ok`,
-    p.expiresAtMs == null ? params : [...params, p.expiresAtMs],
+    p.allowSubjectsJson != null ? [...params, p.expiresAtMs ?? 0, p.allowSubjectsJson] : p.expiresAtMs == null ? params : [...params, p.expiresAtMs],
   );
   if (rows[0]?.ok !== true) throw new Error(`ducknng HTTP profile '${p.profileId}' was not registered`);
 }
@@ -130,6 +152,7 @@ export async function listDucknngHttpProfiles(conn: SqlConn): Promise<DucknngHtt
     created_ms: bigint;
     updated_ms: bigint;
     expires_at_ms: bigint;
+    allow_subjects_json?: string | null;
   }>("SELECT * FROM ducknng_list_http_profiles()");
   return rows.map((r) => ({
     profileId: r.profile_id,
@@ -145,5 +168,6 @@ export async function listDucknngHttpProfiles(conn: SqlConn): Promise<DucknngHtt
     createdMs: r.created_ms,
     updatedMs: r.updated_ms,
     expiresAtMs: r.expires_at_ms,
+    allowSubjectsJson: r.allow_subjects_json ?? null,
   }));
 }

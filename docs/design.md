@@ -130,7 +130,7 @@ Execution adapters
              DuckDB extension that makes network/distributed/multi-agent coordination SQL-native
   duckhts    HTS readers (VCF/BCF, BAM/CRAM, BED/GFF, tabix) as SQL table functions
   compute    out-of-process R / Python / Go / shell over Arrow IPC (the compute pillar)
-  http.get   TS resolver + injected fetch — the fallback where a DuckDB build has no ducknng
+  http.get   TS resolver + injected fetch — an explicit JS-fetch port for hosts that choose that path
 
 Storage/index adapters
   filesystem study bundles
@@ -188,11 +188,12 @@ receipts, and the artifacts it produced.
 `validateReadOnlySelect` is therefore **statement-class only** (one read-only `SELECT`/`WITH`, no writes/DDL: because that is what an "operation" *is*), not an egress firewall. The **primary** network path is SQL-native:
 `ducknng_ncurl_table` (a DuckDB table function) inside `duckdb.sql_materialize`, with the URL/headers/body
 composed in SQL and the JSON parsed into a table: no TS resolver (the `ols4-grounding` GET and
-`variant-annotation` POST examples). `http.get` (a TS resolver needing a host-supplied `fetch`) is the
-**fallback** for a DuckDB build with no ducknng, plus the host-driven multi-request retry/fanout seam. Either
-way network is a **host-injected capability** (`file_scan`/`read_bcf`/`sql_materialize` may read remote URIs if
-the environment allows): the host decides whether egress is possible, the library records that it happened. A
-strict "no external I/O / CAS-snapshot-first" profile is an **optional host policy**, not the default stance.
+`variant-annotation` POST examples). `http.get` is not the shadow version of that path; it is a separate TS
+resolver that needs a host-supplied `fetch` and exists for applications that explicitly want JS fetch policy.
+Either way network is a **host-injected capability** (`file_scan`/`read_bcf`/`sql_materialize` may read remote
+URIs if the environment allows): the host decides whether egress is possible, the library records that it
+happened. A strict "no external I/O / CAS-snapshot-first" profile is an **optional host policy**, not the default
+stance.
 
 When a downstream application needs a real VM boundary, keep it downstream: the host can run Pi, worker
 processes, or stateful tools inside a Gondolin-style microVM and inject only the ports that application authorizes
@@ -671,15 +672,14 @@ borrowable.
 
 Validation status matters here. The library already exercises SQL-native HTTP, POST bodies, AIO fanout/retry,
 ducknng RPC state mutation, NNG socket reachability, a local MCP-style session-header loop, an SSE route served by
-ducknng and consumed with `ducknng_ncurl`, and the new credential integration point: the host registers a scoped
-ducknng HTTP profile through `registerDucknngHttpProfile`, SQL supplies only `profile_id`, and ducknng injects the
-secret header after scope checks.
+ducknng and consumed with `ducknng_ncurl`, and the new credential integration point: the host registers a scoped,
+optionally subject-restricted ducknng HTTP profile through `registerDucknngHttpProfile`, SQL supplies only
+`profile_id`, and ducknng injects the secret header after scope/admission checks.
 The host-auth pattern to reuse from Pi is locked `AuthStorage` plus OAuth refresh: resolve a short-lived token
 before commissioning or rotating the profile and persist only digests/config provenance, never token values. The
-current `http.get` `withAuth` wrapper remains the fallback for dynamic refresh when no ducknng profile is
-available. The remaining gaps are `wss`/server-push app subscriptions, TLS/mTLS auth fixtures in this repo, profile
-rotation/refresh hooks, host admission for which run may use which `profile_id`, and receipts that record
-profile id/scope/version without token values.
+remaining gaps are `wss`/server-push app subscriptions, TLS/mTLS auth fixtures in this repo, profile
+rotation/refresh hooks, receipts that record profile id/scope/version without token values, and in-process
+subject bracketing for non-ducknng-service hosts that want restricted profiles outside an RPC/route request.
 
 ## Progressive disclosure
 

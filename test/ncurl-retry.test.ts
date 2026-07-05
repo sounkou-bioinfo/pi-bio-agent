@@ -8,9 +8,8 @@ import { DuckDBInstance } from "@duckdb/node-api";
 import { duckdbNodeConn } from "../src/duckdb/node-api.js";
 import { buildNcurlRetrySql, ncurlRetry, ncurlRowAvailable } from "../src/duckdb/ncurl-retry.js";
 
-// ncurl-retry: single-endpoint rate-limited retry. The recursive-CTE path needs the OWNED ducknng build (the
-// volatile-scalar fix) loaded; the host-loop fallback works on the default community build. Both must reach 200
-// in 3 attempts against a 503,503,200 fixture. The pure SQL builder is tested without any network.
+// ncurl-retry: single-endpoint rate-limited retry. The recursive-CTE path needs the owned ducknng build with the
+// volatile-scalar ncurl fix. The pure SQL builder is tested without any network.
 
 // --- pure: the SQL builder (no DB, no network) ---
 describe("ncurl-retry: the recursive-CTE SQL builder", () => {
@@ -40,17 +39,9 @@ describe("ncurl-retry: the recursive-CTE SQL builder", () => {
 });
 
 // --- integration: a 503,503,200 counting fixture ---
-const ducknngAvailable = await (async () => {
-  try {
-    const c = await (await DuckDBInstance.create(":memory:", { allow_unsigned_extensions: "true" })).connect();
-    await c.run("INSTALL ducknng FROM community");
-    await c.run("LOAD ducknng");
-    return true;
-  } catch { return false; }
-})();
-
 // the owned (backported) build, if provision:ducknng-owned ran
 const ownedExt = (() => {
+  if (process.env.DUCKNNG_EXTENSION_PATH) return process.env.DUCKNNG_EXTENSION_PATH;
   try {
     const ver = (createRequire(import.meta.url)("@duckdb/node-api/package.json").version as string).replace(/-.*$/, "");
     const p = join(process.cwd(), ".pi", "ducknng", `duckdb-${ver}`, "ducknng.duckdb_extension");
@@ -71,23 +62,7 @@ function fixture(): { port: number; calls: () => number; close: () => Promise<vo
   return { port, calls: () => calls, close: () => new Promise((r) => server.close(() => r())) };
 }
 
-describe("ncurl-retry: host-loop fallback (default community build)", { skip: ducknngAvailable ? false : "ducknng unavailable" }, () => {
-  let fx: ReturnType<typeof fixture>;
-  before(() => { fx = fixture(); });
-  after(() => fx.close());
-  test("retries 503,503 -> 200 in 3 real calls via the host loop", async () => {
-    const c = duckdbNodeConn(await (await DuckDBInstance.create(":memory:", { allow_unsigned_extensions: "true" })).connect());
-    await c.run("LOAD ducknng"); // community build: no ducknng__ncurl_row -> host-loop path
-    assert.equal(await ncurlRowAvailable(c), false, "community build lacks the volatile fix");
-    const r = await ncurlRetry(c, { url: `http://127.0.0.1:${fx.port}/retry`, maxAttempts: 5 });
-    assert.equal(r.via, "host-loop");
-    assert.equal(r.status, 200);
-    assert.equal(r.attempts, 3);
-    assert.equal(fx.calls(), 3, "exactly 3 server-side calls (re-fired by the host loop)");
-  });
-});
-
-describe("ncurl-retry: SQL-native recursive-CTE (owned/backported build)", { skip: ownedExt ? false : "owned ducknng build not provisioned (run: npm run provision:ducknng-owned)" }, () => {
+describe("ncurl-retry: SQL-native recursive-CTE (owned ducknng build)", { skip: ownedExt ? false : "owned ducknng build not provisioned (run: npm run provision:ducknng-owned)" }, () => {
   let fx: ReturnType<typeof fixture>;
   before(() => { fx = fixture(); });
   after(() => fx.close());

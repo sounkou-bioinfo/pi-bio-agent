@@ -133,4 +133,33 @@ describe("validateReadOnlySelect: the single read-only SQL guard", () => {
       "literals/comments are not treated as function calls",
     );
   });
+
+  test("ad-hoc bio_query cannot mutate host-owned ducknng HTTP profiles", () => {
+    assert.equal(
+      validateAdHocBioQuerySelect("SELECT * FROM ducknng_ncurl('http://x', 'GET', NULL, NULL, 1000, 0::UBIGINT)"),
+      "SELECT * FROM ducknng_ncurl('http://x', 'GET', NULL, NULL, 1000, 0::UBIGINT)",
+      "data-plane ncurl calls stay queryable",
+    );
+    for (const sql of [
+      "SELECT ducknng_register_http_profile('p','http','x',NULL::INTEGER,'/','GET',false,'Authorization','Bearer x')",
+      "SELECT main.\"ducknng_drop_http_profile\"('p')",
+    ]) {
+      assert.throws(() => validateAdHocBioQuerySelect(sql), /host-owned ducknng HTTP profiles/, sql);
+    }
+    assert.equal(
+      validateAdHocBioQuerySelect("SELECT * FROM ducknng_list_http_profiles()"),
+      "SELECT * FROM ducknng_list_http_profiles()",
+      "profile listing is redacted and not a mutation",
+    );
+    assert.equal(
+      validateAdHocBioQuerySelect("SELECT ducknng_start_server('s','http://127.0.0.1:0/_ducknng',1,134217728,300000,0::UBIGINT)"),
+      "SELECT ducknng_start_server('s','http://127.0.0.1:0/_ducknng',1,134217728,300000,0::UBIGINT)",
+      "general ducknng orchestration is not folded into the profile-auth guard",
+    );
+    assert.equal(
+      validateAdHocBioQuerySelect("SELECT 'ducknng_register_http_profile()' AS literal /* ducknng_start_server() */"),
+      "SELECT 'ducknng_register_http_profile()' AS literal /* ducknng_start_server() */",
+      "literals/comments do not trigger the admin-function guard",
+    );
+  });
 });

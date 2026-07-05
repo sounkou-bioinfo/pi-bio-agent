@@ -21,8 +21,8 @@ HTTPS, a TLS config (`SET VARIABLE tls = ducknng_tls_config_from_files(NULL, '/e
 (`ducknng_start_server` + `ducknng_register_http_route` + `ducknng_http_json`) is the fixture, so it needs no
 external network. The host opens the db with `duckdbConfig` — good practice regardless, since that's where S3
 secrets, `cache_httpfs` settings, and `allow_unsigned_extensions` live (the *community* ducknng is signed; we
-pass `allow_unsigned_extensions` defensively because a cached or local *dev* build may not be). `http.get` (TS
-resolver + injected fetch) remains the fallback when a DuckDB version has no ducknng build.
+pass `allow_unsigned_extensions` defensively because a cached or local *dev* build may not be). `http.get` is a
+separate TS resolver path for hosts that deliberately choose an injected JS `fetch` port.
 
 > **Honest tag:** this is a **metacurator** concrete, *not* a ClawBio skill. ClawBio has no standalone OLS /
 > ontology-grounding skill — its API skills are things like *Variant Annotation* (Ensembl VEP REST / ClinVar /
@@ -34,15 +34,15 @@ resolver + injected fetch) remains the fallback when a DuckDB version has no duc
 The whole grounding skill is the `duckdb.sql_materialize` resource shown above — a `ducknng_ncurl_table` GET whose
 URL is composed in SQL. That *same* generic SQL-materialize path serves OpenTargets, gnomAD, or any JSON/CSV REST
 endpoint — point a new manifest at a new URL and you have a new "skill", with **zero new TypeScript** (a new API is
-an `ncurl_table` call, not a new resolver). The `http.get` TS fallback (for a DuckDB with no ducknng build)
-additionally memoizes by HTTP `ETag`, replaying a `304 Not Modified` instead of re-downloading.
+an `ncurl_table` call, not a new resolver). The separate `http.get` resolver has its own host-injected `fetch` and
+HTTP `ETag` reuse semantics for applications that choose that path.
 
 ## Running it
 
 Network is the **host's** capability, never the agent's. For the SQL-native path the host provisions ducknng once
 via `duckdbInitSql` (`INSTALL ducknng FROM community; LOAD ducknng`) plus a TLS config for HTTPS (shown above), and
 egress is then whatever the host's DuckDB/sandbox allows — the library is not the egress firewall. The `http.get`
-fallback is granted differently: **by composition**, not an ambient env var (which would inherit across
+resolver is granted differently: **by composition**, not an ambient env var (which would inherit across
 forks/embeddings and is invisible to the model). Its default entrypoint injects no `fetch`, so an `http.get`
 manifest **fails closed**; the operator grants network by loading the explicit *networked* entrypoint:
 

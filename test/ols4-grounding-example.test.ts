@@ -10,8 +10,7 @@ import { runBioQueryFromManifest } from "../src/hosts/run-store.js";
 // SQL-native OLS4 grounding (metacurator disambiguate), DETERMINISTIC: a local ducknng server serves a canned
 // OLS4-shaped response, and the manifest fetches it with `ducknng_ncurl_table` — the URL composed in SQL
 // (getvariable + url_encode), NO TS resolver, no external network. The agent supplies the query as a binding
-// (-> SET VARIABLE), points `ols4_base` at the local fixture, and grounds with one SQL line. (http.get + a mock
-// fetch is the fallback this stands in for when a DuckDB version has no ducknng build.)
+// (-> SET VARIABLE), points `ols4_base` at the local fixture, and grounds with one SQL line.
 const MANIFEST = resolve(process.cwd(), "examples", "ols4-grounding", "manifest.json");
 const PROVISION = ["INSTALL ducknng FROM community", "LOAD ducknng"];
 

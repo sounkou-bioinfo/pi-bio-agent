@@ -2,14 +2,13 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { duckdbNodeConn } from "../src/duckdb/node-api.js";
-import { ducknngHttpProfilesAvailable, registerDucknngHttpProfile } from "../src/duckdb/http-profiles.js";
+import { ducknngHttpProfileSubjectsAvailable, ducknngHttpProfilesAvailable, registerDucknngHttpProfile } from "../src/duckdb/http-profiles.js";
 
 const ducknngExtensionPath = process.env.DUCKNNG_EXTENSION_PATH;
 const ducknngLoadSql = ducknngExtensionPath ? `LOAD '${ducknngExtensionPath.replace(/'/g, "''")}'` : "LOAD ducknng";
 
 // The SQL-native HTTP path uses a local ducknng HTTP server as the fixture, so these tests exercise the same
-// SQL table functions without external network or injected fetch. `http.get` + a mock fetch is the fallback
-// fixture shape for DuckDB builds that cannot load ducknng.
+// SQL table functions without external network or injected fetch.
 const ducknngAvailable = await (async () => {
   try {
     const c = await (await DuckDBInstance.create(":memory:", { allow_unsigned_extensions: "true" })).connect();
@@ -105,6 +104,47 @@ describe("SQL-native HTTP grounding via ducknng (a local ducknng server is the d
     await assert.rejects(() => conn.all(
       `SELECT * FROM ducknng_ncurl_table('${BASE}/securez', 'GET', NULL, NULL, 5000, 0::UBIGINT, 'auth-fixture-profile')`,
     ), /HTTP profile scope rejected URL path/);
+
+    inst.closeSync();
+  });
+
+  test("subject-restricted HTTP profiles fail closed outside a ducknng execution subject", async (t) => {
+    const inst = await DuckDBInstance.create(":memory:", { allow_unsigned_extensions: "true" });
+    const conn = duckdbNodeConn(await inst.connect());
+    await conn.run(ducknngLoadSql);
+    if (!(await ducknngHttpProfileSubjectsAvailable(conn))) {
+      inst.closeSync();
+      t.skip("ducknng subject-restricted HTTP profiles unavailable in this build");
+      return;
+    }
+
+    await conn.run(`SELECT ducknng_start_server('subject_auth_fixture', 'http://127.0.0.1:0/_ducknng', 1, 134217728, 300000, 0::UBIGINT)`);
+    const BASE = (await conn.all<{ listen: string }>("SELECT listen FROM ducknng_list_servers() WHERE name='subject_auth_fixture'"))[0]!.listen.replace(/\/_ducknng.*$/, "");
+    const baseUrl = new URL(BASE);
+    await conn.run(`SELECT ducknng_register_http_route('subject_auth_fixture', 'GET', '/secure',
+      'SELECT * FROM ducknng_http_json(200, ''[{"sent":true}]'')'
+    )`);
+
+    await registerDucknngHttpProfile(conn, {
+      profileId: "subject-auth-fixture-profile",
+      scheme: "http",
+      host: "127.0.0.1",
+      port: Number(baseUrl.port),
+      pathPrefix: "/secure",
+      method: "GET",
+      authHeaderName: "Authorization",
+      authHeaderValue: "Bearer host-token",
+      allowSubjects: ["alice"],
+    });
+
+    const listed = await conn.all<{ allow_subjects_json: string | null }>(
+      `SELECT allow_subjects_json FROM ducknng_list_http_profiles()
+       WHERE profile_id = 'subject-auth-fixture-profile'`,
+    );
+    assert.deepEqual(listed, [{ allow_subjects_json: "[\"alice\"]" }]);
+    await assert.rejects(() => conn.all(
+      `SELECT * FROM ducknng_ncurl_table('${BASE}/secure', 'GET', NULL, NULL, 5000, 0::UBIGINT, 'subject-auth-fixture-profile')`,
+    ), /admission rejected/);
 
     inst.closeSync();
   });

@@ -46,13 +46,13 @@ These REST manifests hardcode a plain `Accept: application/json` header. Auth is
 safe order is:
 - **token-gated APIs** — prefer a **host-commissioned ducknng HTTP profile** for SQL-native connectors. The host
   registers the profile on the DuckDB connection (for local hosts, use `registerDucknngHttpProfile`), pins its
-  scheme/host/port/path/method/TLS scope, and keeps the secret header value inside ducknng. Agent-visible SQL
-  supplies only the non-secret `profile_id` to
+  scheme/host/port/path/method/TLS scope, optionally admits only named execution subjects, and keeps the secret
+  header value inside ducknng. Agent-visible SQL supplies only the non-secret `profile_id` to
   `ducknng_ncurl(...)`, `ducknng_ncurl_aio(...)`, or `ducknng_ncurl_table(...)`. The profile resolver injects the
-  credential after scope checks and rejects caller headers that collide with the injected auth header. For hosts that
-  need OAuth refresh or a provider-specific token lifecycle before ducknng profile rotation exists, keep using the
-  **`http.get` + `withAuth`** fallback: `withAuth` calls the host's auth supplier per request, so Pi-style
-  `AuthStorage` / OAuth refresh can rotate the access token immediately before use. `SET VARIABLE` header
+  credential after scope/admission checks and rejects caller headers that collide with the injected auth header. For
+  hosts that deliberately choose the JS-fetch resolver path, **`http.get` + `withAuth`** calls the host's auth
+  supplier per request, so Pi-style `AuthStorage` / OAuth refresh can rotate the access token immediately before use.
+  `SET VARIABLE` header
   composition is no longer the recommended auth integration point; it is SQL-visible and should stay limited to
   legacy isolated host-authored operations;
 - **MCP servers** — an MCP `initialize` / `tools/list` / `tools/call` (JSON-RPC 2.0 over HTTP) **is an `ncurl`
