@@ -1,7 +1,7 @@
 ---
 type: Proposal
 title: Memory and knowledge unification
-description: "The temporal memory unification: memory, facts, jobs, and store-logged runs are one append-only bio_observations store (Datomic-style, as-of/history/tombstone; runs fold in only when a store/run-log is supplied). Read before changing the memory store or its graph projection."
+description: "The temporal substrate unification: memory, facts, jobs, store-logged runs, and agent session traces are one append-only bio_observations store (Datomic-style, as-of/history/tombstone; runs and sessions fold in when the host supplies the store/CAS hooks). Read before changing memory, session ingestion, or graph projection."
 tags: [memory, temporal, bio-observations, unification]
 ---
 
@@ -11,13 +11,14 @@ Notes on what a coding agent's file-based memory system teaches us, and a propos
 unify `pi-bio-agent`'s currently-separate memory representations under one knowledge-unit
 abstraction.
 
-This is now implemented: see [Implemented: temporal memory in one
-store](#implemented-temporal-memory-in-one-store) below (the store, the agent-tool rewire + rename, and
-temporal skills are all done). The rest of this document remains the design rationale it sharpens, alongside
+This is now implemented beyond memory alone: see [Implemented: temporal substrate in one
+store](#implemented-temporal-substrate-in-one-store) below (the store, the agent-tool rewire + rename, temporal skills,
+store-logged runs, and Pi session-trace ingestion all use the same ledger). The rest of this document remains the
+design rationale it sharpens, alongside
 [`abstraction-derivation.md`](./abstraction-derivation.md) and the storage/skill items in
 [`refinments.md`](./refinments.md).
 
-## Implemented: temporal memory in one store
+## Implemented: temporal substrate in one store
 
 Memory is **the same temporal store as facts**, append-only, as-of, attributed, which honors the
 unified-data-model bet instead of sitting beside it as flat last-write-wins files.
@@ -36,8 +37,9 @@ unified-data-model bet instead of sitting beside it as flat last-write-wins file
   the *same* SemanticSQL closure as facts. (Typed `StudyNote.links` are not yet authorable via `bio_remember`: a
   deliberate future feature, not an implied capability.)
 
-**One store, not a `memory.duckdb`.** Facts, jobs, activation, and memory are all rows in the **same
-`bio_observations` table in the same DuckDB** as the graph (`src/hosts/bio-store.ts` `openBioStore`). A separate
+**One store, not a `memory.duckdb`.** Facts, jobs, activation, memory, store-logged runs, and agent session traces
+are all rows in the **same `bio_observations` table in the same DuckDB** as the graph
+(`src/hosts/bio-store.ts` `openBioStore`). A separate
 memory database would re-fragment the ledger and break the single `entailed_edge` closure that walks
 **observation-backed** memory, ontology, and fact edges together. Tested: a memory note and a `gene→disease` fact
 coexist in one store and one graph closure crosses both namespaces. (`materializeBioEdgesAsOf` projects the

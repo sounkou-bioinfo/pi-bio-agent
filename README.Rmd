@@ -149,13 +149,16 @@ one DuckDB:
 | **Data** | `duckdb.sql_materialize`: any read-only query over everything DuckDB reaches (local files, object stores, other DBs, lakes). A new format is a DuckDB *extension*, not new code: VCF/BAM ([`duckhts`](https://duckdb.org/community_extensions/extensions/duckhts)), single-cell ([`anndata`](https://duckdb.org/community_extensions/extensions/anndata)), [`duckdb_zarr`](https://duckdb.org/community_extensions/extensions/duckdb_zarr), [`plinking_duck`](https://duckdb.org/community_extensions/extensions/plinking_duck), even HTML or git history. |
 | **Network** | `ducknng_ncurl_table`: an HTTP endpoint *is* a table function, with URL/non-secret headers/body composed in SQL and JSON parsed into columns, no TypeScript. Token-gated endpoints use host-commissioned ducknng HTTP profiles: SQL passes only `profile_id`, ducknng checks scope/subject admission and injects the secret header. Plus `ducknng_run_rpc` (a live DB many processes write through) and NNG worker pools (push/pull, pub/sub, survey). `http.get` is a separate host-injected JS fetch resolver for applications that deliberately choose that port. |
 | **Compute** | `compute.run`: what SQL is poor at (an `lm()` fit, a model) runs out-of-process over Arrow IPC. Only the data contract is SQL/Arrow; the computation is a contained child, not FFI. |
-| **Knowledge + memory** | one SemanticSQL graph (`bio_edges` + its `entailed_edge` closure), so subsumption and graph-walks are one indexed join. Grounding runs deterministically first, abstains below threshold, and never invents a CURIE. Memory is *study notes* projected into the same graph, not prompt-only context that becomes stale. |
+| **Knowledge + memory + traces** | one SemanticSQL graph (`bio_edges` + its `entailed_edge` closure), so subsumption and graph-walks are one indexed join. Grounding runs deterministically first, abstains below threshold, and never invents a CURIE. Memory is *study notes* projected into the same graph, not prompt-only context that becomes stale. Agent sessions, turns, tool calls, and artifacts are projected there too. |
 
-**The spine.** Facts, memory, `job:<id>:status`, and runs are not separate systems. They are rows in one
-append-only `bio_observations` ledger, read *as of* a time, over the same graph. So "the current fact," "what did
-the agent learn," and "what was this job's status at t" are one query over one DB. On that spine sits a
-**governance loop** (`declare → validate → test → record → activate → rollback`) with a durable, fail-closed
-approval gate: the substrate *records and gates* the one irreducible human-or-model judgment, it never computes it.
+**The spine.** Facts, memory, `job:<id>:status`, runs, and agent session traces are not separate systems. They are
+rows in one append-only `bio_observations` ledger, read *as of* a time, over the same graph. So "the current fact,"
+"what did the agent learn," "what was this job's status at t," and "which chat/tool turn produced this scientific
+run" are one query over one DB. Pi session JSONL is ingested as `session:`, `turn:`, `msg:`, `toolcall:`, and
+`cas:` observations; bio tools record controlled `toolcall:<id> executes run:<id>` and
+`run:<id> invoked_by toolcall:<id>` links when the run fact exists. On that spine sits a **governance loop**
+(`declare → validate → test → record → activate → rollback`) with a durable, fail-closed approval gate: the
+substrate *records and gates* the one irreducible human-or-model judgment, it never computes it.
 
 **The boundary.** Capability resolvers are host-injected and **fail closed** when unbound: no `fetch` means
 `http.get` is off, no `ComputeRunner` means `compute.run` is off. The substrate enforces statement class
@@ -186,8 +189,10 @@ query examples/connectors/clinvar-region.json --db :memory: --init-sql "LOAD duc
 authoritative record is a `run:<id>` fact in `bio_observations` that references the result, receipts, and replay
 by digest (bytes in CAS); the per-run `run.json` / `receipts.json` / `result.json` are its always-written legible
 *view*. [`run-ledger`](examples/run-ledger/manifest.json) reads that view back with DuckDB `read_json`, so the
-substrate's own provenance is queryable with the same SQL it uses for data. This is the live run graph produced
-*by this very render*:
+substrate's own provenance is queryable with the same SQL it uses for data. With the Pi extension, the surrounding
+chat/tool trajectory is also ledger data: session ingestion records the transcript structure, and bio tool execution
+links the tool-call node to the child `run:<id>` fact instead of reconstructing it from transcript text. This is the
+live run graph produced *by this very render*:
 
 ```{biocli, cache=TRUE}
 query examples/run-ledger/manifest.json --db :memory: --sql "SELECT tool, status, count(*) n FROM run_ledger GROUP BY 1, 2 ORDER BY n DESC"

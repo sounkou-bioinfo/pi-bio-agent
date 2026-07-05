@@ -868,10 +868,12 @@ Open library questions to resolve before claiming that position:
   A chat turn has run anatomy but should not be recorded as a deterministic `RunObservation`: provider/model calls
   are host/model effects with live output, not `runBioQueryFromManifest` or `runBioOperationFromManifest` payloads.
   The turn records context/model/tool-registry/message digests and a live-source-style reproducibility verdict.
-  Child scientific queries/operations it calls remain normal `run:<id>` facts with receipts/replay/CAS. Remaining
-  work after the first `ingestSessionJsonl(...)` slice: harden the statement-key convention across real Pi session
-  variants, add richer training-example projections, and expand graphics metadata beyond embedded images to plots,
-  reports, notebooks, and rendered scientific views.
+  Child scientific queries/operations it calls remain normal `run:<id>` facts with receipts/replay/CAS. The Pi
+  extension now syncs persisted session JSONL at lifecycle boundaries and records controlled
+  `toolcall:<id> executes run:<id>` / `run:<id> invoked_by toolcall:<id>` links for bio tools after confirming the
+  target run fact exists. Do not reconstruct run links by scanning transcript text. Remaining work: add richer
+  training-example projections and expand graphics metadata beyond embedded images to plots, reports, notebooks, and
+  rendered scientific views.
 - **DuckDB `VARIANT` fit for observation/session payloads:** keep `value_json` as the live ledger contract, but do
   not reduce `VARIANT` to a someday storage swap. The immediate fit is the export/training-corpus path: partitioned
   Parquet views can store payloads as typed `VARIANT` values and let DuckDB shred common fields, making agent
