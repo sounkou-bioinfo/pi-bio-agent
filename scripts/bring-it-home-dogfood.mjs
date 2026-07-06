@@ -19,11 +19,16 @@ import { materializeGraphProjectionProfile } from "../dist/duckdb/graph-projecti
 import { ducknngHttpProfileReceiptFromInfo } from "../dist/duckdb/http-profiles.js";
 import { fsCasStore } from "../dist/hosts/fs-cas.js";
 import { recordHostEvent } from "../dist/hosts/host-events.js";
+import { claimJob, createJobQueueSchema, recordJobClaimStatus } from "../dist/hosts/job-queue.js";
 import {
+  cancelBioJob,
   jobStepCheckpointKey,
   readJobStepCheckpoint,
+  resumeBioJob,
   runJobStepWithCheckpoint,
+  submitBioJob,
 } from "../dist/hosts/job-store.js";
+import { queueJobRunner } from "../dist/hosts/queue-job-runner.js";
 import { reproduceRun } from "../dist/hosts/reproduce.js";
 import { runBioQueryFromManifest } from "../dist/hosts/run-store.js";
 
@@ -147,6 +152,7 @@ for (const [name, value] of Object.entries({
 try {
   const sdkConsumer = await compileExternalConsumer();
   await createBioObservationSchema(conn);
+  await createJobQueueSchema(conn);
 
   const hostEvent = await recordHostEvent(conn, {
     subjectId: "session:dogfood",
@@ -222,6 +228,58 @@ try {
   });
   assert.equal(scored.reused, false);
   assert.equal((await readJobStepCheckpoint(conn, "dogfood-workflow", "score/high-impact"))?.value.candidates, 2);
+
+  let queueTick = 10;
+  const queueRunner = queueJobRunner(conn, { clock: () => `2026-07-06T12:01:${String(++queueTick).padStart(2, "0")}.000Z` });
+  const queueRunId = "dogfood-queue-cancel";
+  const queueCwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-dogfood-queue-"));
+  const queueReplay = {
+    schema: "pi-bio.run_replay_spec.v1",
+    runId: queueRunId,
+    kind: "query",
+    sql: "SELECT 1 AS answer",
+  };
+  await submitBioJob(conn, queueRunner, {
+    cwd: queueCwd,
+    runId: queueRunId,
+    replay: queueReplay,
+    now: "2026-07-06T12:01:00.000Z",
+    source: "bring-it-home-dogfood",
+  });
+  const queueClaim = await claimJob(conn, { workerId: "worker:dogfood", now: "2026-07-06T12:01:12.000Z", leaseSeconds: 60 });
+  assert.equal(queueClaim?.runId, queueRunId);
+  await recordJobClaimStatus(conn, {
+    runId: queueRunId,
+    workerId: "worker:dogfood",
+    attempt: queueClaim.attempt,
+    replayDigest: queueClaim.replayDigest,
+    phase: "running",
+    recordedAt: "2026-07-06T12:01:13.000Z",
+    message: "claimed by dogfood worker",
+  });
+  await cancelBioJob(conn, {
+    cwd: queueCwd,
+    runId: queueRunId,
+    now: "2026-07-06T12:01:14.000Z",
+    runner: queueRunner,
+    source: "bring-it-home-dogfood",
+  });
+  let staleQueueWriteRejected = false;
+  try {
+    await recordJobClaimStatus(conn, {
+      runId: queueRunId,
+      workerId: "worker:dogfood",
+      attempt: queueClaim.attempt,
+      replayDigest: queueClaim.replayDigest,
+      phase: "succeeded",
+      recordedAt: "2026-07-06T12:01:15.000Z",
+    });
+  } catch {
+    staleQueueWriteRejected = true;
+  }
+  assert.equal(staleQueueWriteRejected, true);
+  const resumedQueue = await resumeBioJob(conn, { cwd: queueCwd, runId: queueRunId });
+  assert.equal(resumedQueue.phase, "cancelled");
 
   const profileReceipt = ducknngHttpProfileReceiptFromInfo({
     profileId: "clinvar-read-dogfood",
@@ -342,6 +400,7 @@ try {
     dogfood: "bring-it-home",
     hostEventLinks: hostEvent.linkObservationIds.length,
     jobStepExecutions: { extract: extractExecutions, extractReused: resumedExtract.reused },
+    queueCancel: { runId: queueRunId, staleWriteRejected: staleQueueWriteRejected, resumedPhase: resumedQueue.phase },
     checkpointKey: checkpointRow.statement_key,
     ducknngProfileReceipt: {
       profileId: profileReceipt.profileId,

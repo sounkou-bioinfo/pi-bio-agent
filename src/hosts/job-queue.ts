@@ -1,5 +1,7 @@
-import type { JobPhase, JobSubmitSpec } from "../core/jobs.js";
+import { createHash } from "node:crypto";
+import type { JobArtifactRef, JobPhase, JobStatus, JobSubmitSpec } from "../core/jobs.js";
 import { assertJobReplay } from "../core/jobs.js";
+import type { JsonValue } from "../core/json.js";
 import type { SqlConn } from "../core/ports.js";
 import type { RunReplaySpec } from "../core/reproducibility.js";
 import { replaySpecDigest } from "../core/reproducibility.js";
@@ -226,6 +228,73 @@ export async function cancelQueuedJob(conn: SqlConn, req: CancelQueuedJobRequest
   return rowToRecord(rows[0]);
 }
 
+export interface LiveJobClaimRequest {
+  runId: string;
+  workerId: string;
+  attempt: number;
+  recordedAt: string;
+}
+
+export interface RecordJobClaimStatusRequest extends LiveJobClaimRequest {
+  phase: JobPhase;
+  replayDigest: string;
+  source?: string;
+  message?: string;
+  progress?: JobStatus["progress"];
+}
+
+export interface RecordJobClaimResultRequest extends LiveJobClaimRequest {
+  replayDigest: string;
+  source?: string;
+  result?: JsonValue;
+  artifacts?: JobArtifactRef[];
+  error?: string;
+}
+
+/** Record worker status only while the caller still owns the live queue claim. This is the durable-worker guard
+ *  a transport backend needs: NNG/mirai cancellation is best-effort, so stale workers must be rejected at the
+ *  ledger boundary, not trusted to stop. */
+export async function recordJobClaimStatus(conn: SqlConn, req: RecordJobClaimStatusRequest): Promise<JobStatus> {
+  if (!PHASES.has(req.phase)) throw new Error(`job-queue: invalid status phase '${String(req.phase)}'`);
+  const value = req.message !== undefined || req.progress !== undefined
+    ? { phase: req.phase, message: req.message, progress: req.progress }
+    : req.phase;
+  await insertObservationForLiveClaim(conn, req, {
+    statementKey: `job:${req.runId}:status`,
+    subjectId: `job:${req.runId}`,
+    predicate: "job_status",
+    value,
+    source: req.source ?? req.workerId,
+    digest: req.replayDigest,
+    attrs: { worker_id: req.workerId, attempt: req.attempt },
+  });
+  return { runId: req.runId, phase: req.phase, at: req.recordedAt, message: req.message, progress: req.progress };
+}
+
+/** Record a worker result only while the caller still owns the live queue claim. The schema envelope matches
+ *  collectAndRecordBioJob / ledgerJobRunner so in-process and distributed workers share one result slot. */
+export async function recordJobClaimResult(conn: SqlConn, req: RecordJobClaimResultRequest): Promise<string> {
+  const envelope: { schema: "pi-bio.job_result.v1"; result?: JsonValue; artifacts?: JobArtifactRef[]; error?: string } = { schema: "pi-bio.job_result.v1" };
+  if (req.result !== undefined) {
+    assertJsonValue(req.result, "job-queue: result");
+    envelope.result = req.result;
+  }
+  if (req.artifacts !== undefined) {
+    assertJsonValue(req.artifacts, "job-queue: artifacts");
+    envelope.artifacts = req.artifacts;
+  }
+  if (req.error !== undefined) envelope.error = req.error;
+  return insertObservationForLiveClaim(conn, req, {
+    statementKey: `job:${req.runId}:result`,
+    subjectId: `job:${req.runId}`,
+    predicate: "job_result",
+    value: envelope,
+    source: req.source ?? req.workerId,
+    digest: req.replayDigest,
+    attrs: { worker_id: req.workerId, attempt: req.attempt },
+  });
+}
+
 export async function readJobQueueRecord(conn: SqlConn, runId: string): Promise<JobQueueRecord | null> {
   const rows = await conn.all<JobQueueRow>(
     `SELECT run_id, replay_json, replay_digest, phase, attempt, available_at, claimed_by, claim_expires_at, created_at, updated_at
@@ -233,6 +302,62 @@ export async function readJobQueueRecord(conn: SqlConn, runId: string): Promise<
     [runId],
   );
   return rows[0] ? rowToRecord(rows[0]) : null;
+}
+
+interface ClaimGatedObservation {
+  statementKey: string;
+  subjectId: string;
+  predicate: string;
+  value: unknown;
+  source: string;
+  digest: string;
+  attrs?: Record<string, unknown>;
+}
+
+async function insertObservationForLiveClaim(conn: SqlConn, req: LiveJobClaimRequest, obs: ClaimGatedObservation): Promise<string> {
+  assertWorkerId(req.workerId);
+  if (!Number.isInteger(req.attempt) || req.attempt < 1) throw new Error("job-queue: attempt must be a positive integer");
+  await assertTimestamp(conn, "recordedAt", req.recordedAt);
+  const valueJson = JSON.stringify(obs.value);
+  const attrsJson = obs.attrs ? JSON.stringify(obs.attrs) : null;
+  const id = observationId({ ...obs, recordedAt: req.recordedAt });
+  const rows = await conn.all<{ observation_id: string }>(
+    `INSERT INTO bio_observations (observation_id, statement_key, subject_id, predicate, object_id, value_json, recorded_at, valid_from, valid_to, source, digest, attrs, trust)
+     SELECT ?, ?, ?, ?, NULL, ?::JSON, ?, NULL, NULL, ?, ?, ?::JSON, NULL
+     WHERE EXISTS (
+       SELECT 1 FROM ${TABLE}
+       WHERE run_id = ?
+         AND phase = 'running'
+         AND claimed_by = ?
+         AND attempt = ?
+         AND claim_expires_at::TIMESTAMPTZ > ?::TIMESTAMPTZ
+     )
+     ON CONFLICT (observation_id) DO NOTHING
+     RETURNING observation_id`,
+    [id, obs.statementKey, obs.subjectId, obs.predicate, valueJson, req.recordedAt, obs.source, obs.digest, attrsJson, req.runId, req.workerId, req.attempt, req.recordedAt],
+  );
+  if (rows[0]) return rows[0].observation_id;
+  const existing = await conn.all<{ observation_id: string }>("SELECT observation_id FROM bio_observations WHERE observation_id = ?", [id]);
+  if (existing[0]) return id;
+  const rec = await readJobQueueRecord(conn, req.runId);
+  const state = rec ? `${rec.phase}${rec.claimedBy ? ` held by ${rec.claimedBy}` : ""}${rec.attempt ? ` attempt ${rec.attempt}` : ""}` : "missing";
+  throw new Error(`job-queue: job '${req.runId}' is not held by worker '${req.workerId}' on live attempt ${req.attempt} at ${req.recordedAt} (queue state: ${state})`);
+}
+
+function observationId(obs: ClaimGatedObservation & { recordedAt: string }): `sha256:${string}` {
+  const canonical = JSON.stringify([
+    obs.statementKey,
+    obs.subjectId,
+    obs.predicate,
+    null,
+    obs.value ?? null,
+    obs.recordedAt,
+    null,
+    null,
+    obs.source,
+    obs.digest,
+  ]);
+  return `sha256:${createHash("sha256").update(canonical).digest("hex")}`;
 }
 
 function rowToRecord(row: JobQueueRow): JobQueueRecord {
@@ -287,4 +412,29 @@ function assertLeaseSeconds(leaseSeconds: number): void {
   if (!Number.isInteger(leaseSeconds) || leaseSeconds <= 0 || leaseSeconds > 86400) {
     throw new Error("job-queue: leaseSeconds must be a positive integer no larger than 86400");
   }
+}
+
+function assertJsonValue(value: unknown, label: string): asserts value is JsonValue {
+  const visit = (v: unknown, path: string): void => {
+    if (v === null || typeof v === "string" || typeof v === "boolean") return;
+    if (typeof v === "number") {
+      if (!Number.isFinite(v)) throw new Error(`${label}: ${path} must be a finite JSON number`);
+      return;
+    }
+    if (Array.isArray(v)) {
+      for (const [i, item] of v.entries()) visit(item, `${path}[${i}]`);
+      return;
+    }
+    if (typeof v === "object" && v !== null) {
+      const proto = Object.getPrototypeOf(v);
+      if (proto !== Object.prototype && proto !== null) throw new Error(`${label}: ${path} must be a plain JSON object`);
+      for (const [k, item] of Object.entries(v as Record<string, unknown>)) {
+        if (item === undefined) throw new Error(`${label}: ${path}.${k} must not be undefined`);
+        visit(item, `${path}.${k}`);
+      }
+      return;
+    }
+    throw new Error(`${label}: ${path} must be JSON-serializable`);
+  };
+  visit(value, "$");
 }

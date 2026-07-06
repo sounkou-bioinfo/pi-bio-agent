@@ -150,8 +150,10 @@ each lands only when a concrete consumer forces it, never ahead.
 - **Receipt = marker file; never conflate "what to hash" with "what to pass."** `targets`'s `tar_format()`
   conflated the change-detection hash with the value passed downstream, so external-file tracking uses a
   *marker file*: a local file holding the reference (path/URI) + a content validator (ETag), separate from the
-  bytes. Our **receipt already is that marker**: `{ source (where), version=content digest (what), retrievedAt
-  (when) }`, separate from the materialized table (the value). Keep that separation; it is what avoids the trap.
+  bytes. Our **receipt already is that marker**: `{ source (where), sourceValidator (which observed version; e.g.
+  ETag in the current `http.get` path, or a host-supplied snapshot id for other sources), retrievedAt (when) }`,
+  separate from the materialized table (the value) and from CAS byte identity when we actually store bytes. Keep that
+  separation; it is what avoids the trap.
 - **Format/repository split → our resolver already collapses the combinatorics.** `targets` split `format`
   (serialization) from `repository` (location) to avoid the format×provider explosion. `duckdb.sql_materialize`
   is the same move taken further: one resolver, declared SQL, any reader/source. No resolver-per-format zoo.
@@ -827,9 +829,11 @@ Open library questions to resolve before claiming that position:
   submit/claim/heartbeat/wait/event/complete/cancel/status/collect. The primitive is `AsyncRunner`; `ComputeRunner`
   is the compute specialization, and the durable replay queue is the run specialization. The first concrete
   library piece now exists: `hosts/job-queue.ts` provides a `SqlConn`-backed operational queue with replay enqueue,
-  atomic claim, lease heartbeat, waiting/park, and terminal finish. The queue/claim tables are mutable
-  coordination. The observation ledger is the status/result audit truth. Receipts, replay specs, CAS
-  result/artifact digests, and run observations are the evidence that survives backend swaps.
+  atomic claim, lease heartbeat, waiting/park, terminal finish, and live-claim-gated status/result writes. The
+  queue/claim tables are mutable coordination. The observation ledger is the status/result audit truth. Cancellation
+  is durable intent plus best-effort backend interruption; stale workers whose lease was cancelled or reclaimed must
+  be rejected at the ledger boundary. Receipts, replay specs, CAS result/artifact digests, and run observations are
+  the evidence that survives backend swaps.
 
   Absurd is useful prior art here because the implementation is DB-native, not README-only: tasks, runs,
   checkpoints, waits, events, and idempotency keys are tables; `claim_task` uses leased `FOR UPDATE SKIP LOCKED`
@@ -847,11 +851,11 @@ Open library questions to resolve before claiming that position:
   step. This applies equally to Nextflow-shaped compute stages, long API jobs, and agent turns. The first local
   dogfood is `test/absurd-queue-push-dogfood.test.ts`: attempt 1 records an `extract` step, its lease expires,
   attempt 2 reclaims the job, reuses that checkpoint without re-running it, records the `summarize` step, and
-  completes through the same ledger result/status slots. The repeated checkpoint pattern is now lifted into
-  `runJobStepWithCheckpoint` / `recordJobStepCheckpoint` in `src/hosts/job-store.ts`: a caller-owned step id maps to
-  an encoded `job:<runId>:step:<encodedStepId>` slot, the helper reads that slot first, runs only if missing, and
-  records a `job_step_checkpoint` value carrying the replay digest. This is the resume convention, not an
-  orchestration engine.
+  completes through the same live-claim-gated ledger result/status slots. The repeated checkpoint pattern is now
+  lifted into `runJobStepWithCheckpoint` / `recordJobStepCheckpoint` in `src/hosts/job-store.ts`: a caller-owned step
+  id maps to an encoded `job:<runId>:step:<encodedStepId>` slot, the helper reads that slot first, runs only if
+  missing, and records a `job_step_checkpoint` value carrying the replay digest. This is the resume convention, not
+  an orchestration engine.
 
   Do not add an Absurd type system to core. The core should expose the narrow structural contracts an Absurd-like
   backend needs to satisfy: replay spec in, async handle out, status/progress observations, checkpoint/event ids,

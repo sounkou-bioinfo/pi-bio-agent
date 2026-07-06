@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { duckdbNodeConn } from "../src/duckdb/node-api.js";
-import { createBioObservationSchema, recordObservation } from "../src/duckdb/observations.js";
-import { claimJob, createJobQueueSchema, readJobQueueRecord } from "../src/hosts/job-queue.js";
+import { createBioObservationSchema } from "../src/duckdb/observations.js";
+import { claimJob, createJobQueueSchema, readJobQueueRecord, recordJobClaimResult, recordJobClaimStatus } from "../src/hosts/job-queue.js";
 import { queueJobRunner } from "../src/hosts/queue-job-runner.js";
 import type { RunReplaySpec } from "../src/core/reproducibility.js";
 
@@ -32,23 +32,23 @@ describe("queueJobRunner: JobRunner over the durable queue", () => {
   test("ledger status/result win once a worker reports", async () => {
     const { conn, runner } = await setup();
     await runner.submit({ runId: "qr2", replay: replay("qr2") });
-    await claimJob(conn, { workerId: "w1", now: "2026-07-01T00:00:10Z", leaseSeconds: 60 });
+    const claim = await claimJob(conn, { workerId: "w1", now: "2026-07-01T00:00:10Z", leaseSeconds: 60 });
 
-    await recordObservation(conn, {
-      statementKey: "job:qr2:status",
-      subjectId: "job:qr2",
-      predicate: "job_status",
-      value: { phase: "succeeded" },
+    await recordJobClaimStatus(conn, {
+      runId: "qr2",
+      workerId: "w1",
+      attempt: claim!.attempt,
+      replayDigest: claim!.replayDigest,
+      phase: "succeeded",
       recordedAt: "2026-07-01T00:00:12Z",
-      source: "worker",
     });
-    await recordObservation(conn, {
-      statementKey: "job:qr2:result",
-      subjectId: "job:qr2",
-      predicate: "job_result",
-      value: { schema: "pi-bio.job_result.v1", result: { rows: [{ answer: 42 }] } },
+    await recordJobClaimResult(conn, {
+      runId: "qr2",
+      workerId: "w1",
+      attempt: claim!.attempt,
+      replayDigest: claim!.replayDigest,
+      result: { rows: [{ answer: 42 }] },
       recordedAt: "2026-07-01T00:00:13Z",
-      source: "worker",
     });
 
     assert.equal((await runner.status("qr2"))?.phase, "succeeded");

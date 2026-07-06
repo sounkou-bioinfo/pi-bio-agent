@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { duckdbNodeConn } from "../src/duckdb/node-api.js";
+import { createBioObservationSchema, observationAsOfKey } from "../src/duckdb/observations.js";
 import {
+  cancelQueuedJob,
   claimJob,
   createJobQueueSchema,
   enqueueJob,
@@ -10,6 +12,8 @@ import {
   heartbeatJobClaim,
   parkJobClaim,
   readJobQueueRecord,
+  recordJobClaimResult,
+  recordJobClaimStatus,
 } from "../src/hosts/job-queue.js";
 import type { RunReplaySpec } from "../src/core/reproducibility.js";
 
@@ -17,6 +21,7 @@ const replay = (runId: string): RunReplaySpec => ({ schema: "pi-bio.run_replay_s
 
 async function setup() {
   const conn = duckdbNodeConn(await (await DuckDBInstance.create(":memory:")).connect());
+  await createBioObservationSchema(conn);
   await createJobQueueSchema(conn);
   return conn;
 }
@@ -103,6 +108,61 @@ describe("job queue: durable worker coordination", () => {
     await assert.rejects(
       () => finishJobClaim(conn, { runId: "stale", workerId: "old", now: "2026-07-01T00:00:13Z", phase: "failed" }),
       /not held by worker 'old'/,
+    );
+  });
+
+  test("claim-gated status/result reject stale writes after reclaim or cancel", async () => {
+    const conn = await setup();
+    await enqueueJob(conn, { runId: "gate", replay: replay("gate"), now: "2026-07-01T00:00:00Z" });
+    const first = await claimJob(conn, { workerId: "old", now: "2026-07-01T00:00:01Z", leaseSeconds: 10 });
+    assert.equal(first?.attempt, 1);
+
+    await recordJobClaimStatus(conn, {
+      runId: "gate",
+      workerId: "old",
+      attempt: first!.attempt,
+      replayDigest: first!.replayDigest,
+      phase: "running",
+      recordedAt: "2026-07-01T00:00:02Z",
+      message: "attempt 1 is live",
+    });
+    assert.equal(JSON.parse((await observationAsOfKey(conn, "job:gate:status", "2026-07-01T00:00:03Z"))!.value_json!).phase, "running");
+
+    const second = await claimJob(conn, { workerId: "new", now: "2026-07-01T00:00:12Z", leaseSeconds: 30 });
+    assert.equal(second?.attempt, 2);
+    await assert.rejects(
+      () => recordJobClaimResult(conn, {
+        runId: "gate",
+        workerId: "old",
+        attempt: first!.attempt,
+        replayDigest: first!.replayDigest,
+        recordedAt: "2026-07-01T00:00:13Z",
+        result: { stale: true },
+      }),
+      /not held by worker 'old'/,
+    );
+
+    await recordJobClaimResult(conn, {
+      runId: "gate",
+      workerId: "new",
+      attempt: second!.attempt,
+      replayDigest: second!.replayDigest,
+      recordedAt: "2026-07-01T00:00:14Z",
+      result: { ok: true },
+    });
+    assert.deepEqual(JSON.parse((await observationAsOfKey(conn, "job:gate:result", "2026-07-01T00:00:15Z"))!.value_json!).result, { ok: true });
+
+    await cancelQueuedJob(conn, { runId: "gate", now: "2026-07-01T00:00:16Z" });
+    await assert.rejects(
+      () => recordJobClaimStatus(conn, {
+        runId: "gate",
+        workerId: "new",
+        attempt: second!.attempt,
+        replayDigest: second!.replayDigest,
+        phase: "succeeded",
+        recordedAt: "2026-07-01T00:00:17Z",
+      }),
+      /not held by worker 'new'/,
     );
   });
 

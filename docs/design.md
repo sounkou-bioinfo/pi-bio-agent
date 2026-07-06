@@ -101,9 +101,12 @@ the related code.
   mutable work; recorded wakeup/checkpoint observations are durable state; raw transport wakeups are optional
   carriers unless a backend gives them durable stream semantics. Step checkpoints are the resume primitive: code
   outside a step may replay after a crash, compaction, or lease expiry, while a completed step result is read back
-  and not re-executed. `src/hosts/job-store.ts` exposes the narrow helper (`runJobStepWithCheckpoint`) over
-  `job_step_checkpoint` observations; it is not a workflow engine. Receipts, replay specs, CAS result/artifact
-  digests, and `bio_observations` prove what happened. See `src/core/ports.ts`, `src/core/jobs.ts`,
+  and not re-executed. Because backend cancellation is only best-effort, queue workers must publish status/result
+  through live-claim-gated helpers (`recordJobClaimStatus`, `recordJobClaimResult`); a late worker whose lease was
+  cancelled or reclaimed is rejected at the ledger boundary. `src/hosts/job-store.ts` exposes the narrow helper
+  (`runJobStepWithCheckpoint`) over `job_step_checkpoint` observations; it is not a workflow engine. Receipts,
+  replay specs, CAS result/artifact digests, and `bio_observations` prove what happened. See `src/core/ports.ts`,
+  `src/core/jobs.ts`,
   `src/hosts/job-queue.ts`, `src/hosts/job-store.ts`, `test/absurd-queue-push-dogfood.test.ts`,
   `src/duckdb/resolvers/compute-run.ts`,
   `examples/compute-run/`, and `examples/compute-artifacts/`.

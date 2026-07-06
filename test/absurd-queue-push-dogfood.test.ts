@@ -8,7 +8,7 @@ import { DuckDBInstance } from "@duckdb/node-api";
 import type { RunReplaySpec } from "../src/core/reproducibility.js";
 import { duckdbNodeConn } from "../src/duckdb/node-api.js";
 import { createBioObservationSchema, observationAsOfKey, recordObservation } from "../src/duckdb/observations.js";
-import { claimJob, createJobQueueSchema, finishJobClaim, readJobQueueRecord } from "../src/hosts/job-queue.js";
+import { claimJob, createJobQueueSchema, finishJobClaim, readJobQueueRecord, recordJobClaimResult, recordJobClaimStatus } from "../src/hosts/job-queue.js";
 import { queueJobRunner } from "../src/hosts/queue-job-runner.js";
 
 const ducknngAvailable = await (async () => {
@@ -123,36 +123,33 @@ describe("Absurd-style durable queue + ducknng push dogfood", { skip: ducknngAva
         source: workerId,
         digest: claim!.replayDigest,
       });
-      await recordObservation(queue.conn, {
-        statementKey: `job:${runId}:status`,
-        subjectId: `job:${runId}`,
-        predicate: "job_status",
-        value: { phase: "running", progress: { current: 1, total: 2, unit: "steps" }, message: "claimed after push wakeup" },
+      await recordJobClaimStatus(queue.conn, {
+        runId,
+        workerId,
+        attempt: claim!.attempt,
+        replayDigest: claim!.replayDigest,
+        phase: "running",
+        progress: { current: 1, total: 2, unit: "steps" },
+        message: "claimed after push wakeup",
         recordedAt: "2026-07-01T00:00:11Z",
-        source: workerId,
-        digest: claim!.replayDigest,
       });
-      await recordObservation(queue.conn, {
-        statementKey: `job:${runId}:result`,
-        subjectId: `job:${runId}`,
-        predicate: "job_result",
-        value: {
-          schema: "pi-bio.job_result.v1",
-          result: { rows: [{ answer: 1 }], checkpointKey },
-          artifacts: [{ name: "answer.json", digest: `sha256:${"b".repeat(64)}`, kind: "application/json" }],
-        },
+      await recordJobClaimResult(queue.conn, {
+        runId,
+        workerId,
+        attempt: claim!.attempt,
+        replayDigest: claim!.replayDigest,
+        result: { rows: [{ answer: 1 }], checkpointKey },
+        artifacts: [{ name: "answer.json", digest: `sha256:${"b".repeat(64)}`, kind: "application/json" }],
         recordedAt: "2026-07-01T00:00:12Z",
-        source: workerId,
-        digest: claim!.replayDigest,
       });
-      await recordObservation(queue.conn, {
-        statementKey: `job:${runId}:status`,
-        subjectId: `job:${runId}`,
-        predicate: "job_status",
-        value: { phase: "succeeded", progress: { current: 2, total: 2, unit: "steps" } },
+      await recordJobClaimStatus(queue.conn, {
+        runId,
+        workerId,
+        attempt: claim!.attempt,
+        replayDigest: claim!.replayDigest,
+        phase: "succeeded",
+        progress: { current: 2, total: 2, unit: "steps" },
         recordedAt: "2026-07-01T00:00:13Z",
-        source: workerId,
-        digest: claim!.replayDigest,
       });
       await finishJobClaim(queue.conn, { runId, workerId, now: "2026-07-01T00:00:14Z", phase: "succeeded" });
 
@@ -223,23 +220,21 @@ describe("Absurd-style step checkpoint dogfood", () => {
         source: "worker:step-b",
         digest: second!.replayDigest,
       });
-      await recordObservation(queue.conn, {
-        statementKey: `job:${runId}:result`,
-        subjectId: `job:${runId}`,
-        predicate: "job_result",
-        value: { schema: "pi-bio.job_result.v1", result: { steps: [step1Key, step2Key], mean: summary.mean } },
+      await recordJobClaimResult(queue.conn, {
+        runId,
+        workerId: "worker:step-b",
+        attempt: second!.attempt,
+        replayDigest: second!.replayDigest,
+        result: { steps: [step1Key, step2Key], mean: summary.mean },
         recordedAt: "2026-07-01T00:00:18Z",
-        source: "worker:step-b",
-        digest: second!.replayDigest,
       });
-      await recordObservation(queue.conn, {
-        statementKey: `job:${runId}:status`,
-        subjectId: `job:${runId}`,
-        predicate: "job_status",
-        value: { phase: "succeeded" },
+      await recordJobClaimStatus(queue.conn, {
+        runId,
+        workerId: "worker:step-b",
+        attempt: second!.attempt,
+        replayDigest: second!.replayDigest,
+        phase: "succeeded",
         recordedAt: "2026-07-01T00:00:19Z",
-        source: "worker:step-b",
-        digest: second!.replayDigest,
       });
       await finishJobClaim(queue.conn, { runId, workerId: "worker:step-b", now: "2026-07-01T00:00:20Z", phase: "succeeded" });
 
