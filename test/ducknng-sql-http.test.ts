@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { duckdbNodeConn } from "../src/duckdb/node-api.js";
-import { ducknngHttpProfileSubjectsAvailable, ducknngHttpProfilesAvailable, registerDucknngHttpProfile } from "../src/duckdb/http-profiles.js";
+import { DUCKNNG_HTTP_PROFILE_RECEIPT_SCHEMA, ducknngHttpProfileSubjectsAvailable, ducknngHttpProfilesAvailable, registerDucknngHttpProfile } from "../src/duckdb/http-profiles.js";
 
 const ducknngExtensionPath = process.env.DUCKNNG_EXTENSION_PATH;
 const ducknngLoadSql = ducknngExtensionPath ? `LOAD '${ducknngExtensionPath.replace(/'/g, "''")}'` : "LOAD ducknng";
@@ -68,7 +68,7 @@ describe("SQL-native HTTP grounding via ducknng (a local ducknng server is the d
 
     // The host commissions the profile on this connection. The agent-visible SQL below receives only the
     // non-secret profile id; ducknng resolves the secret after URL/method scope checks and before send.
-    await registerDucknngHttpProfile(conn, {
+    const profileReceipt = await registerDucknngHttpProfile(conn, {
       profileId: "auth-fixture-profile",
       scheme: "http",
       host: "127.0.0.1",
@@ -78,6 +78,19 @@ describe("SQL-native HTTP grounding via ducknng (a local ducknng server is the d
       authHeaderName: "Authorization",
       authHeaderValue: "Bearer host-token",
     });
+    assert.equal(profileReceipt.schema, DUCKNNG_HTTP_PROFILE_RECEIPT_SCHEMA);
+    assert.equal(profileReceipt.profileId, "auth-fixture-profile");
+    assert.deepEqual(profileReceipt.authHeaderNames, ["Authorization"]);
+    assert.deepEqual(profileReceipt.scope, {
+      scheme: "http",
+      host: "127.0.0.1",
+      port: Number(baseUrl.port),
+      pathPrefix: "/secure",
+      method: "GET",
+      tlsRequired: false,
+    });
+    assert.match(profileReceipt.policyDigest, /^sha256:[0-9a-f]{64}$/);
+    assert.doesNotMatch(JSON.stringify(profileReceipt), /host-token|Bearer/i, "profile receipt never exposes the token value");
 
     const rows = await conn.all<{ ok: boolean }>(
       `SELECT ok FROM ducknng_ncurl_table(
@@ -125,7 +138,7 @@ describe("SQL-native HTTP grounding via ducknng (a local ducknng server is the d
       'SELECT * FROM ducknng_http_json(200, ''[{"sent":true}]'')'
     )`);
 
-    await registerDucknngHttpProfile(conn, {
+    const restrictedReceipt = await registerDucknngHttpProfile(conn, {
       profileId: "subject-auth-fixture-profile",
       scheme: "http",
       host: "127.0.0.1",
@@ -136,6 +149,10 @@ describe("SQL-native HTTP grounding via ducknng (a local ducknng server is the d
       authHeaderValue: "Bearer host-token",
       allowSubjects: ["alice"],
     });
+    assert.equal(restrictedReceipt.subjectRestriction.restricted, true);
+    assert.equal(restrictedReceipt.subjectRestriction.count, 1);
+    assert.match(restrictedReceipt.subjectRestriction.digest ?? "", /^sha256:[0-9a-f]{64}$/);
+    assert.doesNotMatch(JSON.stringify(restrictedReceipt), /alice|host-token|Bearer/i, "receipt records only a subject-list digest and never token values");
 
     const listed = await conn.all<{ allow_subjects_json: string | null }>(
       `SELECT allow_subjects_json FROM ducknng_list_http_profiles()

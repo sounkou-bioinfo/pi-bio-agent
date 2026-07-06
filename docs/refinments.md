@@ -770,14 +770,15 @@ Open library questions to resolve before claiming that position:
   `registerDucknngHttpProfile`), optionally restricts it by execution subject, agent-visible SQL supplies only
   `profile_id`, and `ducknng_ncurl`, `ducknng_ncurl_aio`, and `ducknng_ncurl_table` resolve the secret header
   inside ducknng after scheme/host/port/path/method/TLS/admission checks. Caller headers that collide with the
-  injected profile auth header fail rather than overriding the credential, and profile listing is redacted. This
-  removes the old `SET VARIABLE token` / `ducknng_http_headers_build(['Authorization'], ...)` integration pattern
-  for generic authenticated SQL connectors.
+  injected profile auth header fail rather than overriding the credential, profile listing is redacted, and
+  `registerDucknngHttpProfile` returns a secret-free receipt over profile id, scope, version/timestamps/expiry,
+  header names, and subject-restriction digest. This removes the old `SET VARIABLE token` /
+  `ducknng_http_headers_build(['Authorization'], ...)` integration pattern for generic authenticated SQL connectors.
 
   Remaining library/host work is narrower and should not be confused with the integration point:
   - rotation/refresh: host auth storage such as Pi `AuthStorage` should update/drop/re-register profiles through
     the same helper/runtime boundary without exposing the current token to SQL;
-  - receipts/replay/action-cache: record profile id, scope, version/expiry, and scope decision, never token values;
+  - receipts/replay/action-cache: thread the returned profile receipt into connector run provenance/action keys;
   - embedded-host subject bracketing: ducknng services install the execution subject; pure in-process hosts still
     need a clean bracketing API if they want subject-restricted profiles without routing through ducknng service
     dispatch;

@@ -1,6 +1,8 @@
 import type { SqlConn } from "../core/ports.js";
+import { canonicalDigest } from "../core/reproducibility.js";
 
 const HTTP_TOKEN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+export const DUCKNNG_HTTP_PROFILE_RECEIPT_SCHEMA = "pi-bio.ducknng_http_profile_receipt.v1" as const;
 
 export interface DucknngHttpProfileSpec {
   profileId: string;
@@ -39,6 +41,31 @@ export interface DucknngHttpProfileInfo {
   allowSubjectsJson: string | null;
 }
 
+export interface DucknngHttpProfileReceipt {
+  schema: typeof DUCKNNG_HTTP_PROFILE_RECEIPT_SCHEMA;
+  profileId: string;
+  scope: {
+    scheme: string;
+    host: string;
+    port: number | null;
+    pathPrefix: string;
+    method: string;
+    tlsRequired: boolean;
+  };
+  authHeaderNames: string[];
+  version: string;
+  createdMs: string;
+  updatedMs: string;
+  expiresAtMs: string | null;
+  subjectRestriction: {
+    restricted: boolean;
+    count: number;
+    digest?: `sha256:${string}`;
+  };
+  /** Digest of this secret-free profile policy receipt. Token/header values are intentionally not representable. */
+  policyDigest: `sha256:${string}`;
+}
+
 function cleanString(value: string, label: string): string {
   if (typeof value !== "string" || value.length === 0 || /[\x00-\x1f\x7f]/.test(value)) {
     throw new Error(`${label} must be a non-empty string without control characters`);
@@ -62,6 +89,53 @@ function validAllowSubjects(subjects: readonly string[] | null | undefined): str
   if (subjects == null) return null;
   if (!Array.isArray(subjects) || subjects.length === 0) throw new Error("ducknng HTTP profile allowSubjects must be a non-empty array when supplied");
   return JSON.stringify(subjects.map((s) => cleanString(s, "ducknng HTTP profile allowSubject")));
+}
+
+function parseStringArray(json: string | null, label: string): string[] {
+  if (json == null) return [];
+  let parsed: unknown;
+  try { parsed = JSON.parse(json); } catch {
+    throw new Error(`${label} must be JSON array text`);
+  }
+  if (!Array.isArray(parsed) || parsed.some((x) => typeof x !== "string")) {
+    throw new Error(`${label} must be a JSON array of strings`);
+  }
+  return parsed;
+}
+
+function bigintText(value: bigint): string {
+  return value.toString();
+}
+
+function expiryText(value: bigint): string | null {
+  return value > 0n ? value.toString() : null;
+}
+
+export function ducknngHttpProfileReceiptFromInfo(info: DucknngHttpProfileInfo): DucknngHttpProfileReceipt {
+  const authHeaderNames = parseStringArray(info.authHeaderNamesJson, "ducknng HTTP profile auth_header_names_json");
+  const allowSubjects = parseStringArray(info.allowSubjectsJson, "ducknng HTTP profile allow_subjects_json");
+  const subjectRestriction = allowSubjects.length === 0
+    ? { restricted: false, count: 0 }
+    : { restricted: true, count: allowSubjects.length, digest: canonicalDigest([...allowSubjects].sort()) };
+  const body = {
+    schema: DUCKNNG_HTTP_PROFILE_RECEIPT_SCHEMA,
+    profileId: info.profileId,
+    scope: {
+      scheme: info.scheme,
+      host: info.host,
+      port: info.hasPort ? info.port : null,
+      pathPrefix: info.pathPrefix,
+      method: info.method,
+      tlsRequired: info.tlsRequired,
+    },
+    authHeaderNames,
+    version: bigintText(info.version),
+    createdMs: bigintText(info.createdMs),
+    updatedMs: bigintText(info.updatedMs),
+    expiresAtMs: expiryText(info.expiresAtMs),
+    subjectRestriction,
+  };
+  return { ...body, policyDigest: canonicalDigest(body) };
 }
 
 function validatedProfile(spec: DucknngHttpProfileSpec): Required<Omit<DucknngHttpProfileSpec, "port" | "expiresAtMs" | "allowSubjects">> & { port: number | null; expiresAtMs: number | null; allowSubjectsJson: string | null } {
@@ -102,7 +176,7 @@ export async function ducknngHttpProfileSubjectsAvailable(conn: SqlConn): Promis
   return Number(rows[0]?.n ?? 0) > 0;
 }
 
-export async function registerDucknngHttpProfile(conn: SqlConn, spec: DucknngHttpProfileSpec): Promise<void> {
+export async function registerDucknngHttpProfile(conn: SqlConn, spec: DucknngHttpProfileSpec): Promise<DucknngHttpProfileReceipt> {
   const p = validatedProfile(spec);
   if (p.allowSubjectsJson != null && !(await ducknngHttpProfileSubjectsAvailable(conn))) {
     throw new Error("ducknng HTTP profile allowSubjects requires ducknng_register_http_profile(..., allow_subjects_json)");
@@ -127,6 +201,9 @@ export async function registerDucknngHttpProfile(conn: SqlConn, spec: DucknngHtt
     p.allowSubjectsJson != null ? [...params, p.expiresAtMs ?? 0, p.allowSubjectsJson] : p.expiresAtMs == null ? params : [...params, p.expiresAtMs],
   );
   if (rows[0]?.ok !== true) throw new Error(`ducknng HTTP profile '${p.profileId}' was not registered`);
+  const receipt = await getDucknngHttpProfileReceipt(conn, p.profileId);
+  if (!receipt) throw new Error(`ducknng HTTP profile '${p.profileId}' was registered but could not be listed for a receipt`);
+  return receipt;
 }
 
 export async function dropDucknngHttpProfile(conn: SqlConn, profileId: string): Promise<boolean> {
@@ -170,4 +247,13 @@ export async function listDucknngHttpProfiles(conn: SqlConn): Promise<DucknngHtt
     expiresAtMs: r.expires_at_ms,
     allowSubjectsJson: r.allow_subjects_json ?? null,
   }));
+}
+
+export async function listDucknngHttpProfileReceipts(conn: SqlConn): Promise<DucknngHttpProfileReceipt[]> {
+  return (await listDucknngHttpProfiles(conn)).map(ducknngHttpProfileReceiptFromInfo);
+}
+
+export async function getDucknngHttpProfileReceipt(conn: SqlConn, profileId: string): Promise<DucknngHttpProfileReceipt | undefined> {
+  const clean = cleanString(profileId, "ducknng HTTP profile profileId");
+  return (await listDucknngHttpProfileReceipts(conn)).find((p) => p.profileId === clean);
 }

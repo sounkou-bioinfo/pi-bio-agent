@@ -740,9 +740,11 @@ ducknng and consumed with `ducknng_ncurl`, and the new credential integration po
 optionally subject-restricted ducknng HTTP profile through `registerDucknngHttpProfile`, SQL supplies only
 `profile_id`, and ducknng injects the secret header after scope/admission checks.
 The host-auth pattern to reuse from Pi is locked `AuthStorage` plus OAuth refresh: resolve a short-lived token
-before commissioning or rotating the profile and persist only digests/config provenance, never token values. The
-remaining gaps are `wss`/server-push app subscriptions, TLS/mTLS auth fixtures in this repo, profile
-rotation/refresh hooks, receipts that record profile id/scope/version without token values, and in-process
+before commissioning or rotating the profile and persist only digests/config provenance, never token values. Profile
+commissioning now returns a secret-free receipt derived from ducknng's redacted profile listing (profile id, scope,
+version/timestamps/expiry, auth header names, and subject-restriction digest), so runs can record profile policy
+without recording credentials. The remaining gaps are `wss`/server-push app subscriptions, TLS/mTLS auth fixtures in
+this repo, profile rotation/refresh hooks, wiring profile receipts into connector run provenance, and in-process
 subject bracketing for non-ducknng-service hosts that want restricted profiles outside an RPC/route request.
 
 ## Progressive disclosure

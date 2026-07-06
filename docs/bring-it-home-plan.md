@@ -163,9 +163,14 @@ Core should prefer ducknng profile-based HTTP for credentialed endpoints: SQL pa
 ducknng control plane owns admission and secret injection. Host-injected `http.get` remains a deliberate resolver port
 for applications that choose it, not an implicit fallback.
 
+**Current proof.** `registerDucknngHttpProfile` returns a secret-free profile receipt derived from ducknng's redacted
+profile listing: profile id, URL/method/TLS scope, profile version/timestamps/expiry, auth header names, and a digest
+of subject restrictions. Unit tests prove the receipt cannot carry token values or subject ids, while the ducknng SQL
+HTTP integration tests exercise profile-based auth and subject admission when the installed extension exposes that API.
+
 **Done when.** Credentialed HTTP examples use subject-scoped profiles with no secrets in SQL, restricted profiles are
-invisible/unusable to non-admitted subjects, and workaround-shaped token plumbing is removed where profiles cover the
-use case.
+invisible/unusable to non-admitted subjects, profile receipts are wired into connector run provenance, and
+workaround-shaped token plumbing is removed where profiles cover the use case.
 
 ## Sequencing
 

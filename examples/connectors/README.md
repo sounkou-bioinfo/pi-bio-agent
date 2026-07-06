@@ -49,7 +49,8 @@ safe order is:
   scheme/host/port/path/method/TLS scope, optionally admits only named execution subjects, and keeps the secret
   header value inside ducknng. Agent-visible SQL supplies only the non-secret `profile_id` to
   `ducknng_ncurl(...)`, `ducknng_ncurl_aio(...)`, or `ducknng_ncurl_table(...)`. The profile resolver injects the
-  credential after scope/admission checks and rejects caller headers that collide with the injected auth header. For
+  credential after scope/admission checks and rejects caller headers that collide with the injected auth header. The
+  registration helper returns a secret-free profile receipt for run provenance; record that receipt, not the token. For
   hosts that deliberately choose the JS-fetch resolver path, **`http.get` + `withAuth`** calls the host's auth
   supplier per request, so Pi-style `AuthStorage` / OAuth refresh can rotate the access token immediately before use.
   `SET VARIABLE` header
