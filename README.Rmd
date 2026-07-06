@@ -56,7 +56,13 @@ knitr::knit_engines$set(pi = function(options) {
     if (nzchar(needle) && !grepl(needle, out_txt, fixed = TRUE)) stop("pi render did not produce required output '", needle, "':\n", out_txt)
   }
   knitr::asis_output(paste0(
-    "``` sh\npi --model ", model, " --thinking ", thinking, " --no-extensions -e extensions/pi-coding-agent/index.ts --tools ", tools, " -p --no-session \\\n",
+    "``` sh\npi \\\n",
+    "  --model ", model, " \\\n",
+    "  --thinking ", thinking, " \\\n",
+    "  --no-extensions \\\n",
+    "  -e extensions/pi-coding-agent/index.ts \\\n",
+    "  --tools ", tools, " \\\n",
+    "  -p --no-session \\\n",
     wrap_prompt(prompt), "\n```\n\n",
     out_txt, "\n"
   ))
@@ -99,14 +105,31 @@ knitr::knit_engines$set(dogfood = function(options) {
 [![License: GPL v2+](https://img.shields.io/badge/License-GPL%20v2%2B-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen.svg)](package.json)
 
-`pi-bio-agent` is a library and Pi extension for agent-controlled scientific computation.
-The unit of work is a manifest: declared resources, read-only SQL, optional process
-compute, receipts, CAS artifacts, and observations in one DuckDB-backed ledger.
+`pi-bio-agent` is a provider-agnostic bioinformatics agent substrate and Pi extension
+for agent-controlled scientific computation: manifests + SQL over DuckDB are the
+program. A manifest declares resources, read-only SQL, optional process compute,
+receipts, CAS artifacts, and observations in one DuckDB-backed ledger.
 
-The agent may inspect schemas and write SQL. Biomedical facts come from declared data,
-deterministic compute, receipts, and recorded approvals.
+The agent may inspect schemas and write SQL; biomedical facts come from declared
+data, deterministic compute, receipts, and recorded approvals.
 
-## ClinVar From A Raw URL
+## Bets
+
+- New biomedical questions should become manifests, SQL, operation specs, or graph
+  data, not new per-question tools.
+- DuckDB is the substrate: files, formats, HTTP-shaped data, graph tables, and
+  reductions should be reached through SQL and extensions whenever possible.
+- Knowledge belongs in queryable graph tables. `bio_edges`, `bio_edges_as_of`, and
+  `entailed_edge` are the interaction surface, not serialized graph context.
+- CAS, resolver receipts, replay specs, and environment evidence are part of the
+  result, not optional metadata.
+- Compute is a host-injected async port: submit, status, collect, cancel. The core
+  records the contract and evidence; hosts decide what processes, credentials, and
+  network access are allowed.
+- The model handles routing, schema inspection, SQL composition, and typed
+  judgment. It is not the source of biomedical facts.
+
+## See It
 
 The agent starts with the raw ClinVar VCF URL and a TP53 genomic range, writes the
 manifest into `.pi/`, runs the query, and returns the SQL plus results. This is a
@@ -114,8 +137,8 @@ tabix range read through `duckhts`, so it should complete in seconds rather than
 download the whole ClinVar VCF. ClinVar is live data; the rows below are the
 result from this README render, not a pinned truth table.
 
-```{pi, timeout=300, removeBefore=".pi/bio-agent/readme-clinvar-tp53.json", mustContain=c("Pathogenic", "GROUP BY significance")}
-This is the complete task. Use tools now; do not ask for a follow-up. First write .pi/bio-agent/readme-clinvar-tp53.json as a pi-bio manifest for the raw ClinVar VCF URL https://ftp.ncbi.nlm.nih.gov/pub/clinvar/vcf_GRCh38/clinvar.vcf.gz, region 17:43044295-43125483, table name clinvar, using the duckhts.read_bcf resolver. Then call bio_query on that manifest with dbPath ':memory:' to count clinical significance buckets. The SQL must handle INFO_CLNSIG as an array and count distinct CHROM, POS, REF, ALT, significance combinations before grouping. Return exactly: one line with Manifest: <path>, then one fenced sql block containing the SQL you passed to bio_query, then one fenced json block containing the result rows.
+```{pi, timeout=300, removeBefore=".pi/bio-agent/readme-clinvar-tp53.json", mustContain=c("Pathogenic", "GROUP BY", "UNNEST", "|")}
+Create .pi/bio-agent/readme-clinvar-tp53.json for the raw ClinVar VCF URL https://ftp.ncbi.nlm.nih.gov/pub/clinvar/vcf_GRCh38/clinvar.vcf.gz, region 17:43044295-43125483, table clinvar, using duckhts.read_bcf. Run bio_query to count clinical-significance buckets in that region. Inspect the schema if needed; avoid double-counting multi-valued significance entries. Return only the manifest path, the SQL, and a Markdown result table.
 ```
 
 The same query with no model in the loop:

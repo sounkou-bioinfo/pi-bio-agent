@@ -9,15 +9,34 @@
 v2+](https://img.shields.io/badge/License-GPL%20v2%2B-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen.svg)](package.json)
 
-`pi-bio-agent` is a library and Pi extension for agent-controlled
-scientific computation. The unit of work is a manifest: declared
-resources, read-only SQL, optional process compute, receipts, CAS
-artifacts, and observations in one DuckDB-backed ledger.
+`pi-bio-agent` is a provider-agnostic bioinformatics agent substrate and
+Pi extension for agent-controlled scientific computation: manifests +
+SQL over DuckDB are the program. A manifest declares resources,
+read-only SQL, optional process compute, receipts, CAS artifacts, and
+observations in one DuckDB-backed ledger.
 
-The agent may inspect schemas and write SQL. Biomedical facts come from
+The agent may inspect schemas and write SQL; biomedical facts come from
 declared data, deterministic compute, receipts, and recorded approvals.
 
-## ClinVar From A Raw URL
+## Bets
+
+- New biomedical questions should become manifests, SQL, operation
+  specs, or graph data, not new per-question tools.
+- DuckDB is the substrate: files, formats, HTTP-shaped data, graph
+  tables, and reductions should be reached through SQL and extensions
+  whenever possible.
+- Knowledge belongs in queryable graph tables. `bio_edges`,
+  `bio_edges_as_of`, and `entailed_edge` are the interaction surface,
+  not serialized graph context.
+- CAS, resolver receipts, replay specs, and environment evidence are
+  part of the result, not optional metadata.
+- Compute is a host-injected async port: submit, status, collect,
+  cancel. The core records the contract and evidence; hosts decide what
+  processes, credentials, and network access are allowed.
+- The model handles routing, schema inspection, SQL composition, and
+  typed judgment. It is not the source of biomedical facts.
+
+## See It
 
 The agent starts with the raw ClinVar VCF URL and a TP53 genomic range,
 writes the manifest into `.pi/`, runs the query, and returns the SQL
@@ -27,84 +46,52 @@ is live data; the rows below are the result from this README render, not
 a pinned truth table.
 
 ``` sh
-pi --model openai-codex/gpt-5.3-codex --thinking high --no-extensions -e extensions/pi-coding-agent/index.ts --tools read,write,bio_describe_model,bio_query,bio_list_duckdb_extensions -p --no-session \
-  "This is the complete task. Use tools now; do not ask for " \
-  "a follow-up. First write " \
-  ".pi/bio-agent/readme-clinvar-tp53.json as a pi-bio " \
-  "manifest for the raw ClinVar VCF URL " \
+pi \
+  --model openai-codex/gpt-5.3-codex \
+  --thinking high \
+  --no-extensions \
+  -e extensions/pi-coding-agent/index.ts \
+  --tools read,write,bio_describe_model,bio_query,bio_list_duckdb_extensions \
+  -p --no-session \
+  "Create .pi/bio-agent/readme-clinvar-tp53.json for the " \
+  "raw ClinVar VCF URL " \
   "https://ftp.ncbi.nlm.nih.gov/pub/clinvar/vcf_GRCh38/clinvar.vcf.gz, " \
-  "region 17:43044295-43125483, table name clinvar, using " \
-  "the duckhts.read_bcf resolver. Then call bio_query on " \
-  "that manifest with dbPath ':memory:' to count clinical " \
-  "significance buckets. The SQL must handle INFO_CLNSIG as " \
-  "an array and count distinct CHROM, POS, REF, ALT, " \
-  "significance combinations before grouping. Return " \
-  "exactly: one line with Manifest: <path>, then one fenced " \
-  "sql block containing the SQL you passed to bio_query, " \
-  "then one fenced json block containing the result rows."
+  "region 17:43044295-43125483, table clinvar, using " \
+  "duckhts.read_bcf. Run bio_query to count " \
+  "clinical-significance buckets in that region. Inspect " \
+  "the schema if needed; avoid double-counting multi-valued " \
+  "significance entries. Return only the manifest path, the " \
+  "SQL, and a Markdown result table."
 ```
 
-Manifest: .pi/bio-agent/readme-clinvar-tp53.json
+Manifest path: `.pi/bio-agent/readme-clinvar-tp53.json`
 
 ``` sql
 WITH distinct_calls AS (
-  SELECT DISTINCT CHROM, POS, REF, ALT, significance
-  FROM clinvar, UNNEST(INFO_CLNSIG) AS u(significance)
+  SELECT DISTINCT CHROM, POS, REF, ALT, u.significance
+  FROM clinvar,
+       UNNEST(INFO_CLNSIG) AS u(significance)
+  WHERE u.significance IS NOT NULL
 )
 SELECT significance, COUNT(*) AS n
 FROM distinct_calls
 GROUP BY significance
-ORDER BY n DESC
+ORDER BY n DESC;
 ```
 
-``` json
-[
-  {
-    "significance": "Pathogenic",
-    "n": 3593
-  },
-  {
-    "significance": "Conflicting_classifications_of_pathogenicity",
-    "n": 2918
-  },
-  {
-    "significance": "Likely_benign",
-    "n": 2891
-  },
-  {
-    "significance": "Uncertain_significance",
-    "n": 2445
-  },
-  {
-    "significance": "Benign",
-    "n": 704
-  },
-  {
-    "significance": "Likely_pathogenic",
-    "n": 263
-  },
-  {
-    "significance": "Pathogenic/Likely_pathogenic",
-    "n": 226
-  },
-  {
-    "significance": "Benign/Likely_benign",
-    "n": 94
-  },
-  {
-    "significance": "not_provided",
-    "n": 49
-  },
-  {
-    "significance": "no_classification_for_the_single_variant",
-    "n": 2
-  },
-  {
-    "significance": "no_classifications_from_unflagged_records",
-    "n": 1
-  }
-]
-```
+| significance                                 |    n |
+|----------------------------------------------|-----:|
+| Pathogenic                                   | 3593 |
+| Conflicting_classifications_of_pathogenicity | 2918 |
+| Likely_benign                                | 2891 |
+| Uncertain_significance                       | 2445 |
+| Benign                                       |  704 |
+| Likely_pathogenic                            |  263 |
+| Pathogenic/Likely_pathogenic                 |  226 |
+| Benign/Likely_benign                         |   94 |
+| not_provided                                 |   49 |
+| no_classification_for_the_single_variant     |    2 |
+| no_classifications_from_unflagged_records    |    1 |
 
 The same query with no model in the loop:
 
