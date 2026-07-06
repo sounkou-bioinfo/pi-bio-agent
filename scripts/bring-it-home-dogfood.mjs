@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
@@ -18,6 +19,7 @@ import {
 import { materializeGraphProjectionProfile } from "../dist/duckdb/graph-projection.js";
 import { ducknngHttpProfileReceiptFromInfo } from "../dist/duckdb/http-profiles.js";
 import { fsCasStore } from "../dist/hosts/fs-cas.js";
+import { recordArtifactReference } from "../dist/hosts/artifacts.js";
 import { recordHostEvent } from "../dist/hosts/host-events.js";
 import { ingestSessionJsonl } from "../dist/hosts/session-ingest.js";
 import { exportTrainingCorpusParquet } from "../dist/hosts/training-corpus.js";
@@ -50,6 +52,10 @@ function asNumber(value) {
 
 function sqlString(value) {
   return `'${String(value).replace(/'/g, "''")}'`;
+}
+
+function sha256(bytes) {
+  return `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
 }
 
 async function compileExternalConsumer() {
@@ -382,6 +388,27 @@ try {
   const hostCapRunNode = `run:${hostCapRun.runId}`;
   await recordObservationLink(conn, { subjectId: sessionToolNode, predicate: "executes", objectId: hostCapRunNode, recordedAt: LATER, source: "bring-it-home-dogfood" });
   await recordObservationLink(conn, { subjectId: hostCapRunNode, predicate: "invoked_by", objectId: sessionToolNode, recordedAt: LATER, source: "bring-it-home-dogfood" });
+  const figureSvg = Buffer.from("<svg xmlns='http://www.w3.org/2000/svg'><text>variant consequence counts</text></svg>");
+  const figureDigest = sha256(figureSvg);
+  await hostCapCas.put({ algorithm: "sha256", digest: figureDigest.slice("sha256:".length) }, figureSvg);
+  await recordArtifactReference(conn, {
+    artifact: {
+      digest: figureDigest,
+      mediaType: "image/svg+xml",
+      semanticRole: "figure",
+      sizeBytes: figureSvg.length,
+    },
+    subjectId: hostCapRunNode,
+    predicate: "produces",
+    recordedAt: LATER,
+    source: "bring-it-home-dogfood",
+    attrs: {
+      producer_run: hostCapRunNode,
+      source_digest: hostCapRun.casRefs.result,
+      spec_digest: profileReceipt.policyDigest,
+      plotting_system: "inline-svg",
+    },
+  });
 
   await conn.run(`
     CREATE TABLE external_kg_raw(subject TEXT, predicate TEXT, object TEXT);
@@ -437,12 +464,21 @@ try {
   assert.equal(corpus.tables.sessions.rows, 1);
   assert.equal(corpus.tables.toolCalls.rows, 1);
   assert.equal(corpus.tables.runs.rows, 1);
+  assert.equal(corpus.tables.artifacts.rows, 1);
   assert.equal(corpus.tables.hostEvents.rows, 1);
   assert.match(corpus.tables.units.parquetDigest, /^sha256:[0-9a-f]{64}$/);
   const corpusUnitsReadback = await conn.all(
-    `SELECT count(*) AS n FROM read_parquet(${sqlString(corpus.tables.units.parquetPath)})`,
+    `SELECT count(*) AS n, max(artifacts) AS artifacts FROM read_parquet(${sqlString(corpus.tables.units.parquetPath)})`,
   );
   assert.equal(asNumber(corpusUnitsReadback[0]?.n), corpus.tables.units.rows);
+  assert.equal(asNumber(corpusUnitsReadback[0]?.artifacts), 1);
+  const corpusArtifactsReadback = await conn.all(
+    `SELECT source_node, semantic_role, plotting_system
+     FROM read_parquet(${sqlString(corpus.tables.artifacts.parquetPath)})`,
+  );
+  assert.deepEqual(corpusArtifactsReadback.map((r) => [r.source_node, r.semantic_role, r.plotting_system]), [
+    [hostCapRunNode, "figure", "inline-svg"],
+  ]);
 
   const checkpointRow = await observationAsOfKey(
     conn,
@@ -483,6 +519,7 @@ try {
       units: corpus.tables.units.rows,
       toolCalls: corpus.tables.toolCalls.rows,
       runs: corpus.tables.runs.rows,
+      artifacts: corpus.tables.artifacts.rows,
       hostEvents: corpus.tables.hostEvents.rows,
       parquetReadbackRows: asNumber(corpusUnitsReadback[0]?.n),
       unitsParquetDigest: corpus.tables.units.parquetDigest,

@@ -138,7 +138,10 @@ For training or publication exports, use `materializeTrainingCorpus` or `exportT
 `pi-bio-agent/hosts`. These are derived temporary projections over the observation ledger, not new storage: messages
 export content digests, tool calls export argument/result digests, runs export replay/receipt/result CAS digests, host
 events export event/payload digests rather than raw payloads, and artifacts export CAS URIs plus display/produce
-references. Private text hydration and publication redaction policy belong to the host/application.
+references and known source/spec/rendering metadata. When a host creates a figure, report, or displayed image, store
+the bytes in CAS and call `recordArtifactReference`; the artifact fact roots the bytes, while the edge records whether
+a turn displayed it, a tool produced it, or a run generated it. Private text hydration and publication redaction policy
+belong to the host/application.
 
 ## 4. Ordinal scales
 

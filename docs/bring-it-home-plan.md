@@ -168,8 +168,14 @@ Keep this as metadata on existing facts/edges:
 The artifact bytes live in CAS. The generative spec or script is part of the producing run's inputs. No plot table is
 needed.
 
-**Done when.** A run-produced figure and a session-displayed image can be walked through the graph, cited by CAS
-digest, rooted by GC, and replayed or honestly marked non-reproducible.
+**Current proof.** `recordArtifactReference` records the shared shape: intrinsic byte metadata as a `cas:<digest>`
+artifact fact, and reference context as a caller-owned edge such as `run:<id> produces cas:<digest>` or
+`toolcall:<id> displays cas:<digest>`. Session image ingestion uses the same helper. The focused artifact test proves
+graph-walkability and ledger-aware GC rooting; the training-corpus test proves run-produced figure metadata
+(`source_digest`, `spec_digest`, `plotting_system`) flows into the exported corpus.
+
+**Remaining.** Consumer-driven renderer coverage only: richer figure/report metadata should be added when the
+workbench path emits real R/Python/HTML artifacts, not as a plot taxonomy in core.
 
 ### 6. Export / Training Corpus
 

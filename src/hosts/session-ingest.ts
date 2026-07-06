@@ -6,6 +6,7 @@ import type { CasStore } from "../core/cas.js";
 import type { SqlConn } from "../core/ports.js";
 import { canonicalDigest } from "../core/reproducibility.js";
 import { createBioObservationSchema, recordObservation, recordObservationLink } from "../duckdb/observations.js";
+import { recordArtifactReference } from "./artifacts.js";
 
 type JsonObject = Record<string, unknown>;
 
@@ -197,39 +198,24 @@ async function recordImageArtifacts(args: {
     }
     if (bytes.length === 0) throw new Error(`ingestSessionJsonl: empty image at line ${args.lineNumber} (${img.indexPath})`);
     const digest = await putCas(args.cas, bytes);
-    const uri = casNode(digest);
     const firstSeen = !args.seenArtifacts.has(digest);
     args.seenArtifacts.add(digest);
-    const artifactValue = {
-      digest,
-      uri,
-      media_type: img.mimeType,
-      semantic_role: "session_image",
-      size_bytes: bytes.length,
-    };
-    await record(args.conn, {
-      statementKey: `${uri}:artifact`,
-      subjectId: uri,
-      predicate: "artifact",
-      value: artifactValue,
+    await recordArtifactReference(args.conn, {
+      artifact: { digest, mediaType: img.mimeType, semanticRole: "session_image", sizeBytes: bytes.length },
+      subjectId: args.ownerNode,
+      predicate: args.ownerPredicate ?? "displays",
       recordedAt: args.recordedAt,
       source: args.source,
-      digest,
       attrs: {
-        media_type: img.mimeType,
-        semantic_role: "session_image",
+        source_session: args.sessionId,
+        source_node: args.ownerNode,
+        producer_run: args.producerRun ?? null,
+        line_number: args.lineNumber,
+        image_index: imageIndex,
+        json_path: img.indexPath,
       },
-    }, args.counts);
-    await recordEdge(args.conn, args.counts, args.ownerNode, args.ownerPredicate ?? "displays", uri, args.recordedAt, args.source, {
-      media_type: img.mimeType,
-      semantic_role: "session_image",
-      source_session: args.sessionId,
-      source_node: args.ownerNode,
-      producer_run: args.producerRun ?? null,
-      line_number: args.lineNumber,
-      image_index: imageIndex,
-      json_path: img.indexPath,
     });
+    args.counts.observations += 2;
     if (firstSeen) args.counts.artifacts++;
     imageIndex++;
   }

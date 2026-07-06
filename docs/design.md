@@ -662,7 +662,8 @@ Graphics are first-class artifacts in this model. A rendered PNG/SVG/PDF/HTML pl
 linked from the turn or child run with metadata such as `media_type`, `semantic_role`, `producer_run`, source table
 or SQL digest, and plotting system. The generative spec or source script belongs in the producing run's inputs or
 artifacts. This keeps the R-lineage graphics surface auditable, replayable where possible, and usable for later
-review or training views.
+review or training views. `recordArtifactReference` is the reusable host helper for this: it writes intrinsic
+artifact metadata on the `cas:<digest>` fact and keeps display/production context on the edge.
 
 ## Skills: proper use
 

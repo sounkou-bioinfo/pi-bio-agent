@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,6 +9,7 @@ import { duckdbNodeConn } from "../src/duckdb/node-api.js";
 import { createBioObservationSchema, recordObservationLink } from "../src/duckdb/observations.js";
 import type { SqlConn } from "../src/core/ports.js";
 import { fsCasStore } from "../src/hosts/fs-cas.js";
+import { recordArtifactReference } from "../src/hosts/artifacts.js";
 import { decideCandidateApproval, submitCandidateForApproval, type OperationCandidate } from "../src/hosts/harness-adaptation.js";
 import { recordHostEvent } from "../src/hosts/host-events.js";
 import { recordRunObservation } from "../src/hosts/run-observations.js";
@@ -32,6 +34,10 @@ async function conn(): Promise<SqlConn> {
 
 function sqlString(value: string): string {
   return `'${value.replace(/'/g, "''")}'`;
+}
+
+function sha256(bytes: Buffer | string): `sha256:${string}` {
+  return `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
 }
 
 async function seedCorpusLedger(c: SqlConn, root: string): Promise<{ sessionId: string; runId: string }> {
@@ -75,6 +81,22 @@ async function seedCorpusLedger(c: SqlConn, root: string): Promise<{ sessionId: 
   }, T4, "test-runner");
   await recordObservationLink(c, { subjectId: toolNode, predicate: "executes", objectId: runNode, recordedAt: T4, source: "test-runner" });
   await recordObservationLink(c, { subjectId: runNode, predicate: "invoked_by", objectId: toolNode, recordedAt: T4, source: "test-runner" });
+  const figureBytes = Buffer.from("<svg xmlns='http://www.w3.org/2000/svg'><text>rare variants</text></svg>");
+  const figureDigest = sha256(figureBytes);
+  await cas.put({ algorithm: "sha256", digest: figureDigest.slice("sha256:".length) }, figureBytes);
+  await recordArtifactReference(c, {
+    artifact: { digest: figureDigest, mediaType: "image/svg+xml", semanticRole: "figure", sizeBytes: figureBytes.length },
+    subjectId: runNode,
+    predicate: "produces",
+    recordedAt: T4,
+    source: "test-runner",
+    attrs: {
+      producer_run: runNode,
+      source_digest: `sha256:${"6".repeat(64)}`,
+      spec_digest: `sha256:${"7".repeat(64)}`,
+      plotting_system: "R/ggplot2",
+    },
+  });
   await recordHostEvent(c, {
     subjectId: `session:${sessionId}`,
     kind: "workbench.input.steer",
@@ -114,7 +136,7 @@ describe("training corpus export", () => {
     assert.equal(receipt.tables.turns.rows, 1);
     assert.equal(receipt.tables.toolCalls.rows, 1);
     assert.equal(receipt.tables.runs.rows, 1);
-    assert.equal(receipt.tables.artifacts.rows, 2, "the corpus preserves display + produce references to one CAS artifact");
+    assert.equal(receipt.tables.artifacts.rows, 3, "the corpus preserves session image refs plus a run-produced artifact");
     assert.ok(receipt.tables.judgments.rows >= 4);
     assert.equal(receipt.tables.hostEvents.rows, 1);
     assert.equal(receipt.tables.units.rows, 1);
@@ -123,7 +145,7 @@ describe("training corpus export", () => {
       `SELECT session_node, tool_calls, linked_runs, artifacts FROM ${TRAINING_CORPUS_TABLES.units}`,
     ))[0]!;
     assert.equal(unit.session_node, `session:${sessionId}`);
-    assert.deepEqual({ toolCalls: unit.tool_calls, linkedRuns: unit.linked_runs, artifacts: unit.artifacts }, { toolCalls: 1, linkedRuns: 1, artifacts: 1 });
+    assert.deepEqual({ toolCalls: unit.tool_calls, linkedRuns: unit.linked_runs, artifacts: unit.artifacts }, { toolCalls: 1, linkedRuns: 1, artifacts: 2 });
 
     const tool = (await c.all<{ toolcall_node: string; run_node: string; is_error: boolean }>(
       `SELECT toolcall_node, run_node, is_error FROM ${TRAINING_CORPUS_TABLES.toolCalls}`,
@@ -142,7 +164,21 @@ describe("training corpus export", () => {
     const artifactRelations = await c.all<{ relation: string; n: bigint }>(
       `SELECT relation, count(*) AS n FROM ${TRAINING_CORPUS_TABLES.artifacts} GROUP BY relation ORDER BY relation`,
     );
-    assert.deepEqual(artifactRelations.map((r) => [r.relation, Number(r.n)]), [["displays", 1], ["produces", 1]]);
+    assert.deepEqual(artifactRelations.map((r) => [r.relation, Number(r.n)]), [["displays", 1], ["produces", 2]]);
+    const figure = (await c.all<{ source_node: string; media_type: string; semantic_role: string; source_digest: string; spec_digest: string; plotting_system: string }>(
+      `SELECT source_node, media_type, semantic_role, source_digest, spec_digest, plotting_system
+       FROM ${TRAINING_CORPUS_TABLES.artifacts}
+       WHERE source_node = ?`,
+      [`run:${runId}`],
+    ))[0]!;
+    assert.deepEqual(figure, {
+      source_node: `run:${runId}`,
+      media_type: "image/svg+xml",
+      semantic_role: "figure",
+      source_digest: `sha256:${"6".repeat(64)}`,
+      spec_digest: `sha256:${"7".repeat(64)}`,
+      plotting_system: "R/ggplot2",
+    });
 
     const messageColumns = await c.all<{ column_name: string }>(`DESCRIBE ${TRAINING_CORPUS_TABLES.messages}`);
     assert.ok(messageColumns.some((c) => c.column_name === "content_digest"));

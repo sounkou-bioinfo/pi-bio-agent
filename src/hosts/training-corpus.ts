@@ -225,6 +225,9 @@ export async function materializeTrainingCorpus(conn: SqlConn, opts: TrainingCor
        edge.predicate AS relation,
        json_extract_string(edge.attrs, '$.producer_run') AS producer_run,
        json_extract_string(edge.attrs, '$.source_session') AS source_session,
+       json_extract_string(edge.attrs, '$.source_digest') AS source_digest,
+       json_extract_string(edge.attrs, '$.spec_digest') AS spec_digest,
+       json_extract_string(edge.attrs, '$.plotting_system') AS plotting_system,
        a.recorded_at,
        a.source
      FROM training_corpus_latest_observations a
@@ -287,7 +290,7 @@ export async function materializeTrainingCorpus(conn: SqlConn, opts: TrainingCor
      FROM ${TRAINING_CORPUS_TABLES.turns} tr
      LEFT JOIN ${TRAINING_CORPUS_TABLES.toolCalls} tc ON tc.turn_node = tr.turn_node
      LEFT JOIN ${TRAINING_CORPUS_TABLES.artifacts} art
-       ON art.source_node IN (tr.turn_node, tr.output_message_node) OR art.source_node = tc.toolcall_node
+       ON art.source_node IN (tr.turn_node, tr.output_message_node) OR art.source_node IN (tc.toolcall_node, tc.run_node)
      GROUP BY tr.turn_node, tr.session_node, tr.input_message_node, tr.output_message_node, tr.provider, tr.model,
               tr.context_digest, tr.output_digest, tr.reproducibility_verdict
      ORDER BY min(tr.recorded_at)::TIMESTAMPTZ, tr.turn_node`,
