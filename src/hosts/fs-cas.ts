@@ -1,6 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
+import { createReadStream, createWriteStream } from "node:fs";
 import { promises as fs } from "node:fs";
 import { join } from "node:path";
+import { pipeline } from "node:stream/promises";
 import type { CasStore } from "../core/cas.js";
 import type { ContentAddress } from "../core/resources.js";
 import { validateContentAddress } from "../core/storage.js";
@@ -58,6 +60,35 @@ export function fsCasStore(root: string): CasStore {
         // a racing put may have created dest first; immutable content means that's fine — drop our temp
         await fs.rm(tmp, { force: true });
         if (!(await this.has(a))) throw err;
+      }
+    },
+    async putFile(filePath) {
+      await fs.mkdir(join(root, "tmp"), { recursive: true });
+      const tmp = join(root, "tmp", `putfile-${process.pid}-${randomUUID()}`);
+      const hash = createHash("sha256");
+      let size = 0;
+      const input = createReadStream(filePath);
+      input.on("data", (chunk) => {
+        const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        hash.update(bytes);
+        size += bytes.length;
+      });
+      try {
+        await pipeline(input, createWriteStream(tmp, { flags: "wx" }));
+        const address: ContentAddress = { algorithm: "sha256", digest: hash.digest("hex") };
+        const dest = pathFor(address);
+        try { await fs.access(dest); await fs.rm(tmp, { force: true }); return { address, size }; } catch { /* not present — install our temp */ }
+        await fs.mkdir(join(root, address.algorithm), { recursive: true });
+        try {
+          await fs.rename(tmp, dest);
+        } catch (err) {
+          await fs.rm(tmp, { force: true });
+          if (!(await this.has(address))) throw err;
+        }
+        return { address, size };
+      } catch (err) {
+        await fs.rm(tmp, { force: true });
+        throw err;
       }
     },
     async remove(a) {

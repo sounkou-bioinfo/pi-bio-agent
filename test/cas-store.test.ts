@@ -49,6 +49,28 @@ describe("CAS-of-bytes: a content-addressed byte store", () => {
     assert.deepEqual(leftovers, [], "no orphaned temp files after concurrent puts");
   });
 
+  test("putFile streams a local file into CAS and returns its content address", async () => {
+    const root = await fs.mkdtemp(join(tmpdir(), "pi-bio-cas-"));
+    const cas = fsCasStore(root);
+    const file = join(root, "artifact.bin");
+    const bytes = "artifact\n".repeat(10000);
+    await fs.writeFile(file, bytes);
+
+    const stored = await cas.putFile(file);
+    const addr = stored.address;
+    assert.deepEqual(addr, addressOf(bytes));
+    assert.equal(stored.size, Buffer.byteLength(bytes));
+    assert.equal(await fs.readFile(cas.pathFor(addr), "utf8"), bytes);
+
+    const mtime = (await fs.stat(cas.pathFor(addr))).mtimeMs;
+    const again = await cas.putFile(file);
+    assert.deepEqual(again.address, addr);
+    assert.equal(again.size, Buffer.byteLength(bytes));
+    assert.equal((await fs.stat(cas.pathFor(addr))).mtimeMs, mtime, "streaming a duplicate does not rewrite the CAS object");
+    const leftovers = (await fs.readdir(join(root, "tmp"))).filter((f) => f.includes("putfile-"));
+    assert.deepEqual(leftovers, [], "no orphaned streaming temp files");
+  });
+
   test("put REFUSES content that does not hash to its address (provenance integrity)", async () => {
     const root = await fs.mkdtemp(join(tmpdir(), "pi-bio-cas-"));
     const cas = fsCasStore(root);

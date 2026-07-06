@@ -111,14 +111,14 @@ describe("compute.run: fail-closed param guards (no spawn, no R)", () => {
     assert.match(out.error ?? "", /maxOutputBytes must be a positive number/);
   });
 
-  test("SECURITY: a declared output OVER the cap is refused before it is read whole into memory (OOM guard)", async () => {
+  test("an optional declared-output byte quota is enforced before capture", async () => {
     const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-guards-cap-"));
     const cas = fsCasStore(await fs.mkdtemp(join(tmpdir(), "pi-bio-cas-")));
     const params = { table: "r", resultTable: "artifacts", command: ["sh", "-c", "printf hello > out.txt"], outputs: [{ name: "o", path: "out.txt" }], maxOutputBytes: 1 };
     const manifest = { ...BASE, provides: { ...BASE.provides, resources: [{ id: "r", title: "r", kind: "virtual", resolver: "compute.run", params }] } };
     await fs.writeFile(join(cwd, "manifest.json"), JSON.stringify(manifest));
     const out = await runBioQueryFromManifest({ cwd, dbPath: ":memory:", manifestPath: "manifest.json", sql: "SELECT * FROM r", compute: { runner: nodeComputeRunner() }, cas, runId: "cap1", now: "T1" });
-    assert.equal(out.ok, false, "the 5-byte output exceeds the 1-byte cap");
-    assert.match(String((out as { error?: unknown }).error ?? ""), /over the 1-byte cap/);
+    assert.equal(out.ok, false, "the 5-byte output exceeds the 1-byte quota");
+    assert.match(String((out as { error?: unknown }).error ?? ""), /over the 1-byte quota/);
   });
 });

@@ -1,5 +1,10 @@
 import type { ContentAddress } from "./resources.js";
 
+export interface StoredCasFile {
+  address: ContentAddress;
+  size: number;
+}
+
 // CAS-of-bytes: a content-addressed byte store. The bytes a resolver materializes are written ONCE under their
 // content hash and reused across dbs/projects — distinct from the per-db resolution memo (which replays a
 // materialized TABLE within ONE db). The sha256 digests every resolver already computes (and stamps into
@@ -17,6 +22,10 @@ export interface CasStore {
   /** Store bytes under their content address. Idempotent + immutable: a present entry is left untouched (the
    *  address IS the content, so re-putting identical bytes is a no-op). */
   put(address: ContentAddress, bytes: Buffer | string): Promise<void>;
+  /** Stream a local file into CAS, hashing as it copies, and return the resulting content address. This is the
+   *  file-artifact path: large declared outputs must become CAS handles without first materializing the whole file
+   *  in JS memory. Idempotent + immutable like put(). */
+  putFile(path: string): Promise<StoredCasFile>;
   /** Delete the bytes for an address (idempotent — a missing entry is a no-op). The GC sweep step's hand: a
    *  content store is immutable but NOT permanent — reclaiming unreferenced bytes is the only mutation allowed,
    *  and only the GC (which proves the address is unreferenced + unleased) should call it. */

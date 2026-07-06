@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { resolve, sep } from "node:path";
 import type { CasStore } from "../core/cas.js";
@@ -9,7 +8,7 @@ import type { CasStore } from "../core/cas.js";
 // SLURM / NNG / container backend that owns a work dir) captures files under the EXACT SAME safety rules instead
 // of reimplementing them subtly differently: relative-only paths, reject a symlink or a non-regular file, confirm
 // the REALPATH stays inside the work dir (a child's `ln -s /etc/passwd out.txt` resolves lexically inside dir but
-// realpaths out), enforce a byte cap BEFORE reading the file whole into memory, then sha256 → cas.put.
+// realpaths out), optionally enforce a host quota, then stream the file into CAS.
 //
 // Lives at the duckdb layer (not hosts): the layer order here is hosts → duckdb → core, so a duckdb resolver
 // (compute-run) must not import UP into hosts; a hosts adapter reaches DOWN into duckdb (the allowed edge).
@@ -40,7 +39,8 @@ export async function captureDeclaredOutputsToCas(opts: {
   workDir: string;
   outputs: readonly DeclaredOutput[];
   cas: CasStore;
-  maxOutputBytes: number;
+  /** Optional host quota. Omitted means no library-imposed artifact-size ceiling; capture still streams to CAS. */
+  maxOutputBytes?: number;
   /** message prefix / actor for errors (default "compute.run" — preserves the resolver's error identity). */
   label?: string;
 }): Promise<CapturedArtifact[]> {
@@ -60,13 +60,12 @@ export async function captureDeclaredOutputsToCas(opts: {
     catch { throw new Error(`${label}: declared output '${o.name}' (${o.path}) was not written (a clean exit that skipped a promised file is still a failure)`); }
     if (st.isSymbolicLink()) throw new Error(`${label}: declared output '${o.name}' must not be a symlink`);
     if (!st.isFile()) throw new Error(`${label}: declared output '${o.name}' must be a regular file`);
-    if (st.size > maxOutputBytes) throw new Error(`${label}: declared output '${o.name}' is ${st.size} bytes, over the ${maxOutputBytes}-byte cap — refusing to read it whole into memory (fail closed)`);
+    if (maxOutputBytes !== undefined && st.size > maxOutputBytes) throw new Error(`${label}: declared output '${o.name}' is ${st.size} bytes, over the ${maxOutputBytes}-byte quota`);
     const real = await fs.realpath(full);
     if (real !== realDirRoot && !real.startsWith(realDirRoot + sep)) throw new Error(`${label}: declared output '${o.name}' realpath escaped the work dir`);
-    const bytes = await fs.readFile(real);
-    const digest = createHash("sha256").update(bytes).digest("hex");
-    await cas.put({ algorithm: "sha256", digest }, bytes); // immutable + idempotent
-    artifacts.push({ name: o.name, path: o.path, kind: o.kind ?? "file", digest: `sha256:${digest}`, size: bytes.length });
+    const stored = await cas.putFile(real); // immutable + idempotent; streams, does not read the whole file into JS memory
+    if (maxOutputBytes !== undefined && stored.size > maxOutputBytes) throw new Error(`${label}: declared output '${o.name}' captured ${stored.size} bytes, over the ${maxOutputBytes}-byte quota`);
+    artifacts.push({ name: o.name, path: o.path, kind: o.kind ?? "file", digest: `${stored.address.algorithm}:${stored.address.digest}` as `sha256:${string}`, size: stored.size });
   }
   return artifacts;
 }

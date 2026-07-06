@@ -131,7 +131,7 @@ spec -> resolver or adapter -> DuckDB table -> recorded run.
 
 - Add a restricted code runtime only after operation clients exist.
 - No ambient network, raw secrets, or raw DuckDB handle.
-- Add tests for timeout, output cap, denied ambient APIs, and in-env filtering.
+- Add tests for timeout, host quotas, denied ambient APIs, and in-env filtering.
 
 ### Stage 8: workflow fixtures
 
@@ -651,7 +651,7 @@ The restricted-runtime contract (build before exposing powerful execution):
   - no raw secrets
   - no raw filesystem except workspace/artifact APIs
   - no raw DuckDB handle except scoped read-only query clients
-  - timeout, memory/output cap, and audit receipt
+  - timeout, host quotas, and audit receipt
 - Decide first supported language: JavaScript is natural for generated clients; R/Python remain useful through explicit tools for analysis/reporting.
 - Define how operation clients are generated from operation specs and injected into the runtime.
 - Add tests proving large intermediate results can be filtered in-env without entering model context.

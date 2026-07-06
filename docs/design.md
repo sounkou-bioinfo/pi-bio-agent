@@ -349,7 +349,7 @@ Three things keep this consistent with the rest of the substrate:
   runtime, exactly as we never embed an ontology runtime (we read its SQL) or a graph engine (we materialize
   closure). Absorb the function, not the runtime.
 - **Host-bound and host-gated effects.** The executor is injected by the host (like `http.get`'s `fetch`), and
-  whether shell/R/containers/SLURM are even possible, and any timeout, output cap, or egress: is the
+  whether shell/R/containers/SLURM are even possible, and any timeout, output quota, or egress: is the
   **host's sandbox decision** (container, namespace, seccomp, cluster). The library **records** what ran
   (command digest, tool + version, input handles, output CAS digests, exit code, duration); it does **not**
   impose the limits. Same posture as the network: accountability, not access control.
@@ -364,8 +364,8 @@ Three things keep this consistent with the rest of the substrate:
   DuckDB. The local implementation runs an out-of-process child (R/Python/Go/shell) over Arrow IPC with a
   script-bytes provenance digest, detached process-group kill on timeout/abort, and fail-closed-without-runner.
   Three output shapes exist: a **table** read back from the child's Arrow IPC (DuckDB → Arrow → child → Arrow →
-  table, `examples/compute-run`); declared **file outputs** captured content-addressed into **CAS**
-  (`resultTable: "artifacts"` + `captureDeclaredOutputsToCas` in `src/duckdb/artifact-capture.ts`: relative-path-only, symlink/non-regular-file rejecting, realpath-confined to the work dir, byte-capped,
+  table, `examples/compute-run`); declared **file outputs** streamed content-addressed into **CAS**
+  (`resultTable: "artifacts"` + `captureDeclaredOutputsToCas` in `src/duckdb/artifact-capture.ts`: relative-path-only, symlink/non-regular-file rejecting, realpath-confined to the work dir, optional host quota,
   fail-closed-without-CAS; `examples/compute-artifacts`); and the **files-only** case where the resource's table
   is the captured-artifacts listing (`examples/compute-files-only`). Environment receipts are also host-extensible:
   `withObservedEnvironment` wraps any `ComputeRunner` with a host-known `EnvDescriptor` (for example an `renv.lock`
@@ -784,9 +784,10 @@ Context should carry compact indexes, not every body/schema/result:
 - operation index -> describe operation/client on demand
 - study index -> read selected note on demand
 - graph shape -> query/walk selected parts
-- large result -> artifact/resource handle plus compact summary
+- large result -> named DuckDB relation/view or CAS artifact handle, then inspect with explicit SQL
+  (`DESCRIBE`, `SUMMARIZE`, `COUNT`, `LIMIT`, filtered projections)
 
-Do not solve context overload by hiding capabilities that the agent legitimately needs. Preserve capability, but make disclosure cheap and explicit.
+Do not solve context overload by hiding capabilities that the agent legitimately needs. Preserve capability, but make disclosure cheap and explicit. In particular, `bio_query` is already the inspection loop: it can create a scoped view when useful and return only the rows the SQL asks for. Model-facing truncation is a presentation decision; artifact capture and run recording keep handles, receipts, and CAS bytes intact.
 
 ## Long-running work
 

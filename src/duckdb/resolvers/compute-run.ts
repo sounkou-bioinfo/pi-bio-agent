@@ -8,12 +8,6 @@ import { captureDeclaredOutputsToCas } from "../artifact-capture.js";
 import { collectComputeTask, type BioResolverImpl, type ComputeRunner } from "../../core/ports.js";
 import { attestEnvironment, validateEnvDescriptor, ENV_ATTESTATION_SCHEMA, type EnvDescriptor } from "../../core/reproducibility.js";
 
-// A declared process output is read whole into memory (hash -> CAS), so an unbounded artifact would OOM the Node
-// host — the same class of risk the http byte-cap addresses. Cap it fail-closed at a generous default (checked
-// against the file's stat size BEFORE reading it into a buffer). A huge legitimate output belongs in a streamed
-// sink the host owns, not a materialized artifact.
-const DEFAULT_MAX_OUTPUT_BYTES = 256 * 1024 * 1024; // 256 MiB
-
 // The COMPUTE-pillar resolver: materialize a table by running an OUT-OF-PROCESS computation (R / Python / Go /
 // shell) over a DuckDB input, exchanging Arrow IPC. The DATA contract stays in SQL/Arrow — this resolver does
 // the marshalling, the injected ComputeRunner only spawns:
@@ -52,8 +46,11 @@ const DEFAULT_MAX_OUTPUT_BYTES = 256 * 1024 * 1024; // 256 MiB
 //               [{ name, path, kind?: "file"|"table" }]. The child writes them into its WORK DIR (its cwd); after
 //               a clean exit the resolver captures each into CAS (content-addressed) and records {name, path,
 //               digest, size} in the receipt. Values come back via Arrow (the table); FILES go via CAS and NEVER
-//               through the IPC — the nf-r-ipc/Nextflow split (Nextflow's content-addressed work dir = our CAS).
+//               through the IPC or model context — the nf-r-ipc/Nextflow split (Nextflow's content-addressed work
+//               dir = our CAS). Capture streams file bytes into CAS; no library-imposed default size ceiling.
 //               Requires a host-injected CAS (fails closed without one).
+//   maxOutputBytes OPTIONAL host quota for a declared output file. It can reject oversized artifacts, but is NOT a
+//               memory-safety primitive; capture streams into CAS.
 //   environment OPTIONAL declared EnvDescriptor (C1) — the reproduction CONTRACT (a conda/micromamba/renv lock, a
 //               container digest, a duckdb+extensions set — runtime-agnostic layers). Validated fail-closed. The
 //               runner's optional describeEnvironment probe gives the OBSERVED env; the receipt records a declared-
@@ -65,12 +62,10 @@ const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/;
 export function computeRunResolver(runner: ComputeRunner): BioResolverImpl {
   return async (resource, ctx) => {
     const p = resource.params as { table?: unknown; inputSql?: unknown; command?: unknown; env?: unknown; timeoutMs?: unknown; extensions?: unknown; outputs?: unknown; resultTable?: unknown; environment?: unknown; maxOutputBytes?: unknown };
-    // Per-output byte cap: can only TIGHTEN the default (min), never raise it — a manifest can't opt OUT of the
-    // OOM guard, only ask for a stricter one.
     if (p.maxOutputBytes !== undefined && (typeof p.maxOutputBytes !== "number" || !Number.isFinite(p.maxOutputBytes) || p.maxOutputBytes <= 0)) {
       throw new Error("compute.run: params.maxOutputBytes must be a positive number of bytes");
     }
-    const maxOutputBytes = Math.min(typeof p.maxOutputBytes === "number" ? p.maxOutputBytes : DEFAULT_MAX_OUTPUT_BYTES, DEFAULT_MAX_OUTPUT_BYTES);
+    const maxOutputBytes = typeof p.maxOutputBytes === "number" ? p.maxOutputBytes : undefined;
     if (typeof p.table !== "string" || !IDENT.test(p.table)) throw new Error("compute.run requires params.table to be a valid SQL identifier");
     // inputSql is OPTIONAL: absent = a FILES-ONLY op (the tool reads/writes its own files; no Arrow input handed in).
     // Present = the op gets its input table as Arrow IPC (in.arrow, appended to argv).
@@ -191,8 +186,9 @@ export function computeRunResolver(runner: ComputeRunner): BioResolverImpl {
 
       // 3b. FILE ARTIFACTS (#3): capture each declared output into CAS, content-addressed. In arrow mode VALUES came
       //     back via Arrow (step 3) while FILES go via CAS — never through the IPC (the nf-r-ipc/Nextflow split). The
-      //     capture rules (relative-only, no symlink/non-regular, realpath containment, byte cap, sha256→put) are a
-      //     SHARED host invariant, factored into captureDeclaredOutputsToCas so a future compute adapter reuses them.
+      //     capture rules (relative-only, no symlink/non-regular, realpath containment, optional host quota,
+      //     streamed sha256→CAS) are a SHARED host invariant, factored into captureDeclaredOutputsToCas so a future
+      //     compute adapter reuses them.
       const artifacts = await captureDeclaredOutputsToCas({ workDir: dir, outputs, cas: ctx.cas!, maxOutputBytes });
 
       // 3c. FILES-ONLY result -> the table IS the artifacts listing (one row per captured output). The tool returned
