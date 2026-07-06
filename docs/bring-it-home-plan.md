@@ -63,8 +63,8 @@ thin: it records only events the host actually emits and does not infer intent f
 **Goal.** Multi-step applications resume from completed durable steps, not by replaying all application code after a
 crash, compaction, lease expiry, or process switch.
 
-The runner layer already has resume/cancel. The missing piece is narrower: a small convention for step checkpoints
-inside workflow-shaped applications.
+The runner layer already has resume/cancel. The checkpoint convention is now a small helper over the observation
+ledger, not a workflow engine.
 
 **Shape.**
 
@@ -75,11 +75,12 @@ inside workflow-shaped applications.
 - code outside a step may rerun after failure, but completed step effects must not repeat.
 
 `test/absurd-queue-push-dogfood.test.ts` already demonstrates the important behavior: a reclaimed attempt reuses a
-recorded step checkpoint instead of redoing the completed step. Promote that into a small helper only when a downstream
-application and one more concrete instance converge on the same convention.
+recorded step checkpoint instead of redoing the completed step. `runJobStepWithCheckpoint` / `recordJobStepCheckpoint`
+promote that repeated pattern into the narrow core surface: read the checkpoint first, run only if missing, and record
+the completed value as `job_step_checkpoint`.
 
-**Done when.** A downstream workflow can be killed mid-run, resumed against the same store, skip completed steps from
-checkpoint facts, and still produce reproducible run/CAS evidence for each completed step.
+**Done when.** A downstream workflow uses the helper in anger, is killed mid-run, resumes against the same store,
+skips completed steps from checkpoint facts, and still produces reproducible run/CAS evidence for each completed step.
 
 ### 3. SDK Surface Polish
 

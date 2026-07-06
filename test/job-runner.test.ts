@@ -8,7 +8,19 @@ import { duckdbNodeConn } from "../src/duckdb/node-api.js";
 import { createBioObservationSchema, observationAsOfKey, recordObservation } from "../src/duckdb/observations.js";
 import { inMemoryJobRunner } from "../src/hosts/in-memory-job-runner.js";
 import { ledgerJobRunner } from "../src/hosts/ledger-job-runner.js";
-import { submitBioJob, pollBioJob, collectBioJob, collectAndRecordBioJob, readJobRecord, resumeBioJob, cancelBioJob } from "../src/hosts/job-store.js";
+import {
+  JOB_STEP_CHECKPOINT_SCHEMA,
+  jobStepCheckpointKey,
+  submitBioJob,
+  pollBioJob,
+  collectBioJob,
+  collectAndRecordBioJob,
+  readJobRecord,
+  resumeBioJob,
+  cancelBioJob,
+  readJobStepCheckpoint,
+  runJobStepWithCheckpoint,
+} from "../src/hosts/job-store.js";
 import type { JobRunner } from "../src/core/jobs.js";
 import type { RunReplaySpec } from "../src/core/reproducibility.js";
 
@@ -138,6 +150,90 @@ describe("L2/L3: durable resume (no runner) + cancellation", () => {
     // but the durable ledger is terminal (cancelled) -> poll must NOT append succeeded over it
     const st = await pollBioJob(conn, runner, { cwd, runId: "d1", now: "2026-07-01T00:00:09Z" });
     assert.equal(st.phase, "cancelled", "durably-terminal wins; poll never resurrects");
+  });
+});
+
+describe("job step checkpoints: durable workflow resume without a workflow engine", () => {
+  test("runJobStepWithCheckpoint records a completed step and skips it on a resumed attempt", async () => {
+    const { conn } = await setup();
+    const runId = "wf1";
+    let executions = 0;
+
+    const first = await runJobStepWithCheckpoint(conn, {
+      runId,
+      stepId: "extract",
+      recordedAt: "2026-07-01T00:00:10Z",
+      source: "worker:a",
+      replayDigest: "sha256:replay",
+      attempt: 1,
+      run: () => {
+        executions += 1;
+        return { rows: 5, file: "variants.parquet" };
+      },
+    });
+    assert.equal(first.reused, false);
+    assert.deepEqual(first.value, { rows: 5, file: "variants.parquet" });
+
+    const second = await runJobStepWithCheckpoint(conn, {
+      runId,
+      stepId: "extract",
+      recordedAt: "2026-07-01T00:00:20Z",
+      source: "worker:b",
+      replayDigest: "sha256:replay",
+      attempt: 2,
+      run: () => {
+        executions += 1;
+        return { rows: 99 };
+      },
+    });
+    assert.equal(second.reused, true);
+    assert.equal(executions, 1, "the resumed attempt reused the durable checkpoint instead of re-running");
+    assert.equal(second.recordedAt, "2026-07-01T00:00:10Z", "the reused checkpoint keeps its original provenance time");
+    assert.deepEqual(second.value, { rows: 5, file: "variants.parquet" });
+
+    const row = await observationAsOfKey(conn, jobStepCheckpointKey(runId, "extract"), "2026-07-01T00:00:30Z");
+    const envelope = JSON.parse(row!.value_json!);
+    assert.equal(envelope.schema, JOB_STEP_CHECKPOINT_SCHEMA);
+    assert.deepEqual(envelope.value, { rows: 5, file: "variants.parquet" });
+    const read = await readJobStepCheckpoint(conn, runId, "extract");
+    assert.equal(read?.attempt, 1);
+    assert.deepEqual(read?.value, { rows: 5, file: "variants.parquet" });
+  });
+
+  test("step checkpoints fail closed on unsafe ids and non-JSON values", async () => {
+    const { conn } = await setup();
+    await assert.rejects(
+      () => runJobStepWithCheckpoint(conn, {
+        runId: "wf2",
+        stepId: "../extract",
+        recordedAt: "2026-07-01T00:00:10Z",
+        replayDigest: "sha256:replay",
+        run: () => ({ ok: true }),
+      }),
+      /unsafe stepId/,
+    );
+    await assert.rejects(
+      () => runJobStepWithCheckpoint(conn, {
+        runId: "wf2",
+        stepId: "bad-value",
+        recordedAt: "2026-07-01T00:00:10Z",
+        replayDigest: "sha256:replay",
+        run: () => ({ rows: Number.NaN }) as never,
+      }),
+      /finite JSON number/,
+    );
+    await recordObservation(conn, {
+      statementKey: jobStepCheckpointKey("wf2", "corrupt"),
+      subjectId: "job:wf2",
+      predicate: "job_step_checkpoint",
+      value: { schema: JOB_STEP_CHECKPOINT_SCHEMA, runId: "other", stepId: "corrupt", value: { ok: true } },
+      recordedAt: "2026-07-01T00:00:11Z",
+      source: "test",
+    });
+    await assert.rejects(
+      () => readJobStepCheckpoint(conn, "wf2", "corrupt"),
+      /envelope does not match/,
+    );
   });
 });
 

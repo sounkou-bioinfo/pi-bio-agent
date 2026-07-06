@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import type { SqlConn } from "../core/ports.js";
 import { assertJobReplay, type JobRunner, type JobResult, type JobStatus, type JobPhase } from "../core/jobs.js";
+import type { JsonValue } from "../core/json.js";
 import type { RunReplaySpec } from "../core/reproducibility.js";
 import { replaySpecDigest } from "../core/reproducibility.js";
 import { recordObservation, observationAsOfKey } from "../duckdb/observations.js";
@@ -33,9 +34,19 @@ const RUN_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const assertSafeRunId = (runId: string): void => {
   if (typeof runId !== "string" || !RUN_ID_RE.test(runId)) throw new Error(`job-store: unsafe runId '${runId}' (letters/numbers/'.'/'_'/':'/'-', no separators, max 128)`);
 };
+const STEP_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+const assertSafeStepId = (stepId: string): void => {
+  if (typeof stepId !== "string" || !STEP_ID_RE.test(stepId)) throw new Error(`job-store: unsafe stepId '${stepId}' (letters/numbers/'.'/'_'/':'/'-', no separators, max 128)`);
+};
 const slotOf = (runId: string): string => `job:${runId}:status`;
 const resultSlotOf = (runId: string): string => `job:${runId}:result`;
 const subjectOf = (runId: string): string => `job:${runId}`;
+export const JOB_STEP_CHECKPOINT_SCHEMA = "pi-bio.job_step_checkpoint.v1" as const;
+export const jobStepCheckpointKey = (runId: string, stepId: string): string => {
+  assertSafeRunId(runId);
+  assertSafeStepId(stepId);
+  return `job:${runId}:step:${stepId}`;
+};
 const jobsDir = (cwd: string): string => join(cwd, ".pi", "bio-agent", "jobs");
 const jobFile = (cwd: string, runId: string): string => { assertSafeRunId(runId); return join(jobsDir(cwd), `${runId}.json`); };
 
@@ -46,6 +57,92 @@ export interface JobRecord {
   replayDigest: string;
   submittedAt: string;
   updatedAt: string;
+}
+
+export interface JobStepCheckpoint<T extends JsonValue = JsonValue> {
+  schema: typeof JOB_STEP_CHECKPOINT_SCHEMA;
+  runId: string;
+  stepId: string;
+  value: T;
+  recordedAt: string;
+  source?: string;
+  replayDigest?: string;
+  attempt?: number;
+}
+
+export interface RecordJobStepCheckpointRequest<T extends JsonValue = JsonValue> {
+  runId: string;
+  stepId: string;
+  value: T;
+  recordedAt: string;
+  replayDigest: string;
+  source?: string;
+  attempt?: number;
+}
+
+export interface RunJobStepWithCheckpointRequest<T extends JsonValue = JsonValue> extends Omit<RecordJobStepCheckpointRequest<T>, "value"> {
+  run: () => Promise<T> | T;
+}
+
+function assertJsonValue(value: unknown, label: string): asserts value is JsonValue {
+  const visit = (v: unknown, path: string): void => {
+    if (v === null || typeof v === "string" || typeof v === "boolean") return;
+    if (typeof v === "number") {
+      if (!Number.isFinite(v)) throw new Error(`${label}: ${path} must be a finite JSON number`);
+      return;
+    }
+    if (Array.isArray(v)) {
+      for (const [i, item] of v.entries()) visit(item, `${path}[${i}]`);
+      return;
+    }
+    if (typeof v === "object" && v !== null) {
+      const proto = Object.getPrototypeOf(v);
+      if (proto !== Object.prototype && proto !== null) throw new Error(`${label}: ${path} must be a plain JSON object`);
+      for (const [k, item] of Object.entries(v as Record<string, unknown>)) {
+        if (item === undefined) throw new Error(`${label}: ${path}.${k} must not be undefined`);
+        visit(item, `${path}.${k}`);
+      }
+      return;
+    }
+    throw new Error(`${label}: ${path} must be JSON-serializable`);
+  };
+  visit(value, "$");
+}
+
+function parseStepCheckpoint<T extends JsonValue>(runId: string, stepId: string, row: { value_json: string | null; recorded_at: string; source: string | null; digest: string | null }): JobStepCheckpoint<T> | null {
+  if (row.value_json == null) return null;
+  const parsed = JSON.parse(row.value_json) as unknown;
+  if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && (parsed as { schema?: unknown }).schema === JOB_STEP_CHECKPOINT_SCHEMA) {
+    const envelope = parsed as { runId?: unknown; stepId?: unknown; value?: unknown; attempt?: unknown };
+    if (envelope.runId !== runId || envelope.stepId !== stepId) {
+      throw new Error(`job step checkpoint '${runId}/${stepId}' envelope does not match its statement slot`);
+    }
+    const attempt = envelope.attempt;
+    if (attempt !== undefined && (typeof attempt !== "number" || !Number.isInteger(attempt) || attempt < 1)) {
+      throw new Error(`job step checkpoint '${runId}/${stepId}' attempt must be a positive integer when present`);
+    }
+    assertJsonValue(envelope.value, `job step checkpoint '${runId}/${stepId}'`);
+    return {
+      schema: JOB_STEP_CHECKPOINT_SCHEMA,
+      runId,
+      stepId,
+      value: envelope.value as T,
+      recordedAt: row.recorded_at,
+      source: row.source ?? undefined,
+      replayDigest: row.digest ?? undefined,
+      attempt,
+    };
+  }
+  assertJsonValue(parsed, `job step checkpoint '${runId}/${stepId}'`);
+  return {
+    schema: JOB_STEP_CHECKPOINT_SCHEMA,
+    runId,
+    stepId,
+    value: parsed as T,
+    recordedAt: row.recorded_at,
+    source: row.source ?? undefined,
+    replayDigest: row.digest ?? undefined,
+  };
 }
 
 async function persistJob(cwd: string, rec: JobRecord): Promise<void> {
@@ -80,6 +177,64 @@ export async function readJobRecord(cwd: string, runId: string): Promise<JobReco
     throw new Error(`job-store: malformed job record for '${runId}'`); // fail closed on a corrupt phase/timestamp, not just schema/id
   }
   return rec;
+}
+
+/** Read one durable step checkpoint. A missing checkpoint returns null; a malformed value fails closed. */
+export async function readJobStepCheckpoint<T extends JsonValue = JsonValue>(conn: SqlConn, runId: string, stepId: string, asOf = FUTURE): Promise<JobStepCheckpoint<T> | null> {
+  const key = jobStepCheckpointKey(runId, stepId);
+  const row = await observationAsOfKey(conn, key, asOf);
+  return row ? parseStepCheckpoint<T>(runId, stepId, row) : null;
+}
+
+/** Record the completed output of one workflow/job step as durable state. Resume should read this before
+ * re-running the step; the helper intentionally records only a checkpoint, not a workflow engine. */
+export async function recordJobStepCheckpoint<T extends JsonValue = JsonValue>(conn: SqlConn, req: RecordJobStepCheckpointRequest<T>): Promise<JobStepCheckpoint<T>> {
+  assertSafeRunId(req.runId);
+  assertSafeStepId(req.stepId);
+  assertJsonValue(req.value, `job step checkpoint '${req.runId}/${req.stepId}'`);
+  if (req.attempt !== undefined && (!Number.isInteger(req.attempt) || req.attempt < 1)) {
+    throw new Error("job-store: checkpoint attempt must be a positive integer when supplied");
+  }
+  const envelope = {
+    schema: JOB_STEP_CHECKPOINT_SCHEMA,
+    runId: req.runId,
+    stepId: req.stepId,
+    value: req.value,
+    ...(req.attempt !== undefined ? { attempt: req.attempt } : {}),
+  };
+  await recordObservation(conn, {
+    statementKey: jobStepCheckpointKey(req.runId, req.stepId),
+    subjectId: subjectOf(req.runId),
+    predicate: "job_step_checkpoint",
+    value: envelope,
+    recordedAt: req.recordedAt,
+    source: req.source ?? "job-store",
+    digest: req.replayDigest,
+    attrs: { step_id: req.stepId, ...(req.attempt !== undefined ? { attempt: req.attempt } : {}) },
+  });
+  return {
+    schema: JOB_STEP_CHECKPOINT_SCHEMA,
+    runId: req.runId,
+    stepId: req.stepId,
+    value: req.value,
+    recordedAt: req.recordedAt,
+    source: req.source ?? "job-store",
+    replayDigest: req.replayDigest,
+    attempt: req.attempt,
+  };
+}
+
+/** Execute one step only if its checkpoint is missing. This is the resume primitive for workflow-shaped jobs:
+ * completed steps are durable observations, and restarted code continues from the first missing step. */
+export async function runJobStepWithCheckpoint<T extends JsonValue = JsonValue>(
+  conn: SqlConn,
+  req: RunJobStepWithCheckpointRequest<T>,
+): Promise<JobStepCheckpoint<T> & { reused: boolean }> {
+  const existing = await readJobStepCheckpoint<T>(conn, req.runId, req.stepId);
+  if (existing) return { ...existing, reused: true };
+  const value = await req.run();
+  const recorded = await recordJobStepCheckpoint(conn, { ...req, value });
+  return { ...recorded, reused: false };
 }
 
 async function latestSlotRow(conn: SqlConn, runId: string): Promise<{ phase: JobPhase; at: string; message?: string; progress?: JobStatus["progress"] } | null> {
