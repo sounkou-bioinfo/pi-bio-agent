@@ -92,12 +92,14 @@ Semantic SQL LinkML source spec -> SQLite/Semantic SQL artifacts -> DuckDB stagi
 
 SQLite is an interchange artifact; DuckDB is the query substrate. The currently exercised path maps Semantic SQL
 `edge(subject,predicate,object)` into `bio_edges(from_id,predicate,to_id)`, keeps label/synonym `statements` in a
-DuckDB table for grounding, and recomputes closure with our `entailed_edge` materializer. A richer resolver can
-also project CURIEs, labels, definitions, synonyms, predicates, xrefs, obsolete flags, source ontology, and
-version/provenance into the stable `ontology_terms`, `ontology_edges`, and `ontology_mappings` views above. This
-keeps ontology lookup, descendant expansion, term-set materialization, GWAS phenotype joins, and agent-authored
-SQL in one execution model. Do not add a MONDO/HPO/OLS-specific helper when a resolver can materialize the
-Semantic SQL schema into the generic graph contract.
+DuckDB table for grounding, and recomputes closure with our `entailed_edge` materializer. The executable profile path
+is symmetric: `materializeGraphProjectionProfile` applies a `GraphProjectionProfile` to a staged ontology edge table
+and to the internal `bio_edges_as_of` observation graph, then uses the same local closure machinery for both. A richer
+resolver can also project CURIEs, labels, definitions, synonyms, predicates, xrefs, obsolete flags, source ontology,
+and version/provenance into the stable `ontology_terms`, `ontology_edges`, and `ontology_mappings` views above. This
+keeps ontology lookup, descendant expansion, term-set materialization, GWAS phenotype joins, and agent-authored SQL in
+one execution model. Do not add a MONDO/HPO/OLS-specific helper when a resolver can materialize the Semantic SQL schema
+into the generic graph contract.
 
 ## Knowledge graph
 

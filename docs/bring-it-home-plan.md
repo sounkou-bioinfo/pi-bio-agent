@@ -112,8 +112,13 @@ This is profile work first, not a new graph subsystem. Workload-derived first-an
 projection, are a latency optimization under this item: build them only when a measured foreign-graph query workload
 needs first-answer latency improvements.
 
-**Done when.** A real external graph projects into `bio_edges_as_of`, closure and graph walks work identically to
-internal observations, and a conformance test proves the import/profile/closure path.
+**Current proof.** `test/graph-projection.test.ts` executes the same profile materializer over a staged ontology edge
+fixture and over the internal `bio_edges_as_of` observation graph, then closes both with the same local
+`entailed_edge` machinery.
+
+**Done when.** A production external graph source projects into the compiled graph surface, closure and graph walks
+work identically to internal observations, and a manifest/operation path consumes that projection without bespoke graph
+code.
 
 ### 5. Graphics And Artifact Metadata
 

@@ -735,8 +735,9 @@ JOIN, not a walker. See [`design.md`](./design.md#the-semanticsql-shape-source-s
   tables/columns, CURIE-prefix registry, generated-view policy (`edge`, labels, synonyms, restrictions),
   transitive-predicate policy, closure source (`relation-graph` artifact vs local CTE), temporal/as-of policy,
   and provenance/license fields. `src/core/graph-projection.ts` validates this contract and emits the projection
-  SQL; the existing resolver + SQL + closure primitives execute it. Still pending: manifest/operation integration
-  and a real SemanticSQL-generated-view profile over a non-fixture ontology artifact.
+  SQL; `src/duckdb/graph-projection.ts` executes it and materializes local closure. Tests now prove the same
+  executor over a staged ontology edge table and the internal `bio_edges_as_of` observation graph. Still pending:
+  manifest/operation integration and a real SemanticSQL-generated-view profile over a non-fixture ontology artifact.
 - Built at the library-helper level: **bounded graph-query windows** so high-degree neighborhoods do not flood
   context. This is not a new graph runtime: `src/duckdb/graph-window.ts` returns bounded rows plus omitted counts
   and, when needed, a continuation resource handle over the same projections (`bio_edges`, `bio_edges_as_of`,

@@ -1,5 +1,6 @@
 export * from "./extensions.js";
 export * from "./graph-closure.js";
+export * from "./graph-projection.js";
 export * from "./graph-window.js";
 export * from "./observations.js";
 export * from "./activation.js";
