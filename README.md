@@ -1,6 +1,6 @@
 
 <!-- README.md is generated from README.Rmd — please edit that file, then `npm run readme:rmd`. -->
-<!-- The `pi` chunks run a live Pi agent; the `biocli` chunks run the built CLI. Rendering needs a built `dist/` and (for `pi`) a model. -->
+<!-- The `pi`, `dogfood`, and `biocli` chunks run real commands. Rendering needs a built `dist/`, Pi, and model credentials. -->
 
 # pi-bio-agent
 
@@ -9,188 +9,110 @@
 v2+](https://img.shields.io/badge/License-GPL%20v2%2B-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen.svg)](package.json)
 
-A lean, provider-agnostic library for **agent-controlled scientific
-computation**. You point an agent at a manifest; it does schema
-discovery, writes read-only SQL over your data, and answers through
-recorded, reproducible runs on infrastructure you control.
+`pi-bio-agent` is a library and Pi extension for agent-controlled
+scientific computation. The unit of work is a manifest: declared
+resources, read-only SQL, optional process compute, receipts, CAS
+artifacts, and observations in one DuckDB-backed ledger.
 
-## See it
+The agent may inspect schemas and write SQL. Biomedical facts come from
+declared data, deterministic compute, receipts, and recorded approvals.
 
-Point a live Pi-hosted agent at a manifest and ask in plain English. It
-writes the SQL itself, runs it through the same library path used by the
-CLI, and answers. This transcript is produced when the README renders:
+## ClinVar From A Raw URL
+
+The agent starts with the raw ClinVar VCF URL and a TP53 genomic range,
+writes the manifest into `.pi/`, runs the query, and returns the SQL
+plus results. This is a tabix range read through `duckhts`, so it should
+complete in seconds rather than download the whole ClinVar VCF. ClinVar
+is live data; the rows below are the result from this README render, not
+a pinned truth table.
 
 ``` sh
-pi --model gpt-5.3-codex-spark -e extensions/pi-coding-agent/index.ts -p \
-  "How many variants of each consequence are in " \
-  "examples/variant-counts/manifest.json? Answer with a " \
-  "short table."
+pi --model openai-codex/gpt-5.3-codex --thinking high --no-extensions -e extensions/pi-coding-agent/index.ts --tools read,write,bio_describe_model,bio_query,bio_list_duckdb_extensions -p --no-session \
+  "This is the complete task. Use tools now; do not ask for " \
+  "a follow-up. First write " \
+  ".pi/bio-agent/readme-clinvar-tp53.json as a pi-bio " \
+  "manifest for the raw ClinVar VCF URL " \
+  "https://ftp.ncbi.nlm.nih.gov/pub/clinvar/vcf_GRCh38/clinvar.vcf.gz, " \
+  "region 17:43044295-43125483, table name clinvar, using " \
+  "the duckhts.read_bcf resolver. Then call bio_query on " \
+  "that manifest with dbPath ':memory:' to count clinical " \
+  "significance buckets. The SQL must handle INFO_CLNSIG as " \
+  "an array and count distinct CHROM, POS, REF, ALT, " \
+  "significance combinations before grouping. Return " \
+  "exactly: one line with Manifest: <path>, then one fenced " \
+  "sql block containing the SQL you passed to bio_query, " \
+  "then one fenced json block containing the result rows."
 ```
 
-> | consequence | variant_count |
-> |-------------|--------------:|
-> | missense    |             2 |
-> | stop_gained |             2 |
-> | synonymous  |             1 |
+Manifest: .pi/bio-agent/readme-clinvar-tp53.json
 
-The agent discovers the schema and composes the `GROUP BY`; the answer
-is not canned.
-
-## Architecture bets
-
-**Manifests, SQL, resources, and ontology data are the program;
-TypeScript is the interpreter.** The core keeps workflow-specific
-behavior in data plus injected effect ports:
-
-- a new **question** is a manifest and SQL, never a new `.ts`;
-- a new **data format** is a *DuckDB extension* (`duckhts`, `anndata`,
-  `duckdb_zarr`, `plinking_duck`, …);
-- a new **API** is an `ncurl_table` call over
-  **[ducknng](https://github.com/sounkou-bioinfo/ducknng)**, an
-  Arrow-native DuckDB extension for NNG/HTTP/RPC transport;
-- a new **compute backend** (SLURM, Modal, an NNG pool) is one injected
-  `JobDispatch`;
-- a new **model** is an injected judge.
-
-The same rule holds for graph inference. The graph is not a prompt
-payload; it is typed state that the agent acts on. The ICLR 2026 study
-[Actions Speak Louder than Prompts](https://arxiv.org/abs/2509.18487)
-makes that point empirically: generated code over graph state beats
-serialized graph prompts when text is long, degree is high, or the
-useful signal shifts between structure, features, and labels. Here that
-means graph-as-SQL over DuckDB, SemanticSQL edges, memory, and run
-ledgers.
-
-The ontology path is the same bet in a more concrete biomedical form.
-[`op2workshop`](https://github.com/vjcitn/op2workshop) pointed us back
-to the canonical [INCATools Semantic
-SQL](https://github.com/INCATools/semantic-sql) source spec: LinkML
-schemas that compile to SQL base tables and views. The source schema’s
-load-bearing tables are `statements`, `prefix`, and `entailed_edge`;
-`edge` and the domain-specific statement tables are generated views over
-those tables. Locally, the exercised path ports that schema shape into
-DuckDB: Semantic SQL statement/edge rows become DuckDB tables, then use
-the same `bio_edges` / `entailed_edge` closure shape as observations and
-memory. Richer adapters can project those rows into stable `ontology_*`
-views when term metadata or mappings matter.
-
-The judgment boundary follows the same discipline.
-[`metacurator`](https://github.com/seandavi/metacurator) is useful here
-because its implementation separates deterministic curation stages from
-exactly typed model calls for table choice, column mapping, and
-candidate disambiguation. That closes over the same shape: deterministic
-stores produce identifiers and candidates; models choose or abstain
-inside a validated contract.
-
-The interpreter stays thin. Application code can compose manifests,
-operations, producers, and host policy around the core; those
-compositions stay outside the core library unless repeated use exposes a
-missing primitive.
-
-## How it works
-
-A manifest declares named **resources**; a **resolver** turns each into
-a DuckDB table and stamps a **receipt** (resolver version, params
-digest, source snapshot). An **operation** is a single read-only
-`SELECT`/`WITH` over those tables, and whatever it returns *is* the
-result. There is no separate report layer. Four legs, all SQL over one
-DuckDB:
-
-| leg                             | one primitive, open surface                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-|---------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Data**                        | `duckdb.sql_materialize`: any read-only query over everything DuckDB reaches (local files, object stores, other DBs, lakes). A new format is a DuckDB *extension*, not new code: VCF/BAM ([`duckhts`](https://duckdb.org/community_extensions/extensions/duckhts)), single-cell ([`anndata`](https://duckdb.org/community_extensions/extensions/anndata)), [`duckdb_zarr`](https://duckdb.org/community_extensions/extensions/duckdb_zarr), [`plinking_duck`](https://duckdb.org/community_extensions/extensions/plinking_duck), even HTML or git history.           |
-| **Network**                     | `ducknng_ncurl_table`: an HTTP endpoint *is* a table function, with URL/non-secret headers/body composed in SQL and JSON parsed into columns, no TypeScript. Token-gated endpoints use host-commissioned ducknng HTTP profiles: SQL passes only `profile_id`, ducknng checks scope/subject admission and injects the secret header. Plus `ducknng_run_rpc` (a live DB many processes write through) and NNG worker pools (push/pull, pub/sub, survey). `http.get` is a separate host-injected JS fetch resolver for applications that deliberately choose that port. |
-| **Compute**                     | `compute.run`: what SQL is poor at (an `lm()` fit, a model) runs out-of-process over Arrow IPC. Only the data contract is SQL/Arrow; the computation is a contained child, not FFI.                                                                                                                                                                                                                                                                                                                                                                                  |
-| **Knowledge + memory + traces** | one SemanticSQL graph (`bio_edges` + its `entailed_edge` closure), so subsumption and graph-walks are one indexed join. Grounding runs deterministically first, abstains below threshold, and never invents a CURIE. Memory is *study notes* projected into the same graph, not prompt-only context that becomes stale. Agent sessions, turns, tool calls, and artifacts are projected there too.                                                                                                                                                                    |
-
-**The spine.** Facts, memory, `job:<id>:status`, runs, and agent session
-traces are not separate systems. They are rows in one append-only
-`bio_observations` ledger, read *as of* a time, over the same graph. So
-“the current fact,” “what did the agent learn,” “what was this job’s
-status at t,” and “which chat/tool turn produced this scientific run”
-are one query over one DB. Pi session JSONL is ingested as `session:`,
-`turn:`, `msg:`, `toolcall:`, and `cas:` observations; bio tools record
-controlled `toolcall:<id> executes run:<id>` and
-`run:<id> invoked_by toolcall:<id>` links when the run fact exists. On
-that spine sits a **governance loop**
-(`declare → validate → test → record → activate → rollback`) with a
-durable, fail-closed approval gate: the substrate *records and gates*
-the one irreducible human-or-model judgment, it never computes it.
-
-**The boundary.** Capability resolvers are host-injected and **fail
-closed** when unbound: no `fetch` means `http.get` is off, no
-`ComputeRunner` means `compute.run` is off. The substrate enforces
-statement class (read-only, no DDL), manifest shape, and receipt
-integrity, but it is *not* a network or filesystem sandbox. **The
-library records what ran; the host decides what may run.** The [design
-notes](docs/design.md) go deeper.
-
-## More, live
-
-**The agent over live ClinVar.** Point a Pi-hosted agent at
-[`clinvar-region.json`](examples/connectors/clinvar-region.json) and it
-reads a ClinVar VCF region over HTTP with `duckhts` (an htslib tabix
-range read of the TP53 locus, not the whole file), discovers that
-`INFO_CLNSIG` is an array, and writes its own `UNNEST` + `GROUP BY`.
-This example is **host-provisioned**: it needs
-`npm run provision:duckhts` and a host that permits `duckhts` HTTP range
-reads (DuckDB-native egress is the host’s boundary).
-
-``` sh
-pi --model gpt-5.3-codex-spark -e extensions/pi-coding-agent/index.ts -p \
-  "Using examples/connectors/clinvar-region.json, how many " \
-  "ClinVar variants are there of each clinical significance " \
-  "in that region? Show the SQL you wrote and the top few " \
-  "rows."
+``` sql
+WITH distinct_calls AS (
+  SELECT DISTINCT CHROM, POS, REF, ALT, significance
+  FROM clinvar, UNNEST(INFO_CLNSIG) AS u(significance)
+)
+SELECT significance, COUNT(*) AS n
+FROM distinct_calls
+GROUP BY significance
+ORDER BY n DESC
 ```
 
-> Used `examples/connectors/clinvar-region.json` (ClinVar TP53-region
-> resource) with this SQL:
->
-> ``` sql
-> WITH exploded AS (
->   SELECT DISTINCT
->     CHROM, POS, REF, ALT,
->     significance
->   FROM clinvar
->   CROSS JOIN UNNEST(INFO_CLNSIG) AS t(significance)
-> )
-> SELECT
->   significance AS clinical_significance,
->   COUNT(*) AS variant_count
-> FROM exploded
-> GROUP BY clinical_significance
-> ORDER BY variant_count DESC
-> LIMIT 10;
-> ```
->
-> Top rows:
->
-> | clinical_significance                        | variant_count |
-> |----------------------------------------------|--------------:|
-> | Pathogenic                                   |         3,593 |
-> | Conflicting_classifications_of_pathogenicity |         2,918 |
-> | Likely_benign                                |         2,891 |
-> | Uncertain_significance                       |         2,445 |
-> | Benign                                       |           704 |
-> | Likely_pathogenic                            |           263 |
-> | Pathogenic/Likely_pathogenic                 |           226 |
-> | Benign/Likely_benign                         |            94 |
-> | not_provided                                 |            49 |
-> | no_classification_for_the_single_variant     |             2 |
-> | no_classifications_from_unflagged_records    |             1 |
->
-> (That is the full set of significance buckets in this region; shown
-> here as top/bottom rows together in order.)
+``` json
+[
+  {
+    "significance": "Pathogenic",
+    "n": 3593
+  },
+  {
+    "significance": "Conflicting_classifications_of_pathogenicity",
+    "n": 2918
+  },
+  {
+    "significance": "Likely_benign",
+    "n": 2891
+  },
+  {
+    "significance": "Uncertain_significance",
+    "n": 2445
+  },
+  {
+    "significance": "Benign",
+    "n": 704
+  },
+  {
+    "significance": "Likely_pathogenic",
+    "n": 263
+  },
+  {
+    "significance": "Pathogenic/Likely_pathogenic",
+    "n": 226
+  },
+  {
+    "significance": "Benign/Likely_benign",
+    "n": 94
+  },
+  {
+    "significance": "not_provided",
+    "n": 49
+  },
+  {
+    "significance": "no_classification_for_the_single_variant",
+    "n": 2
+  },
+  {
+    "significance": "no_classifications_from_unflagged_records",
+    "n": 1
+  }
+]
+```
 
-The **same query with no agent**, the deterministic CLI path for scripts
-and CI. Identical numbers, no model in the loop:
+The same query with no model in the loop:
 
 ``` sh
-pi-bio-agent query examples/connectors/clinvar-region.json \
+pi-bio-agent query .pi/bio-agent/readme-clinvar-tp53.json \
   --db :memory: \
-  --init-sql "LOAD duckhts;" \
-  --sql "SELECT sig, count(*) n FROM (SELECT unnest(INFO_CLNSIG) sig FROM clinvar) WHERE sig IS NOT NULL GROUP BY 1 ORDER BY n DESC LIMIT 8"
+  --init-sql "INSTALL duckhts FROM community; LOAD duckhts;" \
+  --sql "WITH distinct_calls AS (SELECT DISTINCT CHROM, POS, REF, ALT, significance FROM clinvar, UNNEST(INFO_CLNSIG) AS u(significance)) SELECT significance, COUNT(*) AS n FROM distinct_calls GROUP BY significance ORDER BY n DESC"
 ```
 
 ``` json
@@ -198,7 +120,7 @@ pi-bio-agent query examples/connectors/clinvar-region.json \
   "ok": true,
   "runId": "query-<run>",
   "status": "succeeded",
-  "rowCount": 8,
+  "rowCount": 11,
   "artifacts": {
     "run": ".pi/bio-agent/runs/query-<run>/run.json",
     "result": ".pi/bio-agent/runs/query-<run>/result.json",
@@ -207,54 +129,207 @@ pi-bio-agent query examples/connectors/clinvar-region.json \
   "runDir": ".pi/bio-agent/runs/query-<run>",
   "rows": [
     {
-      "sig": "Pathogenic",
+      "significance": "Pathogenic",
       "n": 3593
     },
     {
-      "sig": "Conflicting_classifications_of_pathogenicity",
+      "significance": "Conflicting_classifications_of_pathogenicity",
       "n": 2918
     },
     {
-      "sig": "Likely_benign",
+      "significance": "Likely_benign",
       "n": 2891
     },
     {
-      "sig": "Uncertain_significance",
+      "significance": "Uncertain_significance",
       "n": 2445
     },
     {
-      "sig": "Benign",
+      "significance": "Benign",
       "n": 704
     },
     {
-      "sig": "Likely_pathogenic",
+      "significance": "Likely_pathogenic",
       "n": 263
     },
     {
-      "sig": "Pathogenic/Likely_pathogenic",
+      "significance": "Pathogenic/Likely_pathogenic",
       "n": 226
     },
     {
-      "sig": "Benign/Likely_benign",
+      "significance": "Benign/Likely_benign",
       "n": 94
+    },
+    {
+      "significance": "not_provided",
+      "n": 49
+    },
+    {
+      "significance": "no_classification_for_the_single_variant",
+      "n": 2
+    },
+    {
+      "significance": "no_classifications_from_unflagged_records",
+      "n": 1
     }
   ]
 }
 ```
 
-**The run graph is itself a table.** Every run above was recorded. When
-a host wires in the temporal store, the authoritative record is a
-`run:<id>` fact in `bio_observations` that references the result,
-receipts, and replay by digest (bytes in CAS); the per-run `run.json` /
-`receipts.json` / `result.json` are its always-written legible *view*.
-[`run-ledger`](examples/run-ledger/manifest.json) reads that view back
-with DuckDB `read_json`, so the substrate’s own provenance is queryable
-with the same SQL it uses for data. With the Pi extension, the
-surrounding chat/tool trajectory is also ledger data: session ingestion
-records the transcript structure, and bio tool execution links the
-tool-call node to the child `run:<id>` fact instead of reconstructing it
-from transcript text. This is the live run graph produced *by this very
-render*:
+## Start
+
+Install the Pi extension:
+
+``` sh
+pi install git:github.com/sounkou-bioinfo/pi-bio-agent
+/reload
+```
+
+Use the CLI without Pi:
+
+``` sh
+pi-bio-agent query examples/variant-counts/manifest.json \
+  --db :memory: \
+  --sql "SELECT consequence, count(*) AS n FROM variants GROUP BY consequence ORDER BY consequence"
+```
+
+``` json
+{
+  "ok": true,
+  "runId": "query-<run>",
+  "status": "succeeded",
+  "rowCount": 3,
+  "artifacts": {
+    "run": ".pi/bio-agent/runs/query-<run>/run.json",
+    "result": ".pi/bio-agent/runs/query-<run>/result.json",
+    "receipts": ".pi/bio-agent/runs/query-<run>/receipts.json"
+  },
+  "runDir": ".pi/bio-agent/runs/query-<run>",
+  "rows": [
+    {
+      "consequence": "missense",
+      "n": 2
+    },
+    {
+      "consequence": "stop_gained",
+      "n": 2
+    },
+    {
+      "consequence": "synonymous",
+      "n": 1
+    }
+  ]
+}
+```
+
+Run a declared operation:
+
+``` sh
+pi-bio-agent run examples/rare-high-impact/manifest.json \
+  --db :memory: \
+  --operation rare_high_impact.report
+```
+
+``` json
+{
+  "ok": true,
+  "runId": "rare_high_impact.report-<run>",
+  "status": "succeeded",
+  "rowCount": 5,
+  "artifacts": {
+    "run": ".pi/bio-agent/runs/rare_high_impact.report-<run>/run.json",
+    "result": ".pi/bio-agent/runs/rare_high_impact.report-<run>/result.json",
+    "receipts": ".pi/bio-agent/runs/rare_high_impact.report-<run>/receipts.json"
+  },
+  "runDir": ".pi/bio-agent/runs/rare_high_impact.report-<run>",
+  "rows": [
+    {
+      "bucket": "benign",
+      "n": 1
+    },
+    {
+      "bucket": "included",
+      "n": 1
+    },
+    {
+      "bucket": "no_frequency",
+      "n": 1
+    },
+    {
+      "bucket": "not_high_impact",
+      "n": 1
+    },
+    {
+      "bucket": "not_rare",
+      "n": 1
+    }
+  ]
+}
+```
+
+Use it as a library:
+
+``` ts
+import { runBioQueryFromManifest } from "pi-bio-agent";
+
+const out = await runBioQueryFromManifest({
+  cwd: process.cwd(),
+  dbPath: ":memory:",
+  manifestPath: "examples/variant-counts/manifest.json",
+  sql: "SELECT consequence, count(*) AS n FROM variants GROUP BY consequence",
+});
+```
+
+Run the full gate:
+
+``` sh
+npm install
+npm run check
+```
+
+`npm run check` runs typecheck, tests, docs/example drift checks, and
+README tool-list checks. CI provisions real R and the pinned `nanoarrow`
+package so process-compute examples exercise real spawned `Rscript`, not
+a mock.
+
+## How it works
+
+A manifest declares named resources. Resolvers materialize them into
+DuckDB tables and stamp receipts: resolver version, parameter digest,
+and source snapshot. An operation is one read-only `SELECT`/`WITH` over
+those tables. Whatever it returns is the result.
+
+| leg       | primitive                                                                                                                                                                        |
+|-----------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Data      | `file_scan` and `duckdb.sql_materialize` over files, object stores, local DBs, and DuckDB community extensions such as `duckhts`, `anndata`, `duckdb_zarr`, and `plinking_duck`. |
+| Network   | `ducknng_ncurl_table` and ducknng HTTP profiles for SQL-native HTTP/RPC. `http.get` remains a host-injected JS fetch resolver when an application chooses it.                    |
+| Compute   | `compute.run`: a child process over Arrow IPC and declared file artifacts. R, Python, `rv`, Nextflow, or an NNG worker pool are argv/runner choices, not new core APIs.          |
+| Knowledge | one SemanticSQL-shaped graph: `bio_edges`, `bio_edges_as_of`, and `entailed_edge` for ontology terms, memory, observations, sessions, tool calls, artifacts, and run links.      |
+
+Host capabilities are explicit. If no `fetch` is injected, `http.get` is
+unavailable. If no `ComputeRunner` is injected, `compute.run` is
+unavailable. The library validates manifests, SQL shape, receipts, and
+replay. The host owns filesystem, network, credentials, and process
+isolation.
+
+## Ledger
+
+Runs, facts, memory, job status, session traces, and artifacts are rows
+in `bio_observations`, read as of a time. The graph view is derived from
+edge-like observations, so these are ordinary SQL questions:
+
+- what is the current fact?
+- what did the agent learn?
+- what was this job’s status at a time?
+- which tool call produced this scientific run?
+
+Pi session JSONL is ingested as `session:`, `turn:`, `msg:`,
+`toolcall:`, and `cas:` observations. Bio tools record controlled run
+links at tool execution time, from Pi’s real tool-call id and only after
+the target run fact exists. The ingester does not scan transcript text
+for run-looking strings.
+
+Query a recorded run ledger:
 
 ``` sh
 pi-bio-agent query examples/run-ledger/manifest.json \
@@ -267,7 +342,7 @@ pi-bio-agent query examples/run-ledger/manifest.json \
   "ok": true,
   "runId": "query-<run>",
   "status": "succeeded",
-  "rowCount": 1,
+  "rowCount": 6,
   "artifacts": {
     "run": ".pi/bio-agent/runs/query-<run>/run.json",
     "result": ".pi/bio-agent/runs/query-<run>/result.json",
@@ -278,146 +353,113 @@ pi-bio-agent query examples/run-ledger/manifest.json \
     {
       "tool": "ad-hoc.query",
       "status": "succeeded",
-      "n": 5
+      "n": 1909
+    },
+    {
+      "tool": "ad-hoc.query",
+      "status": "failed",
+      "n": 119
+    },
+    {
+      "tool": "rare_high_impact.report",
+      "status": "succeeded",
+      "n": 107
+    },
+    {
+      "tool": "monarch.disease_phenotypes",
+      "status": "succeeded",
+      "n": 2
+    },
+    {
+      "tool": "opentargets.associated_diseases",
+      "status": "failed",
+      "n": 1
+    },
+    {
+      "tool": "opentargets.associated_diseases",
+      "status": "succeeded",
+      "n": 1
     }
   ]
 }
 ```
 
-For the full live Pi path, run `npm run dogfood:pi-session-trace` after
-installing the extension and configuring an image-capable `openai-codex`
-model. It drives a saved Pi session through an image read, a successful
-shell call, an intentional shell error, manifest discovery, SQL
-validation, and `bio_query`, then queries the project ledger for the
-session summary, tool trajectory, raw-session CAS root, and
-`toolcall:<id> executes run:<id>` link. Current Pi JSONL records the
-image read in the raw session; it only becomes a `cas:` image artifact
-when Pi persists image bytes as structured image content.
+## Dogfood
 
-Because the graph is a table, a chart is a query and a UI is a thin SQL
-client: a grammar-of-graphics layer like posit’s
-[ggsql](https://github.com/posit-dev/ggsql) draws the run timeline
-straight off `run_ledger`.
-
-**Distributed compute is a topology over that same ledger.** Multi-agent
-coordination is transport, not a framework: a coordinator owns the
-shared job ledger, and a *separate worker process* runs the job and
-reports each phase (`running` → `succeeded`) over `ducknng_run_rpc` into
-the `job:<id>:status` slot the coordinator polls, which reads it back
-with the same `observationAsOfKey`. The worker can be any language that
-speaks NNG (Node here, or R via `nanonext`/`mirai`). This is a
-distributed backend as a *topology over data-in-SQL* on ducknng, with
-status as inspectable data rather than opaque runtime state. Real
-separate processes, live when this README renders (the push/pull,
-pub/sub, and survey topologies are exercised the same way in
-[`scripts/`](scripts/) and [`test/`](test/)):
+Run the compact all-primitives dogfood:
 
 ``` sh
-node scripts/nng-job-runner.mjs
+npm run dogfood:bring-it-home
 ```
 
-    Distributed compute over ducknng: a separate worker reports job status into the shared ledger
+``` json
+{
+  "observationCounts": {
+    "executes": 1,
+    "invoked_by": 1,
+    "tool_call": 1,
+    "run": 2,
+    "host_event": 1,
+    "job_step_checkpoint": 2
+  },
+  "trainingCorpus": {
+    "toolCalls": 1,
+    "runs": 2,
+    "hostEvents": 1,
+    "parquetReadbackRows": 1
+  },
+  "queueCancel": {
+    "staleWriteRejected": true,
+    "resumedPhase": "cancelled"
+  },
+  "renvEnvironment": {
+    "rVersion": "4.6.0",
+    "bioconductor": "3.22",
+    "envStatus": "matched",
+    "artifactRows": 1
+  }
+}
+```
 
-      [coordinator pid <pid>] job ledger up; 'wgs-annotate-chr22' recorded as queued
-      [worker nng-worker-1 pid <pid>] reported 'running' over ducknng RPC
-      [worker nng-worker-1 pid <pid>] reported 'succeeded' over ducknng RPC
-      [coordinator] 'wgs-annotate-chr22' final status, read back from the shared slot: "succeeded"
+It exercises host-event receipts, step checkpoints/resume, SemanticSQL
+projection, ducknng profile receipts, SDK exports, and real process
+compute when R is available.
 
-    A separate worker process wrote the job's status (running, then succeeded) into the coordinator's
-    job:<id>:status slot over ducknng RPC, and the coordinator read it back with the same as-of query it
-    uses for any observation. The job-store code did not change, and the worker can be any language that
-    speaks NNG. ducknng RPC keeps status as queryable ledger data.
-
-**And files, not just status — because this is bioinformatics.** A job
-produces a *file* (a plot, a VCF), and another agent has to read it.
-Here one process plots a real PNG into a content-addressed store (CAS)
-and records only the **digest** in the shared ledger over ducknng RPC; a
-*separate* reader process reads that digest and fetches the exact bytes.
-A shared CAS covers the common HPC case; otherwise the bytes ship over
-the same transport.
+Run the Pi session trace dogfood after installing the extension and
+configuring an image-capable model:
 
 ``` sh
-node scripts/nng-file-handoff.mjs
+npm run dogfood:pi-session-trace
 ```
 
-    Distributed file I/O over ducknng: one agent plots a file, another reads it back by digest
+It drives a real Pi session through image read, successful shell call,
+intentional shell error, manifest discovery, SQL validation,
+`bio_query`, and then queries the project ledger for the session
+summary, tool trajectory, CAS roots, and the recorded tool-call/run
+linkage.
 
-      [coordinator pid <pid>] job ledger + ducknng server up; shared CAS at /tmp/pi-bio-handoff-cas-<run>
-      [agent:producer pid <pid>] plotted coverage.png (8354 B) -> CAS sha256:80c6dd525767…; recorded the digest in the ledger
-      [agent:reader pid <pid>] read the ledger, fetched 'coverage.png' from CAS by digest: 8354 B, PNG=true, sha256:80c6dd525767…
+## Examples
 
-    The producer wrote a real PNG into a content-addressed store and recorded only its DIGEST in the
-    shared ledger over ducknng RPC. A SEPARATE reader process read that digest and fetched the exact bytes
-    from CAS. Files move by content address; the ledger moves the reference. No ducknng-fs needed: a shared
-    CAS covers the HPC case, and a no-shared-FS deployment ships the CAS bytes over the same transport.
+Every [example](examples/) has a recorded run; `npm run check` fails if
+generated example blocks drift.
 
-**Two-agent artifact handoff.** The handoff above is scripted plumbing.
-Here two *live* Pi-hosted agents use the same substrate. A producer
-agent, granted the compute and CAS ports by its entrypoint, runs an
-out-of-process R compute and captures the file outputs:
+- [`examples/variant-counts`](examples/variant-counts/) - ad-hoc SQL
+  over a CSV resource.
+- [`examples/rare-high-impact`](examples/rare-high-impact/) - a declared
+  operation with explicit abstention.
+- [`examples/compute-run`](examples/compute-run/) - DuckDB table -\>
+  Arrow IPC -\> R `lm()` -\> DuckDB table.
+- [`examples/compute-artifacts`](examples/compute-artifacts/) - compute
+  value plus declared files captured into CAS.
+- [`examples/compute-files-only`](examples/compute-files-only/) - a
+  file-only tool exposed as an artifacts table.
+- [`examples/coloc`](examples/coloc/) - post-GWAS colocalization: SQL
+  harmonization plus out-of-process R.
+- [`examples/connectors`](examples/connectors/) - APIs as manifests,
+  including UniProt, RCSB PDB, MyGene, Reactome, Monarch, and
+  OpenTargets GraphQL.
 
-``` sh
-pi --model gpt-5.3-codex-spark -e extensions/pi-coding-agent/index-compute.ts -p \
-  "Using examples/compute-artifacts/manifest.json, run " \
-  "bio_query with SQL 'SELECT * FROM summary' (resolving " \
-  "the 'summary' resource runs the R compute and captures " \
-  "its file outputs). Report each output artifact the run " \
-  "produced: its name and byte size."
-```
-
-> Ran `bio_query` on `examples/compute-artifacts/manifest.json` with
-> `SELECT * FROM summary` (resolving `values` and `summary`).
->
-> The `summary` compute run produced these artifacts:
->
-> - `rows_csv` (path: `rows.csv`, table): **14 bytes**
-> - `report` (path: `report.txt`, file): **37 bytes**
-
-Then a *separate*, read-only reader agent discovers those artifacts
-through the run graph, follows the content address into CAS, and reads
-the bytes back:
-
-``` sh
-pi --model gpt-5.3-codex-spark -e extensions/pi-coding-agent/index.ts -p \
-  "A previous run wrote output artifacts under " \
-  ".pi/bio-agent/runs/. Find the most recent run's " \
-  "run.json, list the artifacts it produced (name and byte " \
-  "size), then read the bytes of the 'report' artifact by " \
-  "following its content address, and tell me exactly what " \
-  "the report says."
-```
-
-> I checked `.pi/bio-agent/runs/` and the most recent run is:
->
-> - **Run dir:** `.pi/bio-agent/runs/query-<run>`
-> - **Run file:** `.pi/bio-agent/runs/query-<run>/run.json`
->
-> From that run’s records:
->
-> - `rows_csv` — **14 bytes**
->   (`sha256:ce1d093f3a0b68e60b17e7953ce95317fadda2e7f683ea5cc9caee6bbe2ae1c4`,
->   table artifact)
-> - `report` — **37 bytes**
->   (`sha256:d352a4705f21c9cb6939f924a60041c6e9c9da59897e220e353a88841752911a`,
->   file artifact)
-> - (run output artifact also listed in `run.json`:
->   `runs/query-<run>/result.json`)
->
-> Following the report content address: - **Path:**
-> `.pi/bio-agent/cas/sha256/d352a4705f21c9cb6939f924a60041c6e9c9da59897e220e353a88841752911a`
->
-> The report says exactly:
->
->     # summarize report
->     rows: 5
->     mean_x: 3
-
-**A database connector is a manifest, not a client.** The “60+ connected
-databases” a hosted workbench advertises are, here, one file each:
-[`examples/connectors/`](examples/connectors/) ships UniProt, RCSB PDB,
-MyGene, and Reactome, and a new one is a new URL. The manifest declares
-*where* the data is; the agent discovers the schema and composes *what*
-to pull:
+Example connector, no TypeScript client:
 
 ``` sh
 pi-bio-agent query examples/connectors/uniprot.json \
@@ -449,41 +491,6 @@ pi-bio-agent query examples/connectors/uniprot.json \
 }
 ```
 
-Every [example](examples/) carries a recorded, verified run, and
-`npm run check` fails if one drifts.
-
-## Why a substrate, not a hosted product
-
-Hosted scientific workbenches commonly bundle auditable artifacts,
-on-demand compute, connected databases, and review workflows behind a
-service boundary. `pi-bio-agent` exposes the same kind of substrate as
-an importable library and CLI, with host-owned effects:
-
-|                 | a hosted workbench                    | **pi-bio-agent**                                                                                                                 |
-|-----------------|---------------------------------------|----------------------------------------------------------------------------------------------------------------------------------|
-| the program     | agent-orchestrated code               | a **manifest + SQL**; a new question is a new manifest, zero new `.ts`                                                           |
-| reproducibility | “keep the exact code and environment” | content-addressed receipts + an as-of ledger; a re-run **matches by content**, and a count is a `GROUP BY`, not re-executed code |
-| where it runs   | a vendor’s cloud                      | **your** laptop, cluster, or HPC; an importable library + CLI where the host owns effects and egress                             |
-| trust model     | a model-based reviewer                | **fail-closed determinism**: strict-allowlist manifests, a read-only SQL guard, grounding that abstains                          |
-
-A UI can be a thin client over the CLI/SDK. See [what the substrate
-closes over](docs/closes-over.md) for the agent-topology, Fugu, and RLM
-argument.
-
-**The agent can read and write the substrate artifacts.** The package
-ships its `examples/`, `docs/`, and every manifest, so an installed
-agent has the corpus on disk: it can read a connector to learn the
-pattern, then draft a new one. A new database, MCP server, or HTS source
-should normally enter as application-owned manifests or operation specs
-that can be read, composed, validated, run, and retained.
-
-## Install in Pi
-
-``` sh
-pi install git:github.com/sounkou-bioinfo/pi-bio-agent
-/reload
-```
-
 ## Pi tools
 
 The `pi-coding-agent` extension registers these tools over the
@@ -512,66 +519,21 @@ calls (`npm run readme:tools`); `npm run check` fails if it drifts.
 Project-local skills and the memory store live under `.pi/bio-agent/` in
 the current project.
 
-## CLI
-
-The substrate is provider-agnostic; you do not need Pi to use it.
-`query` and `run` execute a manifest through the **same** host functions
-the Pi extension uses, and both are fail-closed by default (the
-`http.get` fetch and the `compute.run` runner stay unbound unless the
-host injects them). Results print as JSON; a failed run exits `1`, a
-usage error exits `2`.
-
-``` sh
-# run the agent's ad-hoc SQL over a manifest's declared resources
-pi-bio-agent query examples/variant-counts/manifest.json --db :memory: \
-  --sql "SELECT consequence, count(*) AS n FROM variants GROUP BY consequence ORDER BY consequence"
-
-# run a declared, tested operation
-pi-bio-agent run examples/rare-high-impact/manifest.json --db :memory: --operation rare_high_impact.report
-
-# memory is append-only, as-of, attributed observations in one store (agent:memory: in bio_observations)
-pi-bio-agent memory list
-pi-bio-agent memory show <slug> --as-of <ISO-8601-time>         # time-travel: what memory said then
-pi-bio-agent memory history <slug>                            # what changed, when, by whom
-```
-
-## As a library (SDK)
-
-``` ts
-import { runBioQueryFromManifest } from "pi-bio-agent";          // whole surface
-import { validateBioManifest } from "pi-bio-agent/core";         // core contracts
-import { duckdbNodeConn } from "pi-bio-agent/duckdb";            // DuckDB adapters
-import { fsCasStore, ledgerJobRunner } from "pi-bio-agent/hosts"; // host helpers
-
-const out = await runBioQueryFromManifest({
-  cwd: process.cwd(), dbPath: ":memory:", manifestPath: "manifest.json",
-  sql: "SELECT * FROM variants LIMIT 5",
-});
-```
-
-Host effects are injected by composition (a `fetch` for `http.get`, a
-`ComputeRunner` for `compute.run`, a `JobDispatch` for a distributed
-`JobRunner`), and each **fails closed** when unbound. The bin compiles
-to `dist/` via `npm run build`; the package also ships `src` for Pi to
-consume directly.
-
 ## Docs
 
-New here? Start with the [user guide](docs/guide.md): write a manifest,
-run an operation. For the why, see the [design notes](docs/design.md)
-and the [roadmap](docs/roadmap.md). The full [docs index](docs/INDEX.md)
-is generated from each doc’s frontmatter (`npm run docs:index`).
+Start with the [user guide](docs/guide.md): write a manifest, run an
+operation. Then read [design notes](docs/design.md) for the core
+contracts and [roadmap](docs/roadmap.md) for current work. The full
+[docs index](docs/INDEX.md) is generated from frontmatter.
 
 ## References & lineage
 
-The primitives here are discovered, not invented; [what the substrate
-closes over](docs/closes-over.md) makes that argument with citations.
 Prior art and lineage:
 
 - **ClawBio**, the origin corpus this factors into manifests, resolvers,
   and operations: <https://github.com/ClawBio/ClawBio>
-- **metacurator**, deterministic curation stages plus a typed judgment
-  boundary: <https://github.com/seandavi/metacurator>
+- **metacurator**, deterministic curation stages plus typed model
+  judgments: <https://github.com/seandavi/metacurator>
 - **op2workshop / ontoProc2**, the workshop lineage that led us back to
   the Semantic SQL source spec: <https://github.com/vjcitn/op2workshop>
 - **Machine studying** (Li, Battle, Khattab, 2026):
@@ -605,12 +567,9 @@ the `duckhts.read_bcf` resolver (explicit; never auto-installed during
 
 ## Status & contributing
 
-Pre-1.0 (`0.1.0`). The substrate shape is settled (see the
-[roadmap](docs/roadmap.md)) but the public API may still move. Issues
-and PRs welcome; `npm run check` is the single gate and CI runs it on
-every push. Please keep changes fail-closed and manifest/SQL-first: new
-capability should enter as a manifest, a resolver adapter, or SQL, not
-as bespoke core code.
+Pre-1.0 (`0.1.0`). The public API may still move. Issues and PRs
+welcome. Keep new capability manifest/SQL-first: a new question should
+become data, a resolver adapter, or SQL, not bespoke core code.
 
 ## License
 
