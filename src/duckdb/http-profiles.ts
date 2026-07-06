@@ -66,6 +66,15 @@ export interface DucknngHttpProfileReceipt {
   policyDigest: `sha256:${string}`;
 }
 
+export interface DucknngHttpProfileRefreshResult {
+  profileId: string;
+  current: DucknngHttpProfileReceipt;
+  previous?: DucknngHttpProfileReceipt;
+  created: boolean;
+  /** True when the redacted receipt digest changed; upsert version/timestamp movement intentionally counts. */
+  receiptChanged: boolean;
+}
+
 function cleanString(value: string, label: string): string {
   if (typeof value !== "string" || value.length === 0 || /[\x00-\x1f\x7f]/.test(value)) {
     throw new Error(`${label} must be a non-empty string without control characters`);
@@ -204,6 +213,29 @@ export async function registerDucknngHttpProfile(conn: SqlConn, spec: DucknngHtt
   const receipt = await getDucknngHttpProfileReceipt(conn, p.profileId);
   if (!receipt) throw new Error(`ducknng HTTP profile '${p.profileId}' was registered but could not be listed for a receipt`);
   return receipt;
+}
+
+/** Commission or rotate a ducknng HTTP profile through ducknng's upsert path.
+ *
+ * The host remains responsible for fetching or refreshing credential material. This helper only installs the
+ * current secret into ducknng using bound parameters, then returns the before/after redacted policy receipts that
+ * runs can pin as host capability receipts. Re-registering the same profile id is intentionally not drop/register:
+ * ducknng replaces the profile atomically in its runtime and advances the redacted profile version/timestamps.
+ */
+export async function refreshDucknngHttpProfile(conn: SqlConn, spec: DucknngHttpProfileSpec): Promise<DucknngHttpProfileRefreshResult> {
+  const profileId = cleanString(spec.profileId, "ducknng HTTP profile profileId");
+  const previous = await getDucknngHttpProfileReceipt(conn, profileId);
+  const current = await registerDucknngHttpProfile(conn, spec);
+  if (current.profileId !== profileId) {
+    throw new Error(`ducknng HTTP profile refresh returned receipt for '${current.profileId}', expected '${profileId}'`);
+  }
+  return {
+    profileId,
+    current,
+    ...(previous ? { previous } : {}),
+    created: previous === undefined,
+    receiptChanged: previous?.policyDigest !== current.policyDigest,
+  };
 }
 
 export async function dropDucknngHttpProfile(conn: SqlConn, profileId: string): Promise<boolean> {

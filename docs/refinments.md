@@ -792,8 +792,9 @@ Open library questions to resolve before claiming that position:
   policy digest, run/artifact provenance references only that digest, and reproduction fails closed unless the same
   receipt is re-supplied. Remaining library/host work is narrower and should not be confused with the integration
   point:
-  - rotation/refresh: host auth storage such as Pi `AuthStorage` should update/drop/re-register profiles through
-    the same helper/runtime boundary without exposing the current token to SQL;
+  - rotation/refresh: `refreshDucknngHttpProfile` re-commissions the same profile id through ducknng's upsert path
+    and returns previous/current redacted receipts; host auth storage such as Pi `AuthStorage` still owns how a fresh
+    token is obtained and must pass it only as a bound parameter, never SQL text;
   - embedded-host subject bracketing: ducknng services install the execution subject; pure in-process hosts still
     need a clean bracketing API if they want subject-restricted profiles without routing through ducknng service
     dispatch;

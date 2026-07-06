@@ -186,6 +186,9 @@ HTTP integration tests exercise profile-based auth and subject admission when th
 Connector runs can now accept those secret-free receipts as host capability receipts: replay pins only
 `hostReceiptDigests`, run/artifact provenance references `host.capability:<schema>` by digest, and the action-cache key
 changes when the host policy receipt changes. Reproduction fails closed unless the same receipt is re-supplied.
+`refreshDucknngHttpProfile` covers the rotation seam without a drop/register gap: the host refreshes credential
+material, re-commissions the same profile id through ducknng's upsert path, and receives previous/current redacted
+receipts. Tokens remain host-owned bound parameters, never SQL text or replay data.
 
 **Done when.** Credentialed HTTP examples use subject-scoped profiles with no secrets in SQL, restricted profiles are
 invisible/unusable to non-admitted subjects, and workaround-shaped token plumbing is removed where profiles cover the
@@ -201,7 +204,8 @@ use case.
 3. **Graphics metadata and corpus export.** These become valuable once runs, traces, and judgments accrue from real
    app executions.
 4. **ducknng profile cleanup.** Secret-free profile receipts are pinned into connector run replay/provenance/action
-   keys. Next work is rotation/refresh and subject bracketing for embedded hosts.
+   keys, and refresh/rotation uses the same ducknng upsert receipt path. Next work is subject bracketing for embedded
+   hosts and replacing remaining workaround-shaped token plumbing in real credentialed examples.
 5. **Runtime host adapters.** `recordHostEvent` is available; add concrete Pi/workbench hook adapters only when a
    consumer reads those event receipts.
 

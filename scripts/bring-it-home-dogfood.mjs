@@ -85,6 +85,7 @@ import {
 import {
   duckdbNodeConn,
   materializeGraphProjectionProfile,
+  refreshDucknngHttpProfile,
 } from "pi-bio-agent/duckdb";
 import {
   fsCasStore,
@@ -115,6 +116,7 @@ void runBioQueryFromManifest;
 void recordHostEvent;
 void duckdbNodeConn;
 void materializeGraphProjectionProfile;
+void refreshDucknngHttpProfile;
 void fsCasStore;
 void runJobStepWithCheckpoint;
 type _Conn = SqlConn;
@@ -127,7 +129,7 @@ type _Conn = SqlConn;
     await fs.writeFile(join(consumerRoot, "smoke.mjs"), `
 import { runBioQueryFromManifest, recordHostEvent } from "pi-bio-agent";
 import { validateBioManifest } from "pi-bio-agent/core";
-import { duckdbNodeConn, materializeGraphProjectionProfile } from "pi-bio-agent/duckdb";
+import { duckdbNodeConn, materializeGraphProjectionProfile, refreshDucknngHttpProfile } from "pi-bio-agent/duckdb";
 import { fsCasStore, runJobStepWithCheckpoint } from "pi-bio-agent/hosts";
 
 for (const [name, value] of Object.entries({
@@ -136,6 +138,7 @@ for (const [name, value] of Object.entries({
   validateBioManifest,
   duckdbNodeConn,
   materializeGraphProjectionProfile,
+  refreshDucknngHttpProfile,
   fsCasStore,
   runJobStepWithCheckpoint,
 })) {
