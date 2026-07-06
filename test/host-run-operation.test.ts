@@ -253,6 +253,16 @@ describe("host: bio_run_operation end-to-end", () => {
     const schemaRows = JSON.parse(await fs.readFile(join(schema.runDir, "result.json"), "utf8")).rows.map((r: { column_name: string }) => r.column_name);
     assert.ok(schemaRows.includes("consequence") && schemaRows.includes("allele_frequency"));
 
+    const described = await q("DESCRIBE annotated_variants", "q-describe");
+    assert.equal(described.ok, true);
+    const describeRows = JSON.parse(await fs.readFile(join(described.runDir, "result.json"), "utf8")).rows.map((r: { column_name: string }) => r.column_name);
+    assert.ok(describeRows.includes("consequence") && describeRows.includes("allele_frequency"));
+
+    const summarized = await q("SUMMARIZE SELECT consequence, allele_frequency FROM annotated_variants", "q-summarize");
+    assert.equal(summarized.ok, true);
+    const summaryRows = JSON.parse(await fs.readFile(join(summarized.runDir, "result.json"), "utf8")).rows.map((r: { column_name: string; approx_unique: number }) => r.column_name);
+    assert.deepEqual(summaryRows, ["consequence", "allele_frequency"]);
+
     // 2. the agent then writes the SQL that answers the actual question — counts as a BigInt persist fine
     const res = await q("SELECT consequence, count(*) AS n FROM annotated_variants GROUP BY consequence ORDER BY consequence", "q-1");
     assert.equal(res.ok, true);

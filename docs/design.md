@@ -190,7 +190,7 @@ the abstraction abstracts, never the future ones it might serve.**
 What the library *does* enforce is **accountability, not access**: every answer-producing run records the query
 that ran (a digest of the SQL **and** its bound params), the resources/sources it declared, the resolver
 receipts, and the artifacts it produced.
-`validateReadOnlySelect` is therefore **statement-class only** (one read-only `SELECT`/`WITH`, no writes/DDL: because that is what an "operation" *is*), not an egress firewall. The **primary** network path is SQL-native:
+`validateReadOnlySelect` is therefore **statement-class only** for embeddable SQL fragments (one read-only `SELECT`/`WITH`, no writes/DDL), not an egress firewall. The result-producing query path uses the same guard family and also admits DuckDB's read-only `DESCRIBE`/`SUMMARIZE` introspection, because hiding those adds no isolation when the caller can already run `SELECT` over the same relation. The **primary** network path is SQL-native:
 `ducknng_ncurl_table` (a DuckDB table function) inside `duckdb.sql_materialize`, with the URL/headers/body
 composed in SQL and the JSON parsed into a table: no TS resolver (the `ols4-grounding` GET and
 `variant-annotation` POST examples). `http.get` is not the shadow version of that path; it is a separate TS

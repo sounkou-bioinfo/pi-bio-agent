@@ -521,7 +521,8 @@ A prior review audited for ambient/hidden effects. One real finding fixed: wall-
 By doctrine, these are not library bugs: DuckDB replacement scans, httpfs, htslib, and direct filesystem access can
 reach local files and remote URLs. The library is deliberately not the network/filesystem sandbox; egress and
 filesystem confinement are the host's boundary (container/seccomp/Pi/OS). `validateReadOnlySelect` governs
-statement class (single read-only SELECT), not reachability.
+statement class for embeddable SELECT fragments, and the result-statement guard additionally allows read-only
+DuckDB introspection (`DESCRIBE`/`SUMMARIZE`). Neither is a reachability or tenant-isolation mechanism.
 
 ### Frontier residues for public release
 

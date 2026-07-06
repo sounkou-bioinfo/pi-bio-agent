@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { duckdbNodeConn } from "../src/duckdb/node-api.js";
-import { validateReadOnlySelect, validateAdHocBioQuerySelect, sqlCallsDynamicSqlAst } from "../src/core/sql-guard.js";
+import { validateReadOnlySelect, validateReadOnlyResultStatement, validateAdHocBioQuerySelect, sqlCallsDynamicSqlAst } from "../src/core/sql-guard.js";
 
-// runOperation enforces the operation's declared sql.readOnly at execution time via this shared guard
-// (the same one knowledge-graph queries use — one definition of "safe", no divergence).
+// runOperation enforces the operation's declared sql.readOnly at execution time via the shared guard family
+// (one definition of "read-only result statement", no drift from ad-hoc bio_query).
 
 describe("validateReadOnlySelect: the single read-only SQL guard", () => {
   test("accepts a single SELECT/WITH query and returns it trimmed", () => {
@@ -91,6 +91,16 @@ describe("validateReadOnlySelect: the single read-only SQL guard", () => {
     assert.equal(validateReadOnlySelect(sql), sql);
   });
 
+  test("keeps SELECT-only fragments narrow, but result statements allow DuckDB introspection", () => {
+    assert.equal(validateReadOnlyResultStatement("DESCRIBE annotated_variants"), "DESCRIBE annotated_variants");
+    assert.equal(validateReadOnlyResultStatement("SUMMARIZE SELECT * FROM annotated_variants"), "SUMMARIZE SELECT * FROM annotated_variants");
+    assert.throws(() => validateReadOnlySelect("DESCRIBE annotated_variants"), /SELECT/);
+    assert.throws(() => validateReadOnlySelect("SUMMARIZE annotated_variants"), /SELECT/);
+    assert.throws(() => validateReadOnlyResultStatement("EXPLAIN SELECT * FROM annotated_variants"), /SELECT\/WITH, DESCRIBE, or SUMMARIZE/);
+    assert.throws(() => validateReadOnlyResultStatement("DESCRIBE annotated_variants; DROP TABLE annotated_variants"), /one statement only/);
+    assert.throws(() => validateReadOnlyResultStatement("SUMMARIZE SELECT * FROM query('CREATE TABLE pwn AS SELECT 1')"), /dynamic-SQL table function/);
+  });
+
   test("ad-hoc bio_query blocks only host-declared protected session variables, not name shapes", () => {
     assert.equal(
       validateAdHocBioQuerySelect("SELECT getvariable('query') AS q", { protectedVariables: ["api_token"] }),
@@ -106,6 +116,11 @@ describe("validateReadOnlySelect: the single read-only SQL guard", () => {
       () => validateAdHocBioQuerySelect("SELECT getvariable('api_token') AS token", { protectedVariables: ["API_TOKEN"] }),
       /protected session variables.*getvariable\('api_token'\)/,
       "declared protected names are case-insensitive",
+    );
+    assert.throws(
+      () => validateAdHocBioQuerySelect("SUMMARIZE SELECT getvariable('api_token') AS token", { protectedVariables: ["API_TOKEN"] }),
+      /protected session variables.*getvariable\('api_token'\)/,
+      "read-only introspection does not bypass protected-variable checks",
     );
     assert.throws(
       () => validateAdHocBioQuerySelect('SELECT main."getvariable"(\'API_TOKEN\') AS token', { protectedVariables: ["api_token"] }),

@@ -1,8 +1,9 @@
 import type { SqlConn } from "./ports.js";
 
-// The read-only SQL guard. It enforces STATEMENT CLASS ONLY: a single read-only SELECT/WITH with no
-// writes/DDL. That is a correctness contract — an "operation" is by definition a read-only query that produces
-// a result — shared by every execution path (graph queries, operation runner, host tools) so they cannot drift.
+// The read-only SQL guards. They enforce STATEMENT CLASS ONLY: a single read-only SELECT/WITH for SQL fragments
+// that must embed as a subquery, and a slightly wider read-only result statement for user-facing inspection
+// (`SELECT`/`WITH`/`DESCRIBE`/`SUMMARIZE`). That is a correctness contract shared by execution paths so they
+// cannot drift.
 //
 // It is deliberately NOT a network/filesystem firewall. DuckDB replacement scans (`FROM 'x.parquet'`), httpfs
 // remote reads (`read_parquet('https://…')`), and extension autoloading are FEATURES; policing them with
@@ -199,7 +200,7 @@ export function assertSafeFixtureSql(sql: string | undefined | null): void {
  * `json_serialize_sql`, which normalizes every identifier form to the same `function_name` node (verified: an
  * alias like `AS "query"` yields NO function node, so no false positive). This is the "use the parser, not a regex"
  * check the string scan approximates; run it at the execution boundary (a conn is required) as defense-in-depth
- * OVER `validateReadOnlySelect`. Returns TRUE only on a positive detection (→ reject). Returns FALSE if the AST is
+ * OVER the sync SQL guard. Returns TRUE only on a positive detection (→ reject). Returns FALSE if the AST is
  * clean OR could not be produced (e.g. `json_serialize_sql` unavailable): the SYNC string guard is the guaranteed
  * floor, so this layer only ever ADDS a rejection, never removes the sync guard's protection.
  */
@@ -220,17 +221,34 @@ export async function sqlCallsDynamicSqlAst(conn: SqlConn, sql: string): Promise
   return false;
 }
 
-/** Assert `sql` is a single read-only SELECT/WITH statement; returns it trimmed (sans trailing `;`). Throws otherwise. */
-export function validateReadOnlySelect(sql: string): string {
+function validateReadOnlySqlStatement(sql: string, opts: { start: RegExp; message: string }): string {
   const trimmed = sql.trim().replace(/;\s*$/, "");
   const scan = stripLiteralsAndComments(trimmed); // check statement class on the literal-free copy
   if (scan.includes(";")) throw new Error("one statement only");
-  if (!/^(select|with)\b/i.test(trimmed)) throw new Error("query must be a SELECT or WITH ... SELECT");
+  if (!opts.start.test(trimmed)) throw new Error(opts.message);
   if (forbiddenSql.test(scan)) throw new Error("query contains forbidden write/DDL keywords");
   // Reject query()/query_table() in ANY form — bare, quoted (`"query"(…)`), or catalog-qualified — since each
   // resolves to the dynamic-SQL function that would run a write hidden in its (blanked) string argument.
   if (usesDynamicSqlFn(trimmed)) throw new Error("query contains a dynamic-SQL table function (query()/query_table()) — forbidden");
   return trimmed; // return the ORIGINAL sql (literals intact) — only the SCAN copy was stripped
+}
+
+/** Assert `sql` is a single read-only SELECT/WITH statement; returns it trimmed (sans trailing `;`). Throws otherwise.
+ *  Use this for SQL fragments that are embedded in CTAS or handed to compute as a table-producing subquery. */
+export function validateReadOnlySelect(sql: string): string {
+  return validateReadOnlySqlStatement(sql, {
+    start: /^(select|with)\b/i,
+    message: "query must be a SELECT or WITH ... SELECT",
+  });
+}
+
+/** Assert `sql` is a single read-only result statement. This is the model-facing inspection surface: analytic
+ *  SELECT/WITH plus DuckDB's read-only DESCRIBE/SUMMARIZE introspection forms. */
+export function validateReadOnlyResultStatement(sql: string): string {
+  return validateReadOnlySqlStatement(sql, {
+    start: /^(select|with|describe|summarize)\b/i,
+    message: "query must be a SELECT/WITH, DESCRIBE, or SUMMARIZE statement",
+  });
 }
 
 /** The ad-hoc agent query boundary is narrower than the declared-operation boundary: it may use ordinary
@@ -241,7 +259,7 @@ export function validateReadOnlySelect(sql: string): string {
  *  pre-commissioned ducknng profile; declared operations remain the host-authored path for deliberate non-profile
  *  connection state. */
 export function validateAdHocBioQuerySelect(sql: string, opts: { protectedVariables?: readonly string[] } = {}): string {
-  const trimmed = validateReadOnlySelect(sql);
+  const trimmed = validateReadOnlyResultStatement(sql);
   const hit = protectedVariableSurface(trimmed, opts.protectedVariables ?? []);
   if (hit) throw new Error(`ad-hoc bio_query must not read host-declared protected session variables (${hit}); use a host-commissioned ducknng HTTP profile or a host-authored declared operation`);
   const profileMutation = forbiddenDucknngProfileMutationSurface(trimmed);

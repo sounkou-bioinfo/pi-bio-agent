@@ -44,7 +44,7 @@ export interface BioGraphSnapshot {
   artifacts?: BioArtifact[];
 }
 
-export { validateReadOnlySelect, validateAdHocBioQuerySelect } from "./sql-guard.js"; // shared SQL guards
+export { validateReadOnlySelect, validateReadOnlyResultStatement, validateAdHocBioQuerySelect } from "./sql-guard.js"; // shared SQL guards
 
 // graphSqlContract() was a hand-written list of tables — most of which nothing creates — and is removed. The real
 // graph tables are built by `createBioObservationSchema()` (the `bio_observations` ledger) and projected by

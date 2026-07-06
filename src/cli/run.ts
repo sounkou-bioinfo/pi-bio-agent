@@ -10,7 +10,7 @@ import { openBioStore } from "../hosts/bio-store.js";
 // no out-of-process compute are bound here, so a networked/compute manifest fails closed. (A networked CLI variant
 // can compose a fetch in later, the visible-choice discipline — never an ambient default.)
 //
-//   pi-bio-agent query <manifest.json> --db <path|:memory:> --sql "<read-only SELECT>" [--resources a,b] [--run-id id]
+//   pi-bio-agent query <manifest.json> --db <path|:memory:> --sql "<read-only SQL>" [--resources a,b] [--run-id id]
 //   pi-bio-agent run   <manifest.json> --db <path|:memory:> --operation <operationId>   [--run-id id]
 //
 // On success it prints the run response (runId/status/rowCount/runDir/artifacts) AND the result rows (result.json)
@@ -67,7 +67,7 @@ function parseBindings(raw: string | undefined): Record<string, unknown> | undef
 
 const USAGE =
   "usage:\n" +
-  "  pi-bio-agent query <manifest.json> --db <path|:memory:> --sql \"<SELECT>\" [--resources a,b] [--bindings '{...}'] [--init-sql \"INSTALL ...; LOAD ...\"] [--run-id id] [--ledger <path|auto> [--author name]]\n" +
+  "  pi-bio-agent query <manifest.json> --db <path|:memory:> --sql \"<SELECT/WITH/DESCRIBE/SUMMARIZE>\" [--resources a,b] [--bindings '{...}'] [--init-sql \"INSTALL ...; LOAD ...\"] [--run-id id] [--ledger <path|auto> [--author name]]\n" +
   "  pi-bio-agent run   <manifest.json> --db <path|:memory:> --operation <id> [--bindings '{...}'] [--run-id id] [--ledger <path|auto> [--author name]]\n" +
   "  --ledger records the run as a run:<id> fact in the shared bio_observations store (path, or 'auto' for the project default); --author attributes it (default 'cli').";
 
@@ -135,7 +135,7 @@ export async function mainRun(sub: string, argv: string[], deps: RunCliDeps): Pr
   let res;
   try {
     if (sub === "query") {
-      if (!flags.sql) { deps.err("query requires --sql <read-only SELECT>"); deps.err(USAGE); return 2; }
+      if (!flags.sql) { deps.err("query requires --sql <read-only result statement>"); deps.err(USAGE); return 2; }
       const resources = flags.resources ? flags.resources.split(",").map((s) => s.trim()).filter(Boolean) : undefined;
       res = await runBioQueryFromManifest({ ...common, sql: flags.sql, resources });
     } else if (sub === "run") {

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { BioArtifact } from "./types.js";
 import { appendRunEvent, newRunRecord, type BioRunRecord, type BioRunSpec } from "./run-spec.js";
-import { validateReadOnlySelect, validateAdHocBioQuerySelect, sqlCallsDynamicSqlAst } from "./sql-guard.js";
+import { validateReadOnlyResultStatement, validateAdHocBioQuerySelect, sqlCallsDynamicSqlAst } from "./sql-guard.js";
 import { materializeScaleMembers } from "./scales.js";
 import type { BioRegistry, ResolutionReceipt, SourceSnapshot } from "./manifest.js";
 import type { CasStore } from "./cas.js";
@@ -71,7 +71,7 @@ export async function runQuery(
   const id = opts.id ?? "ad-hoc.query";
   const isNamed = opts.id !== undefined;
   const safeSql = isNamed
-    ? validateReadOnlySelect(opts.sql)
+    ? validateReadOnlyResultStatement(opts.sql)
     : validateAdHocBioQuerySelect(opts.sql, { protectedVariables: opts.protectedSessionVariables });
   // Defense-in-depth over the string guard: re-check the dynamic-SQL executors (query()/query_table()) via DuckDB's
   // OWN parser (json_serialize_sql), which normalizes quoted/qualified spellings a string scan can miss. Pre-flight
