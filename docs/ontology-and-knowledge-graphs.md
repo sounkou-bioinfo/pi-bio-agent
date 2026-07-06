@@ -94,7 +94,11 @@ SQLite is an interchange artifact; DuckDB is the query substrate. The currently 
 `edge(subject,predicate,object)` into `bio_edges(from_id,predicate,to_id)`, keeps label/synonym `statements` in a
 DuckDB table for grounding, and recomputes closure with our `entailed_edge` materializer. The executable profile path
 is symmetric: `materializeGraphProjectionProfile` applies a `GraphProjectionProfile` to a staged ontology edge table
-and to the internal `bio_edges_as_of` observation graph, then uses the same local closure machinery for both. A richer
+and to the internal `bio_edges_as_of` observation graph, then uses the same local closure machinery for both.
+The canonical edge-column contract for KGX and SemanticSQL-shaped tables is just `subject`, `predicate`, `object`,
+optionally `attrs` and `trust`; an ordinary `GraphProjectionProfile` maps those columns into `bio_edges`. The
+Monarch KG HTTP example proves that a real downloadable KGX TSV can enter through `duckdb.sql_materialize` plus
+DuckDB `httpfs`, then project into `bio_edges` with no Monarch-specific resolver. A richer
 resolver can also project CURIEs, labels, definitions, synonyms, predicates, xrefs, obsolete flags, source ontology,
 and version/provenance into the stable `ontology_terms`, `ontology_edges`, and `ontology_mappings` views above. This
 keeps ontology lookup, descendant expansion, term-set materialization, GWAS phenotype joins, and agent-authored SQL in

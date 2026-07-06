@@ -657,7 +657,9 @@ The restricted-runtime contract (build before exposing powerful execution):
 ## Application operation sets
 
 - Start with small declarative application-owned operation sets rather than bespoke core adapters:
-  - OpenTargets GraphQL
+  - OpenTargets GraphQL: `examples/connectors/opentargets-graphql.json` proves the carrier is just a
+    `ducknng_ncurl_table` POST whose typed nested response is unnested in operation SQL; no GraphQL-specific core
+    resolver is needed.
   - Monarch/HPO ontology evidence
   - Ensembl/VEP annotation
   - ClinVar/ClinGen evidence references
@@ -697,18 +699,22 @@ JOIN, not a walker. See [`design.md`](./design.md#the-semanticsql-shape-source-s
 - Done: ordinal scales as data (`scale_members` from a ranked `TermSet`): total order to the graph's partial
   order; `decideGrounding` membership unchanged.
 - Source-spec gap audit from `INCATools/semantic-sql`:
-  - **No generated SemanticSQL compatibility layer yet.** Current tests and demos hand-create the staging
-    `statements` / `edge` / `bio_edges` shape or project a foreign SQL graph directly. We do not parse the
-    SemanticSQL LinkML source to generate the full DuckDB DDL/view set. That is source-spec parity work, not a
-    blocker for foreign KG projection or closure.
+  - **SemanticSQL-shaped sources are already absorbable as DuckDB data.** Edge-shaped relations use
+    `subject,predicate,object` plus optional `attrs,trust`; an ordinary `GraphProjectionProfile` maps them into
+    `bio_edges`. Non-edge tables (`statements`, `prefix`, labels, synonyms, mappings, node/entity tables) stay
+    queryable as ordinary materialized relations until a consumer needs them projected. We do not parse the
+    SemanticSQL LinkML source to generate the full DuckDB DDL/view set; that is optional source-spec tooling parity,
+    not a core primitive or a blocker for foreign KG projection.
   - **No SemanticSQL-style CURIE-prefix registry yet.** Here `prefix(prefix, base)` means namespace expansion
     (`HP` -> an HPO base IRI, `biolink` -> a Biolink base IRI), not run-id prefixes, observation-key prefixes, or
     a traversal primitive. The graph currently stores CURIE strings as node/predicate ids and works without
     expansion; first-class prefixes would improve CURIE/IRI validation, canonicalization, receipts, and
     cross-database identifier hygiene.
-  - **Generated views are not modeled.** We only exercise label/synonym statements and direct edge rows, not the
+  - **Generated views are optional source-adapter work.** We exercise canonical edge rows and label/synonym
+    statements, not the full
     generated `rdfs_*`, OMO synonym/mapping, OWL restriction/axiom, RO edge, subgraph, taxon-constraint,
-    similarity, or term-association views.
+    similarity, or term-association views. Add those views in manifests/resolvers when a concrete app asks for them;
+    do not pre-close over the full SemanticSQL source spec in core.
   - **`edge` semantics are under-modeled.** In SemanticSQL, `edge` is a generated relation-graph view that folds
     named subclasses, existential restrictions, subproperties, and selected type assertions. Our current import
     test treats `edge` as already materialized rows.
@@ -718,8 +724,11 @@ JOIN, not a walker. See [`design.md`](./design.md#the-semanticsql-shape-source-s
   - **Axiom annotations and provenance are not carried through.** OWL reified axioms, axiom annotations, evidence
     xrefs, ontology status, and repair/problem views need a projection into receipts/trust/attrs rather than being
     flattened away.
-  - **Multi-ontology attachment is not dogfooded.** SemanticSQL's SQLite pattern supports attached databases and
-    cross-ontology joins; we have not yet shown the DuckDB equivalent over attached/staged ontology artifacts.
+  - **Real foreign KG projection is dogfooded; multi-ontology attachment is not.** The Monarch KGX download path
+    (`examples/monarch-kg-http`, `test/monarch-kg-http-example.test.ts`) stages an HTTP TSV into the canonical edge
+    view and projects it into `bio_edges`. SemanticSQL's SQLite pattern also supports attached databases and
+    cross-ontology joins; the DuckDB equivalent over multiple attached/staged ontology artifacts remains source-spec
+    parity work.
 - Next (deferred until a real grounding/traversal consumer): a thin ontology-ingest resolver that stages the
   SemanticSQL source-spec shape in DuckDB and projects its `edge` view into our `bio_edges` shape.
   No DuckDB sqlite extension is required: ingest from a native-readable format such as OBO Graphs JSON via
@@ -729,15 +738,17 @@ JOIN, not a walker. See [`design.md`](./design.md#the-semanticsql-shape-source-s
   fresh text→CURIE misses (judgment tier); cached CURIEs + FTS are the deterministic projection tier; abstain
   below threshold.
 - Built at the library-helper level: **graph projection profiles**, not a convenience tool zoo. A
-  profile is data that says how any source relation becomes a graph projection: foreign KGs (`monarch.denormalized_edges`),
+  profile is data that says how any source relation becomes a graph projection: foreign KGs (Monarch KGX TSV
+  downloads over HTTP),
   SemanticSQL staging tables (`statements` / generated `edge`), internal producers, memory links, and
   `bio_observations` as-of views all compile through the same contract. The profile declares source
   tables/columns, CURIE-prefix registry, generated-view policy (`edge`, labels, synonyms, restrictions),
   transitive-predicate policy, closure source (`relation-graph` artifact vs local CTE), temporal/as-of policy,
   and provenance/license fields. `src/core/graph-projection.ts` validates this contract and emits the projection
-  SQL; `src/duckdb/graph-projection.ts` executes it and materializes local closure. Tests now prove the same
-  executor over a staged ontology edge table and the internal `bio_edges_as_of` observation graph. Still pending:
-  manifest/operation integration and a real SemanticSQL-generated-view profile over a non-fixture ontology artifact.
+  SQL; `src/duckdb/graph-projection.ts` executes it and materializes local closure. Tests now prove the same executor
+  over a staged ontology edge table, the internal `bio_edges_as_of` observation graph, and a Monarch KGX HTTP
+  download consumed by a manifest operation. Further SemanticSQL view generation is adapter/product work, not a
+  substrate gap.
 - Built at the library-helper level: **bounded graph-query windows** so high-degree neighborhoods do not flood
   context. This is not a new graph runtime: `src/duckdb/graph-window.ts` returns bounded rows plus omitted counts
   and, when needed, a continuation resource handle over the same projections (`bio_edges`, `bio_edges_as_of`,

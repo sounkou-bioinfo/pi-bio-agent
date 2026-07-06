@@ -1,0 +1,54 @@
+{
+  "schema": "pi-bio.manifest.v1",
+  "id": "connector-opentargets-graphql",
+  "version": "0.1.0",
+  "title": "OpenTargets GraphQL — associated diseases as a SQL-native POST",
+  "description": "OpenTargets Platform GraphQL is an HTTP POST with a JSON query body. The manifest materializes the response with ducknng_ncurl_table, then the declared operation unnests the typed GraphQL envelope into ordinary rows. No OpenTargets client code and no GraphQL-specific core resolver.",
+  "provides": {
+    "resolvers": [
+      {
+        "id": "duckdb.sql_materialize",
+        "version": "0.1.0",
+        "title": "SQL materialize",
+        "description": "Materialize a table from a read-only SELECT (here, a GraphQL POST via ducknng_ncurl_table).",
+        "output": { "mode": "table" }
+      }
+    ],
+    "resources": [
+      {
+        "id": "opentargets_target_associated_diseases",
+        "title": "OpenTargets associated diseases for one target",
+        "kind": "virtual",
+        "resolver": "duckdb.sql_materialize",
+        "params": {
+          "table": "opentargets_target_associated_diseases",
+          "extensions": ["ducknng"],
+          "declaredSources": ["https://api.platform.opentargets.org/api/v4/graphql"],
+          "sql": "SELECT * FROM ducknng_ncurl_table('https://api.platform.opentargets.org/api/v4/graphql', 'POST', '[{\"name\":\"Content-Type\",\"value\":\"application/json\"},{\"name\":\"Accept\",\"value\":\"application/json\"}]', json_object('query', 'query AssociatedDiseases($ensemblId: String!, $pageSize: Int!) { target(ensemblId: $ensemblId) { id approvedSymbol associatedDiseases(page: { index: 0, size: $pageSize }) { count rows { score disease { id name } } } } }', 'variables', json_object('ensemblId', getvariable('ensembl_id'), 'pageSize', coalesce(try_cast(getvariable('page_size') AS INTEGER), 3)))::VARCHAR::BLOB, 30000, coalesce(getvariable('tls'), 0)::UBIGINT)"
+        }
+      }
+    ],
+    "operations": [
+      {
+        "id": "opentargets.associated_diseases",
+        "version": "0.1.0",
+        "title": "OpenTargets associated diseases for one target",
+        "description": "Return associated disease rows for an Ensembl target id from the OpenTargets GraphQL response.",
+        "transport": "duckdb.sql",
+        "inputSchema": {
+          "type": "object",
+          "required": ["ensembl_id"],
+          "properties": {
+            "ensembl_id": { "type": "string", "description": "Ensembl target id, for example ENSG00000157764 for BRAF." },
+            "page_size": { "type": "integer", "minimum": 1, "maximum": 100 }
+          }
+        },
+        "sql": {
+          "sqlTemplate": "WITH target AS (SELECT data.target AS target FROM opentargets_target_associated_diseases), rows AS (SELECT target.id AS target_id, target.approvedSymbol AS approved_symbol, target.associatedDiseases.count AS total_count, UNNEST(target.associatedDiseases.rows) AS row FROM target) SELECT target_id, approved_symbol, CAST(total_count AS BIGINT) AS total_count, row.disease.id AS disease_id, row.disease.name AS disease_name, row.score AS score FROM rows ORDER BY score DESC",
+          "readOnly": true,
+          "requiredResources": ["opentargets_target_associated_diseases"]
+        }
+      }
+    ]
+  }
+}

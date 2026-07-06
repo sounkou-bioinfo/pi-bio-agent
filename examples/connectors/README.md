@@ -1,7 +1,7 @@
 # Scientific-database connectors — each is a manifest, zero TypeScript
 
 Hosted AI-for-science products advertise "60+ connected scientific databases." Here a connector is just a
-**manifest**: a `duckdb.sql_materialize` resource whose SQL is a `ducknng_ncurl_table(...)` GET, so the JSON
+**manifest**: a `duckdb.sql_materialize` resource whose SQL is a `ducknng_ncurl_table(...)` HTTP request, so the JSON
 response is parsed straight into a DuckDB table. **No client code, no new `.ts`** — a new database is a new file.
 
 Starter pack (each hits the real public REST API; the accession is the agent's binding):
@@ -12,8 +12,9 @@ Starter pack (each hits the real public REST API; the accession is the agent's b
 | [`pdb.json`](pdb.json) | RCSB PDB | `{pdb_id}` | `data.rcsb.org/rest/v1/core/entry/{id}` |
 | [`mygene.json`](mygene.json) | MyGene / BioThings | `{gene_id}` | `mygene.info/v3/gene/{id}` |
 | [`reactome.json`](reactome.json) | Reactome | `{reactome_id}` | `reactome.org/ContentService/data/query/{id}` |
+| [`opentargets-graphql.json`](opentargets-graphql.json) | OpenTargets Platform GraphQL | `{ensembl_id}` | `api.platform.opentargets.org/api/v4/graphql` |
 
-Add another (Ensembl, ClinVar, ChEMBL, GEO, OpenTargets GraphQL, …) by pointing a new manifest at a new URL — the
+Add another (Ensembl, ClinVar, ChEMBL, GEO, …) by pointing a new manifest at a new URL — the
 shape doesn't change. See [`variant-annotation`](../variant-annotation/) for a POST/batch connector (Ensembl VEP)
 and [`ols4-grounding`](../ols4-grounding/) for an ontology-service connector.
 

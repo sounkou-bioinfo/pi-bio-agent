@@ -468,6 +468,11 @@ link, or an edge-like `bio_observations` row can all declare how it projects int
 declaration is the graph projection profile: source columns, CURIE-prefix registry, generated-view policy,
 transitive-predicate policy, temporal/as-of policy, and provenance fields.
 
+The staging SQL should produce canonical KGX/SemanticSQL edge columns (`subject`, `predicate`, `object`, optionally
+`attrs` and `trust`); an ordinary `GraphProjectionProfile` then projects that table into `bio_edges`. The Monarch KG
+HTTP example uses the downloadable KGX TSV association files through DuckDB `httpfs`; Monarch is a binding of the
+generic KGX/SemanticSQL edge path, not a special resolver.
+
 - **`bio_edges(from_id, predicate, to_id, attrs, trust)`**: the statement/edge base (`subject=from_id,
   predicate, object=to_id`). Labels, synonyms, definitions, and relations are all just rows; the predicate is
   an open CURIE vocabulary (`rdfs:subClassOf`, `BFO:0000050` part_of, our own `references`/`measures`/…).

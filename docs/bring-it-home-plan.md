@@ -119,11 +119,13 @@ needs first-answer latency improvements.
 
 **Current proof.** `test/graph-projection.test.ts` executes the same profile materializer over a staged ontology edge
 fixture and over the internal `bio_edges_as_of` observation graph, then closes both with the same local
-`entailed_edge` machinery.
+`entailed_edge` machinery. `examples/monarch-kg-http` and `test/monarch-kg-http-example.test.ts` add the production
+foreign-graph slice: a real Monarch KGX TSV download over HTTP is staged by `duckdb.sql_materialize`/`httpfs` into
+the canonical SemanticSQL edge columns, projected into `bio_edges`, and consumed by a manifest operation.
 
-**Done when.** A production external graph source projects into the compiled graph surface, closure and graph walks
-work identically to internal observations, and a manifest/operation path consumes that projection without bespoke graph
-code.
+**Done when.** This primitive is done when the first real source runs through it, which Monarch does. Further work is
+consumer-driven breadth: add a second foreign graph or attachable ontology artifact only when a workflow needs it, and
+promote node/label/mapping generated views only after repeated use.
 
 ### 5. Graphics And Artifact Metadata
 
@@ -181,8 +183,9 @@ workaround-shaped token plumbing is removed where profiles cover the use case.
 
 1. **SDK surface polish.** Do this as soon as the downstream workbench imports awkward private paths; let real usage
    decide the exports.
-2. **Production foreign graph projection.** The profile primitive is proven against fixtures and the internal ledger;
-   the next step is one real external graph source consumed by a manifest/operation path.
+2. **Foreign graph projection breadth only when forced.** The first real external graph source is in place through
+   Monarch KGX over HTTP. Do not add a SemanticSQL generator preemptively; add source-specific staging SQL/views when
+   a workflow actually reads them.
 3. **Graphics metadata and corpus export.** These become valuable once runs, traces, and judgments accrue from real
    app executions.
 4. **ducknng provenance cleanup.** The secret-free receipt helper exists; next wire receipts into connector run

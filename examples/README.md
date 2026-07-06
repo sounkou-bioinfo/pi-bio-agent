@@ -18,6 +18,13 @@ A ClawBio skill = a manifest + SQL, with **zero per-skill TypeScript**. Tags are
 The honest boundary (most of "fits neither" collapses to http-resolver generalization; only the LM's semantic
 judgment is irreducible) is in [`docs/refinments.md`](../docs/refinments.md).
 
+## 1b. Foreign KGs as SemanticSQL projections
+A KGX/SemanticSQL edge table = DuckDB data + a graph projection profile, not a new graph subsystem.
+
+| Example | Proof |
+|---|---|
+| [`monarch-kg-http/`](monarch-kg-http/) | Monarch KGX disease→phenotype TSV over HTTP (`httpfs`) -> canonical `edge(subject,predicate,object,attrs,trust)` -> `bio_edges` projection — `test/monarch-kg-http-example.test.ts` |
+
 ## 2. RLM — recursion / unbounded context, as SQL
 `bio_query` over DuckDB *is* RLM's REPL-over-context (context as tables, not a prompt; no context rot).
 

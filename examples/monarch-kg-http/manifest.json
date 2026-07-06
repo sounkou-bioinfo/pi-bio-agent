@@ -1,0 +1,54 @@
+{
+  "schema": "pi-bio.manifest.v1",
+  "id": "monarch-kg-http",
+  "version": "0.1.0",
+  "title": "Monarch KG disease-phenotype edges over HTTP",
+  "description": "A foreign KG projection binding: read Monarch KGX TSV downloads over HTTP with DuckDB httpfs, normalize the edge file to SemanticSQL subject/predicate/object/attrs/trust, then query it as ordinary SQL. No Monarch-specific resolver; the host grants httpfs and the manifest declares the data URL.",
+  "provides": {
+    "resolvers": [
+      {
+        "id": "duckdb.sql_materialize",
+        "version": "0.1.0",
+        "title": "SQL materialize",
+        "description": "Materialize a table from a read-only SELECT (here, DuckDB httpfs reads a Monarch KGX TSV file over HTTP).",
+        "output": { "mode": "table" }
+      }
+    ],
+    "resources": [
+      {
+        "id": "monarch_disease_phenotype_edges",
+        "title": "Monarch disease-phenotype KGX edges",
+        "kind": "virtual",
+        "resolver": "duckdb.sql_materialize",
+        "params": {
+          "table": "monarch_disease_phenotype_edges",
+          "extensions": ["httpfs"],
+          "declaredSources": ["https://data.monarchinitiative.org/monarch-kg/2026-04-14/tsv/all_associations/disease_to_phenotypic_feature_association.all.tsv.gz"],
+          "sql": "WITH kgx AS (SELECT * FROM read_csv_auto('https://data.monarchinitiative.org/monarch-kg/2026-04-14/tsv/all_associations/disease_to_phenotypic_feature_association.all.tsv.gz', delim='\\t', header=true, compression='auto')) SELECT CAST(subject AS VARCHAR) AS subject, CAST(predicate AS VARCHAR) AS predicate, CAST(\"object\" AS VARCHAR) AS \"object\", json_object('subject_label', subject_label, 'subject_category', subject_category, 'subject_taxon', subject_taxon, 'object_label', object_label, 'object_category', object_category, 'primary_knowledge_source', primary_knowledge_source, 'aggregator_knowledge_source', aggregator_knowledge_source, 'publications', publications, 'has_evidence', has_evidence) AS attrs, CASE WHEN coalesce(try_cast(negated AS BOOLEAN), false) THEN 0.0 ELSE 1.0 END AS trust FROM kgx WHERE subject IS NOT NULL AND predicate IS NOT NULL AND \"object\" IS NOT NULL AND coalesce(try_cast(negated AS BOOLEAN), false) = false AND subject = getvariable('disease_id')"
+        }
+      }
+    ],
+    "operations": [
+      {
+        "id": "monarch.disease_phenotypes",
+        "version": "0.1.0",
+        "title": "Disease phenotype edges from Monarch KG",
+        "description": "Return Monarch disease-to-phenotypic-feature edges for one disease CURIE. The resource is already normalized to SemanticSQL edge shape, so this operation is just SQL over the staged edge table.",
+        "transport": "duckdb.sql",
+        "inputSchema": {
+          "type": "object",
+          "required": ["disease_id"],
+          "properties": {
+            "disease_id": { "type": "string", "description": "Disease CURIE, for example MONDO:0007947." },
+            "limit": { "type": "integer", "minimum": 1, "maximum": 1000 }
+          }
+        },
+        "sql": {
+          "sqlTemplate": "SELECT subject AS disease_id, json_extract_string(attrs, '$.subject_label') AS disease_label, \"object\" AS phenotype_id, json_extract_string(attrs, '$.object_label') AS phenotype_label, predicate, json_extract_string(attrs, '$.primary_knowledge_source') AS primary_source FROM monarch_disease_phenotype_edges WHERE subject = getvariable('disease_id') ORDER BY phenotype_id LIMIT coalesce(try_cast(getvariable('limit') AS INTEGER), 20)",
+          "readOnly": true,
+          "requiredResources": ["monarch_disease_phenotype_edges"]
+        }
+      }
+    ]
+  }
+}
