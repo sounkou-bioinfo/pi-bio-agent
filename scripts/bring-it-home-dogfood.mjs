@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { promisify } from "node:util";
 import { DuckDBInstance } from "@duckdb/node-api";
 
 import { duckdbNodeConn } from "../dist/duckdb/node-api.js";
@@ -28,6 +30,8 @@ import { runBioQueryFromManifest } from "../dist/hosts/run-store.js";
 const NOW = "2026-07-06T12:00:00.000Z";
 const LATER = "2026-07-06T12:00:05.000Z";
 const REPLAY_DIGEST = `sha256:${"1".repeat(64)}`;
+const execFileAsync = promisify(execFile);
+const npmCmd = process.platform === "win32" ? "npm.cmd" : "npm";
 
 const instance = await DuckDBInstance.create(":memory:");
 const raw = await instance.connect();
@@ -37,7 +41,111 @@ function asNumber(value) {
   return Number(value ?? 0);
 }
 
+async function compileExternalConsumer() {
+  const consumerRoot = await fs.mkdtemp(join(tmpdir(), "pi-bio-sdk-consumer-"));
+  try {
+    await fs.writeFile(join(consumerRoot, "package.json"), JSON.stringify({ type: "module", private: true }), "utf8");
+    const packed = await execFileAsync(npmCmd, ["pack", "--silent", "--pack-destination", consumerRoot], {
+      cwd: process.cwd(),
+      maxBuffer: 2 * 1024 * 1024,
+    });
+    const tarball = join(consumerRoot, packed.stdout.trim().split(/\r?\n/).at(-1));
+    await execFileAsync(npmCmd, ["install", "--ignore-scripts", "--no-audit", "--no-fund", "--package-lock=false", "--prefer-offline", tarball], {
+      cwd: consumerRoot,
+      maxBuffer: 8 * 1024 * 1024,
+    });
+    await fs.writeFile(join(consumerRoot, "tsconfig.json"), JSON.stringify({
+      compilerOptions: {
+        target: "ES2022",
+        module: "NodeNext",
+        moduleResolution: "NodeNext",
+        strict: true,
+        noEmit: true,
+        skipLibCheck: true,
+        types: ["node"],
+      },
+      include: ["consumer.ts"],
+    }), "utf8");
+    await fs.writeFile(join(consumerRoot, "consumer.ts"), `
+import {
+  runBioQueryFromManifest,
+  recordHostEvent,
+  type HostCapabilityReceipt,
+} from "pi-bio-agent";
+import {
+  validateBioManifest,
+  type BioManifest,
+  type SqlConn,
+} from "pi-bio-agent/core";
+import {
+  duckdbNodeConn,
+  materializeGraphProjectionProfile,
+} from "pi-bio-agent/duckdb";
+import {
+  fsCasStore,
+  runJobStepWithCheckpoint,
+  type RunQueryRequest,
+} from "pi-bio-agent/hosts";
+
+const receipt: HostCapabilityReceipt = { schema: "consumer.policy.v1", policyDigest: "sha256:${"5".repeat(64)}" };
+const manifest: BioManifest = {
+  schema: "pi-bio.manifest.v1",
+  id: "consumer",
+  version: "0.1.0",
+  title: "Consumer",
+  description: "External package compile check.",
+  provides: {},
+};
+const request: RunQueryRequest = {
+  cwd: ".",
+  dbPath: ":memory:",
+  manifestPath: "manifest.json",
+  sql: "SELECT 1",
+  hostCapabilityReceipts: [receipt],
+};
+
+void validateBioManifest(manifest);
+void request;
+void runBioQueryFromManifest;
+void recordHostEvent;
+void duckdbNodeConn;
+void materializeGraphProjectionProfile;
+void fsCasStore;
+void runJobStepWithCheckpoint;
+type _Conn = SqlConn;
+`, "utf8");
+    await execFileAsync(process.execPath, [
+      resolve(process.cwd(), "node_modules", "typescript", "bin", "tsc"),
+      "-p",
+      join(consumerRoot, "tsconfig.json"),
+    ], { cwd: consumerRoot, maxBuffer: 2 * 1024 * 1024 });
+    await fs.writeFile(join(consumerRoot, "smoke.mjs"), `
+import { runBioQueryFromManifest, recordHostEvent } from "pi-bio-agent";
+import { validateBioManifest } from "pi-bio-agent/core";
+import { duckdbNodeConn, materializeGraphProjectionProfile } from "pi-bio-agent/duckdb";
+import { fsCasStore, runJobStepWithCheckpoint } from "pi-bio-agent/hosts";
+
+for (const [name, value] of Object.entries({
+  runBioQueryFromManifest,
+  recordHostEvent,
+  validateBioManifest,
+  duckdbNodeConn,
+  materializeGraphProjectionProfile,
+  fsCasStore,
+  runJobStepWithCheckpoint,
+})) {
+  if (typeof value !== "function") throw new Error(\`public runtime export '\${name}' is not callable\`);
+}
+`, "utf8");
+    await execFileAsync(process.execPath, [join(consumerRoot, "smoke.mjs")], { cwd: consumerRoot, maxBuffer: 2 * 1024 * 1024 });
+    return { publicExportsOnly: true, runtimeImports: true, packageSource: "npm-pack", imports: ["pi-bio-agent", "pi-bio-agent/core", "pi-bio-agent/duckdb", "pi-bio-agent/hosts"] };
+  } finally {
+    await fs.rm(consumerRoot, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
 try {
+  const sdkConsumer = await compileExternalConsumer();
   await createBioObservationSchema(conn);
 
   const hostEvent = await recordHostEvent(conn, {
@@ -249,6 +357,7 @@ try {
     },
     externalProjection,
     internalProjection,
+    sdkConsumer,
     observationCounts: Object.fromEntries(counts.map((r) => [r.predicate, asNumber(r.n)])),
   };
   console.log(JSON.stringify(summary, null, 2));

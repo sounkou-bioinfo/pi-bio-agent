@@ -75,6 +75,23 @@ Each run is written under `.pi/bio-agent/runs/<runId>/`:
 A query that fails at runtime (e.g. a missing column) returns `{ ok: false, error, runDir }` and still persists
 `run.json` + `receipts.json`: the failure is auditable.
 
+### Embedding from a host or application
+
+Downstream applications should import the substrate through package exports, not private source paths:
+
+```ts
+import { runBioQueryFromManifest } from "pi-bio-agent";
+import { validateBioManifest } from "pi-bio-agent/core";
+import { duckdbNodeConn } from "pi-bio-agent/duckdb";
+import { fsCasStore, runJobStepWithCheckpoint } from "pi-bio-agent/hosts";
+```
+
+The dependency direction is one-way: the application supplies manifests, host policy, credentials, UI, and effect
+ports; `pi-bio-agent` supplies contracts, validators, DuckDB adapters, runs, CAS, observations, receipts, replay, and
+job/checkpoint helpers. If an application needs a stable type that is not importable through `pi-bio-agent`,
+`pi-bio-agent/core`, `pi-bio-agent/duckdb`, or `pi-bio-agent/hosts`, treat that as an SDK export gap rather than
+importing from `src/`.
+
 ### When to declare an operation
 
 An **operation** is a *pinned, named, versioned, tested* query: the special case worth saving when a query is

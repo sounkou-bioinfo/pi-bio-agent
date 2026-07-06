@@ -37,7 +37,9 @@ These are not remaining work items:
 - **The bring-it-home substrate pieces compose.** `npm run dogfood:bring-it-home` executes a deterministic in-core
   proof that records a host-event receipt, resumes a slash-bearing workflow step from a checkpoint, projects both a
   staged external KG and the internal observation graph through `GraphProjectionProfile`, and records a secret-free
-  ducknng HTTP profile receipt.
+  ducknng HTTP profile receipt. It also packs the built package, installs that tarball into a temporary TypeScript
+  consumer, compiles imports, and smoke-loads runtime exports using only the public package exports
+  (`pi-bio-agent`, `pi-bio-agent/core`, `pi-bio-agent/duckdb`, and `pi-bio-agent/hosts`).
 
 ## Core Work Items
 
@@ -99,8 +101,15 @@ Likely cleanup:
   ports, and keeps application behavior out of core;
 - tests that compile a small external-style consumer against the public exports.
 
-**Done when.** A sibling app can build against public exports only, with no internal-path imports and no local copies
-of core contracts.
+**Current proof.** `package.json` exposes the root, `/core`, `/duckdb`, and `/hosts` entry points. The bring-it-home
+dogfood command builds `dist`, creates an `npm pack` tarball, installs that packed artifact into a temporary consumer
+project, and typechecks imports of the host-facing run, CAS, job, graph-projection, reproducibility, and manifest
+contracts through those public exports only. The same temp consumer then runs a Node ESM smoke import to catch
+declaration/runtime export mismatches.
+
+**Done when.** This stays consumer-driven: if a real sibling app needs a stable type and cannot import it through one
+of those public entry points, add the export with a consumer compile check. Do not add private-path imports or local
+copies of core contracts downstream.
 
 ### 4. Foreign Graph Projection Profiles
 
