@@ -17,6 +17,17 @@ declared resources -> SQL/materialization -> async compute when needed -> record
 artifacts -> replay/export. If a downstream app cannot do that without bypassing the ledger, that is a core gap. If it
 can, the behavior belongs downstream.
 
+## Motivation
+
+OpenAI's June 18, 2026 rare-disease reanalysis report is a useful external forcing function, not a product template to
+clone: previously unsolved cases can become newly interpretable as gene-disease relationships, variant evidence, case
+reports, and literature change. In that study, a model surfaced evidence-linked hypotheses for expert review across
+376 previously unsolved cases, with 18 diagnoses established only after human review, additional testing, and clinical
+confirmation (https://openai.com/index/diagnose-rare-childhood-diseases/). The core lesson here is generic: scientific
+value sits in evolving ecosystems of packages, statistical methods, data formats, ontologies, knowledge graphs, and
+papers. The library's job is to make that accumulated practice accessible as declared, replayable, queryable workflows
+with receipts, CAS artifacts, environment attestations, and explicit judgment gates.
+
 ## Closed In Core
 
 These are not remaining work items:
@@ -32,6 +43,10 @@ These are not remaining work items:
 - **Async execution has one lifecycle.** `AsyncRunner` is `submit/status/collect/cancel`. `ComputeRunner` and
   `JobRunner` specialize that shape; `in-memory-job-runner`, `ledger-job-runner`, and `queue-job-runner` are
   implementations, not competing lifecycles. `resumeBioJob` and `cancelBioJob` already exist.
+- **Compute environments are declared and observed as receipts.** `compute.run` records declared-vs-observed
+  `EnvDescriptor` attestation. `withObservedEnvironment` lets a host attach known runtime/package state, such as an
+  `renv.lock` digest or package snapshot, to any compute backend without adding an R-specific runner or probing the
+  child process.
 - **Approval is a durable gate.** The Phase-4 approval path records and gates the irreducible judgment; it should be
   reused rather than shadowed with another policy-decision primitive.
 - **The bring-it-home substrate pieces compose.** `npm run dogfood:bring-it-home` executes a deterministic in-core

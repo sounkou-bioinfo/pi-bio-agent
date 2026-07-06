@@ -367,7 +367,13 @@ Three things keep this consistent with the rest of the substrate:
   table, `examples/compute-run`); declared **file outputs** captured content-addressed into **CAS**
   (`resultTable: "artifacts"` + `captureDeclaredOutputsToCas` in `src/duckdb/artifact-capture.ts`: relative-path-only, symlink/non-regular-file rejecting, realpath-confined to the work dir, byte-capped,
   fail-closed-without-CAS; `examples/compute-artifacts`); and the **files-only** case where the resource's table
-  is the captured-artifacts listing (`examples/compute-files-only`). What is still missing is only the
+  is the captured-artifacts listing (`examples/compute-files-only`). Environment receipts are also host-extensible:
+  `withObservedEnvironment` wraps any `ComputeRunner` with a host-known `EnvDescriptor` (for example an `renv.lock`
+  digest, package snapshot, container image, or module set) so a manifest's declared reproduction contract can match
+  what the host says actually ran. The wrapper does not sniff the child process or infer packages; it reports
+  host-owned knowledge through the existing `describeEnvironment` port. If that host-provided descriptor is invalid,
+  `compute.run` records an explicit unknown/probe-failed environment observation rather than a fake match. What is
+  still missing is only the
   *operation-level* executor: a `process` **BioOperationTransport** (the OPERATION transport is still
   `duckdb.sql` only, `BioOperationTransport = "duckdb.sql"`), the argv-in-a-run-dir path for the six-hour batch /
   Nextflow-Snakemake case. The compute pillar's resolver path, table AND file artifacts, exists; the

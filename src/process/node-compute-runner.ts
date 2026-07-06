@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { StringDecoder } from "node:string_decoder";
 import type { ComputeRunner, ComputeTaskHandle, ComputeTaskResult, ComputeTaskSpec, ComputeTaskStatus } from "../core/ports.js";
-import { ENV_DESCRIPTOR_SCHEMA, unknownEnvDescriptor, type EnvDescriptor } from "../core/reproducibility.js";
+import { ENV_DESCRIPTOR_SCHEMA, unknownEnvDescriptor, validateEnvDescriptor, type EnvDescriptor } from "../core/reproducibility.js";
 
 // A minimal base environment for a spawned child: just enough to resolve binaries and locale, never the host's
 // arbitrary vars (that's where ENV-VAR secrets — *_API_KEY, *_TOKEN, AWS_*, … — live). An allowlist, not a
@@ -33,6 +33,39 @@ function safeBaseEnv(): Record<string, string> {
 // the kept string is hard-sliced to OUTPUT_CAP and a stream `data` chunk is <= the stream highWaterMark (~64KB),
 // so the worst-case live allocation is OUTPUT_CAP + one chunk — intentionally not micro-optimized further.
 const OUTPUT_CAP = 1_000_000;
+
+export type ObservedEnvironmentProvider =
+  | EnvDescriptor
+  | ((spec: ComputeTaskSpec) => EnvDescriptor | undefined | Promise<EnvDescriptor | undefined>);
+
+/**
+ * Attach a host-observed environment descriptor to an existing compute backend.
+ *
+ * This is for hosts that already know the real execution environment: an `renv.lock` digest, a container image,
+ * scheduler module set, or a package snapshot. The wrapper does not inspect the child process or run probes; it
+ * only reports the descriptor through the existing `ComputeRunner.describeEnvironment` port so compute.run can
+ * record declared-vs-observed attestation. Returning `undefined` from the provider falls back to the wrapped
+ * runner's own probe, if any.
+ */
+export function withObservedEnvironment(runner: ComputeRunner, provider: ObservedEnvironmentProvider): ComputeRunner {
+  const describeEnvironment = async (spec: ComputeTaskSpec): Promise<EnvDescriptor> => {
+    const descriptor = typeof provider === "function" ? await provider(spec) : provider;
+    if (descriptor !== undefined) {
+      const errs = validateEnvDescriptor(descriptor);
+      if (errs.length) throw new Error(`withObservedEnvironment: invalid EnvDescriptor — ${errs.join("; ")}`);
+      return descriptor;
+    }
+    return runner.describeEnvironment ? runner.describeEnvironment(spec) : unknownEnvDescriptor(["no wrapped environment probe"]);
+  };
+
+  return {
+    submit: (spec) => runner.submit(spec),
+    status: (handle) => runner.status(handle),
+    collect: (handle) => runner.collect(handle),
+    ...(runner.cancel ? { cancel: (handle: ComputeTaskHandle) => runner.cancel!(handle) } : {}),
+    describeEnvironment,
+  };
+}
 
 export function nodeComputeRunner(): ComputeRunner {
   type Entry = {

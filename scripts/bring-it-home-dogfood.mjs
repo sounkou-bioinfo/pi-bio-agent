@@ -90,6 +90,7 @@ import {
 import {
   fsCasStore,
   runJobStepWithCheckpoint,
+  withObservedEnvironment,
   type RunQueryRequest,
 } from "pi-bio-agent/hosts";
 
@@ -119,6 +120,7 @@ void materializeGraphProjectionProfile;
 void refreshDucknngHttpProfile;
 void fsCasStore;
 void runJobStepWithCheckpoint;
+void withObservedEnvironment;
 type _Conn = SqlConn;
 `, "utf8");
     await execFileAsync(process.execPath, [
@@ -130,7 +132,7 @@ type _Conn = SqlConn;
 import { runBioQueryFromManifest, recordHostEvent } from "pi-bio-agent";
 import { validateBioManifest } from "pi-bio-agent/core";
 import { duckdbNodeConn, materializeGraphProjectionProfile, refreshDucknngHttpProfile } from "pi-bio-agent/duckdb";
-import { fsCasStore, runJobStepWithCheckpoint } from "pi-bio-agent/hosts";
+import { fsCasStore, runJobStepWithCheckpoint, withObservedEnvironment } from "pi-bio-agent/hosts";
 
 for (const [name, value] of Object.entries({
   runBioQueryFromManifest,
@@ -141,6 +143,7 @@ for (const [name, value] of Object.entries({
   refreshDucknngHttpProfile,
   fsCasStore,
   runJobStepWithCheckpoint,
+  withObservedEnvironment,
 })) {
   if (typeof value !== "function") throw new Error(\`public runtime export '\${name}' is not callable\`);
 }

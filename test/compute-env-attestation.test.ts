@@ -4,9 +4,10 @@ import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runBioQueryFromManifest } from "../src/hosts/run-store.js";
-import { nodeComputeRunner } from "../src/process/node-compute-runner.js";
+import { nodeComputeRunner, withObservedEnvironment } from "../src/process/node-compute-runner.js";
 import { fsCasStore } from "../src/hosts/fs-cas.js";
 import type { ComputeRunner } from "../src/core/ports.js";
+import type { EnvDescriptor } from "../src/core/reproducibility.js";
 
 // C1b: compute.run records a declared-vs-observed ENVIRONMENT ATTESTATION in the receipt. The observed side
 // comes from the runner's optional describeEnvironment probe; absent probe => explicit 'unknown', never a fake pin.
@@ -36,6 +37,15 @@ async function runInline(runner: ComputeRunner, environment?: unknown): Promise<
 }
 
 const declaredEnv = { schema: "pi-bio.env_descriptor.v1", kind: "composite", layers: [{ kind: "executable", name: "sh", version: "5.0" }] };
+const declaredRStyleEnv: EnvDescriptor = {
+  schema: "pi-bio.env_descriptor.v1",
+  kind: "composite",
+  layers: [
+    { kind: "executable", name: "Rscript", version: "4.4.0" },
+    { kind: "package_lock", manager: "renv", path: "renv.lock", digest: `sha256:${"a".repeat(64)}` },
+    { kind: "package_snapshot", manager: "renv", packages: [{ name: "nanoarrow", version: "0.7.0" }, { name: "coloc", version: "5.2.3" }] },
+  ],
+};
 const noProbeRunner = (): ComputeRunner => {
   const runner = nodeComputeRunner();
   return {
@@ -59,6 +69,39 @@ describe("C1b: compute.run environment attestation in the receipt", () => {
     assert.ok(env.notes?.includes("env_status:drift"), env.notes?.join(","));
     assert.ok(env.notes?.some((n) => n.startsWith("env_declared:sha256:")));
     assert.ok(env.notes?.some((n) => n.startsWith("env_observed:sha256:")));
+  });
+
+  test("a host-observed package environment can match the declared reproduction contract", async () => {
+    const runner = withObservedEnvironment(nodeComputeRunner(), declaredRStyleEnv);
+    const env = await runInline(runner, declaredRStyleEnv);
+    assert.ok(env.notes?.includes("env_status:matched"), env.notes?.join(","));
+    const declared = env.notes?.find((n) => n.startsWith("env_declared:sha256:"));
+    const observed = env.notes?.find((n) => n.startsWith("env_observed:sha256:"));
+    assert.ok(declared);
+    assert.ok(observed);
+    assert.equal(declared.replace("env_declared:", ""), observed.replace("env_observed:", ""));
+  });
+
+  test("the observed-environment provider can derive per-command descriptors or delegate to the wrapped runner", async () => {
+    const derived: EnvDescriptor = {
+      schema: "pi-bio.env_descriptor.v1",
+      kind: "composite",
+      layers: [{ kind: "executable", name: "sh" }, { kind: "module", name: "analysis-stack", version: "2026.07" }],
+    };
+    const calls: string[][] = [];
+    const runner = withObservedEnvironment(nodeComputeRunner(), (spec) => {
+      calls.push([...spec.command]);
+      return spec.command[0] === "sh" ? derived : undefined;
+    });
+
+    const matched = await runInline(runner, derived);
+    assert.ok(matched.notes?.includes("env_status:matched"), matched.notes?.join(","));
+    assert.deepEqual(calls.map((c) => c[0]), ["sh"]);
+
+    const delegated = await runner.describeEnvironment?.({ command: ["not-sh"], cwd: ".", timeoutMs: 1 });
+    assert.deepEqual(calls.map((c) => c[0]), ["sh", "not-sh"]);
+    assert.equal(delegated?.kind, "composite");
+    assert.ok(delegated?.layers.some((l) => l.kind === "executable" && l.name === "not-sh"), "undefined delegates to wrapped probe");
   });
 
   test("a runner with NO describeEnvironment probe -> explicit unknown (no declaration), never a fake pin", async () => {
@@ -90,5 +133,12 @@ describe("C1b: compute.run environment attestation in the receipt", () => {
     const cas = fsCasStore(await fs.mkdtemp(join(tmpdir(), "pi-bio-env-cas-")));
     const out = await runBioQueryFromManifest({ cwd, dbPath: ":memory:", manifestPath: mpath, sql: "SELECT * FROM tracks", compute: { runner: nodeComputeRunner() }, cas, runId: "envbad", now: "T1" });
     assert.equal(out.ok, false, "an invalid declared EnvDescriptor must fail closed");
+  });
+
+  test("an invalid host-observed descriptor degrades to explicit unknown", async () => {
+    const runner = withObservedEnvironment(nodeComputeRunner(), { schema: "pi-bio.env_descriptor.v1", kind: "composite", layers: [] } as never);
+    const env = await runInline(runner);
+    assert.ok(env.notes?.includes("env_status:unknown"), env.notes?.join(","));
+    assert.ok(env.notes?.some((n) => /withObservedEnvironment: invalid EnvDescriptor/.test(n)), env.notes?.join(","));
   });
 });
