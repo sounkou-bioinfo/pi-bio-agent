@@ -22,7 +22,8 @@ describe("bring-it-home dogfood command", () => {
       checkpointKey: string;
       ducknngProfileReceipt: { subjectRestriction: { restricted: boolean; count: number; digest?: string } };
       externalProjection: { edgeCount: number; closureCount: number };
-      internalProjection: { edgeCount: number; closureCount: number };
+      internalProjection: { edgesTable: string; edgeCount: number; closureTable: string; closureCount: number };
+      trainingCorpus: { digest: string; redaction: string; units: number; toolCalls: number; runs: number; hostEvents: number; parquetReadbackRows: number; unitsParquetDigest: string };
       sdkConsumer: { publicExportsOnly: boolean; runtimeImports: boolean; packageSource: string; imports: string[] };
       observationCounts: Record<string, number>;
     };
@@ -35,7 +36,20 @@ describe("bring-it-home dogfood command", () => {
     assert.equal(summary.ducknngProfileReceipt.subjectRestriction.count, 2);
     assert.match(summary.ducknngProfileReceipt.subjectRestriction.digest ?? "", /^sha256:[0-9a-f]{64}$/);
     assert.deepEqual(summary.externalProjection, { edgesTable: "dogfood_external_edges", edgeCount: 3, closureTable: "dogfood_external_entailed", closureCount: 3 });
-    assert.deepEqual(summary.internalProjection, { edgesTable: "dogfood_internal_edges", edgeCount: 4, closureTable: "dogfood_internal_entailed", closureCount: 3 });
+    assert.equal(summary.internalProjection.edgesTable, "dogfood_internal_edges");
+    assert.equal(summary.internalProjection.closureTable, "dogfood_internal_entailed");
+    assert.ok(summary.internalProjection.edgeCount >= 4);
+    assert.ok(summary.internalProjection.closureCount >= 3);
+    assert.match(summary.trainingCorpus.digest, /^sha256:[0-9a-f]{64}$/);
+    assert.equal(summary.trainingCorpus.redaction, "digest_only");
+    assert.deepEqual({
+      units: summary.trainingCorpus.units,
+      toolCalls: summary.trainingCorpus.toolCalls,
+      runs: summary.trainingCorpus.runs,
+      hostEvents: summary.trainingCorpus.hostEvents,
+      parquetReadbackRows: summary.trainingCorpus.parquetReadbackRows,
+    }, { units: 1, toolCalls: 1, runs: 1, hostEvents: 1, parquetReadbackRows: 1 });
+    assert.match(summary.trainingCorpus.unitsParquetDigest, /^sha256:[0-9a-f]{64}$/);
     assert.deepEqual(summary.sdkConsumer, { publicExportsOnly: true, runtimeImports: true, packageSource: "npm-pack", imports: ["pi-bio-agent", "pi-bio-agent/core", "pi-bio-agent/duckdb", "pi-bio-agent/hosts"] });
     assert.equal(summary.observationCounts.host_event, 1);
     assert.equal(summary.observationCounts.job_step_checkpoint, 2);

@@ -613,10 +613,15 @@ redacted/public/training exports -> derived views or artifacts
 `value_json` stays the base-ledger storage contract for now. DuckDB `VARIANT` is still a strong fit, but the split
 matters: it is not ready for the read/round-trip contract because the current Node API path can execute `VARIANT`
 expressions but does not materialize raw `VARIANT` values into JavaScript cleanly. The export/corpus lane is different:
-`VARIANT` Parquet works now and can shred regular payload fields into typed columns. Training, review, and public
-dataset exports should target partitioned `VARIANT`-shredded Parquet views when that export path is built; the live
-ledger should stay JSON until client bindings, redaction helpers, as-of projections, and CAS-root scans can handle
-typed payloads without casts or hidden text assumptions.
+`VARIANT` Parquet works now and can shred regular payload fields into typed columns. The built corpus path is
+therefore a derived, digest-first export: `materializeTrainingCorpus` projects sessions, turns, tool trajectories,
+runs, artifacts, host events, and approval/judgment facts into fixed temporary tables, and
+`exportTrainingCorpusParquet` writes those tables as Parquet with row/file-digest receipts. It does not inline private
+message text, tool payloads, or raw host-event payloads; it exports content digests, CAS URIs, replay/receipt/result
+digests, event/payload digests, and graph links. A future consumer can choose a
+partitioned `VARIANT`-shredded Parquet layout for nested payload columns, but the live ledger should stay JSON until
+client bindings, redaction helpers, as-of projections, and CAS-root scans can handle typed payloads without casts or
+hidden text assumptions.
 
 A session line, message, tool call, compaction, image, plot, report, or review label is an observation under a stable
 namespace such as `session:`, `turn:`, `msg:`, `toolcall:`, `cas:`, and `run:`. Edges such as `has_message`,

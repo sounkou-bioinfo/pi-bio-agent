@@ -52,8 +52,10 @@ These are not remaining work items:
 - **The bring-it-home substrate pieces compose.** `npm run dogfood:bring-it-home` executes a deterministic in-core
   proof that records a host-event receipt, resumes a slash-bearing workflow step from a checkpoint, projects both a
   staged external KG and the internal observation graph through `GraphProjectionProfile`, and records a secret-free
-  ducknng HTTP profile receipt. It also packs the built package, installs that tarball into a temporary TypeScript
-  consumer, compiles imports, and smoke-loads runtime exports using only the public package exports
+  ducknng HTTP profile receipt. It also links a Pi-shaped session tool call to a scientific run, exports the derived
+  digest-only corpus tables to Parquet, reads the exported corpus back through DuckDB, packs the built package,
+  installs that tarball into a temporary TypeScript consumer, compiles imports, and smoke-loads runtime exports using
+  only the public package exports
   (`pi-bio-agent`, `pi-bio-agent/core`, `pi-bio-agent/duckdb`, and `pi-bio-agent/hosts`).
 
 ## Core Work Items
@@ -183,8 +185,17 @@ Shape:
 - VARIANT-shredded Parquet is the export target when useful, because it avoids raw VARIANT return through Node while
   giving external engines typed nested columns.
 
-**Done when.** A corpus export can be read by an external engine, joins trace/run/judgment data, and has a redacted
-projection with explicit receipts.
+**Current proof.** `materializeTrainingCorpus` derives fixed digest-only temporary corpus tables from the existing
+`bio_observations` ledger: sessions, messages, turns, tool calls, runs, artifacts, host events, approval/judgment
+facts, and per-turn training units. `exportTrainingCorpusParquet` writes those tables as Parquet and returns a receipt
+with row counts and file digests. `test/training-corpus.test.ts` seeds a composed ledger (session trace, tool->run
+link, run fact, image artifact, host event, and approval gate), proves the export joins those surfaces without
+inlining private text or clobbering persistent caller tables, and reads the Parquet files back. `npm run
+dogfood:bring-it-home` exercises the same export in the combined substrate proof.
+
+**Done when.** The core slice is done. Follow-on work is consumer-owned: private payload hydration, redaction policy,
+publication review, and VARIANT-shredded Parquet when a real downstream corpus consumer benefits from nested typed
+columns. The ledger contract remains `value_json`; VARIANT is an export format choice, not the base store.
 
 ### 7. ducknng Profile Cleanup
 
@@ -216,8 +227,8 @@ use case.
 2. **Foreign graph projection breadth only when forced.** The first real external graph source is in place through
    Monarch KGX over HTTP. Do not add a SemanticSQL generator preemptively; add source-specific staging SQL/views when
    a workflow actually reads them.
-3. **Graphics metadata and corpus export.** These become valuable once runs, traces, and judgments accrue from real
-   app executions.
+3. **Graphics metadata.** The corpus export now carries artifact CAS rows and display/produce references. The
+   remaining work is richer run-produced figure metadata when a downstream report path needs it.
 4. **ducknng profile cleanup.** Secret-free profile receipts are pinned into connector run replay/provenance/action
    keys, and refresh/rotation uses the same ducknng upsert receipt path. Next work is subject bracketing for embedded
    hosts and replacing remaining workaround-shaped token plumbing in real credentialed examples.

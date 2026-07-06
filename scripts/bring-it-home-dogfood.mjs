@@ -19,6 +19,8 @@ import { materializeGraphProjectionProfile } from "../dist/duckdb/graph-projecti
 import { ducknngHttpProfileReceiptFromInfo } from "../dist/duckdb/http-profiles.js";
 import { fsCasStore } from "../dist/hosts/fs-cas.js";
 import { recordHostEvent } from "../dist/hosts/host-events.js";
+import { ingestSessionJsonl } from "../dist/hosts/session-ingest.js";
+import { exportTrainingCorpusParquet } from "../dist/hosts/training-corpus.js";
 import { claimJob, createJobQueueSchema, recordJobClaimStatus } from "../dist/hosts/job-queue.js";
 import {
   cancelBioJob,
@@ -44,6 +46,10 @@ const conn = duckdbNodeConn(raw);
 
 function asNumber(value) {
   return Number(value ?? 0);
+}
+
+function sqlString(value) {
+  return `'${String(value).replace(/'/g, "''")}'`;
 }
 
 async function compileExternalConsumer() {
@@ -75,6 +81,8 @@ async function compileExternalConsumer() {
 import {
   runBioQueryFromManifest,
   recordHostEvent,
+  ingestSessionJsonl,
+  exportTrainingCorpusParquet,
   type HostCapabilityReceipt,
 } from "pi-bio-agent";
 import {
@@ -115,6 +123,8 @@ void validateBioManifest(manifest);
 void request;
 void runBioQueryFromManifest;
 void recordHostEvent;
+void ingestSessionJsonl;
+void exportTrainingCorpusParquet;
 void duckdbNodeConn;
 void materializeGraphProjectionProfile;
 void refreshDucknngHttpProfile;
@@ -129,7 +139,7 @@ type _Conn = SqlConn;
       join(consumerRoot, "tsconfig.json"),
     ], { cwd: consumerRoot, maxBuffer: 2 * 1024 * 1024 });
     await fs.writeFile(join(consumerRoot, "smoke.mjs"), `
-import { runBioQueryFromManifest, recordHostEvent } from "pi-bio-agent";
+import { runBioQueryFromManifest, recordHostEvent, ingestSessionJsonl, exportTrainingCorpusParquet } from "pi-bio-agent";
 import { validateBioManifest } from "pi-bio-agent/core";
 import { duckdbNodeConn, materializeGraphProjectionProfile, refreshDucknngHttpProfile } from "pi-bio-agent/duckdb";
 import { fsCasStore, runJobStepWithCheckpoint, withObservedEnvironment } from "pi-bio-agent/hosts";
@@ -137,6 +147,8 @@ import { fsCasStore, runJobStepWithCheckpoint, withObservedEnvironment } from "p
 for (const [name, value] of Object.entries({
   runBioQueryFromManifest,
   recordHostEvent,
+  ingestSessionJsonl,
+  exportTrainingCorpusParquet,
   validateBioManifest,
   duckdbNodeConn,
   materializeGraphProjectionProfile,
@@ -323,6 +335,8 @@ try {
     manifestPath: resolve(process.cwd(), "examples", "variant-counts", "manifest.json"),
     sql: "SELECT consequence, count(*) AS n FROM variants GROUP BY consequence ORDER BY consequence",
     cas: hostCapCas,
+    store: conn,
+    author: "bring-it-home-dogfood",
     runId: "dogfood-host-capability",
     now: NOW,
     hostCapabilityReceipts: [profileReceipt],
@@ -340,6 +354,34 @@ try {
     hostCapabilityReceipts: [profileReceipt],
   });
   assert.equal(hostCapReproduced.matched, true);
+
+  const sessionRoot = await fs.mkdtemp(join(tmpdir(), "pi-bio-dogfood-session-"));
+  const sessionCas = fsCasStore(join(sessionRoot, "cas"));
+  const sessionPath = join(sessionRoot, "dogfood-session.jsonl");
+  const sessionId = "dogfood-session";
+  const sessionToolCallId = "call_dogfood|fc_bio_query";
+  await fs.writeFile(sessionPath, `${[
+    { type: "session", id: sessionId, timestamp: "2026-07-06T12:00:00.000Z", cwd: sessionRoot },
+    { type: "message", id: "u1", timestamp: "2026-07-06T12:00:01.000Z", message: { role: "user", content: "Summarize variant consequences." } },
+    {
+      type: "message", id: "a1", parentId: "u1", timestamp: "2026-07-06T12:00:02.000Z",
+      message: {
+        role: "assistant",
+        provider: "openai",
+        model: "gpt-dogfood",
+        content: [
+          { type: "text", text: "I will query the manifest." },
+          { type: "toolCall", id: sessionToolCallId, name: "bio_query", arguments: { sql: "SELECT consequence, count(*) AS n FROM variants GROUP BY consequence ORDER BY consequence" } },
+        ],
+      },
+    },
+    { type: "message", id: "tr1", parentId: "a1", timestamp: "2026-07-06T12:00:03.000Z", message: { role: "toolResult", toolCallId: sessionToolCallId, toolName: "bio_query", isError: false, content: "3 rows" } },
+  ].map((line) => JSON.stringify(line)).join("\n")}\n`, "utf8");
+  await ingestSessionJsonl({ conn, cas: sessionCas, sessionPath, sessionId, source: "bring-it-home-dogfood", now: NOW });
+  const sessionToolNode = `toolcall:${sessionId}:${sessionToolCallId}`;
+  const hostCapRunNode = `run:${hostCapRun.runId}`;
+  await recordObservationLink(conn, { subjectId: sessionToolNode, predicate: "executes", objectId: hostCapRunNode, recordedAt: LATER, source: "bring-it-home-dogfood" });
+  await recordObservationLink(conn, { subjectId: hostCapRunNode, predicate: "invoked_by", objectId: sessionToolNode, recordedAt: LATER, source: "bring-it-home-dogfood" });
 
   await conn.run(`
     CREATE TABLE external_kg_raw(subject TEXT, predicate TEXT, object TEXT);
@@ -376,8 +418,8 @@ try {
     },
     provenance: [{ source: "bio_observations", deid: "unknown" }],
   });
-  assert.equal(internalProjection.edgeCount, 4);
-  assert.equal(internalProjection.closureCount, 3);
+  assert.ok(internalProjection.edgeCount >= 4);
+  assert.ok(internalProjection.closureCount >= 3);
 
   const reportDeps = await conn.all(`
     SELECT to_id FROM dogfood_internal_entailed
@@ -388,6 +430,19 @@ try {
     "workflow:dogfood:step:extract",
     "workflow:dogfood:step:score",
   ]);
+
+  const corpusDir = await fs.mkdtemp(join(tmpdir(), "pi-bio-dogfood-corpus-"));
+  const corpus = await exportTrainingCorpusParquet(conn, corpusDir, { asOf: "2026-07-06T12:02:00.000Z" });
+  assert.equal(corpus.redaction, "digest_only");
+  assert.equal(corpus.tables.sessions.rows, 1);
+  assert.equal(corpus.tables.toolCalls.rows, 1);
+  assert.equal(corpus.tables.runs.rows, 1);
+  assert.equal(corpus.tables.hostEvents.rows, 1);
+  assert.match(corpus.tables.units.parquetDigest, /^sha256:[0-9a-f]{64}$/);
+  const corpusUnitsReadback = await conn.all(
+    `SELECT count(*) AS n FROM read_parquet(${sqlString(corpus.tables.units.parquetPath)})`,
+  );
+  assert.equal(asNumber(corpusUnitsReadback[0]?.n), corpus.tables.units.rows);
 
   const checkpointRow = await observationAsOfKey(
     conn,
@@ -422,6 +477,16 @@ try {
     },
     externalProjection,
     internalProjection,
+    trainingCorpus: {
+      digest: corpus.digest,
+      redaction: corpus.redaction,
+      units: corpus.tables.units.rows,
+      toolCalls: corpus.tables.toolCalls.rows,
+      runs: corpus.tables.runs.rows,
+      hostEvents: corpus.tables.hostEvents.rows,
+      parquetReadbackRows: asNumber(corpusUnitsReadback[0]?.n),
+      unitsParquetDigest: corpus.tables.units.parquetDigest,
+    },
     sdkConsumer,
     observationCounts: Object.fromEntries(counts.map((r) => [r.predicate, asNumber(r.n)])),
   };

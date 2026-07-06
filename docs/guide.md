@@ -134,6 +134,12 @@ deployment's decision (container, sandbox, the Pi runtime). The substrate record
 what may run. A strict "no external I/O" profile is a few lines wrapping the `SqlConn` you inject (see
 [design notes](design.md#powerful-by-default-host-controlled-effects-provenance-aware-not-policy-obsessed)).
 
+For training or publication exports, use `materializeTrainingCorpus` or `exportTrainingCorpusParquet` from
+`pi-bio-agent/hosts`. These are derived temporary projections over the observation ledger, not new storage: messages
+export content digests, tool calls export argument/result digests, runs export replay/receipt/result CAS digests, host
+events export event/payload digests rather than raw payloads, and artifacts export CAS URIs plus display/produce
+references. Private text hydration and publication redaction policy belong to the host/application.
+
 ## 4. Ordinal scales
 
 To threshold or compare on an ordered scale (ACMG, variant impact, clinical stage), declare an `ordered`
