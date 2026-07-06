@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
+import { promises as fs } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { DuckDBInstance } from "@duckdb/node-api";
 
 import { duckdbNodeConn } from "../dist/duckdb/node-api.js";
@@ -12,12 +15,15 @@ import {
 } from "../dist/duckdb/observations.js";
 import { materializeGraphProjectionProfile } from "../dist/duckdb/graph-projection.js";
 import { ducknngHttpProfileReceiptFromInfo } from "../dist/duckdb/http-profiles.js";
+import { fsCasStore } from "../dist/hosts/fs-cas.js";
 import { recordHostEvent } from "../dist/hosts/host-events.js";
 import {
   jobStepCheckpointKey,
   readJobStepCheckpoint,
   runJobStepWithCheckpoint,
 } from "../dist/hosts/job-store.js";
+import { reproduceRun } from "../dist/hosts/reproduce.js";
+import { runBioQueryFromManifest } from "../dist/hosts/run-store.js";
 
 const NOW = "2026-07-06T12:00:00.000Z";
 const LATER = "2026-07-06T12:00:05.000Z";
@@ -137,6 +143,32 @@ try {
     digest: profileReceipt.policyDigest,
   });
 
+  const hostCapRunCwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-dogfood-host-cap-"));
+  const hostCapCas = fsCasStore(await fs.mkdtemp(join(tmpdir(), "pi-bio-dogfood-host-cap-cas-")));
+  const hostCapRun = await runBioQueryFromManifest({
+    cwd: hostCapRunCwd,
+    dbPath: ":memory:",
+    manifestPath: resolve(process.cwd(), "examples", "variant-counts", "manifest.json"),
+    sql: "SELECT consequence, count(*) AS n FROM variants GROUP BY consequence ORDER BY consequence",
+    cas: hostCapCas,
+    runId: "dogfood-host-capability",
+    now: NOW,
+    hostCapabilityReceipts: [profileReceipt],
+  });
+  assert.equal(hostCapRun.ok, true);
+  const replayText = await fs.readFile(join(hostCapRun.runDir, "replay.json"), "utf8");
+  const hostCapReplay = JSON.parse(replayText);
+  assert.deepEqual(hostCapReplay.hostReceiptDigests, [profileReceipt.policyDigest]);
+  assert.doesNotMatch(replayText, /case:alpha|case:beta|Bearer|token|secret/i);
+  await assert.rejects(() => reproduceRun({ cwd: hostCapRunCwd, replay: hostCapReplay, cas: hostCapCas }), /hostReceiptDigests/);
+  const hostCapReproduced = await reproduceRun({
+    cwd: hostCapRunCwd,
+    replay: hostCapReplay,
+    cas: hostCapCas,
+    hostCapabilityReceipts: [profileReceipt],
+  });
+  assert.equal(hostCapReproduced.matched, true);
+
   await conn.run(`
     CREATE TABLE external_kg_raw(subject TEXT, predicate TEXT, object TEXT);
     INSERT INTO external_kg_raw VALUES
@@ -207,6 +239,13 @@ try {
       profileId: profileReceipt.profileId,
       policyDigest: profileReceipt.policyDigest,
       subjectRestriction: profileReceipt.subjectRestriction,
+    },
+    hostCapabilityRun: {
+      runId: hostCapRun.runId,
+      hostReceiptDigest: hostCapReplay.hostReceiptDigests[0],
+      reproduced: hostCapReproduced.reproduced,
+      matched: hostCapReproduced.matched,
+      resultMatched: hostCapReproduced.resultMatched,
     },
     externalProjection,
     internalProjection,

@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import { createHash } from "node:crypto";
 import { join, resolve, isAbsolute } from "node:path";
-import { RUN_REPLAY_SPEC_SCHEMA, receiptContentDigest, canonicalDigest, type RunReplaySpec } from "../core/reproducibility.js";
+import { RUN_REPLAY_SPEC_SCHEMA, receiptContentDigest, canonicalDigest, hostCapabilityReceiptDigests, type HostCapabilityReceipt, type RunReplaySpec } from "../core/reproducibility.js";
 import type { CasStore } from "../core/cas.js";
 import type { ComputeRunner } from "../core/ports.js";
 import type { FetchLike } from "../duckdb/resolvers/http-table-scan.js";
@@ -70,6 +70,8 @@ export interface ReproduceRequest {
   protectedSessionBindings?: Record<string, unknown>;
   /** Additional host-declared protected session variable names, e.g. for variables set by duckdbInitSql. */
   protectedSessionVariables?: string[];
+  /** Secret-free host capability policy receipts pinned by the original run, e.g. ducknng HTTP profile receipts. */
+  hostCapabilityReceipts?: readonly HostCapabilityReceipt[];
   now?: string;
 }
 
@@ -114,6 +116,11 @@ export async function reproduceRun(req: ReproduceRequest): Promise<ReproduceResu
     if (!req.protectedSessionVariables) throw new Error("reproduce: this run pinned a protectedSessionVariablesDigest — re-supply the same protectedSessionVariables to reproduce it faithfully (fail closed)");
     if (canonicalDigest(normalizeProtectedSessionVariables(req.protectedSessionVariables)) !== replay.protectedSessionVariablesDigest) throw new Error("reproduce: the supplied protectedSessionVariables do not match the pinned protectedSessionVariablesDigest (would not be a faithful reproduction)");
   }
+  if (replay.hostReceiptDigests?.length) {
+    const supplied = hostCapabilityReceiptDigests(req.hostCapabilityReceipts);
+    if (supplied.length === 0) throw new Error("reproduce: this run pinned hostReceiptDigests — re-supply the same hostCapabilityReceipts to reproduce it faithfully (fail closed)");
+    if (JSON.stringify(supplied) !== JSON.stringify(replay.hostReceiptDigests)) throw new Error("reproduce: the supplied hostCapabilityReceipts do not match the pinned hostReceiptDigests (would not be a faithful reproduction)");
+  }
   // VERIFY the manifest hasn't changed: reproduce re-runs from replay.manifest.path (by operationId or sql), so a
   // manifest edited since the original run would execute DIFFERENT logic yet could still 'match' if receipts happen
   // to align. Compare the CURRENT file's digest to the pinned one and fail closed on drift. (manifestDigest =
@@ -136,7 +143,7 @@ export async function reproduceRun(req: ReproduceRequest): Promise<ReproduceResu
   const shortId = replay.runId.slice(0, Math.max(1, budget));
   const base = {
     cwd: req.cwd, dbPath: req.dbPath ?? ":memory:", manifestPath: replay.manifest!.path!,
-    bindings: replay.bindings, duckdbInitSql: req.duckdbInitSql, protectedSessionBindings: req.protectedSessionBindings, protectedSessionVariables: req.protectedSessionVariables, duckdbConfig: req.duckdbConfig,
+    bindings: replay.bindings, duckdbInitSql: req.duckdbInitSql, protectedSessionBindings: req.protectedSessionBindings, protectedSessionVariables: req.protectedSessionVariables, duckdbConfig: req.duckdbConfig, hostCapabilityReceipts: req.hostCapabilityReceipts,
     network: req.network, compute: req.compute, cas: req.cas,
     runId: `reproduce-${shortId}${suffix}`, now: req.now,
   };

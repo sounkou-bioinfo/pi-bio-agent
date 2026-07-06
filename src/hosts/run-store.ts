@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import { systemClock } from "../core/clock.js";
-import { RUN_REPLAY_SPEC_SCHEMA, receiptContentDigest, canonicalDigest, type RunReplaySpec, type EnvAttestationSummary } from "../core/reproducibility.js";
+import { RUN_REPLAY_SPEC_SCHEMA, receiptContentDigest, canonicalDigest, hostCapabilityReceiptDigest, type HostCapabilityReceipt, type RunReplaySpec, type EnvAttestationSummary } from "../core/reproducibility.js";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { createBioRegistry, describeManifest, validateBioManifest, type BioRegistry, type BioManifest, type ManifestDescription, type ResolutionReceipt } from "../core/manifest.js";
@@ -11,7 +11,7 @@ import type { CasStore } from "../core/cas.js";
 import type { BioResolverImpl, ComputeRunner, SqlConn } from "../core/ports.js";
 import { OperationRunError, runOperation, runQuery, type OperationResult } from "../core/operations.js";
 import type { BioRunRecord } from "../core/run-spec.js";
-import type { BioArtifact } from "../core/types.js";
+import type { BioArtifact, Provenance } from "../core/types.js";
 import { duckdbNodeConn } from "../duckdb/node-api.js";
 import { sqlReadsOnlyResolvedTables, resolvedBaseTables, sqlUsesNonDeterministicFn, hermeticIntrospectionUsable } from "../duckdb/plan-hermeticity.js";
 import { duckdbFileScanResolver } from "../duckdb/resolvers/duckdb-file-scan.js";
@@ -135,21 +135,55 @@ export function isRunDbOpenError(err: unknown): boolean {
 // null), undefined (dropped), a function/symbol, a non-plain object (Date etc.) — would make the re-read replay key
 // DIFFER from the original run's, so recall misses or (worse) collides two distinct runs. Reject such bindings at the
 // entry, before the run, so bindings are always JSON-round-trippable and the input key is stable across serialization.
+function assertJsonSafeValue(v: unknown, path: string, label: string, reason: string): void {
+  if (v === null) return;
+  const t = typeof v;
+  if (t === "string" || t === "boolean") return;
+  if (t === "number") { if (!Number.isFinite(v as number)) throw new Error(`${label} '${path}' is a non-finite number (NaN/Infinity) — ${reason}`); return; }
+  if (t === "bigint") throw new Error(`${label} '${path}' is a bigint — ${reason}; pass it as a string`);
+  if (t === "function" || t === "symbol" || t === "undefined") throw new Error(`${label} '${path}' is a ${t} — ${reason}`);
+  if (Array.isArray(v)) { v.forEach((e, i) => assertJsonSafeValue(e, `${path}[${i}]`, label, reason)); return; }
+  const proto = Object.getPrototypeOf(v);
+  if (proto !== Object.prototype && proto !== null) throw new Error(`${label} '${path}' is a non-plain object (${proto?.constructor?.name ?? "unknown"}) — ${reason}`);
+  for (const [k, val] of Object.entries(v as Record<string, unknown>)) assertJsonSafeValue(val, `${path}.${k}`, label, reason);
+}
+
 function assertJsonSafeBindings(bindings: Record<string, unknown> | undefined, label = "binding", reason = "bindings must be JSON-serializable so they round-trip through replay.json"): void {
   if (bindings === undefined) return;
-  const check = (v: unknown, path: string): void => {
-    if (v === null) return;
-    const t = typeof v;
-    if (t === "string" || t === "boolean") return;
-    if (t === "number") { if (!Number.isFinite(v as number)) throw new Error(`${label} '${path}' is a non-finite number (NaN/Infinity) — ${reason}`); return; }
-    if (t === "bigint") throw new Error(`${label} '${path}' is a bigint — ${reason}; pass it as a string`);
-    if (t === "function" || t === "symbol" || t === "undefined") throw new Error(`${label} '${path}' is a ${t} — ${reason}`);
-    if (Array.isArray(v)) { v.forEach((e, i) => check(e, `${path}[${i}]`)); return; }
-    const proto = Object.getPrototypeOf(v);
-    if (proto !== Object.prototype && proto !== null) throw new Error(`${label} '${path}' is a non-plain object (${proto?.constructor?.name ?? "unknown"}) — ${reason}`);
-    for (const [k, val] of Object.entries(v as Record<string, unknown>)) check(val, `${path}.${k}`);
+  for (const [k, v] of Object.entries(bindings)) assertJsonSafeValue(v, k, label, reason);
+}
+
+function hostCapabilityReceiptRefs(receipts: readonly HostCapabilityReceipt[] | undefined): Array<{ schema: string; digest: `sha256:${string}` }> {
+  if (!receipts) return [];
+  if (!Array.isArray(receipts)) throw new Error("hostCapabilityReceipts must be an array");
+  return receipts.map((receipt, i) => {
+    assertJsonSafeValue(receipt, `hostCapabilityReceipts[${i}]`, "host capability receipt", "host capability receipts must be secret-free JSON so replay/action keys are stable");
+    const digest = hostCapabilityReceiptDigest(receipt);
+    return { schema: receipt.schema, digest };
+  }).sort((a, b) => a.digest === b.digest ? a.schema.localeCompare(b.schema) : a.digest.localeCompare(b.digest));
+}
+
+function hostCapabilityProvenance(refs: Array<{ schema: string; digest: `sha256:${string}` }>): Provenance[] {
+  return refs.map((r) => ({
+    source: `host.capability:${r.schema}`,
+    digest: r.digest,
+    notes: ["host capability receipt"],
+  }));
+}
+
+function annotateRunWithHostCapabilities(run: BioRunRecord, refs: Array<{ schema: string; digest: `sha256:${string}` }>): BioRunRecord {
+  if (refs.length === 0) return run;
+  const provenance = hostCapabilityProvenance(refs);
+  const annotateArtifact = (artifact: BioArtifact): BioArtifact => ({
+    ...artifact,
+    provenance: [...(artifact.provenance ?? []), ...provenance],
+  });
+  return {
+    ...run,
+    spec: { ...run.spec, provenance: [...(run.spec.provenance ?? []), ...provenance] },
+    ...(run.artifacts ? { artifacts: run.artifacts.map(annotateArtifact) } : {}),
+    events: run.events.map((event) => event.artifacts ? { ...event, artifacts: event.artifacts.map(annotateArtifact) } : event),
   };
-  for (const [k, v] of Object.entries(bindings)) check(v, k);
 }
 
 async function bindSessionVariables(conn: SqlConn, vars: Record<string, unknown> | undefined, label: string): Promise<void> {
@@ -302,6 +336,9 @@ export interface RunOperationRequest {
    *  startup settings: S3/object-store secrets, cache_httpfs cache dir, extension_directory, and
    *  allow_unsigned_extensions (for a cached/local dev extension build; community builds are signed). */
   duckdbConfig?: Record<string, string>;
+  /** Secret-free host capability policy receipts that affect the run, e.g. a ducknng HTTP profile receipt. The
+   *  run pins only their digests in replay/action keys and references those digests in run provenance. */
+  hostCapabilityReceipts?: readonly HostCapabilityReceipt[];
 }
 
 /** CAS content addresses for a run's immutable outputs — the bytes live in CAS (outside the DB), the fact + this
@@ -473,6 +510,7 @@ async function runAndPersist(
   protectedSessionVariables?: readonly string[],
   duckdbConfig?: Record<string, string>,
   replay?: RunReplaySpec,
+  hostCapabilityRefs: Array<{ schema: string; digest: `sha256:${string}` }> = [],
   runLog?: { store: SqlConn; author?: string },
   cas?: CasStore,
   serialize?: boolean,
@@ -522,6 +560,7 @@ async function runAndPersist(
     if (initSql) for (const stmt of initSql) await conn.run(stmt);
     try {
       const { run, result, receipts } = await body(conn, protectedVariableNames);
+      const attributedRun = annotateRunWithHostCapabilities(run, hostCapabilityRefs);
       let enriched = replay ? enrichReplay(replay, receipts) : undefined;
       // result rows -> CAS FIRST (needed to retarget the artifact below); the run:<id> fact references it by digest.
       const resultDigest = await putCas(result.rows);
@@ -559,7 +598,7 @@ async function runAndPersist(
       // Files are the legible VIEW (default). result.json/receipts.json/replay.json are skipped in lean mode
       // (serialize:false); run.json is always written — and in lean mode its output artifact points at the CAS URI,
       // not the unwritten result.json. (Safe: the CAS bytes are durable AND rooted by cas-refs.json before this deletes them.)
-      const runForFiles = serialize === false && resultDigest ? retargetResultArtifactToCas(run, runId, `cas:${resultDigest}`) : run;
+      const runForFiles = serialize === false && resultDigest ? retargetResultArtifactToCas(attributedRun, runId, `cas:${resultDigest}`) : attributedRun;
       const persisted = await persistRun(cwd, runId, { run: runForFiles, result, receipts }, { serialize, casBacked: cas !== undefined });
       if (enriched && serialize !== false) await writeRunFile(persisted.dir, "replay.json", enriched);
       if (!wroteCasRefs) {
@@ -572,7 +611,7 @@ async function runAndPersist(
       // visible as succeeded before it actually completed. Injected `now` (tests) collapses this to the fixed value.
       const completedAt = injectedNow ?? systemClock();
       // Datomic + CAS: record the run as a fact in the ONE store, referencing content by digest (bytes stay outside).
-      await recordRun(runLog, completedAt, { runId, identity, kind, status: run.status, error: undefined, dir: persisted.dir, replay, enriched, resultDigest, receiptsDigest, replayDigest, runObjectDigest });
+      await recordRun(runLog, completedAt, { runId, identity, kind, status: attributedRun.status, error: undefined, dir: persisted.dir, replay, enriched, resultDigest, receiptsDigest, replayDigest, runObjectDigest });
       // ActionCache (LLVM CAS): map this input's CASID -> the result's CASID, so an identical future run can be
       // memoized/deduped and reproduce() has an input->output handle. Only when both a CAS and the store are present.
       // SKIP a run with a LIVE SOURCE: its sourceReceiptDigests are blind to the source's CONTENT (sql_materialize /
@@ -613,6 +652,7 @@ async function runAndPersist(
       // failure is auditable, not lost. Pre-flight/config errors (which never became a run) still throw.
       if (error instanceof OperationRunError) {
         const enriched = replay ? enrichReplay(replay, error.receipts) : undefined;
+        const attributedRun = annotateRunWithHostCapabilities(error.run, hostCapabilityRefs);
         // SAME lean-mode data-loss fix as the success path: CAS-write the failed run's receipts/replay BEFORE
         // persistFailedRun deletes/skips the JSON files, so a crash/failed-put can't strand the provenance bytes.
         const receiptsDigest = await putCas(error.receipts);
@@ -625,7 +665,7 @@ async function runAndPersist(
         if (wroteCasRefs) {
           await writeRunFile(dir, "cas-refs.json", { schema: "pi-bio.cas_refs.v1", receipts: receiptsDigest, replay: replayDigest });
         }
-        const persisted = await persistFailedRun(cwd, runId, { run: error.run, receipts: error.receipts }, { serialize, casBacked: cas !== undefined });
+        const persisted = await persistFailedRun(cwd, runId, { run: attributedRun, receipts: error.receipts }, { serialize, casBacked: cas !== undefined });
         if (enriched && serialize !== false) await writeRunFile(persisted.dir, "replay.json", enriched); // a failed run is replayable too
         if (!wroteCasRefs) {
           // reused runId, no cas: clear a prior CAS run's stale cas-refs.json AFTER persistFailedRun (write-before-
@@ -633,7 +673,7 @@ async function runAndPersist(
           await fs.rm(join(persisted.dir, "cas-refs.json"), { force: true });
         }
         const failedAt = injectedNow ?? systemClock(); // FAILURE time, not run start (see the success path)
-        await recordRun(runLog, failedAt, { runId, identity, kind, status: error.run.status, error: error.message, dir: persisted.dir, replay, enriched, receiptsDigest, replayDigest });
+        await recordRun(runLog, failedAt, { runId, identity, kind, status: attributedRun.status, error: error.message, dir: persisted.dir, replay, enriched, receiptsDigest, replayDigest });
         const casRefs = cas ? { receipts: receiptsDigest, replay: replayDigest } : undefined;
         return { ok: false, runId, operationId: identity, status: error.run.status, error: error.message, casRefs, runDir: persisted.dir };
       }
@@ -656,6 +696,7 @@ export async function runBioOperationFromManifest(req: RunOperationRequest): Pro
   }
   assertJsonSafeBindings(req.bindings); // bindings must round-trip through replay.json (see the helper) — fail before any effect
   assertJsonSafeBindings(req.protectedSessionBindings, "protected session binding", "protected session bindings must be JSON-serializable so their digest is stable across reproduce/recall keys");
+  const hostCapabilityRefs = hostCapabilityReceiptRefs(req.hostCapabilityReceipts);
   const protectedNamesDigest = protectedSessionVariablesDigest(req.protectedSessionVariables);
   const { registry, raw, manifest, manifestDigest } = await prepareRegistry(req);
   const op = registry.getOperation(req.operationId);
@@ -678,9 +719,10 @@ export async function runBioOperationFromManifest(req: RunOperationRequest): Pro
     ...(req.protectedSessionBindings ? { protectedSessionBindingsDigest: canonicalDigest(req.protectedSessionBindings) } : {}), // pin WHICH protected bindings (digest only; values are not replayed)
     ...(protectedNamesDigest ? { protectedSessionVariablesDigest: protectedNamesDigest } : {}), // pin additional protected names declared by the host
     ...(req.duckdbConfig ? { duckdbConfigDigest: canonicalDigest(req.duckdbConfig) } : {}), // pin WHICH config (digest, not the secret-bearing config itself)
+    ...(hostCapabilityRefs.length ? { hostReceiptDigests: hostCapabilityRefs.map((r) => r.digest) } : {}),
     ...(proc ? { compute: proc } : {}),
   };
-  return runAndPersist(req.cwd, req.dbPath, runId, req.operationId, "operation", (conn) => runOperation(registry, conn, { operationId: req.operationId, runId, now, signal: req.signal, cas: req.cas }), req.now, req.duckdbInitSql, req.bindings, req.protectedSessionBindings, req.protectedSessionVariables, req.duckdbConfig, replay, req.store ? { store: req.store, author: req.author } : undefined, req.cas, req.serialize);
+  return runAndPersist(req.cwd, req.dbPath, runId, req.operationId, "operation", (conn) => runOperation(registry, conn, { operationId: req.operationId, runId, now, signal: req.signal, cas: req.cas }), req.now, req.duckdbInitSql, req.bindings, req.protectedSessionBindings, req.protectedSessionVariables, req.duckdbConfig, replay, hostCapabilityRefs, req.store ? { store: req.store, author: req.author } : undefined, req.cas, req.serialize);
 }
 
 export interface RunQueryRequest {
@@ -720,6 +762,8 @@ export interface RunQueryRequest {
    *  startup settings: S3/object-store secrets, cache_httpfs cache dir, extension_directory, and
    *  allow_unsigned_extensions (for a cached/local dev extension build; community builds are signed). */
   duckdbConfig?: Record<string, string>;
+  /** Secret-free host capability policy receipts that affect the run, e.g. a ducknng HTTP profile receipt. */
+  hostCapabilityReceipts?: readonly HostCapabilityReceipt[];
 }
 
 /**
@@ -735,6 +779,7 @@ export async function runBioQueryFromManifest(req: RunQueryRequest): Promise<Run
   }
   assertJsonSafeBindings(req.bindings); // bindings must round-trip through replay.json (see the helper) — fail before any effect
   assertJsonSafeBindings(req.protectedSessionBindings, "protected session binding", "protected session bindings must be JSON-serializable so their digest is stable across reproduce/recall keys");
+  const hostCapabilityRefs = hostCapabilityReceiptRefs(req.hostCapabilityReceipts);
   const protectedNamesDigest = protectedSessionVariablesDigest(req.protectedSessionVariables);
   const { registry, manifest, raw, manifestDigest } = await prepareRegistry(req);
   const resources = req.resources ?? (manifest.provides?.resources ?? []).map((r) => r.id);
@@ -749,7 +794,8 @@ export async function runBioQueryFromManifest(req: RunQueryRequest): Promise<Run
     ...(req.protectedSessionBindings ? { protectedSessionBindingsDigest: canonicalDigest(req.protectedSessionBindings) } : {}), // pin WHICH protected bindings (digest only; values are not replayed)
     ...(protectedNamesDigest ? { protectedSessionVariablesDigest: protectedNamesDigest } : {}), // pin additional protected names declared by the host
     ...(req.duckdbConfig ? { duckdbConfigDigest: canonicalDigest(req.duckdbConfig) } : {}), // pin WHICH config (digest, not the secret-bearing config itself)
+    ...(hostCapabilityRefs.length ? { hostReceiptDigests: hostCapabilityRefs.map((r) => r.digest) } : {}),
     ...(proc ? { compute: proc } : {}),
   };
-  return runAndPersist(req.cwd, req.dbPath, runId, "ad-hoc.query", "query", (conn, protectedSessionVariables) => runQuery(registry, conn, { sql: req.sql, resources, runId, now, signal: req.signal, cas: req.cas, protectedSessionVariables }), req.now, req.duckdbInitSql, req.bindings, req.protectedSessionBindings, req.protectedSessionVariables, req.duckdbConfig, replay, req.store ? { store: req.store, author: req.author } : undefined, req.cas, req.serialize);
+  return runAndPersist(req.cwd, req.dbPath, runId, "ad-hoc.query", "query", (conn, protectedSessionVariables) => runQuery(registry, conn, { sql: req.sql, resources, runId, now, signal: req.signal, cas: req.cas, protectedSessionVariables }), req.now, req.duckdbInitSql, req.bindings, req.protectedSessionBindings, req.protectedSessionVariables, req.duckdbConfig, replay, hostCapabilityRefs, req.store ? { store: req.store, author: req.author } : undefined, req.cas, req.serialize);
 }

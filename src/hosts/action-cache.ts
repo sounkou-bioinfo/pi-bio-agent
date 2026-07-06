@@ -54,7 +54,7 @@ function canonicalize(v: unknown): unknown {
   return v;
 }
 
-export function actionInputDigest(replay: Pick<RunReplaySpec, "kind" | "manifest" | "operationId" | "sql" | "resources" | "bindings" | "sourceReceiptDigests" | "duckdbInitSqlDigest" | "protectedSessionBindingsDigest" | "protectedSessionVariablesDigest" | "duckdbConfigDigest" | "compute" | "environment">): string {
+export function actionInputDigest(replay: Pick<RunReplaySpec, "kind" | "manifest" | "operationId" | "sql" | "resources" | "bindings" | "sourceReceiptDigests" | "hostReceiptDigests" | "duckdbInitSqlDigest" | "protectedSessionBindingsDigest" | "protectedSessionVariablesDigest" | "duckdbConfigDigest" | "compute" | "environment">): string {
   const canonical = JSON.stringify(canonicalize([
     replay.kind,
     replay.manifest?.digest ?? null,
@@ -65,6 +65,7 @@ export function actionInputDigest(replay: Pick<RunReplaySpec, "kind" | "manifest
                               // -> different result. Sorting would collide them under one key and serve a wrong hit.
     replay.bindings ?? null, // canonicalize() sorts its keys so binding order doesn't change the CASID
     replay.sourceReceiptDigests ?? null, // resolved-content refs, in resolution order (matches `resources`) -> the key captures the input DAG AND the order it was built in
+    replay.hostReceiptDigests ?? null, // host-owned capability policy refs (e.g. ducknng profile policy) can change the effective source/permission boundary
     // RESULT-AFFECTING execution facts — omitting these would collide runs that produce DIFFERENT results and let
     // the ActionCache/recallRunResult serve the WRONG cached result:
     replay.duckdbInitSqlDigest ?? null,  // digest of the init SQL (SET/LOAD/ATTACH change the result); same SQL -> same digest -> same key
@@ -121,7 +122,7 @@ export async function recallRunResult(
   // run was stored under, so a caller's minimal replay could collide with a simpler run and serve its wrong rows.
   // (`resultDigest` is NOT part of the input key — it's the run's RECORDED output, used below to fail closed on a
   // memo that has since diverged.)
-  replay: Pick<RunReplaySpec, "kind" | "manifest" | "operationId" | "sql" | "resources" | "bindings" | "sourceReceiptDigests" | "duckdbInitSqlDigest" | "protectedSessionBindingsDigest" | "protectedSessionVariablesDigest" | "duckdbConfigDigest" | "compute" | "environment" | "resultDigest">,
+  replay: Pick<RunReplaySpec, "kind" | "manifest" | "operationId" | "sql" | "resources" | "bindings" | "sourceReceiptDigests" | "hostReceiptDigests" | "duckdbInitSqlDigest" | "protectedSessionBindingsDigest" | "protectedSessionVariablesDigest" | "duckdbConfigDigest" | "compute" | "environment" | "resultDigest">,
 ): Promise<{ rows: unknown[]; resultDigest: string } | null> {
   const outputDigest = await actionCacheGet(store, actionInputDigest(replay));
   if (!outputDigest) return null;

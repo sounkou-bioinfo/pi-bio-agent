@@ -8,6 +8,7 @@ import { reproduceRun } from "../src/hosts/reproduce.js";
 import { fsCasStore } from "../src/hosts/fs-cas.js";
 import { nodeComputeRunner } from "../src/process/node-compute-runner.js";
 import type { RunReplaySpec } from "../src/core/reproducibility.js";
+import { ducknngHttpProfileReceiptFromInfo } from "../src/duckdb/http-profiles.js";
 
 // C2 — reproduce(): re-execute a RunReplaySpec against a fresh db and compare the produced receipts' DETERMINISTIC
 // content digests to the spec's sourceReceiptDigests. Same inputs -> matched (clock differences don't count as
@@ -99,6 +100,67 @@ describe("C2: reproduce() compares deterministic receipt content, not wall-clock
     await assert.rejects(() => reproduceRun({ cwd, replay, duckdbConfig: { threads: "8" } }), /does not match the pinned duckdbConfigDigest/); // wrong config -> refuse
     const rep = await reproduceRun({ cwd, replay, duckdbConfig }); // matching config -> reproduces
     assert.equal(rep.matched, true);
+  });
+
+  test("host capability receipts are pinned by digest and must be re-supplied on reproduce", async () => {
+    const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-repro-host-cap-"));
+    const cas = fsCasStore(await fs.mkdtemp(join(tmpdir(), "pi-bio-cas-")));
+    const receipt = ducknngHttpProfileReceiptFromInfo({
+      profileId: "opentargets-read",
+      scheme: "https",
+      host: "api.platform.opentargets.org",
+      port: 443,
+      hasPort: true,
+      pathPrefix: "/api/v4/graphql",
+      method: "POST",
+      tlsRequired: true,
+      authHeaderNamesJson: "[\"Authorization\"]",
+      version: 3n,
+      createdMs: 1783283000000n,
+      updatedMs: 1783283060000n,
+      expiresAtMs: 1783286600000n,
+      allowSubjectsJson: "[\"case:alpha\"]",
+    });
+    const secondReceipt = ducknngHttpProfileReceiptFromInfo({
+      profileId: "monarch-read",
+      scheme: "https",
+      host: "data.monarchinitiative.org",
+      port: 443,
+      hasPort: true,
+      pathPrefix: "/monarch-kg/latest/",
+      method: "GET",
+      tlsRequired: true,
+      authHeaderNamesJson: "[]",
+      version: 1n,
+      createdMs: 1783283000000n,
+      updatedMs: 1783283060000n,
+      expiresAtMs: 0n,
+      allowSubjectsJson: null,
+    });
+    const out = await runBioQueryFromManifest({
+      cwd,
+      dbPath: ":memory:",
+      manifestPath: MANIFEST,
+      sql: SQL,
+      cas,
+      runId: "orighostcap",
+      now: "2026-07-01T00:00:00Z",
+      hostCapabilityReceipts: [receipt, secondReceipt],
+    });
+    assert.equal(out.ok, true);
+    const replayText = await fs.readFile(join((out as { runDir: string }).runDir, "replay.json"), "utf8");
+    const replay = JSON.parse(replayText) as RunReplaySpec;
+    assert.deepEqual(replay.hostReceiptDigests, [receipt.policyDigest, secondReceipt.policyDigest].sort());
+    assert.doesNotMatch(replayText, /case:alpha|Bearer|token|secret/i, "replay pins only host receipt digests");
+
+    await assert.rejects(() => reproduceRun({ cwd, replay, cas }), /hostReceiptDigests/);
+    await assert.rejects(
+      () => reproduceRun({ cwd, replay, cas, hostCapabilityReceipts: [{ ...receipt, policyDigest: `sha256:${"0".repeat(64)}` }] }),
+      /hostCapabilityReceipts/,
+    );
+    const rep = await reproduceRun({ cwd, replay, cas, hostCapabilityReceipts: [secondReceipt, receipt] });
+    assert.equal(rep.matched, true);
+    assert.equal(rep.resultMatched, true);
   });
 
   test("SECURITY: duckdbInitSql is NOT persisted verbatim (secret leak) — only its digest is pinned; reproduce re-supplies + verifies", async () => {

@@ -4,7 +4,9 @@ import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { BioManifest } from "../src/core/manifest.js";
+import type { RunReplaySpec } from "../src/core/reproducibility.js";
 import type { FetchLike } from "../src/duckdb/resolvers/http-table-scan.js";
+import { ducknngHttpProfileReceiptFromInfo } from "../src/duckdb/http-profiles.js";
 import { persistRun, persistFailedRun, runBioOperationFromManifest, runBioQueryFromManifest, runsRoot } from "../src/hosts/run-store.js";
 
 // End-to-end through the host: a manifest JSON on disk -> validated registry -> built-in resolvers -> a
@@ -92,6 +94,50 @@ describe("host: bio_run_operation end-to-end", () => {
     // the result IS the report; there is no report.json (deleted). replay.json is the C1 reproduce() seed.
     const onDisk = (await fs.readdir(dir)).sort();
     assert.deepEqual(onDisk, ["receipts.json", "replay.json", "result.json", "run.json"]);
+  });
+
+  test("host capability receipts are pinned in replay and referenced from run provenance", async () => {
+    const cwd = await tmpProject(manifest);
+    const profileReceipt = ducknngHttpProfileReceiptFromInfo({
+      profileId: "clinvar-read-test",
+      scheme: "https",
+      host: "api.example.test",
+      port: 443,
+      hasPort: true,
+      pathPrefix: "/v1/clinvar",
+      method: "GET",
+      tlsRequired: true,
+      authHeaderNamesJson: "[\"Authorization\"]",
+      version: 7n,
+      createdMs: 1783283000000n,
+      updatedMs: 1783283060000n,
+      expiresAtMs: 1783286600000n,
+      allowSubjectsJson: "[\"case:alpha\"]",
+    });
+    const res = await runBioOperationFromManifest({
+      cwd,
+      dbPath: ":memory:",
+      manifestPath: "manifest.json",
+      operationId: "rare_high_impact.report",
+      runId: "cap-1",
+      now: "2026-06-28T00:00:00Z",
+      hostCapabilityReceipts: [profileReceipt],
+    });
+    assert.equal(res.ok, true);
+    const runText = await fs.readFile(join(res.runDir, "run.json"), "utf8");
+    const runJson = JSON.parse(runText) as { spec: { provenance?: Array<{ source: string; digest: string; notes?: string[] }> }; artifacts?: Array<{ role: string; provenance?: Array<{ source: string; digest: string; notes?: string[] }> }> };
+    const replay = JSON.parse(await fs.readFile(join(res.runDir, "replay.json"), "utf8")) as RunReplaySpec;
+
+    assert.deepEqual(replay.hostReceiptDigests, [profileReceipt.policyDigest]);
+    assert.doesNotMatch(runText, /case:alpha|Bearer|token|secret/i, "run provenance stores digest refs, not profile contents or credentials");
+    const expectedProv = {
+      source: "host.capability:pi-bio.ducknng_http_profile_receipt.v1",
+      digest: profileReceipt.policyDigest,
+      notes: ["host capability receipt"],
+    };
+    assert.ok(runJson.spec.provenance?.some((p) => JSON.stringify(p) === JSON.stringify(expectedProv)), "run spec references the host capability receipt digest");
+    const out = runJson.artifacts?.find((a) => a.role === "output");
+    assert.ok(out?.provenance?.some((p) => JSON.stringify(p) === JSON.stringify(expectedProv)), "output artifact provenance references the same host receipt digest");
   });
 
   test("a run that fails at runtime persists a failed-run receipt and returns ok:false", async () => {

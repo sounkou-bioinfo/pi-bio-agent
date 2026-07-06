@@ -195,6 +195,28 @@ export interface EnvAttestationSummary {
   observedDigest?: string;
 }
 
+export interface HostCapabilityReceipt {
+  schema: string;
+  /** Optional policy digest from a secret-free receipt, e.g. a ducknng HTTP profile receipt. */
+  policyDigest?: string;
+}
+
+const HOST_RECEIPT_DIGEST = /^sha256:[0-9a-f]{64}$/;
+
+export function hostCapabilityReceiptDigest(receipt: HostCapabilityReceipt): `sha256:${string}` {
+  if (!receipt || typeof receipt !== "object" || Array.isArray(receipt)) throw new Error("host capability receipt must be an object");
+  if (typeof receipt.schema !== "string" || !receipt.schema.trim()) throw new Error("host capability receipt requires a schema string");
+  if (receipt.policyDigest !== undefined) {
+    if (typeof receipt.policyDigest !== "string" || !HOST_RECEIPT_DIGEST.test(receipt.policyDigest)) throw new Error("host capability receipt policyDigest must be sha256:<64 hex>");
+    return receipt.policyDigest as `sha256:${string}`;
+  }
+  return canonicalDigest(receipt);
+}
+
+export function hostCapabilityReceiptDigests(receipts: readonly HostCapabilityReceipt[] | undefined): `sha256:${string}`[] {
+  return (receipts ?? []).map(hostCapabilityReceiptDigest).sort();
+}
+
 export interface RunReplaySpec {
   schema: typeof RUN_REPLAY_SPEC_SCHEMA;
   runId: string;
@@ -224,6 +246,8 @@ export interface RunReplaySpec {
   environment?: EnvAttestationSummary;
   /** stable digests of the receipts this run produced — reproduce()'s pin on the exact provenance it should match. */
   sourceReceiptDigests?: string[];
+  /** stable digests of host-owned capability policy receipts (secret-free), e.g. a ducknng HTTP profile policy. */
+  hostReceiptDigests?: string[];
   /** CAS digest of the run's RESULT rows — reproduce()'s pin on the OUTPUT content, so a re-run that yields a
    *  different result is caught (not just a changed source). "matches by content" means this, not only receipts. */
   resultDigest?: string;
