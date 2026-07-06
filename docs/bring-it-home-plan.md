@@ -47,16 +47,19 @@ These are not remaining work items:
 - **Compute environments are declared and observed as receipts.** `compute.run` records declared-vs-observed
   `EnvDescriptor` attestation. `withObservedEnvironment` lets a host attach known runtime/package state, such as an
   `renv.lock` digest or package snapshot, to any compute backend without adding an R-specific runner or probing the
-  child process.
+  child process. `envDescriptorFromRenvLock` maps a common R/Bioconductor lockfile into that same generic descriptor:
+  exact lock bytes are pinned as a `package_lock` layer, while package/version records are projected as an inspectable
+  `package_snapshot`.
 - **Approval is a durable gate.** The Phase-4 approval path records and gates the irreducible judgment; it should be
   reused rather than shadowed with another policy-decision primitive.
 - **The bring-it-home substrate pieces compose.** `npm run dogfood:bring-it-home` executes a deterministic in-core
-  proof that records a host-event receipt, resumes a slash-bearing workflow step from a checkpoint, projects both a
-  staged external KG and the internal observation graph through `GraphProjectionProfile`, and records a secret-free
-  ducknng HTTP profile receipt. It also links a Pi-shaped session tool call to a scientific run, exports the derived
-  digest-only corpus tables to Parquet, reads the exported corpus back through DuckDB, packs the built package,
-  installs that tarball into a temporary TypeScript consumer, compiles imports, and smoke-loads runtime exports using
-  only the public package exports
+  proof that records a host-event receipt, resumes a slash-bearing workflow step from a checkpoint, parses an
+  `renv.lock` into an `EnvDescriptor`, runs a tiny R `compute.run` step with matching declared/observed environment
+  attestation, projects both a staged external KG and the internal observation graph through `GraphProjectionProfile`,
+  and records a secret-free ducknng HTTP profile receipt. It also links a Pi-shaped session tool call to a scientific
+  run, exports the derived digest-only corpus tables to Parquet, reads the exported corpus back through DuckDB, packs
+  the built package, installs that tarball into a temporary TypeScript consumer, compiles imports, and smoke-loads
+  runtime exports using only the public package exports
   (`pi-bio-agent`, `pi-bio-agent/core`, `pi-bio-agent/duckdb`, and `pi-bio-agent/hosts`).
 
 ## Core Work Items

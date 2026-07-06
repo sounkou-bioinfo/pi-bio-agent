@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { describe, test } from "node:test";
 import {
   type EnvDescriptor, type EnvLayer,
-  ENV_DESCRIPTOR_SCHEMA, unknownEnvDescriptor, canonicalEnvDescriptor, envDigest, validateEnvDescriptor, attestEnvironment,
+  ENV_DESCRIPTOR_SCHEMA, unknownEnvDescriptor, canonicalEnvDescriptor, envDigest, validateEnvDescriptor, attestEnvironment, envDescriptorFromRenvLock,
 } from "../src/core/reproducibility.js";
 
 // C1a: the pure reproducibility data shapes. Runtime-agnostic (containers/conda/renv/modules are just layers),
@@ -84,6 +85,69 @@ describe("C1a validateEnvDescriptor", () => {
     assert.deepEqual(validateEnvDescriptor(env([{ kind: "package_lock", manager: "conda", digest: good } as EnvLayer])), []);
     assert.ok(validateEnvDescriptor(env([{ kind: "container_image", digest: "nope" } as EnvLayer])).some((e) => /container_image.*digest.*sha256/.test(e)));
     assert.ok(validateEnvDescriptor(env([{ kind: "package_snapshot", manager: "renv", packages: [{ name: "coloc", digest: "xx" }] } as EnvLayer])).some((e) => /packages\[0\].digest.*sha256/.test(e)));
+  });
+});
+
+describe("renv.lock -> EnvDescriptor", () => {
+  const lock = JSON.stringify({
+    R: {
+      Version: "4.6.0",
+      Repositories: [{ Name: "CRAN", URL: "https://cloud.r-project.org" }],
+    },
+    Bioconductor: { Version: "3.22" },
+    Packages: {
+      data_table: {
+        Package: "data.table",
+        Version: "1.15.0",
+        Source: "Repository",
+        Repository: "CRAN",
+        Hash: "renv-non-sha-hash-is-covered-by-lock-digest",
+      },
+      BiocGenerics: {
+        Package: "BiocGenerics",
+        Version: "0.52.0",
+        Source: "Bioconductor",
+        Repository: "Bioconductor",
+      },
+    },
+  }, null, 2);
+
+  test("projects the exact lock plus package records into the generic descriptor shape", () => {
+    const descriptor = envDescriptorFromRenvLock(lock, { path: "renv.lock", notes: ["R project lock"] });
+    assert.deepEqual(validateEnvDescriptor(descriptor), []);
+    assert.equal(descriptor.kind, "composite");
+    assert.equal(descriptor.notes?.[0], "R project lock");
+
+    const lockLayer = descriptor.layers.find((l) => l.kind === "package_lock");
+    assert.deepEqual(lockLayer, {
+      kind: "package_lock",
+      manager: "renv",
+      path: "renv.lock",
+      digest: `sha256:${createHash("sha256").update(lock).digest("hex")}`,
+    });
+    const snapshot = descriptor.layers.find((l) => l.kind === "package_snapshot");
+    assert.ok(snapshot && snapshot.kind === "package_snapshot");
+    assert.deepEqual(snapshot.packages.sort((a, b) => a.name.localeCompare(b.name)), [
+      { name: "BiocGenerics", version: "0.52.0", build: "Bioconductor", channel: "Bioconductor" },
+      { name: "data.table", version: "1.15.0", build: "Repository", channel: "CRAN" },
+    ]);
+    assert.ok(descriptor.layers.some((l) => l.kind === "executable" && l.name === "R" && l.version === "4.6.0"));
+    assert.ok(descriptor.layers.some((l) => l.kind === "module" && l.name === "Bioconductor" && l.version === "3.22"));
+    assert.match(envDigest(descriptor), /^sha256:[0-9a-f]{64}$/);
+  });
+
+  test("a package version change changes the environment identity", () => {
+    const a = envDescriptorFromRenvLock(lock, { path: "renv.lock" });
+    const b = envDescriptorFromRenvLock(lock.replace('"1.15.0"', '"1.15.1"'), { path: "renv.lock" });
+    assert.notEqual(envDigest(a), envDigest(b));
+  });
+
+  test("malformed lockfiles fail closed", () => {
+    assert.throws(() => envDescriptorFromRenvLock(""), /non-empty/);
+    assert.throws(() => envDescriptorFromRenvLock("{"), /valid JSON/);
+    assert.throws(() => envDescriptorFromRenvLock(JSON.stringify({ Packages: [] })), /Packages must be an object/);
+    assert.throws(() => envDescriptorFromRenvLock(JSON.stringify({ Packages: { x: { Package: "x" } } })), /Version/);
+    assert.throws(() => envDescriptorFromRenvLock(lock, { path: "" }), /path/);
   });
 });
 

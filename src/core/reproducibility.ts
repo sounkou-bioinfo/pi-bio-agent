@@ -78,6 +78,80 @@ export function envDigest(env: EnvDescriptor): `sha256:${string}` {
   return `sha256:${createHash("sha256").update(canonicalEnvDescriptor(env)).digest("hex")}`;
 }
 
+export interface RenvLockEnvDescriptorOptions {
+  /** Optional authored path to the lockfile. Recorded as annotation on the package_lock layer. */
+  path?: string;
+  /** Defaults to `renv`; overridable for hosts that use a compatible lockfile producer. */
+  manager?: string;
+  /** Human annotations. Excluded from identity like every EnvDescriptor note. */
+  notes?: string[];
+}
+
+/** Convert an `renv.lock` JSON document into the generic EnvDescriptor shape.
+ *
+ * The exact lockfile bytes are pinned as a `package_lock` layer. The package records are also projected as a
+ * `package_snapshot` layer so corpus/export queries can see package names and versions without reparsing the lock.
+ * This helper does not restore packages, inspect an R library, or privilege Bioconductor; it is only a structured
+ * adapter from a common R lockfile into the existing runtime-agnostic environment descriptor.
+ */
+export function envDescriptorFromRenvLock(lockText: string, opts: RenvLockEnvDescriptorOptions = {}): EnvDescriptor {
+  if (typeof lockText !== "string" || lockText.length === 0) throw new Error("renv.lock text must be a non-empty string");
+  const manager = opts.manager ?? "renv";
+  if (typeof manager !== "string" || manager.length === 0 || /[\x00-\x1f\x7f]/.test(manager)) throw new Error("renv.lock manager must be a non-empty string without control characters");
+  if (opts.path !== undefined && (typeof opts.path !== "string" || opts.path.length === 0 || /[\x00-\x1f\x7f]/.test(opts.path))) throw new Error("renv.lock path must be a non-empty string without control characters");
+
+  let parsed: unknown;
+  try { parsed = JSON.parse(lockText); } catch {
+    throw new Error("renv.lock must be valid JSON");
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw new Error("renv.lock must be a JSON object");
+  const lock = parsed as Record<string, unknown>;
+  if (typeof lock.Packages !== "object" || lock.Packages === null || Array.isArray(lock.Packages)) throw new Error("renv.lock Packages must be an object");
+
+  const packages = Object.entries(lock.Packages as Record<string, unknown>).map(([key, value]) => {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error(`renv.lock package '${key}' must be an object`);
+    const record = value as Record<string, unknown>;
+    const packageName = record.Package ?? key;
+    if (typeof packageName !== "string" || packageName.length === 0) throw new Error(`renv.lock package '${key}' Package must be a non-empty string when supplied`);
+    if (typeof record.Version !== "string" || record.Version.length === 0) throw new Error(`renv.lock package '${key}' Version must be a non-empty string`);
+    const source = record.Source;
+    const repository = record.Repository;
+    if (source !== undefined && typeof source !== "string") throw new Error(`renv.lock package '${key}' Source must be a string when supplied`);
+    if (repository !== undefined && typeof repository !== "string") throw new Error(`renv.lock package '${key}' Repository must be a string when supplied`);
+    return {
+      name: packageName,
+      version: record.Version,
+      ...(source ? { build: source } : {}),
+      ...(repository ? { channel: repository } : {}),
+    };
+  });
+
+  const layers: EnvLayer[] = [
+    { kind: "package_lock", manager, ...(opts.path ? { path: opts.path } : {}), digest: `sha256:${createHash("sha256").update(lockText).digest("hex")}` },
+    { kind: "package_snapshot", manager, packages },
+  ];
+
+  if (lock.R !== undefined) {
+    if (typeof lock.R !== "object" || lock.R === null || Array.isArray(lock.R)) throw new Error("renv.lock R must be an object when supplied");
+    const r = lock.R as Record<string, unknown>;
+    if (r.Version !== undefined) {
+      if (typeof r.Version !== "string" || r.Version.length === 0) throw new Error("renv.lock R.Version must be a non-empty string when supplied");
+      layers.push({ kind: "executable", name: "R", version: r.Version });
+    }
+  }
+
+  if (lock.Bioconductor !== undefined) {
+    if (typeof lock.Bioconductor !== "object" || lock.Bioconductor === null || Array.isArray(lock.Bioconductor)) throw new Error("renv.lock Bioconductor must be an object when supplied");
+    const bioc = lock.Bioconductor as Record<string, unknown>;
+    if (bioc.Version !== undefined) {
+      if (typeof bioc.Version !== "string" || bioc.Version.length === 0) throw new Error("renv.lock Bioconductor.Version must be a non-empty string when supplied");
+      layers.push({ kind: "module", name: "Bioconductor", version: bioc.Version });
+    }
+  }
+
+  return { schema: ENV_DESCRIPTOR_SCHEMA, kind: "composite", layers, ...(opts.notes ? { notes: opts.notes } : {}) };
+}
+
 const SHA256 = /^sha256:[0-9a-f]{64}$/; // digest-shaped fields are sha256-first (matches the CAS + receipt digests)
 
 /** Structural validation of UNTRUSTED input (a manifest may supply `params.environment`) — returns the list of

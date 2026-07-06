@@ -18,11 +18,13 @@ import {
 } from "../dist/duckdb/observations.js";
 import { materializeGraphProjectionProfile } from "../dist/duckdb/graph-projection.js";
 import { ducknngHttpProfileReceiptFromInfo } from "../dist/duckdb/http-profiles.js";
+import { envDescriptorFromRenvLock, envDigest, validateEnvDescriptor } from "../dist/core/reproducibility.js";
 import { fsCasStore } from "../dist/hosts/fs-cas.js";
 import { recordArtifactReference } from "../dist/hosts/artifacts.js";
 import { recordHostEvent } from "../dist/hosts/host-events.js";
 import { ingestSessionJsonl } from "../dist/hosts/session-ingest.js";
 import { exportTrainingCorpusParquet } from "../dist/hosts/training-corpus.js";
+import { nodeComputeRunner, withObservedEnvironment } from "../dist/hosts/index.js";
 import { claimJob, createJobQueueSchema, recordJobClaimStatus } from "../dist/hosts/job-queue.js";
 import {
   cancelBioJob,
@@ -93,6 +95,8 @@ import {
 } from "pi-bio-agent";
 import {
   validateBioManifest,
+  envDescriptorFromRenvLock,
+  envDigest,
   type BioManifest,
   type SqlConn,
 } from "pi-bio-agent/core";
@@ -103,6 +107,7 @@ import {
 } from "pi-bio-agent/duckdb";
 import {
   fsCasStore,
+  nodeComputeRunner,
   runJobStepWithCheckpoint,
   withObservedEnvironment,
   type RunQueryRequest,
@@ -124,8 +129,10 @@ const request: RunQueryRequest = {
   sql: "SELECT 1",
   hostCapabilityReceipts: [receipt],
 };
+const renvEnv = envDescriptorFromRenvLock(JSON.stringify({ Packages: { renv: { Package: "renv", Version: "1.0.0" } } }), { path: "renv.lock" });
 
 void validateBioManifest(manifest);
+void envDigest(renvEnv);
 void request;
 void runBioQueryFromManifest;
 void recordHostEvent;
@@ -135,6 +142,7 @@ void duckdbNodeConn;
 void materializeGraphProjectionProfile;
 void refreshDucknngHttpProfile;
 void fsCasStore;
+void nodeComputeRunner;
 void runJobStepWithCheckpoint;
 void withObservedEnvironment;
 type _Conn = SqlConn;
@@ -177,6 +185,19 @@ try {
   const sdkConsumer = await compileExternalConsumer();
   await createBioObservationSchema(conn);
   await createJobQueueSchema(conn);
+
+  const renvLockText = JSON.stringify({
+    R: { Version: "4.6.0", Repositories: [{ Name: "CRAN", URL: "https://cloud.r-project.org" }] },
+    Bioconductor: { Version: "3.22" },
+    Packages: {
+      renv: { Package: "renv", Version: "1.0.0", Source: "Repository", Repository: "CRAN" },
+      BiocGenerics: { Package: "BiocGenerics", Version: "0.52.0", Source: "Bioconductor", Repository: "Bioconductor" },
+    },
+  }, null, 2);
+  const renvEnv = envDescriptorFromRenvLock(renvLockText, { path: "renv.lock", notes: ["dogfood R/Bioconductor lock"] });
+  assert.deepEqual(validateEnvDescriptor(renvEnv), []);
+  const renvEnvDigest = envDigest(renvEnv);
+  assert.match(renvEnvDigest, /^sha256:[0-9a-f]{64}$/);
 
   const hostEvent = await recordHostEvent(conn, {
     subjectId: "session:dogfood",
@@ -361,6 +382,55 @@ try {
   });
   assert.equal(hostCapReproduced.matched, true);
 
+  const rEnvRunCwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-dogfood-r-env-"));
+  const rEnvCas = fsCasStore(await fs.mkdtemp(join(tmpdir(), "pi-bio-dogfood-r-env-cas-")));
+  const rEnvManifest = {
+    schema: "pi-bio.manifest.v1",
+    id: "dogfood-r-env",
+    version: "0.1.0",
+    title: "Dogfood R environment attestation",
+    description: "Tiny R files-only compute step with a declared renv.lock environment descriptor.",
+    provides: {
+      resolvers: [{ id: "compute.run", version: "0.1.0", title: "Compute run", description: "Run a contained child process.", output: { mode: "table" } }],
+      resources: [{
+        id: "r_env_artifacts",
+        title: "R environment proof artifact",
+        kind: "virtual",
+        resolver: "compute.run",
+        params: {
+          table: "r_env_artifacts",
+          command: ["Rscript", "-e", "writeLines('renv-attested', 'r-env.txt')"],
+          resultTable: "artifacts",
+          outputs: [{ name: "r_env", path: "r-env.txt", kind: "file" }],
+          environment: renvEnv,
+        },
+      }],
+    },
+  };
+  const rEnvManifestPath = join(rEnvRunCwd, "manifest.json");
+  await fs.writeFile(rEnvManifestPath, JSON.stringify(rEnvManifest), "utf8");
+  const rEnvRun = await runBioQueryFromManifest({
+    cwd: rEnvRunCwd,
+    dbPath: ":memory:",
+    manifestPath: rEnvManifestPath,
+    resources: ["r_env_artifacts"],
+    sql: "SELECT name, kind, digest, size FROM r_env_artifacts",
+    compute: { runner: withObservedEnvironment(nodeComputeRunner(), renvEnv) },
+    cas: rEnvCas,
+    store: conn,
+    author: "bring-it-home-dogfood",
+    runId: "dogfood-r-env",
+    now: "2026-07-06T12:00:04.000Z",
+  });
+  assert.equal(rEnvRun.ok, true);
+  const rEnvRows = JSON.parse(await fs.readFile(join(rEnvRun.runDir, "result.json"), "utf8")).rows;
+  assert.deepEqual(rEnvRows.map((r) => [r.name, r.kind]), [["r_env", "file"]]);
+  const rEnvReceipts = JSON.parse(await fs.readFile(join(rEnvRun.runDir, "receipts.json"), "utf8"));
+  const rEnvProvenance = rEnvReceipts.find((r) => r.resourceId === "r_env_artifacts")?.provenance.find((p) => p.source === "environment");
+  assert.ok(rEnvProvenance?.notes?.includes("env_status:matched"), rEnvProvenance?.notes?.join(","));
+  assert.ok(rEnvProvenance.notes.includes(`env_declared:${renvEnvDigest}`));
+  assert.ok(rEnvProvenance.notes.includes(`env_observed:${renvEnvDigest}`));
+
   const sessionRoot = await fs.mkdtemp(join(tmpdir(), "pi-bio-dogfood-session-"));
   const sessionCas = fsCasStore(join(sessionRoot, "cas"));
   const sessionPath = join(sessionRoot, "dogfood-session.jsonl");
@@ -463,7 +533,7 @@ try {
   assert.equal(corpus.redaction, "digest_only");
   assert.equal(corpus.tables.sessions.rows, 1);
   assert.equal(corpus.tables.toolCalls.rows, 1);
-  assert.equal(corpus.tables.runs.rows, 1);
+  assert.equal(corpus.tables.runs.rows, 2);
   assert.equal(corpus.tables.artifacts.rows, 1);
   assert.equal(corpus.tables.hostEvents.rows, 1);
   assert.match(corpus.tables.units.parquetDigest, /^sha256:[0-9a-f]{64}$/);
@@ -510,6 +580,15 @@ try {
       reproduced: hostCapReproduced.reproduced,
       matched: hostCapReproduced.matched,
       resultMatched: hostCapReproduced.resultMatched,
+    },
+    renvEnvironment: {
+      digest: renvEnvDigest,
+      packages: renvEnv.layers.find((l) => l.kind === "package_snapshot")?.packages.length ?? 0,
+      rVersion: renvEnv.layers.find((l) => l.kind === "executable" && l.name === "R")?.version ?? null,
+      bioconductor: renvEnv.layers.find((l) => l.kind === "module" && l.name === "Bioconductor")?.version ?? null,
+      computeRunId: rEnvRun.runId,
+      envStatus: "matched",
+      artifactRows: rEnvRows.length,
     },
     externalProjection,
     internalProjection,

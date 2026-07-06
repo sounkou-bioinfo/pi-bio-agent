@@ -371,8 +371,11 @@ Three things keep this consistent with the rest of the substrate:
   `withObservedEnvironment` wraps any `ComputeRunner` with a host-known `EnvDescriptor` (for example an `renv.lock`
   digest, package snapshot, container image, or module set) so a manifest's declared reproduction contract can match
   what the host says actually ran. The wrapper does not sniff the child process or infer packages; it reports
-  host-owned knowledge through the existing `describeEnvironment` port. If that host-provided descriptor is invalid,
-  `compute.run` records an explicit unknown/probe-failed environment observation rather than a fake match. What is
+  host-owned knowledge through the existing `describeEnvironment` port. `envDescriptorFromRenvLock` is the narrow
+  R/Bioconductor adapter for this: it parses an `renv.lock` JSON document into a generic package-lock layer plus an
+  inspectable package-snapshot layer, without restoring packages or adding an R-specific runner. If that
+  host-provided descriptor is invalid, `compute.run` records an explicit unknown/probe-failed environment observation
+  rather than a fake match. What is
   still missing is only the
   *operation-level* executor: a `process` **BioOperationTransport** (the OPERATION transport is still
   `duckdb.sql` only, `BioOperationTransport = "duckdb.sql"`), the argv-in-a-run-dir path for the six-hour batch /

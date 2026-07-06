@@ -21,6 +21,7 @@ describe("bring-it-home dogfood command", () => {
       jobStepExecutions: { extract: number; extractReused: boolean };
       checkpointKey: string;
       ducknngProfileReceipt: { subjectRestriction: { restricted: boolean; count: number; digest?: string } };
+      renvEnvironment: { digest: string; packages: number; rVersion: string | null; bioconductor: string | null; envStatus: string; artifactRows: number };
       externalProjection: { edgeCount: number; closureCount: number };
       internalProjection: { edgesTable: string; edgeCount: number; closureTable: string; closureCount: number };
       trainingCorpus: { digest: string; redaction: string; units: number; toolCalls: number; runs: number; hostEvents: number; parquetReadbackRows: number; unitsParquetDigest: string };
@@ -35,6 +36,14 @@ describe("bring-it-home dogfood command", () => {
     assert.equal(summary.ducknngProfileReceipt.subjectRestriction.restricted, true);
     assert.equal(summary.ducknngProfileReceipt.subjectRestriction.count, 2);
     assert.match(summary.ducknngProfileReceipt.subjectRestriction.digest ?? "", /^sha256:[0-9a-f]{64}$/);
+    assert.match(summary.renvEnvironment.digest, /^sha256:[0-9a-f]{64}$/);
+    assert.deepEqual({
+      packages: summary.renvEnvironment.packages,
+      rVersion: summary.renvEnvironment.rVersion,
+      bioconductor: summary.renvEnvironment.bioconductor,
+      envStatus: summary.renvEnvironment.envStatus,
+      artifactRows: summary.renvEnvironment.artifactRows,
+    }, { packages: 2, rVersion: "4.6.0", bioconductor: "3.22", envStatus: "matched", artifactRows: 1 });
     assert.deepEqual(summary.externalProjection, { edgesTable: "dogfood_external_edges", edgeCount: 3, closureTable: "dogfood_external_entailed", closureCount: 3 });
     assert.equal(summary.internalProjection.edgesTable, "dogfood_internal_edges");
     assert.equal(summary.internalProjection.closureTable, "dogfood_internal_entailed");
@@ -48,7 +57,7 @@ describe("bring-it-home dogfood command", () => {
       runs: summary.trainingCorpus.runs,
       hostEvents: summary.trainingCorpus.hostEvents,
       parquetReadbackRows: summary.trainingCorpus.parquetReadbackRows,
-    }, { units: 1, toolCalls: 1, runs: 1, hostEvents: 1, parquetReadbackRows: 1 });
+    }, { units: 1, toolCalls: 1, runs: 2, hostEvents: 1, parquetReadbackRows: 1 });
     assert.match(summary.trainingCorpus.unitsParquetDigest, /^sha256:[0-9a-f]{64}$/);
     assert.deepEqual(summary.sdkConsumer, { publicExportsOnly: true, runtimeImports: true, packageSource: "npm-pack", imports: ["pi-bio-agent", "pi-bio-agent/core", "pi-bio-agent/duckdb", "pi-bio-agent/hosts"] });
     assert.equal(summary.observationCounts.host_event, 1);
