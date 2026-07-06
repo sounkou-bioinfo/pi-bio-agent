@@ -836,8 +836,9 @@ Open library questions to resolve before claiming that position:
   attempt 2 reclaims the job, reuses that checkpoint without re-running it, records the `summarize` step, and
   completes through the same ledger result/status slots. The repeated checkpoint pattern is now lifted into
   `runJobStepWithCheckpoint` / `recordJobStepCheckpoint` in `src/hosts/job-store.ts`: a caller-owned step id maps to
-  `job:<runId>:step:<stepId>`, the helper reads that slot first, runs only if missing, and records a
-  `job_step_checkpoint` value carrying the replay digest. This is the resume convention, not an orchestration engine.
+  an encoded `job:<runId>:step:<encodedStepId>` slot, the helper reads that slot first, runs only if missing, and
+  records a `job_step_checkpoint` value carrying the replay digest. This is the resume convention, not an
+  orchestration engine.
 
   Do not add an Absurd type system to core. The core should expose the narrow structural contracts an Absurd-like
   backend needs to satisfy: replay spec in, async handle out, status/progress observations, checkpoint/event ids,

@@ -7,7 +7,7 @@
 
 ## Proposal
 
-- [Bring-it-home plan — core substrate closure](bring-it-home-plan.md) — Core-library tasks remaining after the workbench split: host-event receipts, workflow step checkpoints, SDK surface polish, graph projection profiles, graphics metadata, export corpus, and ducknng profile cleanup. _(roadmap, substrate, host-events, jobs, graph-projection, artifacts, corpus, ducknng)_
+- [Bring-it-home plan — core substrate closure](bring-it-home-plan.md) — Core-library closure status after the workbench split: landed primitives, current dogfood proof, and the remaining SDK, artifact, corpus, and ducknng provenance work. _(roadmap, substrate, host-events, jobs, graph-projection, artifacts, corpus, ducknng)_
 - [Clinical-genomics application pattern on pi-bio-agent](clinical-genomics-application.md) — A downstream application pattern that consumes pi-bio-agent as a library: staged, deterministic-first variant analysis (case structuring, annotation, HPO, prioritization, scoring, ACMG, family-aware interpretation) with recorded-and-gated judgment. Read before scoping clinical-genomics applications or papers. _(flagship, application, clinical-genomics, product, reproducibility)_
 - [Memory and knowledge unification](memory-and-knowledge-unification.md) — The temporal substrate unification: memory, facts, jobs, store-logged runs, and agent session traces are one append-only bio_observations store (Datomic-style, as-of/history/tombstone; runs and sessions fold in when the host supplies the store/CAS hooks). Read before changing memory, session ingestion, or graph projection. _(memory, temporal, bio-observations, unification)_
 

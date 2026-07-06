@@ -20,7 +20,7 @@
       "path": "docs/bring-it-home-plan.md",
       "type": "Proposal",
       "title": "Bring-it-home plan — core substrate closure",
-      "description": "Core-library tasks remaining after the workbench split: host-event receipts, workflow step checkpoints, SDK surface polish, graph projection profiles, graphics metadata, export corpus, and ducknng profile cleanup.",
+      "description": "Core-library closure status after the workbench split: landed primitives, current dogfood proof, and the remaining SDK, artifact, corpus, and ducknng provenance work.",
       "tags": [
         "roadmap",
         "substrate",

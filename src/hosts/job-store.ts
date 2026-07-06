@@ -34,9 +34,19 @@ const RUN_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const assertSafeRunId = (runId: string): void => {
   if (typeof runId !== "string" || !RUN_ID_RE.test(runId)) throw new Error(`job-store: unsafe runId '${runId}' (letters/numbers/'.'/'_'/':'/'-', no separators, max 128)`);
 };
-const STEP_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
-const assertSafeStepId = (stepId: string): void => {
-  if (typeof stepId !== "string" || !STEP_ID_RE.test(stepId)) throw new Error(`job-store: unsafe stepId '${stepId}' (letters/numbers/'.'/'_'/':'/'-', no separators, max 128)`);
+const MAX_STEP_ID_LEN = 512;
+const assertValidStepId = (stepId: string): void => {
+  if (typeof stepId !== "string" || stepId.trim().length === 0) throw new Error("job-store: stepId must be a non-empty string");
+  if (stepId.length > MAX_STEP_ID_LEN) throw new Error(`job-store: stepId must be at most ${MAX_STEP_ID_LEN} characters`);
+  if (/[\x00-\x1f\x7f\u2028\u2029]/.test(stepId)) throw new Error("job-store: stepId must not contain control characters or line separators");
+};
+const encodedStepId = (stepId: string): string => {
+  assertValidStepId(stepId);
+  try {
+    return encodeURIComponent(stepId);
+  } catch {
+    throw new Error("job-store: stepId must be valid Unicode");
+  }
 };
 const slotOf = (runId: string): string => `job:${runId}:status`;
 const resultSlotOf = (runId: string): string => `job:${runId}:result`;
@@ -44,8 +54,7 @@ const subjectOf = (runId: string): string => `job:${runId}`;
 export const JOB_STEP_CHECKPOINT_SCHEMA = "pi-bio.job_step_checkpoint.v1" as const;
 export const jobStepCheckpointKey = (runId: string, stepId: string): string => {
   assertSafeRunId(runId);
-  assertSafeStepId(stepId);
-  return `job:${runId}:step:${stepId}`;
+  return `job:${runId}:step:${encodedStepId(stepId)}`;
 };
 const jobsDir = (cwd: string): string => join(cwd, ".pi", "bio-agent", "jobs");
 const jobFile = (cwd: string, runId: string): string => { assertSafeRunId(runId); return join(jobsDir(cwd), `${runId}.json`); };
@@ -190,7 +199,7 @@ export async function readJobStepCheckpoint<T extends JsonValue = JsonValue>(con
  * re-running the step; the helper intentionally records only a checkpoint, not a workflow engine. */
 export async function recordJobStepCheckpoint<T extends JsonValue = JsonValue>(conn: SqlConn, req: RecordJobStepCheckpointRequest<T>): Promise<JobStepCheckpoint<T>> {
   assertSafeRunId(req.runId);
-  assertSafeStepId(req.stepId);
+  assertValidStepId(req.stepId);
   assertJsonValue(req.value, `job step checkpoint '${req.runId}/${req.stepId}'`);
   if (req.attempt !== undefined && (!Number.isInteger(req.attempt) || req.attempt < 1)) {
     throw new Error("job-store: checkpoint attempt must be a positive integer when supplied");

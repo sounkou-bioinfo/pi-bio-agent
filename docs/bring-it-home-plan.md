@@ -1,7 +1,7 @@
 ---
 type: Proposal
 title: Bring-it-home plan — core substrate closure
-description: "Core-library tasks remaining after the workbench split: host-event receipts, workflow step checkpoints, SDK surface polish, graph projection profiles, graphics metadata, export corpus, and ducknng profile cleanup."
+description: "Core-library closure status after the workbench split: landed primitives, current dogfood proof, and the remaining SDK, artifact, corpus, and ducknng provenance work."
 tags: [roadmap, substrate, host-events, jobs, graph-projection, artifacts, corpus, ducknng]
 ---
 
@@ -34,8 +34,12 @@ These are not remaining work items:
   implementations, not competing lifecycles. `resumeBioJob` and `cancelBioJob` already exist.
 - **Approval is a durable gate.** The Phase-4 approval path records and gates the irreducible judgment; it should be
   reused rather than shadowed with another policy-decision primitive.
+- **The bring-it-home substrate pieces compose.** `npm run dogfood:bring-it-home` executes a deterministic in-core
+  proof that records a host-event receipt, resumes a slash-bearing workflow step from a checkpoint, projects both a
+  staged external KG and the internal observation graph through `GraphProjectionProfile`, and records a secret-free
+  ducknng HTTP profile receipt.
 
-## Remaining Core Work
+## Core Work Items
 
 ### 1. Host-Event Receipts
 
@@ -175,18 +179,16 @@ workaround-shaped token plumbing is removed where profiles cover the use case.
 
 ## Sequencing
 
-1. **Host-event receipts.** Low-risk and directly closes the runtime-control gap for steering, interrupts, context
-   digests, and host scheduler events.
-2. **SDK surface polish.** Do this as soon as the downstream workbench imports awkward private paths; let real usage
+1. **SDK surface polish.** Do this as soon as the downstream workbench imports awkward private paths; let real usage
    decide the exports.
-3. **Foreign graph projection profile.** Pick one concrete graph source and prove it through the existing
-   `GraphProjectionProfile` path.
-4. **Workflow step checkpoints.** Formalize only after the downstream workflow has a real two-step durable path and
-   the dogfood checkpoint pattern proves reusable.
-5. **Graphics metadata and corpus export.** These become valuable once runs, traces, and judgments accrue from real
+2. **Production foreign graph projection.** The profile primitive is proven against fixtures and the internal ledger;
+   the next step is one real external graph source consumed by a manifest/operation path.
+3. **Graphics metadata and corpus export.** These become valuable once runs, traces, and judgments accrue from real
    app executions.
-6. **ducknng profile cleanup.** Land before publishing connector-heavy examples or corpus exports that rely on
-   credentialed sources.
+4. **ducknng provenance cleanup.** The secret-free receipt helper exists; next wire receipts into connector run
+   provenance/action keys, rotation/refresh, and subject bracketing for embedded hosts.
+5. **Runtime host adapters.** `recordHostEvent` is available; add concrete Pi/workbench hook adapters only when a
+   consumer reads those event receipts.
 
 The core is "home" when downstream applications can stay boring: they declare resources and operations, inject host
 ports, record runtime control receipts when needed, and read one SQL-addressable ledger for data, graph facts, runs,

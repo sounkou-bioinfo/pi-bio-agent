@@ -71,6 +71,7 @@
     "provision:duckhts": "node --input-type=module -e \"import {DuckDBInstance} from '@duckdb/node-api'; const c=await(await DuckDBInstance.create(':memory:')).connect(); await c.run('INSTALL duckhts FROM community;'); await c.run('LOAD duckhts;'); console.log('duckhts installed + loaded');\"",
     "provision:ducknng-owned": "bash scripts/provision-ducknng-owned.sh",
     "dogfood:pi-session-trace": "node scripts/pi-session-trace-dogfood.mjs",
+    "dogfood:bring-it-home": "npm run build && node scripts/bring-it-home-dogfood.mjs",
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
     "prepare": "npm run build",
     "readme:tools": "node scripts/generate-readme-tools.mjs",

@@ -200,17 +200,62 @@ describe("job step checkpoints: durable workflow resume without a workflow engin
     assert.deepEqual(read?.value, { rows: 5, file: "variants.parquet" });
   });
 
-  test("step checkpoints fail closed on unsafe ids and non-JSON values", async () => {
+  test("step checkpoints allow host-owned step labels and fail closed on malformed ids/non-JSON values", async () => {
     const { conn } = await setup();
+    const named = await runJobStepWithCheckpoint(conn, {
+      runId: "wf2",
+      stepId: "extract/variants:case 001",
+      recordedAt: "2026-07-01T00:00:09Z",
+      replayDigest: "sha256:replay",
+      run: () => ({ ok: true }),
+    });
+    assert.equal(named.reused, false);
+    assert.equal(named.stepId, "extract/variants:case 001");
+    assert.equal(jobStepCheckpointKey("wf2", "extract/variants:case 001"), "job:wf2:step:extract%2Fvariants%3Acase%20001");
+    const readNamed = await readJobStepCheckpoint<{ ok: boolean }>(conn, "wf2", "extract/variants:case 001");
+    assert.deepEqual(readNamed?.value, { ok: true });
+    const namedRow = await observationAsOfKey(conn, jobStepCheckpointKey("wf2", "extract/variants:case 001"), "2026-07-01T00:00:10Z");
+    assert.equal(JSON.parse(namedRow!.attrs!).step_id, "extract/variants:case 001");
+
     await assert.rejects(
       () => runJobStepWithCheckpoint(conn, {
         runId: "wf2",
-        stepId: "../extract",
+        stepId: " \t ",
         recordedAt: "2026-07-01T00:00:10Z",
         replayDigest: "sha256:replay",
         run: () => ({ ok: true }),
       }),
-      /unsafe stepId/,
+      /stepId must be a non-empty string/,
+    );
+    await assert.rejects(
+      () => runJobStepWithCheckpoint(conn, {
+        runId: "wf2",
+        stepId: "extract\nvariants",
+        recordedAt: "2026-07-01T00:00:10Z",
+        replayDigest: "sha256:replay",
+        run: () => ({ ok: true }),
+      }),
+      /stepId must not contain control characters or line separators/,
+    );
+    await assert.rejects(
+      () => runJobStepWithCheckpoint(conn, {
+        runId: "wf2",
+        stepId: "extract\u2028variants",
+        recordedAt: "2026-07-01T00:00:10Z",
+        replayDigest: "sha256:replay",
+        run: () => ({ ok: true }),
+      }),
+      /stepId must not contain control characters or line separators/,
+    );
+    await assert.rejects(
+      () => runJobStepWithCheckpoint(conn, {
+        runId: "wf2",
+        stepId: "x".repeat(513),
+        recordedAt: "2026-07-01T00:00:10Z",
+        replayDigest: "sha256:replay",
+        run: () => ({ ok: true }),
+      }),
+      /stepId must be at most 512 characters/,
     );
     await assert.rejects(
       () => runJobStepWithCheckpoint(conn, {
