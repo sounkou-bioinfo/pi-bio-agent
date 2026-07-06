@@ -25,7 +25,8 @@ reports, and literature change. In that study, a model surfaced evidence-linked 
 376 previously unsolved cases, with 18 diagnoses established only after human review, additional testing, and clinical
 confirmation (https://openai.com/index/diagnose-rare-childhood-diseases/). The core lesson here is generic: scientific
 value sits in evolving ecosystems of packages, statistical methods, data formats, ontologies, knowledge graphs, and
-papers. The library's job is to make that accumulated practice accessible as declared, replayable, queryable workflows
+papers. In life sciences, much of that accumulated practice already lives in the R/Bioconductor ecosystem and its
+literature trail. The library's job is to make that practice accessible as declared, replayable, queryable workflows
 with receipts, CAS artifacts, environment attestations, and explicit judgment gates.
 
 ## Closed In Core
@@ -213,14 +214,18 @@ for applications that choose it, not an implicit fallback.
 
 **Current proof.** `registerDucknngHttpProfile` returns a secret-free profile receipt derived from ducknng's redacted
 profile listing: profile id, URL/method/TLS scope, profile version/timestamps/expiry, auth header names, and a digest
-of subject restrictions. Unit tests prove the receipt cannot carry token values or subject ids, while the ducknng SQL
-HTTP integration tests exercise profile-based auth and subject admission when the installed extension exposes that API.
+of subject restrictions. Subject allow-lists are normalized as sorted unique sets before registration and receipt
+digesting, so the policy surface is set-shaped rather than caller-order-shaped. Unit tests prove the receipt cannot
+carry token values or subject ids, while the ducknng SQL HTTP integration tests exercise profile-based auth and subject
+admission when the installed extension exposes that API.
 Connector runs can now accept those secret-free receipts as host capability receipts: replay pins only
 `hostReceiptDigests`, run/artifact provenance references `host.capability:<schema>` by digest, and the action-cache key
 changes when the host policy receipt changes. Reproduction fails closed unless the same receipt is re-supplied.
 `refreshDucknngHttpProfile` covers the rotation seam without a drop/register gap: the host refreshes credential
 material, re-commissions the same profile id through ducknng's upsert path, and receives previous/current redacted
-receipts. Tokens remain host-owned bound parameters, never SQL text or replay data.
+receipts. Tokens remain host-owned bound parameters, never SQL text or replay data. Today ducknng's execution subject
+is bound by its service/session machinery; this repository should not invent an embedded subject switch until ducknng
+exposes one as a host-only API.
 
 **Done when.** Credentialed HTTP examples use subject-scoped profiles with no secrets in SQL, restricted profiles are
 invisible/unusable to non-admitted subjects, and workaround-shaped token plumbing is removed where profiles cover the
@@ -236,8 +241,9 @@ use case.
 3. **Graphics metadata.** The corpus export now carries artifact CAS rows and display/produce references. The
    remaining work is richer run-produced figure metadata when a downstream report path needs it.
 4. **ducknng profile cleanup.** Secret-free profile receipts are pinned into connector run replay/provenance/action
-   keys, and refresh/rotation uses the same ducknng upsert receipt path. Next work is subject bracketing for embedded
-   hosts and replacing remaining workaround-shaped token plumbing in real credentialed examples.
+   keys, refresh/rotation uses the same ducknng upsert receipt path, and subject restrictions are canonicalized before
+   registration. Next work is replacing remaining workaround-shaped token plumbing in real credentialed examples; an
+   embedded subject bracket belongs in ducknng first, because the current subject mechanism is service/session-bound.
 5. **Runtime host adapters.** `recordHostEvent` is available; add concrete Pi/workbench hook adapters only when a
    consumer reads those event receipts.
 

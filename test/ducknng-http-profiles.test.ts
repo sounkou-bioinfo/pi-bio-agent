@@ -73,6 +73,11 @@ class FakeDucknngProfileConn implements SqlConn {
     this.nowMs += 1000n;
     return this.nowMs;
   }
+
+  profileRow(profileId: string): { allow_subjects_json: string | null } | undefined {
+    const row = this.profiles.get(profileId);
+    return row ? { allow_subjects_json: row.allow_subjects_json } : undefined;
+  }
 }
 
 describe("ducknng HTTP profile receipts", () => {
@@ -91,7 +96,7 @@ describe("ducknng HTTP profile receipts", () => {
       createdMs: 1783283000000n,
       updatedMs: 1783283060000n,
       expiresAtMs: 1783286600000n,
-      allowSubjectsJson: "[\"case:alpha\",\"case:beta\"]",
+      allowSubjectsJson: "[\"case:beta\",\"case:alpha\",\"case:alpha\"]",
     };
 
     const receipt = ducknngHttpProfileReceiptFromInfo(info);
@@ -114,6 +119,7 @@ describe("ducknng HTTP profile receipts", () => {
 
     const serialized = JSON.stringify(receipt);
     assert.doesNotMatch(serialized, /Bearer|token|secret|case:alpha|case:beta/i);
+    assert.equal(receipt.subjectRestriction.digest, ducknngHttpProfileReceiptFromInfo({ ...info, allowSubjectsJson: "[\"case:alpha\",\"case:beta\"]" }).subjectRestriction.digest);
   });
 
   test("omits default ports and absent subject restrictions from the receipt", () => {
@@ -152,7 +158,7 @@ describe("ducknng HTTP profile receipts", () => {
       authHeaderName: "Authorization",
       authHeaderValue: "Bearer secret-one",
       expiresAtMs: 1783286600000,
-      allowSubjects: ["case:alpha", "case:beta"],
+      allowSubjects: ["case:beta", "case:alpha", "case:alpha"],
     });
 
     assert.equal(first.created, true);
@@ -161,6 +167,8 @@ describe("ducknng HTTP profile receipts", () => {
     assert.equal(first.current.version, "1");
     assert.equal(first.current.scope.host, "api.example.test");
     assert.equal(first.current.subjectRestriction.restricted, true);
+    assert.equal(first.current.subjectRestriction.count, 2);
+    assert.deepEqual(conn.profileRow("clinvar-read"), { allow_subjects_json: "[\"case:alpha\",\"case:beta\"]" });
     assert.deepEqual(conn.authValuesSeen, ["Bearer secret-one"]);
 
     const second = await refreshDucknngHttpProfile(conn, {

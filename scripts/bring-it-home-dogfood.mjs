@@ -319,7 +319,7 @@ try {
     createdMs: 1783283000000n,
     updatedMs: 1783283060000n,
     expiresAtMs: 1783286600000n,
-    allowSubjectsJson: "[\"case:alpha\",\"case:beta\"]",
+    allowSubjectsJson: "[\"case:beta\",\"case:alpha\",\"case:alpha\"]",
   });
   assert.match(profileReceipt.policyDigest, /^sha256:[0-9a-f]{64}$/);
   assert.doesNotMatch(JSON.stringify(profileReceipt), /Bearer|token|secret|case:alpha|case:beta/i);

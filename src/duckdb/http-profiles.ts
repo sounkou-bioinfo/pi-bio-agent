@@ -97,7 +97,8 @@ function validExpiry(expiresAtMs: number | null | undefined): number | null {
 function validAllowSubjects(subjects: readonly string[] | null | undefined): string | null {
   if (subjects == null) return null;
   if (!Array.isArray(subjects) || subjects.length === 0) throw new Error("ducknng HTTP profile allowSubjects must be a non-empty array when supplied");
-  return JSON.stringify(subjects.map((s) => cleanString(s, "ducknng HTTP profile allowSubject")));
+  const normalized = [...new Set(subjects.map((s) => cleanString(s, "ducknng HTTP profile allowSubject")))].sort();
+  return JSON.stringify(normalized);
 }
 
 function parseStringArray(json: string | null, label: string): string[] {
@@ -122,7 +123,7 @@ function expiryText(value: bigint): string | null {
 
 export function ducknngHttpProfileReceiptFromInfo(info: DucknngHttpProfileInfo): DucknngHttpProfileReceipt {
   const authHeaderNames = parseStringArray(info.authHeaderNamesJson, "ducknng HTTP profile auth_header_names_json");
-  const allowSubjects = parseStringArray(info.allowSubjectsJson, "ducknng HTTP profile allow_subjects_json");
+  const allowSubjects = [...new Set(parseStringArray(info.allowSubjectsJson, "ducknng HTTP profile allow_subjects_json"))].sort();
   const subjectRestriction = allowSubjects.length === 0
     ? { restricted: false, count: 0 }
     : { restricted: true, count: allowSubjects.length, digest: canonicalDigest([...allowSubjects].sort()) };
