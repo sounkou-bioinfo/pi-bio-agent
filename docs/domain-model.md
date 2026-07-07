@@ -258,25 +258,26 @@ Examples (registered data, not guessed TS classes): a **genomics** application p
 **proteomics** provides mzML/FASTA resolvers, UniProt/GO sets, peptide/PSM SQL; **single-cell** provides
 h5ad/Zarr resolvers and PCA/UMAP SQL. Source dialect and analysis are SQL, not per-application TypeScript.
 
-## Execution backends: two transports, not a zoo
+## Execution backends: SQL plus compute, not a zoo
 
 `BioOperationSpec`/`BioResolverSpec` separate **what** from **how**, but "how" does **not** fan out into a
-per-language backend enum. The congealed shape is **two transports over one substrate**:
+per-language backend enum. Operations are declared SQL today:
 
 ```ts
-type BioOperationTransport = "duckdb.sql";   // built today; a `process` transport is earned when a real pipeline needs it
+type BioOperationTransport = "duckdb.sql";
 ```
 
 - **`duckdb.sql`** carries both **data** (files/formats as table functions) and **network** (`ducknng_ncurl_table`: an HTTP/GraphQL call is a SQL table function, not a per-API TypeScript client).
-- **`process`** is the one general out-of-process backend (argv in a run dir over Arrow IPC). `Rscript`, `python`,
-  `bcftools`, `nextflow`, `snakemake` are **argv presets over `process`**, never separate transports: one backend,
-  not `runDeseq2()`/`runGatk()` sprawl. `compute.run` (the resolver form: table, file, and files-only outputs)
-  is **built**; the operation-level `process` transport is earned, not prebuilt (see
-  [design notes](design.md#execution-beyond-sql-shell-r-and-workflows-as-process-operations)).
+- **`compute.run`** is the one general out-of-process backend (argv in a run dir over Arrow IPC, declared file
+  artifacts, CAS capture, environment evidence, receipts, replay, and async `ComputeRunner` integration). `Rscript`,
+  `python`, `bcftools`, `nextflow`, and `snakemake` are argv choices for that backend, never separate transports:
+  one backend, not `runDeseq2()`/`runGatk()` sprawl. If an application wants a process-first authoring surface later,
+  it should be syntax over `compute.run`, not a second operation lifecycle (see
+  [design notes](design.md#execution-beyond-sql-shell-r-and-workflows-as-compute-operations)).
 
 Core defines only the **contract**; actual execution lives in adapters with policy, provenance, timeouts, CAS
 receipts, and tests. CLI/R/Python tools are first-class, `bcftools`/`duckhts`, Bioconductor, scanpy/pysam, but
-they enter as **manifest data + argv over `process`**, not as bespoke per-tool TypeScript.
+they enter as **manifest data + argv through `compute.run`**, not as bespoke per-tool TypeScript.
 
 ## Flagship as proof
 

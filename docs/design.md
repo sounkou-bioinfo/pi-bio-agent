@@ -361,12 +361,9 @@ Three things keep this consistent with the rest of the substrate:
   R/Bioconductor adapter for this: it parses an `renv.lock` JSON document into a generic package-lock layer plus an
   inspectable package-snapshot layer, without restoring packages or adding an R-specific runner. If that
   host-provided descriptor is invalid, `compute.run` records an explicit unknown/probe-failed environment observation
-  rather than a fake match. What is
-  still missing is only the
-  *operation-level* executor: a `process` **BioOperationTransport** (the OPERATION transport is still
-  `duckdb.sql` only, `BioOperationTransport = "duckdb.sql"`), the argv-in-a-run-dir path for the six-hour batch /
-  Nextflow-Snakemake case. The compute pillar's resolver path, table AND file artifacts, exists; the
-  operation-transport wrapper does not.
+  rather than a fake match. The process path is not missing: `compute.run` already owns argv-in-a-run-dir execution,
+  Arrow/table results, declared file artifacts, CAS capture, environment evidence, receipts, replay, and async
+  `ComputeRunner` integration.
 
   This is a materialization boundary over the async compute primitive, not a separate synchronous compute world. A
   host may run it through a local child process, an NNG worker, a scheduler, or an Absurd-style queue backend. The
@@ -384,15 +381,13 @@ fixtures). A genuinely new implementation is earned only when execution needs se
 express: remote workers, queue checkpoints, stateful sessions, or scheduler-native cancellation; it must still fit
 the `AsyncRunner` lifecycle unless a concrete second primitive is proven.
 
-**Discipline: do not build the transport ahead idealistically.** Speculative non-SQL transports were already
-deleted once (http/graphql/mcp/local with no runner). The out-of-process case, table AND file artifacts, is now
-served by the `compute.run` RESOLVER (above); the OPERATION-level `BioOperationTransport` stays `duckdb.sql`
-until a real pipeline forces a compute-backed operation transport (a Snakemake/Nextflow step or a DESeq2 run driven as an
-*operation*, not a resolved resource). A full `BioExecutionSpec` (a backend enum,
-`container`/`env`/`resources`/`effects`/`capture` fields) is the *sketch of the destination*, not core surface: add fields when an executor consumes them. CAS-of-bytes itself is **built** (`src/core/cas.ts` + `src/hosts/fs-cas.ts`,
-proven by `http.get` byte-reuse across DBs in `test/http-cas-reuse.test.ts`), and the FILE-outputs-into-CAS wiring
-is **built too** (`captureDeclaredOutputsToCas`); what the operation transport still needs is only to reuse that
-same capture from an argv-in-a-run-dir executor.
+**Discipline: do not invent a second process lane.** Speculative non-SQL transports were already deleted once
+(http/graphql/mcp/local with no runner). The out-of-process case, table results, file artifacts, CAS capture,
+environment evidence, receipts, and replay are now served by the `compute.run` resolver above. An operation whose
+body is mostly process work should usually declare a `compute.run` resource and run ordinary SQL over its result
+or artifacts. If downstream applications repeatedly find that authoring shape awkward, a future
+`operation.executor = "process"` spelling may be useful, but it must be syntax over `ComputeRunner`,
+`captureDeclaredOutputsToCas`, step checkpoints, receipts, and replay specs, not a new lifecycle or transport.
 
 ## Storage story
 
@@ -425,6 +420,14 @@ For shared CAS, byte lifetime must be row-driven rather than inferred from local
 `casMetadata` on the same SQL authority as the run ledger, run persistence records each
 result/receipt/replay/run-object byte as a `cas_object` and roots it with durable `cas_ref` rows under `run:<id>`.
 The metadata GC then uses refs/leases as the root set instead of scraping run directories or JSON blobs.
+
+Filesystem-shaped access is a possible adapter over this model, not a replacement for it. DuckDB already has
+filesystem-oriented extension work such as [HostFS](https://duckdb.org/community_extensions/extensions/hostfs.html),
+and duckfs-style virtual filesystem experiments are useful prior art for exposing CAS/object metadata as paths.
+If we need that surface, keep it as a host adapter over `cas_object` / `cas_ref` / ledger rows: bytes remain CAS,
+metadata remains SQL, and the mounted/tree view is derived. A DuckTinyCC-style lightweight C extension could be a
+way to prototype such DuckDB-facing adapters without committing to a large C++ extension, but it should be proven
+by a real consumer before becoming core surface.
 
 ### 3. Virtual resources: live or expensive data
 

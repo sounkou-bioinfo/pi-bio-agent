@@ -98,21 +98,20 @@ roots, host policy hooks, and real process compute when R is available.
 
 These are the remaining lanes. They should not become new core abstractions until an application proves a gap.
 
-1. **Scoped relation/resource visibility, if a host proves it needs it.** HTTP profile admission now lives in
-   sibling `ducknng` plus secret-free receipts. Do not add SQL string guards in this repo. If a real embedding host
-   needs subject-scoped relation or resource visibility beyond its wrapped `SqlConn`, implement it as a host/ducknng
-   admission feature and receipt it.
+1. **Scoped relation/resource visibility, if a host proves it needs more than port wrapping.** The current pattern is
+   a host-owned `SqlConn` wrapper: a host that hides a relation should deny `SELECT`, `DESCRIBE`, `SUMMARIZE`, and
+   catalog/introspection reads on that injected connection. `ducknng` HTTP profile admission is the corresponding
+   network/profile gate. Do not add ad-hoc SQL string guards here. If a real embedding host needs centrally managed,
+   subject-scoped relation or resource visibility across remote services, implement it as a host/ducknng admission
+   feature and receipt it.
 2. **Training corpus hardening.** App-driven redaction policy, label schema, export contract, and VARIANT-shredded
    Parquet when a real downstream corpus consumer benefits from nested typed columns. The base ledger remains
    `value_json`.
 3. **Graphics/report metadata from real reports.** Core has `recordArtifactReference`; richer renderer metadata should
    be added only when a downstream R/Python/HTML report path emits it.
-4. **Process operation transport.** Still real, still deferred. Meaning: a declared operation whose executor is a
-   process/argv/run-dir, reusing `ComputeRunner`, checkpoints, CAS output capture, and replay specs. Build it only
-   when a real workflow step needs operation semantics rather than `compute.run` as a table resolver.
-5. **SDK maintenance.** Add public exports only when a sibling app needs a stable type, and prove each export through
+4. **SDK maintenance.** Add public exports only when a sibling app needs a stable type, and prove each export through
    the packed external-consumer dogfood.
-6. **Host adapters.** `recordHostEvent` is available. Concrete Pi/workbench/scheduler hook adapters should record only
+5. **Host adapters.** `recordHostEvent` is available. Concrete Pi/workbench/scheduler hook adapters should record only
    events the host actually emits, and only when a consumer reads those receipts.
 
 ## Non-Goals In Core
@@ -121,7 +120,10 @@ These are the remaining lanes. They should not become new core abstractions unti
 - Topology primitives for swarms, forks, or resumes. Use caller-owned nodes plus ordinary edges.
 - Special hiding rules for `DESCRIBE` or `SUMMARIZE`; they are ordinary DuckDB inspection over relations the host made
   visible.
-- Process transport before a real workflow needs it.
+- Process-first operation syntax as a separate primitive. `compute.run` already provides process/argv execution,
+  declared file artifacts, CAS capture, environment evidence, async runner integration, receipts, and replay. If a
+  downstream app proves that wrapping process work as a `compute.run` resource is repeatedly awkward, add only a thin
+  authoring facade over those existing pieces.
 - Another workflow engine above step checkpoints and the async runner lifecycle.
 
 ## Verification
