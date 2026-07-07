@@ -3,6 +3,7 @@ import type { SqlConn } from "../core/ports.js";
 import { contentAddressUri, type ContentAddress } from "../core/resources.js";
 import { validateContentAddress } from "../core/storage.js";
 import { createBioObservationSchema, recordObservation, recordObservationLink } from "../duckdb/observations.js";
+import { addCasRef, initCasMetadata, recordCasObject } from "./cas-metadata.js";
 
 export interface CasArtifactFact {
   digest: `sha256:${string}`;
@@ -25,6 +26,8 @@ export interface ArtifactReferenceInput {
   trust?: TrustBlock;
   factStatementKey?: string;
   referenceStatementKey?: string;
+  /** Optional shared-CAS metadata authority. Pass only after the artifact bytes have been written to that CAS. */
+  casMetadata?: { conn: SqlConn; nowMs?: number; refId?: string; refType?: string };
 }
 
 export interface ArtifactReferenceRecord {
@@ -72,6 +75,17 @@ export async function recordArtifactReference(conn: SqlConn, input: ArtifactRefe
   const referenceAttrs = { ...(input.attrs ?? {}) };
   if (input.artifact.mediaType !== undefined && referenceAttrs.media_type === undefined) referenceAttrs.media_type = input.artifact.mediaType;
   if (input.artifact.semanticRole !== undefined && referenceAttrs.semantic_role === undefined) referenceAttrs.semantic_role = input.artifact.semanticRole;
+
+  if (input.casMetadata) {
+    const nowMs = input.casMetadata.nowMs ?? Date.now();
+    await initCasMetadata(input.casMetadata.conn);
+    await recordCasObject(input.casMetadata.conn, address, input.artifact.sizeBytes ?? null, nowMs);
+    await addCasRef(input.casMetadata.conn, {
+      refId: input.casMetadata.refId ?? casUri,
+      refType: input.casMetadata.refType ?? "artifact",
+      address,
+    }, nowMs);
+  }
 
   await createBioObservationSchema(conn, { ifNotExists: true });
   const artifactObservationId = await recordObservation(conn, {

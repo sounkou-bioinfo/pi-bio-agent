@@ -1007,11 +1007,13 @@ write/reuse race (→ `cas_lease` + `withCasObject`), and the remote-index race 
 single in-memory DuckDB authority (`test/cas-metadata-gc.test.ts`), which exercises the exact SQL a
 ducknng-served authority runs.
 
-Still open (integration, not core): auto-registering `cas_ref` rows from run receipts + captured artifacts, and
-resolvers taking a `withCasObject` lease around a cross-db `cas.pathFor` reuse (so the shared path is wired
-through the run-store, not just callable); a `gc_epoch` row + a published tombstone/delete event for cross-node
-observers; the ducknng-served-authority dogfood script. A `utimes` LRU-touch on CAS hit is a cheap node-local
-nicety (cache semantics, not a lease): only if a real workload wants it.
+Run and artifact roots are wired into this path: `run-store` registers result/receipt/replay/run-object bytes as
+`cas_object` rows and replaces durable `run:<id>` refs when `casMetadata` is supplied, while
+`recordArtifactReference` can register an artifact `cas_ref` after the caller has written the bytes to the shared
+CAS. Still open (integration, not core): resolvers taking a `withCasObject` lease around a cross-db `cas.pathFor`
+reuse; a `gc_epoch` row + a published tombstone/delete event for cross-node observers; the
+ducknng-served-authority dogfood script. A `utimes` LRU-touch on CAS hit is a cheap node-local nicety (cache
+semantics, not a lease): only if a real workload wants it.
 
 ## Documentation cleanup
 

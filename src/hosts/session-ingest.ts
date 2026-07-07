@@ -15,6 +15,8 @@ const FUTURE = "9999-12-31T23:59:59.999Z";
 export interface IngestSessionJsonlRequest {
   conn: SqlConn;
   cas: CasStore;
+  /** Optional shared-CAS metadata authority; pass only when `cas` stores bytes visible to that authority. */
+  casMetadata?: { conn: SqlConn; nowMs?: number };
   sessionPath: string;
   /** Stable public id for the imported session. Defaults to the JSONL basename without `.jsonl`. */
   sessionId?: string;
@@ -177,6 +179,7 @@ function* walkImages(value: unknown): Generator<{ data: string; mimeType: string
 async function recordImageArtifacts(args: {
   conn: SqlConn;
   cas: CasStore;
+  casMetadata?: { conn: SqlConn; nowMs?: number };
   counts: { observations: number; artifacts: number };
   seenArtifacts: Set<string>;
   sessionId: string;
@@ -214,6 +217,7 @@ async function recordImageArtifacts(args: {
         image_index: imageIndex,
         json_path: img.indexPath,
       },
+      casMetadata: args.casMetadata ? { ...args.casMetadata, refId: casNode(digest), refType: "artifact" } : undefined,
     });
     args.counts.observations += 2;
     if (firstSeen) args.counts.artifacts++;
@@ -470,7 +474,7 @@ export async function ingestSessionJsonl(req: IngestSessionJsonlRequest): Promis
       await recordEdge(req.conn, counts, entryNode, "materializes_message", msgNode, recordedAt, source, { custom_type: customType });
       if (parentNode) await recordEdge(req.conn, counts, msgNode, "parent", parentNode, recordedAt, source);
       await recordImageArtifacts({
-        conn: req.conn, cas: req.cas, counts, sessionId, source, recordedAt,
+        conn: req.conn, cas: req.cas, casMetadata: req.casMetadata, counts, sessionId, source, recordedAt,
         seenArtifacts,
         ownerNode: msgNode, ownerPredicate: "displays", value: entry.content, lineNumber,
       });
@@ -552,12 +556,12 @@ export async function ingestSessionJsonl(req: IngestSessionJsonlRequest): Promis
     if (role === "user") previousUserMessageNode = msgNode;
 
     await recordImageArtifacts({
-      conn: req.conn, cas: req.cas, counts, sessionId, source, recordedAt,
+      conn: req.conn, cas: req.cas, casMetadata: req.casMetadata, counts, sessionId, source, recordedAt,
       seenArtifacts,
       ownerNode: msgNode, ownerPredicate: "displays", value: msg.content, lineNumber,
     });
     if (turnNode) await recordImageArtifacts({
-      conn: req.conn, cas: req.cas, counts, sessionId, source, recordedAt,
+      conn: req.conn, cas: req.cas, casMetadata: req.casMetadata, counts, sessionId, source, recordedAt,
       seenArtifacts,
       ownerNode: turnNode, ownerPredicate: "displays", value: msg.content, lineNumber,
     });
@@ -602,7 +606,7 @@ export async function ingestSessionJsonl(req: IngestSessionJsonlRequest): Promis
       }, counts);
       await recordEdge(req.conn, counts, toolNode, "output", msgNode, recordedAt, source, { name: toolName ?? null, is_error: isError });
       await recordImageArtifacts({
-        conn: req.conn, cas: req.cas, counts, sessionId, source, recordedAt,
+        conn: req.conn, cas: req.cas, casMetadata: req.casMetadata, counts, sessionId, source, recordedAt,
         seenArtifacts,
         ownerNode: toolNode, ownerPredicate: "produces", value: msg.content, lineNumber,
       });

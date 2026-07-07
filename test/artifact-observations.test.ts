@@ -11,6 +11,7 @@ import type { SqlConn } from "../src/core/ports.js";
 import { collectGarbage } from "../src/hosts/gc.js";
 import { fsCasStore } from "../src/hosts/fs-cas.js";
 import { recordArtifactReference } from "../src/hosts/artifacts.js";
+import { dropCasRefs, recordCasObject } from "../src/hosts/cas-metadata.js";
 
 const T0 = "2026-07-06T10:00:00.000Z";
 
@@ -129,5 +130,39 @@ describe("CAS artifact observations", () => {
     assert.deepEqual(gc.casSwept, [`sha256/${swept.slice("sha256:".length)}`]);
     assert.equal(await cas.has({ algorithm: "sha256", digest: kept.slice("sha256:".length) }), true);
     assert.equal(await cas.has({ algorithm: "sha256", digest: swept.slice("sha256:".length) }), false);
+  });
+
+  test("artifact references can register shared CAS metadata roots", async () => {
+    const dir = await tmp("pi-bio-artifact-meta-");
+    const casRoot = join(dir, "cas");
+    const cas = fsCasStore(casRoot);
+    const c = await conn();
+    const keptBytes = Buffer.from("shared figure");
+    const sweptBytes = Buffer.from("shared stray");
+    const kept = sha256(keptBytes);
+    const swept = sha256(sweptBytes);
+    const keptAddress = { algorithm: "sha256" as const, digest: kept.slice("sha256:".length) };
+    const sweptAddress = { algorithm: "sha256" as const, digest: swept.slice("sha256:".length) };
+    await cas.put(keptAddress, keptBytes);
+    await cas.put(sweptAddress, sweptBytes);
+
+    await recordArtifactReference(c, {
+      artifact: { digest: kept, mediaType: "text/plain", semanticRole: "report", sizeBytes: keptBytes.length },
+      subjectId: "run:report-1",
+      predicate: "produces",
+      recordedAt: T0,
+      source: "artifact-test",
+      attrs: { producer_run: "run:report-1" },
+      casMetadata: { conn: c, nowMs: 1000 },
+    });
+    await recordCasObject(c, sweptAddress, sweptBytes.length, 1000);
+
+    await collectGarbage(dir, { casMode: "shared", metadata: { conn: c, cas, cutoffMs: 2000, graceMs: 0 }, minAgeMs: 1 });
+    assert.equal(await cas.has(keptAddress), true, "artifact metadata ref protects shared CAS bytes");
+    assert.equal(await cas.has(sweptAddress), false, "unreferenced shared CAS bytes are swept");
+
+    await dropCasRefs(c, `cas:${kept}`);
+    await collectGarbage(dir, { casMode: "shared", metadata: { conn: c, cas, cutoffMs: 2000, graceMs: 0 }, minAgeMs: 1 });
+    assert.equal(await cas.has(keptAddress), false, "dropping the artifact metadata ref releases its bytes");
   });
 });
