@@ -31,7 +31,7 @@ import {
   jobStepCheckpointKey,
   readJobStepCheckpoint,
   resumeBioJob,
-  runJobStepWithCheckpoint,
+  runJobStepsWithCheckpoints,
   submitBioJob,
 } from "../dist/hosts/job-store.js";
 import { queueJobRunner } from "../dist/hosts/queue-job-runner.js";
@@ -109,7 +109,7 @@ import {
 import {
   fsCasStore,
   nodeComputeRunner,
-  runJobStepWithCheckpoint,
+  runJobStepsWithCheckpoints,
   withObservedEnvironment,
   type RunQueryRequest,
 } from "pi-bio-agent/hosts";
@@ -148,7 +148,7 @@ void materializeGraphProjectionProfile;
 void refreshDucknngHttpProfile;
 void fsCasStore;
 void nodeComputeRunner;
-void runJobStepWithCheckpoint;
+void runJobStepsWithCheckpoints;
 void withObservedEnvironment;
 type _Conn = SqlConn;
 `, "utf8");
@@ -161,7 +161,7 @@ type _Conn = SqlConn;
 import { runBioQueryFromManifest, recordHostEvent, ingestSessionJsonl, exportTrainingCorpusParquet } from "pi-bio-agent";
 import { validateBioManifest } from "pi-bio-agent/core";
 import { duckdbNodeConn, materializeGraphProjectionProfile, refreshDucknngHttpProfile } from "pi-bio-agent/duckdb";
-import { fsCasStore, runJobStepWithCheckpoint, withObservedEnvironment } from "pi-bio-agent/hosts";
+import { fsCasStore, runJobStepsWithCheckpoints, withObservedEnvironment } from "pi-bio-agent/hosts";
 
 for (const [name, value] of Object.entries({
   runBioQueryFromManifest,
@@ -173,7 +173,7 @@ for (const [name, value] of Object.entries({
   materializeGraphProjectionProfile,
   refreshDucknngHttpProfile,
   fsCasStore,
-  runJobStepWithCheckpoint,
+  runJobStepsWithCheckpoints,
   withObservedEnvironment,
 })) {
   if (typeof value !== "function") throw new Error(\`public runtime export '\${name}' is not callable\`);
@@ -238,45 +238,56 @@ try {
   });
 
   let extractExecutions = 0;
-  const firstExtract = await runJobStepWithCheckpoint(conn, {
+  let scoreExecutions = 0;
+  const firstPlan = await runJobStepsWithCheckpoints(conn, {
     runId: "dogfood-workflow",
-    stepId: "extract/variants",
     recordedAt: "2026-07-06T12:00:01.000Z",
     source: "bring-it-home-dogfood",
     replayDigest: REPLAY_DIGEST,
     attempt: 1,
-    run: () => {
-      extractExecutions += 1;
-      return { rows: 5, artifact_uri: "cas:sha256:variants-fixture" };
-    },
+    steps: [
+      {
+        stepId: "extract/variants",
+        run: () => {
+          extractExecutions += 1;
+          return { rows: 5, artifact_uri: "cas:sha256:variants-fixture" };
+        },
+      },
+    ],
   });
-  const resumedExtract = await runJobStepWithCheckpoint(conn, {
+  const resumedPlan = await runJobStepsWithCheckpoints(conn, {
     runId: "dogfood-workflow",
-    stepId: "extract/variants",
     recordedAt: "2026-07-06T12:00:02.000Z",
     source: "bring-it-home-dogfood",
     replayDigest: REPLAY_DIGEST,
     attempt: 2,
-    run: () => {
-      extractExecutions += 1;
-      return { rows: 99 };
-    },
+    steps: [
+      {
+        stepId: "extract/variants",
+        run: () => {
+          extractExecutions += 1;
+          return { rows: 99 };
+        },
+      },
+      {
+        stepId: "score/high-impact",
+        run: ({ valueOf }) => {
+          scoreExecutions += 1;
+          const extract = valueOf("extract/variants");
+          return { candidates: 2, upstream_rows: extract.rows, upstream_checkpoint: jobStepCheckpointKey("dogfood-workflow", "extract/variants") };
+        },
+      },
+    ],
   });
-  assert.equal(firstExtract.reused, false);
-  assert.equal(resumedExtract.reused, true);
+  const resumedExtract = resumedPlan.steps.find((s) => s.stepId === "extract/variants");
+  const scored = resumedPlan.steps.find((s) => s.stepId === "score/high-impact");
+  assert.deepEqual({ executed: firstPlan.executed, reused: firstPlan.reused }, { executed: 1, reused: 0 });
+  assert.deepEqual({ executed: resumedPlan.executed, reused: resumedPlan.reused }, { executed: 1, reused: 1 });
+  assert.equal(resumedExtract?.reused, true);
+  assert.equal(scored?.reused, false);
   assert.equal(extractExecutions, 1);
-  assert.deepEqual(resumedExtract.value, { rows: 5, artifact_uri: "cas:sha256:variants-fixture" });
-
-  const scored = await runJobStepWithCheckpoint(conn, {
-    runId: "dogfood-workflow",
-    stepId: "score/high-impact",
-    recordedAt: "2026-07-06T12:00:03.000Z",
-    source: "bring-it-home-dogfood",
-    replayDigest: REPLAY_DIGEST,
-    attempt: 1,
-    run: () => ({ candidates: 2, upstream_checkpoint: jobStepCheckpointKey("dogfood-workflow", "extract/variants") }),
-  });
-  assert.equal(scored.reused, false);
+  assert.equal(scoreExecutions, 1);
+  assert.deepEqual(resumedExtract?.value, { rows: 5, artifact_uri: "cas:sha256:variants-fixture" });
   assert.equal((await readJobStepCheckpoint(conn, "dogfood-workflow", "score/high-impact"))?.value.candidates, 2);
 
   let queueTick = 10;
@@ -571,7 +582,14 @@ try {
   const summary = {
     dogfood: "bring-it-home",
     hostEventLinks: hostEvent.linkObservationIds.length,
-    jobStepExecutions: { extract: extractExecutions, extractReused: resumedExtract.reused },
+    jobStepExecutions: {
+      extract: extractExecutions,
+      score: scoreExecutions,
+      firstExecuted: firstPlan.executed,
+      resumedExecuted: resumedPlan.executed,
+      resumedReused: resumedPlan.reused,
+      extractReused: resumedExtract?.reused,
+    },
     queueCancel: { runId: queueRunId, staleWriteRejected: staleQueueWriteRejected, resumedPhase: resumedQueue.phase },
     checkpointKey: checkpointRow.statement_key,
     ducknngProfileReceipt: {

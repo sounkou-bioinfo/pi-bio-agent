@@ -93,6 +93,39 @@ export interface RunJobStepWithCheckpointRequest<T extends JsonValue = JsonValue
   run: () => Promise<T> | T;
 }
 
+export interface RunJobStepsWithCheckpointsContext {
+  runId: string;
+  /** Completed earlier steps in this plan invocation, including checkpoints reused from prior attempts. */
+  completed: ReadonlyMap<string, JobStepCheckpoint<JsonValue> & { reused: boolean }>;
+  /** Read a completed upstream step value by id. Throws if a step asks for a future/missing step. */
+  valueOf<T extends JsonValue = JsonValue>(stepId: string): T;
+}
+
+export interface RunJobStepsWithCheckpointsStep<T extends JsonValue = JsonValue> {
+  stepId: string;
+  run: (ctx: RunJobStepsWithCheckpointsContext) => Promise<T> | T;
+  recordedAt?: string;
+  source?: string;
+  replayDigest?: string;
+  attempt?: number;
+}
+
+export interface RunJobStepsWithCheckpointsRequest {
+  runId: string;
+  steps: readonly RunJobStepsWithCheckpointsStep[];
+  recordedAt: string;
+  replayDigest: string;
+  source?: string;
+  attempt?: number;
+}
+
+export interface RunJobStepsWithCheckpointsResult {
+  runId: string;
+  steps: Array<JobStepCheckpoint<JsonValue> & { reused: boolean }>;
+  executed: number;
+  reused: number;
+}
+
 function assertJsonValue(value: unknown, label: string): asserts value is JsonValue {
   const visit = (v: unknown, path: string): void => {
     if (v === null || typeof v === "string" || typeof v === "boolean") return;
@@ -244,6 +277,62 @@ export async function runJobStepWithCheckpoint<T extends JsonValue = JsonValue>(
   const value = await req.run();
   const recorded = await recordJobStepCheckpoint(conn, { ...req, value });
   return { ...recorded, reused: false };
+}
+
+/** Execute a sequential step plan over durable checkpoints.
+ *
+ * This is the narrow workflow resume convention, not a scheduler: callers own the step ids/order and express
+ * dependencies by reading earlier values from the provided context. On restart or lease reclaim, pass the same runId
+ * and step list; completed checkpoints are reused and execution continues from the first missing step.
+ */
+export async function runJobStepsWithCheckpoints(
+  conn: SqlConn,
+  req: RunJobStepsWithCheckpointsRequest,
+): Promise<RunJobStepsWithCheckpointsResult> {
+  assertSafeRunId(req.runId);
+  if (req.steps.length === 0) throw new Error("job-store: checkpoint step plan must contain at least one step");
+  if (req.attempt !== undefined && (!Number.isInteger(req.attempt) || req.attempt < 1)) {
+    throw new Error("job-store: checkpoint attempt must be a positive integer when supplied");
+  }
+  const seen = new Set<string>();
+  for (const step of req.steps) {
+    assertValidStepId(step.stepId);
+    if (seen.has(step.stepId)) throw new Error(`job-store: duplicate checkpoint stepId '${step.stepId}'`);
+    seen.add(step.stepId);
+    if (step.attempt !== undefined && (!Number.isInteger(step.attempt) || step.attempt < 1)) {
+      throw new Error(`job-store: checkpoint attempt for step '${step.stepId}' must be a positive integer when supplied`);
+    }
+  }
+
+  const completed = new Map<string, JobStepCheckpoint<JsonValue> & { reused: boolean }>();
+  const resultSteps: Array<JobStepCheckpoint<JsonValue> & { reused: boolean }> = [];
+  const valueOf = <T extends JsonValue = JsonValue>(stepId: string): T => {
+    const cp = completed.get(stepId);
+    if (!cp) throw new Error(`job-store: checkpoint step '${stepId}' has not completed in this plan`);
+    return cp.value as T;
+  };
+  const context: RunJobStepsWithCheckpointsContext = { runId: req.runId, completed, valueOf };
+
+  for (const step of req.steps) {
+    const checkpoint = await runJobStepWithCheckpoint<JsonValue>(conn, {
+      runId: req.runId,
+      stepId: step.stepId,
+      recordedAt: step.recordedAt ?? req.recordedAt,
+      source: step.source ?? req.source,
+      replayDigest: step.replayDigest ?? req.replayDigest,
+      attempt: step.attempt ?? req.attempt,
+      run: () => step.run(context),
+    });
+    completed.set(step.stepId, checkpoint);
+    resultSteps.push(checkpoint);
+  }
+
+  return {
+    runId: req.runId,
+    steps: resultSteps,
+    executed: resultSteps.filter((s) => !s.reused).length,
+    reused: resultSteps.filter((s) => s.reused).length,
+  };
 }
 
 async function latestSlotRow(conn: SqlConn, runId: string): Promise<{ phase: JobPhase; at: string; message?: string; progress?: JobStatus["progress"] } | null> {

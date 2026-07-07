@@ -53,7 +53,7 @@ These are not remaining work items:
 - **Approval is a durable gate.** The Phase-4 approval path records and gates the irreducible judgment; it should be
   reused rather than shadowed with another policy-decision primitive.
 - **The bring-it-home substrate pieces compose.** `npm run dogfood:bring-it-home` executes a deterministic in-core
-  proof that records a host-event receipt, resumes a slash-bearing workflow step from a checkpoint, parses an
+  proof that records a host-event receipt, resumes a slash-bearing sequential workflow plan from checkpoints, parses an
   `renv.lock` into an `EnvDescriptor`, runs a tiny R `compute.run` step with matching declared/observed environment
   attestation, projects both a staged external KG and the internal observation graph through `GraphProjectionProfile`,
   and records a secret-free ducknng HTTP profile receipt. It also links a Pi-shaped session tool call to a scientific
@@ -102,9 +102,11 @@ ledger, not a workflow engine.
 - code outside a step may rerun after failure, but completed step effects must not repeat.
 
 `test/absurd-queue-push-dogfood.test.ts` already demonstrates the important behavior: a reclaimed attempt reuses a
-recorded step checkpoint instead of redoing the completed step. `runJobStepWithCheckpoint` / `recordJobStepCheckpoint`
-promote that repeated pattern into the narrow core surface: read the checkpoint first, run only if missing, and record
-the completed value as `job_step_checkpoint`.
+recorded step checkpoint instead of redoing the completed step. `runJobStepWithCheckpoint`,
+`runJobStepsWithCheckpoints`, and `recordJobStepCheckpoint` promote that repeated pattern into the narrow core surface:
+read checkpoints first, run only missing sequential steps, and record completed values as `job_step_checkpoint`.
+Step dependencies are not inferred; a step declares its real dependency by reading earlier checkpoint values through
+the helper context, or by recording explicit graph edges in the application/workflow layer.
 
 **Done when.** A downstream workflow uses the helper in anger, is killed mid-run, resumes against the same store,
 skips completed steps from checkpoint facts, and still produces reproducible run/CAS evidence for each completed step.
