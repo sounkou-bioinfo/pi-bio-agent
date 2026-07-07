@@ -183,6 +183,9 @@ artifact fact, and reference context as a caller-owned edge such as `run:<id> pr
 `toolcall:<id> displays cas:<digest>`. Session image ingestion uses the same helper. The focused artifact test proves
 graph-walkability and ledger-aware GC rooting; the training-corpus test proves run-produced figure metadata
 (`source_digest`, `spec_digest`, `plotting_system`) flows into the exported corpus.
+Run persistence also closes the shared-CAS root path: when a host supplies `casMetadata` on the run ledger's SQL
+authority, result/receipt/replay and run-object bytes are recorded as `cas_object` rows and rooted by `cas_ref` rows
+under `run:<id>`, so metadata-driven GC does not depend on run-directory files.
 
 **Remaining.** Consumer-driven renderer coverage only: richer figure/report metadata should be added when the
 workbench path emits real R/Python/HTML artifacts, not as a plot taxonomy in core.

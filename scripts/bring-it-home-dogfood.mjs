@@ -383,6 +383,7 @@ try {
     runId: "dogfood-host-capability",
     now: NOW,
     hostCapabilityReceipts: [profileReceipt],
+    casMetadata: { conn, nowMs: 1783283000000 },
   });
   assert.equal(hostCapRun.ok, true);
   const replayText = await fs.readFile(join(hostCapRun.runDir, "replay.json"), "utf8");
@@ -397,6 +398,13 @@ try {
     hostCapabilityReceipts: [profileReceipt],
   });
   assert.equal(hostCapReproduced.matched, true);
+  const hostCapCasRefRows = await conn.all(
+    `SELECT count(*) AS n
+     FROM cas_ref
+     WHERE ref_id = ${sqlString(`run:${hostCapRun.runId}`)}
+       AND ref_type = 'run'`,
+  );
+  assert.ok(asNumber(hostCapCasRefRows[0]?.n) >= 3);
 
   const rEnvRunCwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-dogfood-r-env-"));
   const rEnvCas = fsCasStore(await fs.mkdtemp(join(tmpdir(), "pi-bio-dogfood-r-env-cas-")));
@@ -603,6 +611,7 @@ try {
       reproduced: hostCapReproduced.reproduced,
       matched: hostCapReproduced.matched,
       resultMatched: hostCapReproduced.resultMatched,
+      casMetadataRefs: asNumber(hostCapCasRefRows[0]?.n),
     },
     renvEnvironment: {
       digest: renvEnvDigest,

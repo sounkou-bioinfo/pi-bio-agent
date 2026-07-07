@@ -437,6 +437,11 @@ A `ResourceHandle` points to the digest and metadata. This is appropriate for do
 
 CAS is not a consent or retention policy. Sensitive deployments can add deletion/retention policy in adapters. The substrate only needs the primitive; retention/consent is a host concern.
 
+For shared CAS, byte lifetime must be row-driven rather than inferred from local files. When a host supplies
+`casMetadata` on the same SQL authority as the run ledger, run persistence records each
+result/receipt/replay/run-object byte as a `cas_object` and roots it with durable `cas_ref` rows under `run:<id>`.
+The metadata GC then uses refs/leases as the root set instead of scraping run directories or JSON blobs.
+
 ### 3. Virtual resources: live or expensive data
 
 Not everything should be materialized. A virtual handle records:

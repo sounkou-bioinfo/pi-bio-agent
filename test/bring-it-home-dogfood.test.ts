@@ -21,6 +21,7 @@ describe("bring-it-home dogfood command", () => {
       jobStepExecutions: { extract: number; score: number; firstExecuted: number; resumedExecuted: number; resumedReused: number; extractReused: boolean };
       checkpointKey: string;
       ducknngProfileReceipt: { subjectRestriction: { restricted: boolean; count: number; digest?: string } };
+      hostCapabilityRun: { casMetadataRefs: number };
       renvEnvironment: { digest: string; packages: number; rVersion: string | null; bioconductor: string | null; envStatus: string; artifactRows: number };
       externalProjection: { edgeCount: number; closureCount: number };
       internalProjection: { edgesTable: string; edgeCount: number; closureTable: string; closureCount: number };
@@ -36,6 +37,7 @@ describe("bring-it-home dogfood command", () => {
     assert.equal(summary.ducknngProfileReceipt.subjectRestriction.restricted, true);
     assert.equal(summary.ducknngProfileReceipt.subjectRestriction.count, 2);
     assert.match(summary.ducknngProfileReceipt.subjectRestriction.digest ?? "", /^sha256:[0-9a-f]{64}$/);
+    assert.ok(summary.hostCapabilityRun.casMetadataRefs >= 3);
     assert.match(summary.renvEnvironment.digest, /^sha256:[0-9a-f]{64}$/);
     assert.deepEqual({
       packages: summary.renvEnvironment.packages,

@@ -107,6 +107,31 @@ export async function dropCasRefs(conn: SqlConn, refId: string): Promise<{ dropp
   return { dropped: Number(before[0]?.n ?? 0) };
 }
 
+/** Replace one referrer's exact root set for a ref type. New refs are inserted before stale refs are removed, so a
+ * crash can over-root but not unroot the newly committed set. */
+export async function replaceCasRefs(conn: SqlConn, refId: string, refType: string, refs: readonly Omit<CasRefSpec, "refId" | "refType">[], nowMs: number): Promise<void> {
+  const unique = new Map<string, Omit<CasRefSpec, "refId" | "refType">>();
+  for (const ref of refs) {
+    assertSha256(ref.address);
+    unique.set(`${ref.address.algorithm}:${ref.address.digest.toLowerCase()}`, {
+      ...ref,
+      address: { ...ref.address, digest: ref.address.digest.toLowerCase() },
+    });
+  }
+  for (const ref of unique.values()) await addCasRef(conn, { refId, refType, ...ref }, nowMs);
+  const kept = [...unique.values()];
+  if (kept.length === 0) {
+    await conn.run(`DELETE FROM cas_ref WHERE ref_id = ? AND ref_type = ?`, [refId, refType]);
+    return;
+  }
+  const keepSql = kept.map(() => `(algorithm = ? AND digest = ?)`).join(" OR ");
+  const params = kept.flatMap((r) => [r.address.algorithm, r.address.digest]);
+  await conn.run(
+    `DELETE FROM cas_ref WHERE ref_id = ? AND ref_type = ? AND NOT (${keepSql})`,
+    [refId, refType, ...params],
+  );
+}
+
 /** Acquire a lease over an address for `ttlMs`. Returns the lease id (release/renew with it). A leased object is
  *  retained by GC regardless of refs — this is the primitive a writer takes BEFORE reusing existing bytes. */
 export async function acquireCasLease(conn: SqlConn, holder: string, address: ContentAddress, ttlMs: number, nowMs: number): Promise<string> {

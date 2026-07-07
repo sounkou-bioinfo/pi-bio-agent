@@ -19,6 +19,7 @@ import { duckdbSqlMaterializeResolver } from "../duckdb/resolvers/duckdb-sql-mat
 import { duckhtsReadBcfResolver } from "../duckdb/resolvers/duckhts-read-bcf.js";
 import { httpTableResolver, type FetchLike } from "../duckdb/resolvers/http-table-scan.js";
 import { computeRunResolver } from "../duckdb/resolvers/compute-run.js";
+import { addCasRef, dropCasRefs, initCasMetadata, recordCasObject, replaceCasRefs } from "./cas-metadata.js";
 
 // Host-level run runner + store. Core returns { run, result, receipts }; persistence and resolver binding
 // live HERE, not in core. Only built-in resolver impls are bound; a manifest that declares any other
@@ -37,6 +38,7 @@ const NETWORK_RESOLVER = "http.get";
 // The COMPUTE capability: a manifest's compute.run resource resolves only when the host injects a
 // ComputeRunner (grants out-of-process compute by composition), exactly like http.get needs an injected fetch.
 const COMPUTE_RESOLVER = "compute.run";
+const PENDING_RUN_CAS_REF_TTL_MS = 24 * 60 * 60 * 1000;
 
 // Built-in resolvers whose params.path is a file location to resolve relative to the manifest's directory.
 const FILE_PATH_RESOLVERS = new Set(["duckdb.file_scan", "duckhts.read_bcf"]);
@@ -321,6 +323,10 @@ export interface RunOperationRequest {
   /** CAS mode (host opt-in): a content-addressed byte store. Present = resolvers snapshot bytes into it and
    *  reuse them across dbs/runs; absent = fast mode. */
   cas?: CasStore;
+  /** Optional CAS metadata on the same SqlConn as `store`. With `cas`, run result/receipt/replay/run-object CAS
+   *  bytes are registered as objects and rooted by `run:<id>` refs for metadata-driven shared-CAS GC. Without `cas`,
+   *  the authority is used only to clear stale refs for this run id after a non-CAS reuse commits. */
+  casMetadata?: { conn: SqlConn; nowMs?: number };
   /** Host-owned connection bootstrap SQL (INSTALL/LOAD/SET), run once before resolution — e.g. enabling
    *  httpfs + cache_httpfs so file_scan/sql_materialize remote reads get block caching. NOT agent SQL. */
   duckdbInitSql?: string[];
@@ -513,11 +519,14 @@ async function runAndPersist(
   hostCapabilityRefs: Array<{ schema: string; digest: `sha256:${string}` }> = [],
   runLog?: { store: SqlConn; author?: string },
   cas?: CasStore,
+  casMetadata?: { conn: SqlConn; nowMs?: number },
   serialize?: boolean,
 ): Promise<RunOperationResponse> {
   // Fail closed: lean mode drops result/receipts/replay FILES, so without a CAS to hold those bytes they would be
   // lost entirely (data loss). Refuse rather than silently discard outputs/provenance.
   if (serialize === false && !cas) throw new Error("serialize:false requires a cas — refusing to skip result/receipts/replay files with nowhere else to store the bytes");
+  if (casMetadata && !runLog) throw new Error("casMetadata requires store — run CAS metadata roots live with the run ledger");
+  if (casMetadata && runLog && casMetadata.conn !== runLog.store) throw new Error("casMetadata.conn must be the same SqlConn passed as store — run root cleanup must use one authority");
   const protectedVariableNames = protectedSessionVariableNames(protectedSessionBindings, protectedSessionVariables);
   let instance: DuckDBInstance;
   try {
@@ -533,15 +542,58 @@ async function runAndPersist(
     throw markRunDbOpenError(err); // still BEFORE side effects — a host may retry unlogged (see extension withRunLog)
   }
   const conn = duckdbNodeConn(connection);
+  const casMetadataNowMs = (): number => casMetadata?.nowMs ?? Date.now();
+  const runCasRefId = `run:${runId}`;
+  const pendingRunCasRefId = `${runCasRefId}:pending:${randomUUID()}`;
+  let pendingRunCasRefsAdded = false;
   // Put a JSON blob in CAS (bytes OUTSIDE the DB) and return its content address, or undefined when no CAS.
   const putCas = async (obj: unknown): Promise<string | undefined> => {
     if (!cas) return undefined;
     const bytes = Buffer.from(JSON.stringify(obj, bigintToJson), "utf8");
     const digest = createHash("sha256").update(bytes).digest("hex");
     await cas.put({ algorithm: "sha256", digest }, bytes); // immutable + idempotent
+    if (casMetadata) await recordCasObject(casMetadata.conn, { algorithm: "sha256", digest }, bytes.length, casMetadataNowMs());
     return `sha256:${digest}`;
   };
+  const runCasRefSpecs = (refs: readonly (string | undefined)[]) =>
+    refs.filter((ref): ref is string => typeof ref === "string").map((ref) => ({ address: { algorithm: "sha256" as const, digest: ref.slice("sha256:".length) } }));
+  const addPendingRunCasRefsBeforeCommit = async (refs: readonly (string | undefined)[]): Promise<void> => {
+    if (!casMetadata) return;
+    const nowMs = casMetadataNowMs();
+    for (const ref of runCasRefSpecs(refs)) {
+      await addCasRef(casMetadata.conn, { refId: pendingRunCasRefId, refType: "run_pending", ...ref, expiresAt: nowMs + PENDING_RUN_CAS_REF_TTL_MS }, nowMs);
+    }
+    pendingRunCasRefsAdded = true;
+  };
+  const replaceRunCasRefsAfterCommit = async (refs: readonly (string | undefined)[]): Promise<void> => {
+    if (!casMetadata) return;
+    await replaceCasRefs(
+      casMetadata.conn,
+      runCasRefId,
+      "run",
+      runCasRefSpecs(refs),
+      casMetadataNowMs(),
+    );
+  };
+  const dropPendingRunCasRefs = async (): Promise<void> => {
+    if (!casMetadata || !pendingRunCasRefsAdded) return;
+    await dropCasRefs(casMetadata.conn, pendingRunCasRefId);
+    pendingRunCasRefsAdded = false;
+  };
+  const clearRunCasRefsAfterCommit = async (): Promise<void> => {
+    if (casMetadata) {
+      await replaceCasRefs(casMetadata.conn, runCasRefId, "run", [], casMetadataNowMs());
+      return;
+    }
+    if (!runLog) return;
+    const rows = await runLog.store.all<{ n: bigint }>(
+      `SELECT count(*) AS n FROM information_schema.tables WHERE lower(table_name) = 'cas_ref'`,
+    );
+    if (Number(rows[0]?.n ?? 0) === 0) return;
+    await runLog.store.run(`DELETE FROM cas_ref WHERE ref_id = ? AND ref_type = ?`, [runCasRefId, "run"]);
+  };
   try {
+    if (casMetadata) await initCasMetadata(casMetadata.conn);
     // Agent params are DuckDB SESSION VARIABLES: the agent's bindings become `SET VARIABLE name = value`, so a
     // resource url/body composes them with plain SQL (`'…?q=' || getvariable('query')`). Values are parameter-bound
     // (no injection). These go FIRST so host init below is AUTHORITATIVE: an agent binding must NOT be able to
@@ -590,11 +642,13 @@ async function runAndPersist(
       const dir = runDir(cwd, runId);
       await fs.mkdir(dir, { recursive: true });
       const wroteCasRefs = !!(cas && (resultDigest || receiptsDigest || replayDigest || runObjectDigest));
+      const successCasRefs = [resultDigest, receiptsDigest, replayDigest, runObjectDigest];
       if (wroteCasRefs) {
         // BEFORE persistRun clears stale JSON: root THIS run's CAS bytes (a lean run writes no receipts.json), or a
         // crash in that gap would leave them in CAS but unrooted. persistRun doesn't touch cas-refs.json.
         await writeRunFile(dir, "cas-refs.json", { schema: "pi-bio.cas_refs.v1", result: resultDigest, receipts: receiptsDigest, replay: replayDigest, runObject: runObjectDigest });
       }
+      if (wroteCasRefs) await addPendingRunCasRefsBeforeCommit(successCasRefs);
       // Files are the legible VIEW (default). result.json/receipts.json/replay.json are skipped in lean mode
       // (serialize:false); run.json is always written — and in lean mode its output artifact points at the CAS URI,
       // not the unwritten result.json. (Safe: the CAS bytes are durable AND rooted by cas-refs.json before this deletes them.)
@@ -606,6 +660,12 @@ async function runAndPersist(
         // deleting it BEFORE persistRun would, on a crash in the gap, unroot the PRIOR run's still-referenced bytes
         // before this run's run.json is durably written.
         await fs.rm(join(persisted.dir, "cas-refs.json"), { force: true });
+        await clearRunCasRefsAfterCommit();
+      } else if (casMetadata) {
+        await replaceRunCasRefsAfterCommit(successCasRefs);
+        await dropPendingRunCasRefs();
+      } else {
+        await clearRunCasRefsAfterCommit();
       }
       // COMPLETION time (not run start): the ledger fact + memo record when the run FINISHED, so a long run isn't
       // visible as succeeded before it actually completed. Injected `now` (tests) collapses this to the fixed value.
@@ -648,9 +708,17 @@ async function runAndPersist(
       const casRefs = cas ? { result: resultDigest, receipts: receiptsDigest, replay: replayDigest, runObject: runObjectDigest } : undefined;
       return { ok: true, runId, operationId: identity, status: run.status, rowCount: result.rows.length, artifacts: persisted.files, casRefs, runDir: persisted.dir };
     } catch (error) {
+      if (!(error instanceof OperationRunError)) {
+        try {
+          await dropPendingRunCasRefs();
+        } catch {
+          /* pending refs are TTL'd; preserve the original failure */
+        }
+        throw error;
+      }
       // A run that started and failed at runtime persists a failed-run receipt and returns ok:false; the
       // failure is auditable, not lost. Pre-flight/config errors (which never became a run) still throw.
-      if (error instanceof OperationRunError) {
+      try {
         const enriched = replay ? enrichReplay(replay, error.receipts) : undefined;
         const attributedRun = annotateRunWithHostCapabilities(error.run, hostCapabilityRefs);
         // SAME lean-mode data-loss fix as the success path: CAS-write the failed run's receipts/replay BEFORE
@@ -662,22 +730,36 @@ async function runAndPersist(
         const dir = runDir(cwd, runId);
         await fs.mkdir(dir, { recursive: true });
         const wroteCasRefs = !!(cas && (receiptsDigest || replayDigest));
+        const failureCasRefs = [receiptsDigest, replayDigest];
         if (wroteCasRefs) {
           await writeRunFile(dir, "cas-refs.json", { schema: "pi-bio.cas_refs.v1", receipts: receiptsDigest, replay: replayDigest });
         }
+        if (wroteCasRefs) await addPendingRunCasRefsBeforeCommit(failureCasRefs);
         const persisted = await persistFailedRun(cwd, runId, { run: attributedRun, receipts: error.receipts }, { serialize, casBacked: cas !== undefined });
         if (enriched && serialize !== false) await writeRunFile(persisted.dir, "replay.json", enriched); // a failed run is replayable too
         if (!wroteCasRefs) {
           // reused runId, no cas: clear a prior CAS run's stale cas-refs.json AFTER persistFailedRun (write-before-
           // delete) — deleting first would, on a crash in the gap, unroot the prior run's bytes (see the success path).
           await fs.rm(join(persisted.dir, "cas-refs.json"), { force: true });
+          await clearRunCasRefsAfterCommit();
+        } else if (casMetadata) {
+          await replaceRunCasRefsAfterCommit(failureCasRefs);
+          await dropPendingRunCasRefs();
+        } else {
+          await clearRunCasRefsAfterCommit();
         }
         const failedAt = injectedNow ?? systemClock(); // FAILURE time, not run start (see the success path)
         await recordRun(runLog, failedAt, { runId, identity, kind, status: attributedRun.status, error: error.message, dir: persisted.dir, replay, enriched, receiptsDigest, replayDigest });
         const casRefs = cas ? { receipts: receiptsDigest, replay: replayDigest } : undefined;
         return { ok: false, runId, operationId: identity, status: error.run.status, error: error.message, casRefs, runDir: persisted.dir };
+      } catch (innerError) {
+        try {
+          await dropPendingRunCasRefs();
+        } catch {
+          /* pending refs are TTL'd; preserve the original failure */
+        }
+        throw innerError;
       }
-      throw error;
     }
   } finally {
     connection.closeSync();
@@ -722,7 +804,7 @@ export async function runBioOperationFromManifest(req: RunOperationRequest): Pro
     ...(hostCapabilityRefs.length ? { hostReceiptDigests: hostCapabilityRefs.map((r) => r.digest) } : {}),
     ...(proc ? { compute: proc } : {}),
   };
-  return runAndPersist(req.cwd, req.dbPath, runId, req.operationId, "operation", (conn) => runOperation(registry, conn, { operationId: req.operationId, runId, now, signal: req.signal, cas: req.cas }), req.now, req.duckdbInitSql, req.bindings, req.protectedSessionBindings, req.protectedSessionVariables, req.duckdbConfig, replay, hostCapabilityRefs, req.store ? { store: req.store, author: req.author } : undefined, req.cas, req.serialize);
+  return runAndPersist(req.cwd, req.dbPath, runId, req.operationId, "operation", (conn) => runOperation(registry, conn, { operationId: req.operationId, runId, now, signal: req.signal, cas: req.cas }), req.now, req.duckdbInitSql, req.bindings, req.protectedSessionBindings, req.protectedSessionVariables, req.duckdbConfig, replay, hostCapabilityRefs, req.store ? { store: req.store, author: req.author } : undefined, req.cas, req.casMetadata, req.serialize);
 }
 
 export interface RunQueryRequest {
@@ -748,6 +830,10 @@ export interface RunQueryRequest {
   signal?: AbortSignal;
   /** CAS mode (host opt-in): a content-addressed byte store for cross-db byte reuse. */
   cas?: CasStore;
+  /** Optional CAS metadata on the same SqlConn as `store`. With `cas`, run result/receipt/replay/run-object CAS
+   *  bytes are registered as objects and rooted by `run:<id>` refs for metadata-driven shared-CAS GC. Without `cas`,
+   *  the authority is used only to clear stale refs for this run id after a non-CAS reuse commits. */
+  casMetadata?: { conn: SqlConn; nowMs?: number };
   /** Host-owned connection bootstrap SQL (INSTALL/LOAD/SET), run once before resolution. NOT agent SQL. */
   duckdbInitSql?: string[];
   /** Agent params as DuckDB session variables: each becomes `SET VARIABLE name = value`, so a resource url/body composes them with plain SQL (getvariable(name)) and upstream data with subqueries — no bespoke template DSL. */
@@ -797,5 +883,5 @@ export async function runBioQueryFromManifest(req: RunQueryRequest): Promise<Run
     ...(hostCapabilityRefs.length ? { hostReceiptDigests: hostCapabilityRefs.map((r) => r.digest) } : {}),
     ...(proc ? { compute: proc } : {}),
   };
-  return runAndPersist(req.cwd, req.dbPath, runId, "ad-hoc.query", "query", (conn, protectedSessionVariables) => runQuery(registry, conn, { sql: req.sql, resources, runId, now, signal: req.signal, cas: req.cas, protectedSessionVariables }), req.now, req.duckdbInitSql, req.bindings, req.protectedSessionBindings, req.protectedSessionVariables, req.duckdbConfig, replay, hostCapabilityRefs, req.store ? { store: req.store, author: req.author } : undefined, req.cas, req.serialize);
+  return runAndPersist(req.cwd, req.dbPath, runId, "ad-hoc.query", "query", (conn, protectedSessionVariables) => runQuery(registry, conn, { sql: req.sql, resources, runId, now, signal: req.signal, cas: req.cas, protectedSessionVariables }), req.now, req.duckdbInitSql, req.bindings, req.protectedSessionBindings, req.protectedSessionVariables, req.duckdbConfig, replay, hostCapabilityRefs, req.store ? { store: req.store, author: req.author } : undefined, req.cas, req.casMetadata, req.serialize);
 }

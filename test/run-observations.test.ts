@@ -13,6 +13,7 @@ import type { RunPayload } from "../src/hosts/run-store.js";
 import { fsCasStore } from "../src/hosts/fs-cas.js";
 import type { CasStore } from "../src/core/cas.js";
 import { collectGarbage } from "../src/hosts/gc.js";
+import { dropCasRefs } from "../src/hosts/cas-metadata.js";
 import { MEMORY_NOW } from "../src/hosts/memory-store.js";
 
 const conn = async (): Promise<SqlConn> => {
@@ -202,6 +203,154 @@ describe("run-observations: ad-hoc SQL folds into the ONE store as an as-of, att
     assert.notEqual(a.runId, b.runId); // different ledger keys...
     assert.equal(a.casRefs!.runObject, b.casRefs!.runObject); // ...but ONE content-addressed run DAG root
     assert.equal(await cas.has({ algorithm: "sha256", digest: a.casRefs!.runObject!.slice(7) }), true);
+  });
+
+  test("run CAS outputs automatically register cas_object rows and run refs for metadata GC", async () => {
+    const store = await conn();
+    const cas = fsCasStore(await fsp.mkdtemp(join(tmpdir(), "cas-meta-")));
+    const cwd = await fsp.mkdtemp(join(tmpdir(), "run-cas-meta-"));
+    const res = await runBioQueryFromManifest({
+      cwd,
+      dbPath: ":memory:",
+      manifestPath: resolve(process.cwd(), "examples/variant-counts/manifest.json"),
+      sql: "SELECT count(*) AS n FROM variants",
+      runId: "cas-meta-run",
+      store,
+      author: "agent:A",
+      cas,
+      casMetadata: { conn: store, nowMs: 1000 },
+    });
+    assert.ok(res.ok);
+    if (!res.ok) return;
+    const digests = new Set(Object.values(res.casRefs ?? {}).filter((x): x is string => typeof x === "string").map((x) => x.slice("sha256:".length)));
+    assert.ok(digests.size >= 3, "result/receipts/replay/run-object CAS refs were returned");
+
+    const objectRows = (await store.all<{ digest: string; state: string }>(
+      `SELECT digest, state FROM cas_object ORDER BY digest`,
+    )).filter((r) => digests.has(r.digest));
+    assert.deepEqual(new Set(objectRows.map((r) => r.digest)), digests);
+    assert.deepEqual([...new Set(objectRows.map((r) => r.state))], ["committed"]);
+    const refRows = await store.all<{ digest: string }>(
+      `SELECT digest FROM cas_ref WHERE ref_id = ? AND ref_type = 'run' ORDER BY digest`,
+      [`run:${res.runId}`],
+    );
+    assert.deepEqual(new Set(refRows.map((r) => r.digest)), digests);
+
+    const rerun = await runBioQueryFromManifest({
+      cwd,
+      dbPath: ":memory:",
+      manifestPath: resolve(process.cwd(), "examples/variant-counts/manifest.json"),
+      sql: "SELECT count(*) + 1 AS n FROM variants",
+      runId: "cas-meta-run",
+      store,
+      author: "agent:A",
+      cas,
+      casMetadata: { conn: store, nowMs: 1500 },
+    });
+    assert.ok(rerun.ok);
+    if (!rerun.ok) return;
+    const rerunDigests = new Set(Object.values(rerun.casRefs ?? {}).filter((x): x is string => typeof x === "string").map((x) => x.slice("sha256:".length)));
+    const replacedRefRows = await store.all<{ digest: string }>(
+      `SELECT digest FROM cas_ref WHERE ref_id = ? AND ref_type = 'run' ORDER BY digest`,
+      [`run:${rerun.runId}`],
+    );
+    assert.deepEqual(new Set(replacedRefRows.map((r) => r.digest)), rerunDigests, "run id reuse replaces stale CAS refs with the current run's roots");
+
+    await collectGarbage(cwd, { casMode: "shared", metadata: { conn: store, cas, cutoffMs: 2000, graceMs: 0 }, minAgeMs: 1, runs: { keep: 0 } });
+    for (const digest of rerunDigests) assert.equal(await cas.has({ algorithm: "sha256", digest }), true, "run ref protects CAS bytes under metadata GC");
+
+    await dropCasRefs(store, `run:${rerun.runId}`);
+    await collectGarbage(cwd, { casMode: "shared", metadata: { conn: store, cas, cutoffMs: 2000, graceMs: 0 }, minAgeMs: 1, runs: { keep: 0 } });
+    for (const digest of rerunDigests) assert.equal(await cas.has({ algorithm: "sha256", digest }), false, "dropping the run ref releases CAS bytes to metadata GC");
+  });
+
+  test("runId reuse without casMetadata clears prior metadata CAS refs from the run log store", async () => {
+    const store = await conn();
+    const cas = fsCasStore(await fsp.mkdtemp(join(tmpdir(), "cas-meta-reuse-")));
+    const cwd = await fsp.mkdtemp(join(tmpdir(), "run-cas-meta-reuse-"));
+    const first = await runBioQueryFromManifest({
+      cwd,
+      dbPath: ":memory:",
+      manifestPath: resolve(process.cwd(), "examples/variant-counts/manifest.json"),
+      sql: "SELECT count(*) AS n FROM variants",
+      runId: "cas-meta-reuse",
+      store,
+      cas,
+      casMetadata: { conn: store, nowMs: 1000 },
+    });
+    assert.ok(first.ok);
+    const before = await store.all<{ n: bigint }>(
+      `SELECT count(*) AS n FROM cas_ref WHERE ref_id = ? AND ref_type = 'run'`,
+      [`run:${first.runId}`],
+    );
+    assert.ok(Number(before[0]?.n ?? 0) > 0, "the CAS-backed run rooted its metadata refs");
+
+    const second = await runBioQueryFromManifest({
+      cwd,
+      dbPath: ":memory:",
+      manifestPath: resolve(process.cwd(), "examples/variant-counts/manifest.json"),
+      sql: "SELECT count(*) + 1 AS n FROM variants",
+      runId: "cas-meta-reuse",
+      store,
+      cas,
+    });
+    assert.ok(second.ok);
+    const after = await store.all<{ n: bigint }>(
+      `SELECT count(*) AS n FROM cas_ref WHERE ref_id = ? AND ref_type = 'run'`,
+      [`run:${second.runId}`],
+    );
+    assert.equal(Number(after[0]?.n ?? 0), 0, "CAS reuse without metadata cleared stale row roots instead of pinning old bytes");
+
+    const reroot = await runBioQueryFromManifest({
+      cwd,
+      dbPath: ":memory:",
+      manifestPath: resolve(process.cwd(), "examples/variant-counts/manifest.json"),
+      sql: "SELECT count(*) + 2 AS n FROM variants",
+      runId: "cas-meta-reuse",
+      store,
+      cas,
+      casMetadata: { conn: store, nowMs: 2000 },
+    });
+    assert.ok(reroot.ok);
+    const rerooted = await store.all<{ n: bigint }>(
+      `SELECT count(*) AS n FROM cas_ref WHERE ref_id = ? AND ref_type = 'run'`,
+      [`run:${reroot.runId}`],
+    );
+    assert.ok(Number(rerooted[0]?.n ?? 0) > 0, "the metadata-backed re-run rooted rows again");
+
+    const third = await runBioQueryFromManifest({
+      cwd,
+      dbPath: ":memory:",
+      manifestPath: resolve(process.cwd(), "examples/variant-counts/manifest.json"),
+      sql: "SELECT count(*) + 3 AS n FROM variants",
+      runId: "cas-meta-reuse",
+      store,
+    });
+    assert.ok(third.ok);
+    const final = await store.all<{ n: bigint }>(
+      `SELECT count(*) AS n FROM cas_ref WHERE ref_id = ? AND ref_type = 'run'`,
+      [`run:${third.runId}`],
+    );
+    assert.equal(Number(final[0]?.n ?? 0), 0, "non-CAS reuse also cleared stale row roots just like stale cas-refs.json");
+  });
+
+  test("run CAS metadata roots require the run log store as the metadata authority", async () => {
+    const store = await conn();
+    const metadata = await conn();
+    const cas = fsCasStore(await fsp.mkdtemp(join(tmpdir(), "cas-meta-authority-")));
+    const cwd = await fsp.mkdtemp(join(tmpdir(), "run-cas-meta-authority-"));
+    await assert.rejects(
+      () => runBioQueryFromManifest({
+        cwd,
+        dbPath: ":memory:",
+        manifestPath: resolve(process.cwd(), "examples/variant-counts/manifest.json"),
+        sql: "SELECT count(*) AS n FROM variants",
+        store,
+        cas,
+        casMetadata: { conn: metadata, nowMs: 1000 },
+      }),
+      /casMetadata\.conn must be the same SqlConn passed as store/,
+    );
   });
 
   test("lean-mode DURABILITY: receipts/replay go to CAS BEFORE the run dir is finalized — a failed CAS put can't strand a reused runId's prior provenance", async () => {
