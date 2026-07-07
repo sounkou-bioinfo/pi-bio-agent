@@ -1,101 +1,117 @@
 ---
 name: pi-bio-agent
-description: "Guides design and use of pi-bio-agent abstractions: SQL-first bio primitives, ontology and knowledge-graph modeling, DuckDB extension substrates, capability discovery, and project-local skill authoring. Use when building agentic bio/genomics workflows over Pi."
+description: "Use pi-bio-agent as a host-neutral substrate for agentic bioinformatics: write manifests, inspect DuckDB tables, compose read-only SQL, run pi-bio-agent query/run through the CLI or Pi tools, and avoid per-question skill sprawl. Use for Codex, ClawBio-like systems, Pi, or any agent host that needs biomedical answers from declared resources, receipts, CAS, and observations rather than model-generated facts."
 ---
 
 # Pi Bio Agent
 
-Use this skill when a bioinformatics task should be handled by composable primitives rather than a one-off scripted skill.
+Use this skill when a bioinformatics question should become declared data plus SQL, not a bespoke script or a new
+per-question skill. The substrate is host-neutral: Pi's `bio_*` tools are convenient when present, but the default
+portable path is the `pi-bio-agent` CLI.
 
-## Core stance
+## Core Rule
 
-Do not turn every natural-language question into a bespoke hand-coded skill. First expose the substrate:
+The model may route, inspect schemas, write manifests, write SQL, and explain results. It is not the source of
+biomedical facts. Facts must come from declared resources, deterministic compute, receipts, CAS artifacts, and
+recorded observations or approvals.
 
-- typed sources and artifacts
-- genomic intervals, variants, features, samples, cohorts, matrices, and trees
-- ontologies as term/edge/mapping SQL graphs
-- knowledge graphs as typed nodes and edges with provenance/trust
-- DuckDB extension-backed readers and kernels
-- capability contracts that tell the agent what can be composed
-- project-local skills only when a reusable workflow emerges
+## Default CLI Loop
 
-The LLM routes, clarifies, writes SQL/tool calls, explains, and can author new skills. It is not the source of biomedical facts.
+1. Create or update a `manifest.json` that declares resources and, for repeated workflows, operations.
+2. Inspect resolved tables with small read-only queries:
 
-"Study notes" here are [machine studying](https://jacobxli.com/blog/2026/machine-studying/) artifacts — the agent's own indexed, hooked learning about a corpus/API/domain — not biomedical studies/trials/cohorts.
+   ```sh
+   pi-bio-agent query manifest.json --db :memory: --sql "DESCRIBE table_name"
+   pi-bio-agent query manifest.json --db :memory: --sql "SUMMARIZE table_name"
+   pi-bio-agent query manifest.json --db :memory: --sql "SELECT * FROM table_name LIMIT 5"
+   ```
 
-## Preferred workflow
+3. Answer the question with one read-only `SELECT` or `WITH` statement:
 
-1. Call `bio_describe_model` to inspect the domain model and SQL contracts.
-2. Call `bio_list_duckdb_extensions` to identify useful DuckDB format/reader substrates before claiming a capability is missing.
-3. Point `bio_query` (ad-hoc SQL) or `bio_run_operation` (a declared operation) at a manifest: declare resources, do schema discovery, and answer with a read-only `SELECT`/`WITH` over the resolved tables. Model ontology/graph work the same way — SQL over stable views.
-4. Use `bio_validate_select` to confirm SQL is a single read-only statement before running it.
-5. If a workflow repeats, use `bio_create_skill` to write a project-local skill, then ask the user to run `/reload`.
+   ```sh
+   pi-bio-agent query manifest.json --db :memory: --sql "<WITH/SELECT/DESCRIBE/SUMMARIZE>"
+   ```
 
-## Ontology modeling
+4. For stable workflows, put the SQL in a declared manifest operation and run:
 
-Represent ontologies as SQL-visible graph tables:
+   ```sh
+   pi-bio-agent run manifest.json --db :memory: --operation operation.id
+   ```
 
-- `ontology_terms(system, id, label, definition, synonyms, obsolete, source, metadata)`
-- `ontology_edges(subject_system, subject_id, predicate, object_system, object_id, source, evidence)`
-- `ontology_mappings(from_system, from_id, predicate, to_system, to_id, confidence, source)`
-- term sets for reusable predicates, such as a consequence class or phenotype class
+5. When provenance matters, add `--ledger auto` so the run becomes a `run:<id>` fact in the project observation
+   store. Report the manifest path, SQL or operation id, run id, and the answer rows.
 
-Avoid scattering domain phrases through code. Treat them as named predicates with explicit provenance, thresholds, ontology bindings, and source versions.
+## Manifest Pattern
 
-## Knowledge graph modeling
+Start with a thin manifest. Add code only when a new reusable resolver/adapter is genuinely needed.
 
-Use typed nodes:
+```json
+{
+  "schema": "pi-bio.manifest.v1",
+  "id": "task-name",
+  "version": "0.1.0",
+  "title": "Task name",
+  "description": "Declared resources for an agent-authored SQL answer.",
+  "provides": {
+    "resolvers": [
+      {
+        "id": "duckdb.file_scan",
+        "version": "0.1.0",
+        "title": "DuckDB file scan",
+        "description": "Read a DuckDB-native file into a table.",
+        "output": { "mode": "table" }
+      }
+    ],
+    "resources": [
+      {
+        "id": "variants",
+        "title": "Variants",
+        "kind": "virtual",
+        "resolver": "duckdb.file_scan",
+        "params": { "path": "data/variants.csv", "table": "variants" }
+      }
+    ]
+  }
+}
+```
 
-- subject/sample/cohort
-- artifact/source/cache
-- interval/variant/feature/matrix/tree
-- ontology term/concept
-- observation/evidence/analysis
+For examples, inspect `examples/variant-counts/manifest.json`, `examples/rare-high-impact/manifest.json`,
+`examples/connectors/clinvar-region.json`, and `examples/monarch-kg-http/manifest.json`.
 
-Use typed edges:
+## Resolver Choice
 
-- `about`
-- `annotated_as`
-- `overlaps`
-- `contains`
-- `derived_from`
-- `extracted_from`
-- `supersedes`
-- `supports` / `contradicts`
+Prefer DuckDB-native surfaces:
 
-Facts should carry trust/provenance blocks: source, version, command or SQL, digest, producer, confidence, and evidence class.
+- local tabular files: `duckdb.file_scan`
+- reusable SQL projections/views: `duckdb.sql_materialize`
+- HTTP-shaped data when the host grants network: `http.get` or ducknng-backed manifests
+- VCF/BAM/BCF/tabix ranges when provisioned: `duckhts.read_bcf`
+- graph/ontology work: load edge-shaped tables and query them with SQL
 
-## Resource and request substrate
+Fail clearly when the host has not granted a needed effect. Do not silently fetch, install extensions, read files, or
+call network endpoints outside the manifest and host policy.
 
-Model reusable resources explicitly:
+## Answering Style
 
-- content-addressed handles for local/cached bytes
-- references for files, object-store URIs, and database tables
-- virtual handles for resources resolved by an adapter
-- declarative HTTP request templates for tools that are fundamentally API calls
+Return the result and the method, not a story:
 
-The core should know the contract, not the provider. A resolver spec says what request shape and output shape exist; an adapter decides how to inject credentials, enforce consent, fetch bytes, cache responses, and return a typed resource.
+- manifest path
+- SQL or operation id
+- run id when available
+- concise result rows or counts
+- abstentions and unsupported capabilities when relevant
 
-## DuckDB substrate
+For rare/high-impact or clinical-style questions, treat missing evidence as an abstention unless the declared data
+supports a stronger claim. Do not call missing population frequency "rare".
 
-Prefer DuckDB table functions and extensions before custom parsers:
+## Skills Are Graduation
 
-- `duckhts` for VCF/BCF/BAM/CRAM/FASTA/FASTQ/BED/GFF/GTF/tabix and genomics kernels
-- `plinking_duck` for PLINK genotype data and cohort genetics analytics
-- `anndata` for h5ad single-cell data
-- `duckdb_zarr` for Zarr arrays
-- `fts` for local catalog and ontology search
-- `httpfs` only when remote access is explicitly allowed
+Do not create a new skill for a new natural-language question. First solve it as manifest + SQL.
 
-## Skill authoring rule
+Create or update a skill only when the workflow has already stabilized across repeated use and the skill is merely a
+thin playbook: where the manifest lives, which operation or query pattern to run, which fixtures prove it, and what
+output contract to report. A skill must not become the biomedical computation or a hidden script pack. If the skill
+needs facts, it should point back to declared resources and `pi-bio-agent query/run`.
 
-Create a skill only after you have a stable reusable workflow. The skill should describe:
-
-- when to use it
-- required sources/artifacts
-- exact ontology/predicate definitions
-- SQL/tool steps
-- provenance and output contract
-- safety boundaries
-
-Do not use skills to hide missing substrate. Improve the substrate first.
+For ClawBio-like systems, the migration path is: keep the host's intent/routing layer, replace per-question scripts
+with manifests and SQL operations, and call `pi-bio-agent query/run` as the compute substrate.
