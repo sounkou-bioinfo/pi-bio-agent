@@ -237,9 +237,12 @@ ducknng profile receipts are self-checked before use: their `policyDigest` must 
 redacted receipt body, and raw subject lists or extra secret-bearing fields are rejected.
 `refreshDucknngHttpProfile` covers the rotation seam without a drop/register gap: the host refreshes credential
 material, re-commissions the same profile id through ducknng's upsert path, and receives previous/current redacted
-receipts. Tokens remain host-owned bound parameters, never SQL text or replay data. Today ducknng's execution subject
-is bound by its service/session machinery; this repository should not invent an embedded subject switch until ducknng
-exposes one as a host-only API.
+receipts. Tokens remain host-owned bound parameters, never SQL text or replay data. The bring-it-home dogfood now
+exercises this helper contract against a fake `SqlConn`: it commissions and rotates a subject-restricted profile,
+pins the rotated receipt into a run, and proves replay/reproduce use only the receipt digest. Real ducknng runtime
+profile admission is still covered by the gated SQL HTTP tests when the installed extension exposes that API. Today
+ducknng's execution subject is bound by its service/session machinery; this repository should not invent an embedded
+subject switch until ducknng exposes one as a host-only API.
 
 **Done when.** Credentialed HTTP examples use subject-scoped profiles with no secrets in SQL, restricted profiles are
 invisible/unusable to non-admitted subjects, and workaround-shaped token plumbing is removed where profiles cover the

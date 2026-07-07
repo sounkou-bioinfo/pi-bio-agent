@@ -17,7 +17,7 @@ import {
   recordObservationLink,
 } from "../dist/duckdb/observations.js";
 import { materializeGraphProjectionProfile } from "../dist/duckdb/graph-projection.js";
-import { ducknngHttpProfileReceiptFromInfo } from "../dist/duckdb/http-profiles.js";
+import { refreshDucknngHttpProfile } from "../dist/duckdb/http-profiles.js";
 import { envDescriptorFromRenvLock, envDigest, validateEnvDescriptor } from "../dist/core/reproducibility.js";
 import { fsCasStore } from "../dist/hosts/fs-cas.js";
 import { recordArtifactReference } from "../dist/hosts/artifacts.js";
@@ -58,6 +58,56 @@ function sqlString(value) {
 
 function sha256(bytes) {
   return `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+}
+
+class FakeDucknngProfileConn {
+  sqlSeen = [];
+  authValuesSeen = [];
+  profiles = new Map();
+  nowMs = 1783283000000n;
+
+  async run() {
+    throw new Error("FakeDucknngProfileConn.run is not used by this dogfood");
+  }
+
+  async all(sql, params) {
+    this.sqlSeen.push(sql);
+    if (sql.includes("duckdb_functions()")) return [{ n: 1n }];
+    if (sql.includes("ducknng_list_http_profiles()")) return [...this.profiles.values()].map((row) => ({ ...row }));
+    if (sql.includes("ducknng_register_http_profile")) {
+      assert.ok(params && params.length >= 9, "ducknng profile registration is parameter-bound");
+      const profileId = String(params[0]);
+      const existing = this.profiles.get(profileId);
+      const createdMs = existing?.created_ms ?? this.tick();
+      const updatedMs = existing ? this.tick() : createdMs;
+      const expiresAtMs = params.length >= 10 ? BigInt(params[9]) : 0n;
+      const allowSubjectsJson = params.length >= 11 ? String(params[10]) : null;
+      this.authValuesSeen.push(String(params[8]));
+      this.profiles.set(profileId, {
+        profile_id: profileId,
+        scheme: String(params[1]),
+        host: String(params[2]),
+        port: params[3] == null ? null : Number(params[3]),
+        has_port: params[3] != null,
+        path_prefix: String(params[4]),
+        method: String(params[5]),
+        tls_required: Boolean(params[6]),
+        auth_header_names_json: JSON.stringify([String(params[7])]),
+        version: (existing?.version ?? 0n) + 1n,
+        created_ms: createdMs,
+        updated_ms: updatedMs,
+        expires_at_ms: expiresAtMs,
+        allow_subjects_json: allowSubjectsJson,
+      });
+      return [{ ok: true }];
+    }
+    throw new Error(`FakeDucknngProfileConn does not implement SQL: ${sql}`);
+  }
+
+  tick() {
+    this.nowMs += 1000n;
+    return this.nowMs;
+  }
 }
 
 async function compileExternalConsumer() {
@@ -342,22 +392,42 @@ try {
   const resumedQueue = await resumeBioJob(conn, { cwd: queueCwd, runId: queueRunId });
   assert.equal(resumedQueue.phase, "cancelled");
 
-  const profileReceipt = ducknngHttpProfileReceiptFromInfo({
+  const profileConn = new FakeDucknngProfileConn();
+  const firstProfile = await refreshDucknngHttpProfile(profileConn, {
     profileId: "clinvar-read-dogfood",
     scheme: "https",
     host: "api.example.test",
     port: 443,
-    hasPort: true,
     pathPrefix: "/v1/clinvar",
     method: "GET",
     tlsRequired: true,
-    authHeaderNamesJson: "[\"Authorization\"]",
-    version: 1n,
-    createdMs: 1783283000000n,
-    updatedMs: 1783283060000n,
-    expiresAtMs: 1783286600000n,
-    allowSubjectsJson: "[\"case:beta\",\"case:alpha\",\"case:alpha\"]",
+    authHeaderName: "Authorization",
+    authHeaderValue: "Bearer dogfood-token-one",
+    expiresAtMs: 1783286600000,
+    allowSubjects: ["case:beta", "case:alpha", "case:alpha"],
   });
+  const rotatedProfile = await refreshDucknngHttpProfile(profileConn, {
+    profileId: "clinvar-read-dogfood",
+    scheme: "https",
+    host: "api.example.test",
+    port: 443,
+    pathPrefix: "/v1/clinvar",
+    method: "GET",
+    tlsRequired: true,
+    authHeaderName: "Authorization",
+    authHeaderValue: "Bearer dogfood-token-two",
+    expiresAtMs: 1783287200000,
+    allowSubjects: ["case:alpha", "case:beta"],
+  });
+  assert.equal(firstProfile.created, true);
+  assert.equal(rotatedProfile.created, false);
+  assert.equal(rotatedProfile.previous?.policyDigest, firstProfile.current.policyDigest);
+  assert.notEqual(rotatedProfile.current.policyDigest, firstProfile.current.policyDigest);
+  assert.equal(rotatedProfile.current.version, "2");
+  assert.equal(rotatedProfile.current.subjectRestriction.count, 2);
+  assert.deepEqual(profileConn.authValuesSeen, ["Bearer dogfood-token-one", "Bearer dogfood-token-two"]);
+  assert.doesNotMatch(profileConn.sqlSeen.join("\n"), /dogfood-token|Bearer|case:alpha|case:beta/i);
+  const profileReceipt = rotatedProfile.current;
   assert.match(profileReceipt.policyDigest, /^sha256:[0-9a-f]{64}$/);
   assert.doesNotMatch(JSON.stringify(profileReceipt), /Bearer|token|secret|case:alpha|case:beta/i);
   await recordObservation(conn, {
@@ -603,6 +673,9 @@ try {
     ducknngProfileReceipt: {
       profileId: profileReceipt.profileId,
       policyDigest: profileReceipt.policyDigest,
+      rotatedFromDigest: rotatedProfile.previous?.policyDigest,
+      version: profileReceipt.version,
+      receiptChanged: rotatedProfile.receiptChanged,
       subjectRestriction: profileReceipt.subjectRestriction,
     },
     hostCapabilityRun: {
