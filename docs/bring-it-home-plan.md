@@ -100,10 +100,13 @@ Together these commands exercise host-event receipts, step checkpoints/resume, g
 receipts, public SDK imports, training-corpus Parquet export/readback, session tool-call/run stitching, CAS metadata
 roots, host policy hooks, and real process compute when R is available.
 
-## Remaining Work
+## Pending Issue Ledger
 
-These are the remaining lanes. Several are required to bring the substrate home; the constraint is that they should
-close over existing primitives and concrete consumers, not become speculative taxonomies.
+This section closes over the deferred/not-deferred backlog. Items listed here are current-state issues, not old chat
+residue. If an item from an earlier list is not in "active", it has been reclassified below as closed,
+consumer-pulled, or a non-goal.
+
+### Active / Not Deferred
 
 1. **Lazy resource forcing.** Resolve only the declared resources a query or operation actually names, while keeping
    the manifest contract explicit and fail-closed. This is required for larger manifests and agent-authored
@@ -111,37 +114,83 @@ close over existing primitives and concrete consumers, not become speculative ta
 2. **ducknng/quack sibling upload and shared-data path.** Use the sibling transport that fits the operation:
    ducknng RPC is the proven mutable-state path; append/share or upload-shaped paths may use quack where that fits.
    Keep this in the sibling transport/host layer and surface it to core through receipts, `SqlConn`, CAS, and
-   resolver handles.
-3. **Scoped relation/resource visibility.** The current pattern is
-   a host-owned `SqlConn` wrapper: a host that hides a relation should deny `SELECT`, `DESCRIBE`, `SUMMARIZE`, and
-   catalog/introspection reads on that injected connection. `ducknng` HTTP profile admission is the corresponding
-   network/profile gate. Do not add ad-hoc SQL string guards here. If a real embedding host needs centrally managed,
-   subject-scoped relation or resource visibility across remote services, implement it as a host/ducknng admission
-   feature and receipt it.
-4. **Training corpus hardening.** This is required, not optional: redaction policy, label schema, export contract,
-   and VARIANT-shredded Parquet for nested session/tool/run payloads. The base ledger remains `value_json`; typed
-   Parquet is a derived export for downstream corpus consumers.
-5. **Graphics/report metadata from real reports.** Core has `recordArtifactReference`; richer renderer metadata is
-   required once R/Python/HTML report paths emit it. Add fields from real artifacts and report consumers, not from a
-   guessed plot-table schema.
-6. **SDK maintenance.** Required exports should follow real sibling consumers. Each new public type/helper needs a
-   packed external-consumer dogfood so the library boundary stays usable from outside the repo.
-7. **Host adapters over `recordHostEvent`.** `recordHostEvent` is available; concrete Pi/workbench/scheduler hook
-   adapters are required where control events affect training, replay, steering, interruption, or governance. They
-   should record only events the host actually emits and only the receipts a consumer reads.
+   resolver handles. `remoteCacheScope` consistency is required wherever shared remote freshness or shared CAS reuse
+   is exposed.
+3. **Concrete host adapters over `recordHostEvent`.** The primitive exists; the open work is the adapter layer:
+   Pi/workbench/scheduler hooks for steers, interrupts, compaction, session switching, context digests, lease loss,
+   and governance events that a consumer actually reads. Do not add a closed event taxonomy.
+4. **Host capability operator ergonomics.** The library pieces exist (`duckdbInitSql`, protected session variables,
+   host capability receipts, and ducknng profile helpers), but the operator story must stay crisp. Add a small
+   profile/admin CLI only when a host needs it; it must read secrets from host storage/stdin/env, never from
+   manifests, SQL text, or argv, and it must emit only secret-free receipts.
+5. **Durable workflow dogfood over the closed lifecycle.** The async lifecycle and checkpoint resume helper are
+   built. The remaining work is to dogfood them with real R/Python/bash/NNG/scheduler-backed steps and prove
+   restart/reclaim behavior through the ledger. This is not a request for another workflow engine.
+6. **Substrate skill and non-Pi host dogfood.** The packaged skill should keep onboarding weaker hosts into the
+   substrate: write or inspect a manifest, discover schemas with `DESCRIBE` / `SUMMARIZE`, run bounded SQL, walk the
+   ledger/graph when present, and promote only repeated workflows into thin playbooks.
+7. **Docs hygiene.** Keep README and guides action-first: real commands, real code chunks, no fake text-block
+   architecture diagrams, no speculative hostfs claims, and no stale "process transport" lane. Claims should point
+   to commands, tests, or examples that currently run.
 
-## Non-Goals In Core
+### Consumer-Pulled / Deferred
+
+1. **Scoped relation/resource visibility.** Only build this when a host needs visibility narrower than its injected
+   `SqlConn`. The current pattern is a host-owned connection wrapper: hidden relations should fail for `SELECT`,
+   `DESCRIBE`, `SUMMARIZE`, and catalog/introspection reads on that connection. For remote services, this belongs in
+   host/ducknng admission and receipts, not SQL string guards.
+2. **Training corpus hardening.** Redaction policy, label schema, export contract, and VARIANT-shredded Parquet are
+   required once a real corpus consumer exists. The base ledger remains `value_json`; typed Parquet is a derived
+   export.
+3. **Graphics/report metadata from real reports.** Core has `recordArtifactReference`; richer renderer metadata
+   waits for R/Python/HTML reports that emit actual figures, tables, notebooks, and review packets.
+4. **SDK maintenance.** Required exports should follow real sibling consumers. Each new public type/helper needs a
+   packed external-consumer dogfood so the library remains usable outside this repo.
+5. **Workbench package abstractions.** `pi-bio-workbench` should remain a downstream app. Core closes over primitives
+   only after that app proves repeated shape; clinical genomics is the first binding, not a reason to prebuild a
+   framework.
+6. **SemanticSQL source-spec parity.** Edge-shaped sources are already absorbable through graph projection profiles.
+   Full generated views, prefix registries, axiom annotations, source-spec DDL, multi-ontology attachment, and richer
+   closure policy are adapter/product work until a grounding or traversal consumer needs them.
+7. **External tool robustness tests.** `rv`, OpenTargets, Monarch DuckDB, ChEMBL, R `targets`/`mirai`/`nanonext`,
+   and similar systems should first enter through manifests, SQL, `compute.run`, and receipts. Add primitives only
+   when that route fails for a concrete reason.
+8. **HostFS / ducknng-fs / DuckTinyCC research.** A filesystem-shaped or C-FFI-shaped lane is interesting only when
+   a real manifest needs it. It is not a current core primitive, and community `hostfs` notes are not product
+   evidence.
+
+### Closed / Reclassified From Earlier Backlog
+
+- **ducknng subject/auth/profile rotation at the core receipt layer.** `refreshDucknngHttpProfile`, redacted profile
+  receipts, subject-restriction digests, and action/replay key pinning exist. Remaining work is product conformance
+  and host adapter work, not another core auth primitive.
+- **Base durable runner/resume.** `AsyncRunner` is the lifecycle; `JobRunner` and checkpoint helpers specialize it.
+  Resume means completed-prefix checkpoint reuse plus suffix rerun.
+- **`recordHostEvent` primitive.** Built as one open host event fact plus ordinary links. The pending item is concrete
+  adapters, not a new host-event model.
+- **Foreign graph projection base.** A real external Monarch KGX HTTP path and internal observation-graph projection
+  exist. SemanticSQL parity is deferred adapter work.
+- **Base training-corpus export.** Digest-only ledger/session/tool/run/artifact/event exports exist. Labels and
+  redaction remain consumer-pulled.
+- **Base SDK packaging.** Root, `/core`, `/duckdb`, and `/hosts` exports are checked by a packed downstream
+  embedding dogfood. Expansion remains consumer-driven.
+
+### Non-Goals In Core
 
 - New biomedical helpers for individual questions.
+- Per-question skill packs. Skills are onboarding/playbook integration points; stable scientific work belongs in
+  manifests, SQL, operations, compute specs, receipts, and observations.
 - A closed topology taxonomy or special `topology:` node kind in core. Multi-agent, fork/resume, and workflow
-  correlation are required, but they are expressed with caller-owned `workflow:`, `session:`, `step:`, or similar
-  nodes plus ordinary edges.
+  correlation are expressed with caller-owned `workflow:`, `session:`, `step:`, or similar nodes plus ordinary edges.
+- A closed runtime event enum such as `pi.input.steer` / `pi.interrupt`. Event `kind` strings are host-owned data.
+- Regex transcript/run-id harvesting. Use self-declaring tool/run/session links and ledger observations.
+- Secrets or capability policy in manifests, SQL strings, command-line argv, or agent-authored config. Hosts grant
+  effects and provide secret-free receipts.
 - Special hiding rules for `DESCRIBE` or `SUMMARIZE`; they are ordinary DuckDB inspection over relations the host made
   visible.
 - Process-first operation syntax as a separate primitive. `compute.run` already provides process/argv execution,
-  declared file artifacts, CAS capture, environment evidence, async runner integration, receipts, and replay. If a
-  downstream app proves that wrapping process work as a `compute.run` resource is repeatedly awkward, add only a thin
-  authoring facade over those existing pieces.
+  declared file artifacts, streamed CAS capture, environment evidence, async runner integration, receipts, and
+  replay. If a downstream app proves the authoring shape is awkward, add only a thin facade over those pieces.
 - Another workflow engine above step checkpoints and the async runner lifecycle.
 
 ## Verification
