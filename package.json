@@ -72,6 +72,7 @@
     "provision:ducknng-owned": "bash scripts/provision-ducknng-owned.sh",
     "dogfood:pi-session-trace": "node scripts/pi-session-trace-dogfood.mjs",
     "dogfood:bring-it-home": "npm run build && node scripts/bring-it-home-dogfood.mjs",
+    "dogfood:sdk-host-embedding": "npm run build && node scripts/sdk-host-embedding.mjs",
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
     "prepare": "npm run build",
     "readme:tools": "node scripts/generate-readme-tools.mjs",
