@@ -30,11 +30,11 @@ const HOSTS = [
 const HOST_SET = new Set<string>(HOSTS);
 type HostPreset = typeof HOSTS[number];
 
-const usage = (command: "install-skill" | "install-codex-skill"): string => [
+export const installSkillUsage = (command: "install-skill" | "install-codex-skill"): string => [
   `usage: pi-bio-agent ${command} [--host <preset>|--dest <host-skills-dir>] [--force] [--link]`,
   "",
   "Installs the packaged pi-bio-agent substrate skill into an agent host's skill/playbook root.",
-  "Presets: pi, pi-project, claude, claude-project, opencode, opencode-project, copilot, copilot-project, codex.",
+  `Presets: ${HOSTS.join(", ")}.`,
   "--dest is required for generic hosts.",
 ].join("\n");
 
@@ -87,7 +87,7 @@ function parseArgs(argv: string[], env: NodeJS.ProcessEnv, defaultHost: HostPres
       continue;
     }
     if (arg === "--help" || arg === "-h") {
-      throw new Error(usage(command));
+      throw new Error(installSkillUsage(command));
     }
     throw new Error(`unknown argument '${arg}'`);
   }
@@ -119,7 +119,7 @@ async function installSkill(argv: string[], deps: InstallSkillDeps, defaultHost:
     opts = parseArgs(argv, env, defaultHost, command);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    const help = usage(command);
+    const help = installSkillUsage(command);
     if (message !== help) deps.err(message);
     deps.err(help);
     return message === help ? 0 : 2;

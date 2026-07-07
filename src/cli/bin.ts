@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { mainMemory } from "./memory.js";
 import { mainRun } from "./run.js";
-import { mainInstallCodexSkill, mainInstallSkill } from "./install-skill.js";
+import { installSkillUsage, mainInstallCodexSkill, mainInstallSkill } from "./install-skill.js";
 
 /**
  * Thin process wrapper around the testable CLI engines. Each engine takes injected deps (out/err sinks) and
@@ -16,12 +16,22 @@ const out = (line: string) => console.log(line);
 const err = (line: string) => console.error(line);
 const [group, ...rest] = process.argv.slice(2);
 
+const usage = (): string => [
+  "usage: pi-bio-agent <query|run|memory|install-skill|install-codex-skill> ...",
+  "  query/run <manifest.json> --db <path> [--sql/--operation ...]",
+  "  memory <list|show|history> [slug] [--as-of <iso>]",
+  "",
+  installSkillUsage("install-skill"),
+  "",
+  installSkillUsage("install-codex-skill"),
+].join("\n");
+
 const dispatch = (): Promise<number> => {
   if (group === "query" || group === "run") return mainRun(group, rest, { cwd: process.cwd(), out, err });
   if (group === "memory") return mainMemory(rest, { cwd: process.cwd(), out, err });
   if (group === "install-skill") return mainInstallSkill(rest, { out, err });
   if (group === "install-codex-skill") return mainInstallCodexSkill(rest, { out, err });
-  err("usage: pi-bio-agent <query|run|memory|install-skill|install-codex-skill> ...\n  query/run <manifest.json> --db <path> [--sql/--operation ...]\n  memory <list|show|history> [slug] [--as-of <iso>]\n  install-skill [--host <preset>|--dest <host-skills-dir>] [--force]\n  install-codex-skill [--force] [--dest <dir>]");
+  err(usage());
   return Promise.resolve(2);
 };
 

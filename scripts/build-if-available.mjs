@@ -5,9 +5,23 @@ import { fileURLToPath } from "node:url";
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const tsc = join(packageRoot, "node_modules", "typescript", "bin", "tsc");
+const requiredDist = [
+  join(packageRoot, "dist", "index.js"),
+  join(packageRoot, "dist", "cli", "bin.js"),
+];
 if (!existsSync(tsc)) {
-  console.log("pi-bio-agent: skipping build; TypeScript is not installed yet");
-  process.exit(0);
+  const missing = requiredDist.filter((path) => !existsSync(path));
+  if (missing.length === 0) {
+    chmodSync(join(packageRoot, "dist", "cli", "bin.js"), 0o755);
+    console.log("pi-bio-agent: TypeScript is not installed; using existing dist artifacts");
+    process.exit(0);
+  }
+  console.error([
+    "pi-bio-agent: cannot build because TypeScript is not installed and dist artifacts are missing.",
+    "Run `npm install` in this checkout, or install from a package that includes dist/.",
+    `Missing: ${missing.map((path) => path.slice(packageRoot.length + 1)).join(", ")}`,
+  ].join("\n"));
+  process.exit(1);
 }
 
 rmSync(join(packageRoot, "dist"), { recursive: true, force: true });

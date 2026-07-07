@@ -9,6 +9,7 @@ import { mainInstallCodexSkill, mainInstallSkill } from "../src/cli/install-skil
 
 const execFileAsync = promisify(execFile);
 const script = resolve("scripts", "install-skill.mjs");
+const buildIfAvailableScript = resolve("scripts", "build-if-available.mjs");
 
 test("generic skill installer copies the package skill and refuses accidental overwrite", async () => {
   const root = await fs.mkdtemp(join(tmpdir(), "pi-bio-host-skill-"));
@@ -33,6 +34,67 @@ test("generic skill installer copies the package skill and refuses accidental ov
 
   const forced = await execFileAsync(process.execPath, [script, "--dest", dest, "--force"], { cwd: process.cwd() });
   assert.equal(JSON.parse(forced.stdout).ok, true);
+});
+
+test("installer help lists every accepted host preset and link mode", async () => {
+  const out: string[] = [];
+  const err: string[] = [];
+  const code = await mainInstallSkill(["--help"], {
+    out: (line) => out.push(line),
+    err: (line) => err.push(line),
+    sourceDir: resolve("skills", "pi-bio-agent"),
+    env: {},
+  });
+  assert.equal(code, 0);
+  assert.deepEqual(out, []);
+  const help = err.join("\n");
+  for (const preset of [
+    "generic",
+    "pi",
+    "pi-project",
+    "claude",
+    "claude-project",
+    "opencode",
+    "opencode-project",
+    "copilot",
+    "copilot-project",
+    "github-copilot",
+    "github-copilot-project",
+    "codex",
+  ]) {
+    assert.match(help, new RegExp(`\\b${preset}\\b`), `missing preset ${preset}`);
+  }
+  assert.match(help, /--link/);
+
+  const scriptHelp = await execFileAsync(process.execPath, [script, "--help"], { cwd: process.cwd() });
+  assert.match(scriptHelp.stdout, /github-copilot-project/);
+  assert.match(scriptHelp.stdout, /--link-cli/);
+});
+
+test("prepare build script fails closed without TypeScript unless dist artifacts already exist", async () => {
+  const root = await fs.mkdtemp(join(tmpdir(), "pi-bio-prepare-"));
+  const tempScript = join(root, "scripts", "build-if-available.mjs");
+  await fs.mkdir(join(root, "scripts"), { recursive: true });
+  await fs.copyFile(buildIfAvailableScript, tempScript);
+
+  try {
+    await execFileAsync(process.execPath, [tempScript], { cwd: root });
+    assert.fail("build-if-available should fail when TypeScript and dist artifacts are both absent");
+  } catch (e) {
+    const err = e as { code?: number; stderr?: string };
+    assert.equal(err.code, 1);
+    assert.match(err.stderr ?? "", /cannot build because TypeScript is not installed/);
+    assert.match(err.stderr ?? "", /dist\/index\.js/);
+    assert.match(err.stderr ?? "", /dist\/cli\/bin\.js/);
+  }
+
+  await fs.mkdir(join(root, "dist", "cli"), { recursive: true });
+  await fs.writeFile(join(root, "dist", "index.js"), "export {};\n", "utf8");
+  await fs.writeFile(join(root, "dist", "cli", "bin.js"), "#!/usr/bin/env node\n", "utf8");
+  const ok = await execFileAsync(process.execPath, [tempScript], { cwd: root });
+  assert.match(ok.stdout, /using existing dist artifacts/);
+  const mode = (await fs.stat(join(root, "dist", "cli", "bin.js"))).mode;
+  assert.notEqual(mode & 0o111, 0, "existing CLI dist artifact is made executable");
 });
 
 test("package CLI command installs the generic skill from the packaged skill directory", async () => {

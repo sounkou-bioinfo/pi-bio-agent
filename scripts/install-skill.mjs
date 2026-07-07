@@ -32,7 +32,7 @@ function usage() {
     "",
     "Installs skills/pi-bio-agent into an agent host's skill/playbook root.",
     "--link-cli also runs `npm run build` and `npm link` so `pi-bio-agent` is on PATH.",
-    "Presets: pi, pi-project, claude, claude-project, opencode, opencode-project, copilot, copilot-project, codex.",
+    `Presets: ${Array.from(hosts).join(", ")}.`,
     "--dest is required for generic hosts.",
   ].join("\n");
 }
