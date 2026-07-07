@@ -28,6 +28,7 @@
   "files": [
     "src",
     "dist",
+    "bin",
     "extensions",
     "skills",
     "docs",
@@ -59,7 +60,7 @@
     }
   },
   "bin": {
-    "pi-bio-agent": "dist/cli/bin.js"
+    "pi-bio-agent": "bin/pi-bio-agent.mjs"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -80,7 +81,6 @@
     "dogfood:sdk-host-embedding": "npm run build && node scripts/sdk-host-embedding.mjs",
     "build": "rm -rf dist && node ./node_modules/typescript/bin/tsc -p tsconfig.build.json && chmod +x dist/cli/bin.js",
     "prepare": "node scripts/build-if-available.mjs",
-    "postinstall": "node scripts/build-if-available.mjs",
     "readme:tools": "node scripts/generate-readme-tools.mjs",
     "check:readme-tools": "node scripts/generate-readme-tools.mjs --check"
   },
