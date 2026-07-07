@@ -8,7 +8,7 @@ import { createBioRegistry, describeManifest, validateBioManifest, type BioRegis
 import { recordRunObservation, type RunObservation } from "./run-observations.js";
 import { actionCachePut, actionInputDigest } from "./action-cache.js";
 import type { CasStore } from "../core/cas.js";
-import type { BioResolverImpl, ComputeRunner, SqlConn } from "../core/ports.js";
+import { wrapSqlConn, type BioResolverImpl, type ComputeRunner, type SqlConn, type SqlConnPolicy } from "../core/ports.js";
 import { OperationRunError, runOperation, runQuery, type OperationResult } from "../core/operations.js";
 import type { BioRunRecord } from "../core/run-spec.js";
 import type { BioArtifact, Provenance } from "../core/types.js";
@@ -342,6 +342,10 @@ export interface RunOperationRequest {
    *  startup settings: S3/object-store secrets, cache_httpfs cache dir, extension_directory, and
    *  allow_unsigned_extensions (for a cached/local dev extension build; community builds are signed). */
   duckdbConfig?: Record<string, string>;
+  /** Host-owned SQL policy/audit over the execution connection opened by this high-level runner. It is the same
+   *  composition as `wrapSqlConn`: the policy sees init SQL, resolver SQL, DuckDB parser/introspection SQL, and the
+   *  final operation SQL. Hosts using lower-level APIs can still wrap their own `SqlConn` directly. */
+  sqlPolicy?: SqlConnPolicy;
   /** Secret-free host capability policy receipts that affect the run, e.g. a ducknng HTTP profile receipt. The
    *  run pins only their digests in replay/action keys and references those digests in run provenance. */
   hostCapabilityReceipts?: readonly HostCapabilityReceipt[];
@@ -515,6 +519,7 @@ async function runAndPersist(
   protectedSessionBindings?: Record<string, unknown>,
   protectedSessionVariables?: readonly string[],
   duckdbConfig?: Record<string, string>,
+  sqlPolicy?: SqlConnPolicy,
   replay?: RunReplaySpec,
   hostCapabilityRefs: Array<{ schema: string; digest: `sha256:${string}` }> = [],
   runLog?: { store: SqlConn; author?: string },
@@ -541,7 +546,8 @@ async function runAndPersist(
     instance.closeSync(); // connect() failed (bad db/config/lock) — the finally below can't run yet, so close the instance here or it leaks (a process-exclusive writer lock would linger)
     throw markRunDbOpenError(err); // still BEFORE side effects — a host may retry unlogged (see extension withRunLog)
   }
-  const conn = duckdbNodeConn(connection);
+  const rawConn = duckdbNodeConn(connection);
+  const conn = sqlPolicy ? wrapSqlConn(rawConn, sqlPolicy) : rawConn;
   const casMetadataNowMs = (): number => casMetadata?.nowMs ?? Date.now();
   const runCasRefId = `run:${runId}`;
   const pendingRunCasRefId = `${runCasRefId}:pending:${randomUUID()}`;
@@ -689,13 +695,20 @@ async function runAndPersist(
       // SQL has no ambient read / ATTACH / volatile (it isn't a single serializable query, so it keeps the text check).
       const runSql = enriched?.sql ?? "";
       const initUnproven = (initSql ?? []).some((s) => AMBIENT_SQL_READ.test(s) || VOLATILE_SQL.test(s) || /\/\*|--|"/.test(s) || /\battach\b/i.test(s));
-      const hermetic =
-        dbPath === ":memory:" &&
-        !initUnproven &&
-        runSql !== "" &&
-        (await hermeticIntrospectionUsable(conn)) && // guard: if a DuckDB parser/plan-format change broke our introspection, memoization turns OFF (never a wrong memo)
-        !(await sqlUsesNonDeterministicFn(conn, runSql)) &&
-        (await sqlReadsOnlyResolvedTables(conn, runSql, await resolvedBaseTables(conn)));
+      let hermetic = false;
+      try {
+        hermetic =
+          dbPath === ":memory:" &&
+          !initUnproven &&
+          runSql !== "" &&
+          (await hermeticIntrospectionUsable(conn)) && // guard: if a DuckDB parser/plan-format change broke our introspection, memoization turns OFF (never a wrong memo)
+          !(await sqlUsesNonDeterministicFn(conn, runSql)) &&
+          (await sqlReadsOnlyResolvedTables(conn, runSql, await resolvedBaseTables(conn)));
+      } catch {
+        // Hermeticity only controls optional ActionCache writes. If a host SQL policy denies this internal
+        // introspection, or DuckDB changes an introspection surface, the run remains valid and memoization turns off.
+        hermetic = false;
+      }
       if (resultDigest && runLog && enriched && !hasLiveSource && hermetic) {
         try {
           // key on the ENRICHED replay so the action key is CONTENT-addressed (includes sourceReceiptDigests) —
@@ -804,7 +817,7 @@ export async function runBioOperationFromManifest(req: RunOperationRequest): Pro
     ...(hostCapabilityRefs.length ? { hostReceiptDigests: hostCapabilityRefs.map((r) => r.digest) } : {}),
     ...(proc ? { compute: proc } : {}),
   };
-  return runAndPersist(req.cwd, req.dbPath, runId, req.operationId, "operation", (conn) => runOperation(registry, conn, { operationId: req.operationId, runId, now, signal: req.signal, cas: req.cas }), req.now, req.duckdbInitSql, req.bindings, req.protectedSessionBindings, req.protectedSessionVariables, req.duckdbConfig, replay, hostCapabilityRefs, req.store ? { store: req.store, author: req.author } : undefined, req.cas, req.casMetadata, req.serialize);
+  return runAndPersist(req.cwd, req.dbPath, runId, req.operationId, "operation", (conn) => runOperation(registry, conn, { operationId: req.operationId, runId, now, signal: req.signal, cas: req.cas }), req.now, req.duckdbInitSql, req.bindings, req.protectedSessionBindings, req.protectedSessionVariables, req.duckdbConfig, req.sqlPolicy, replay, hostCapabilityRefs, req.store ? { store: req.store, author: req.author } : undefined, req.cas, req.casMetadata, req.serialize);
 }
 
 export interface RunQueryRequest {
@@ -848,6 +861,10 @@ export interface RunQueryRequest {
    *  startup settings: S3/object-store secrets, cache_httpfs cache dir, extension_directory, and
    *  allow_unsigned_extensions (for a cached/local dev extension build; community builds are signed). */
   duckdbConfig?: Record<string, string>;
+  /** Host-owned SQL policy/audit over the execution connection opened by this high-level runner. It is the same
+   *  composition as `wrapSqlConn`: the policy sees init SQL, resolver SQL, DuckDB parser/introspection SQL, and the
+   *  final ad-hoc SQL. Hosts using lower-level APIs can still wrap their own `SqlConn` directly. */
+  sqlPolicy?: SqlConnPolicy;
   /** Secret-free host capability policy receipts that affect the run, e.g. a ducknng HTTP profile receipt. */
   hostCapabilityReceipts?: readonly HostCapabilityReceipt[];
 }
@@ -883,5 +900,5 @@ export async function runBioQueryFromManifest(req: RunQueryRequest): Promise<Run
     ...(hostCapabilityRefs.length ? { hostReceiptDigests: hostCapabilityRefs.map((r) => r.digest) } : {}),
     ...(proc ? { compute: proc } : {}),
   };
-  return runAndPersist(req.cwd, req.dbPath, runId, "ad-hoc.query", "query", (conn, protectedSessionVariables) => runQuery(registry, conn, { sql: req.sql, resources, runId, now, signal: req.signal, cas: req.cas, protectedSessionVariables }), req.now, req.duckdbInitSql, req.bindings, req.protectedSessionBindings, req.protectedSessionVariables, req.duckdbConfig, replay, hostCapabilityRefs, req.store ? { store: req.store, author: req.author } : undefined, req.cas, req.casMetadata, req.serialize);
+  return runAndPersist(req.cwd, req.dbPath, runId, "ad-hoc.query", "query", (conn, protectedSessionVariables) => runQuery(registry, conn, { sql: req.sql, resources, runId, now, signal: req.signal, cas: req.cas, protectedSessionVariables }), req.now, req.duckdbInitSql, req.bindings, req.protectedSessionBindings, req.protectedSessionVariables, req.duckdbConfig, req.sqlPolicy, replay, hostCapabilityRefs, req.store ? { store: req.store, author: req.author } : undefined, req.cas, req.casMetadata, req.serialize);
 }

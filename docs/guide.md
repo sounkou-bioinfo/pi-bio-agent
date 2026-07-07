@@ -92,6 +92,24 @@ job/checkpoint helpers. If an application needs a stable type that is not import
 `pi-bio-agent/core`, `pi-bio-agent/duckdb`, or `pi-bio-agent/hosts`, treat that as an SDK export gap rather than
 importing from `src/`.
 
+For high-level manifest runs, pass host policy as a function on the request:
+
+```ts
+await runBioQueryFromManifest({
+  cwd,
+  dbPath: ":memory:",
+  manifestPath: "manifest.json",
+  sql,
+  sqlPolicy: ({ sql }) => {
+    audit(sql);
+    if (disallowed(sql)) throw new Error("host policy denied SQL");
+  },
+});
+```
+
+That policy sees the connection bootstrap SQL, resolver materialization SQL, DuckDB parser/introspection SQL, and the
+final query. Hosts using lower-level APIs can instead wrap the connection they already own with `wrapSqlConn`.
+
 ### When to declare an operation
 
 An **operation** is a *pinned, named, versioned, tested* query: the special case worth saving when a query is

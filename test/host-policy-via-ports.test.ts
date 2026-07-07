@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { promises as fs } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { validateReadOnlySelect } from "../src/core/sql-guard.js";
 import { type SqlConn, wrapSqlConn } from "../src/core/ports.js";
 import { duckdbNodeConn } from "../src/duckdb/node-api.js";
+import { runBioQueryFromManifest } from "../src/hosts/run-store.js";
 
 // The host-control surface IS the injected ports — not a separate hook framework. The library guard is
 // statement-class only (it now ACCEPTS external readers; egress is the host's call). A host that wants a
@@ -66,6 +70,14 @@ function denyRelations(inner: SqlConn, deniedRelations: readonly string[]): SqlC
   });
 }
 
+async function tmpVariantProject(): Promise<string> {
+  const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-host-policy-"));
+  await fs.mkdir(join(cwd, "data"), { recursive: true });
+  await fs.copyFile("examples/variant-counts/manifest.json", join(cwd, "manifest.json"));
+  await fs.copyFile("examples/variant-counts/data/variants.csv", join(cwd, "data", "variants.csv"));
+  return cwd;
+}
+
 describe("host policy via port-wrapping (the ports are the hooks)", () => {
   test("the LIBRARY guard accepts an external reader — egress is not its concern", () => {
     const sql = "SELECT * FROM read_csv_auto('x.csv')";
@@ -123,5 +135,58 @@ describe("host policy via port-wrapping (the ports are the hooks)", () => {
     ]) {
       await assert.rejects(() => scoped.all(sql), /host policy: catalog metadata .* is not visible/, sql);
     }
+  });
+
+  test("high-level manifest runs expose their execution SqlConn to host policy", async () => {
+    const cwd = await tmpVariantProject();
+    const seen: string[] = [];
+    const res = await runBioQueryFromManifest({
+      cwd,
+      dbPath: ":memory:",
+      manifestPath: "manifest.json",
+      runId: "host-policy-ok",
+      sql: "SELECT count(*) AS n FROM variants",
+      sqlPolicy: ({ sql }) => { seen.push(sql); },
+    });
+    assert.equal(res.ok, true);
+    assert.ok(seen.some((sql) => /CREATE OR REPLACE TABLE/i.test(sql) && /variants/i.test(sql)), "policy saw resolver/materialization SQL");
+    assert.ok(seen.includes("SELECT count(*) AS n FROM variants"), "policy saw the final agent SQL");
+  });
+
+  test("high-level manifest runs fail closed when host policy denies the final SQL", async () => {
+    const cwd = await tmpVariantProject();
+    const res = await runBioQueryFromManifest({
+      cwd,
+      dbPath: ":memory:",
+      manifestPath: "manifest.json",
+      runId: "host-policy-denied",
+      sql: "SELECT count(*) AS n FROM variants",
+      sqlPolicy: ({ sql }) => {
+        if (sql === "SELECT count(*) AS n FROM variants") throw new Error("host policy: final query denied");
+      },
+    });
+    assert.equal(res.ok, false);
+    if (res.ok) throw new Error("unreachable");
+    assert.match(res.error, /host policy: final query denied/);
+  });
+
+  test("high-level manifest runs do not fail if host policy denies optional memoization introspection", async () => {
+    const cwd = await tmpVariantProject();
+    let deniedExplain = 0;
+    const res = await runBioQueryFromManifest({
+      cwd,
+      dbPath: ":memory:",
+      manifestPath: "manifest.json",
+      runId: "host-policy-no-explain",
+      sql: "SELECT count(*) AS n FROM variants",
+      sqlPolicy: ({ sql }) => {
+        if (/^\s*EXPLAIN\b/i.test(sql)) {
+          deniedExplain += 1;
+          throw new Error("host policy: explain denied");
+        }
+      },
+    });
+    assert.equal(res.ok, true);
+    assert.ok(deniedExplain > 0, "policy denied optional EXPLAIN introspection");
   });
 });

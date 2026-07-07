@@ -150,6 +150,7 @@ import {
   wrapSqlConn,
   type BioManifest,
   type SqlConn,
+  type SqlConnPolicy,
 } from "pi-bio-agent/core";
 import {
   duckdbNodeConn,
@@ -165,6 +166,9 @@ import {
 } from "pi-bio-agent/hosts";
 
 const receipt: HostCapabilityReceipt = { schema: "consumer.policy.v1", policyDigest: "sha256:${"5".repeat(64)}" };
+const policy: SqlConnPolicy = ({ sql }) => {
+  if (!sql.trim()) throw new Error("empty SQL");
+};
 const manifest: BioManifest = {
   schema: "pi-bio.manifest.v1",
   id: "consumer",
@@ -178,12 +182,11 @@ const request: RunQueryRequest = {
   dbPath: ":memory:",
   manifestPath: "manifest.json",
   sql: "SELECT 1",
+  sqlPolicy: policy,
   hostCapabilityReceipts: [receipt],
 };
 const renvEnv = envDescriptorFromRenvLock(JSON.stringify({ Packages: { renv: { Package: "renv", Version: "1.0.0" } } }), { path: "renv.lock" });
-const scopedConn: SqlConn = wrapSqlConn({ all: async () => [], run: async () => undefined }, ({ sql }) => {
-  if (!sql.trim()) throw new Error("empty SQL");
-});
+const scopedConn: SqlConn = wrapSqlConn({ all: async () => [], run: async () => undefined }, policy);
 
 void validateBioManifest(manifest);
 void envDigest(renvEnv);

@@ -144,7 +144,9 @@ project, and typechecks imports of the host-facing run, CAS, job, graph-projecti
 contracts through those public exports only. The same temp consumer then runs a Node ESM smoke import to catch
 declaration/runtime export mismatches. The host-policy test now uses the exported `wrapSqlConn` helper to prove that
 no-external-I/O and subject-scoped relation visibility are host-owned port policies, including `DESCRIBE`/`SUMMARIZE`
-over hidden relations and common catalog disclosure channels, not new `bio_query` statement classes.
+over hidden relations and common catalog disclosure channels, not new `bio_query` statement classes. The same test
+also proves the high-level manifest runners accept a `sqlPolicy` function, so embedding apps can audit or deny the
+execution connection they did not open themselves.
 
 **Done when.** This stays consumer-driven: if a real sibling app needs a stable type and cannot import it through one
 of those public entry points, add the export with a consumer compile check. Do not add private-path imports or local
