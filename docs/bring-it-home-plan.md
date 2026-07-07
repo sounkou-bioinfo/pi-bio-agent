@@ -70,16 +70,18 @@ These items are no longer open substrate work in `pi-bio-agent`.
   [sdk-host-embedding.mjs](../scripts/sdk-host-embedding.mjs),
   [sdk-host-embedding.test.ts](../test/sdk-host-embedding.test.ts),
   [bring-it-home-dogfood.test.ts](../test/bring-it-home-dogfood.test.ts).
-- **ducknng profile receipts and HTTP profile admission are pinned without secrets.** Profile receipts carry
-  redacted scope/version/subject digests; host capability receipt digests affect replay/provenance/action-cache keys.
-  Caller SQL cannot override a host-owned profile auth header. The sibling `ducknng` HTTP profile tests cover
-  credential rotation, header-collision rejection, subject allowlists, scoped profile listing, service request
-  subject bracketing, and streaming-query session subject bracketing. Core receipt evidence plus sibling profile
-  conformance evidence:
+- **ducknng profile receipts and admission are pinned without secrets.** Profile receipts carry redacted
+  scope/version/subject digests; host capability receipt digests affect replay/provenance/action-cache keys. Caller
+  SQL cannot override a host-owned profile auth header. The sibling `ducknng` HTTP profile tests cover credential
+  rotation, header-collision rejection, subject allowlists, scoped profile listing, service request subject
+  bracketing, and streaming-query session subject bracketing. Adjacent ducknng transport tests cover mTLS peer
+  identity and exact peer allowlists. Core receipt evidence plus sibling conformance evidence:
   [http-profiles.ts](../src/duckdb/http-profiles.ts),
   [ducknng-http-profiles.test.ts](../test/ducknng-http-profiles.test.ts),
   [ducknng-sql-http.test.ts](../test/ducknng-sql-http.test.ts),
-  [ducknng HTTP profile tests](https://github.com/sounkou-bioinfo/ducknng/blob/395ed5c/test/sql/ducknng_http_profiles.test).
+  [ducknng HTTP profile tests](https://github.com/sounkou-bioinfo/ducknng/blob/395ed5c/test/sql/ducknng_http_profiles.test),
+  [ducknng mTLS tests](https://github.com/sounkou-bioinfo/ducknng/blob/395ed5c/test/sql/ducknng_mtls_auth.test),
+  [ducknng peer-allowlist tests](https://github.com/sounkou-bioinfo/ducknng/blob/395ed5c/test/sql/ducknng_peer_allowlist.test).
 
 The compact proof is:
 
