@@ -243,7 +243,8 @@ profile listing: profile id, URL/method/TLS scope, profile version/timestamps/ex
 of subject restrictions. Subject allow-lists are normalized as sorted unique sets before registration and receipt
 digesting, so the policy surface is set-shaped rather than caller-order-shaped. Unit tests prove the receipt cannot
 carry token values or subject ids, while the ducknng SQL HTTP integration tests exercise profile-based auth and subject
-admission when the installed extension exposes that API.
+admission when the installed extension exposes that API. The profile-auth fixture also proves caller SQL cannot
+override the host-owned auth header while using the profile.
 Connector runs can now accept those secret-free receipts as host capability receipts: replay pins only
 `hostReceiptDigests`, run/artifact provenance references `host.capability:<schema>` by digest, and the action-cache key
 changes when the host policy receipt changes. Reproduction fails closed unless the same receipt is re-supplied. Known

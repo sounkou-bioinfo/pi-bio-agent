@@ -104,6 +104,17 @@ describe("SQL-native HTTP grounding via ducknng (a local ducknng server is the d
       )`,
     );
     assert.deepEqual(rows, [{ ok: true }]);
+    await assert.rejects(() => conn.all(
+      `SELECT * FROM ducknng_ncurl_table(
+        '${BASE}/secure',
+        'GET',
+        ducknng_http_headers_build(['Authorization'], ['Bearer attacker-token']),
+        NULL,
+        5000,
+        0::UBIGINT,
+        'auth-fixture-profile'
+      )`,
+    ), /caller header collides with HTTP profile auth header/);
     const listed = await conn.all<{ auth_header_names_json: string; token_absent: boolean }>(
       `SELECT auth_header_names_json,
               position('host-token' IN profile_id || scheme || host || path_prefix || method || auth_header_names_json) = 0 AS token_absent
