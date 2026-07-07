@@ -260,11 +260,13 @@ Real ducknng runtime profile admission is still covered by the gated SQL HTTP te
 exposes that API. A gated local ducknng runtime fixture also exercises `tls+tcp://` RPC with a host-provisioned
 self-signed TLS handle, mTLS client-certificate rejection, and exact peer-identity allow-list admission/denial.
 
-**Done when.** The core profile receipt path is done for this repository. Remaining work is either upstream in
-ducknng or consumer-owned:
+**Done when.** The core profile receipt path is done for this repository. Remaining work is either upstream adapter
+exposure or consumer-owned:
 
-- ducknng may add a host-only embedded subject bracket so an embedding service can execute a query as subject X
-  without relying on the current service/session execution-subject mechanism;
+- the `ducknng` runtime already installs execution subjects in service dispatch and HTTP route handling, and
+  carries them through connection-id bindings so subject-restricted profiles survive DuckDB worker-thread execution.
+  SQL cannot set that subject. A non-service embedding host still needs an application-facing adapter over ducknng's
+  host/internal C bracketing surface if it wants to execute as subject X without routing through a ducknng service;
 - a credentialed downstream app should use scoped profiles for SQL-native HTTP and pin the returned receipt digest
   into run replay/provenance;
 - if a host needs relation/resource visibility, it should scope the injected `SqlConn` or ducknng service profile so
@@ -283,8 +285,9 @@ ducknng or consumer-owned:
 4. **ducknng profile cleanup.** Secret-free profile receipts are pinned into connector run replay/provenance/action
    keys, refresh/rotation uses the same ducknng upsert receipt path, and subject restrictions are canonicalized before
    registration. Next work is downstream/upstream: real credentialed apps should use the profile path instead of
-   ad-hoc token plumbing, and an embedded subject bracket belongs in ducknng first because the current subject
-   mechanism is service/session-bound.
+   ad-hoc token plumbing. The `ducknng` subject mechanism is now service/HTTP-route installed and connection-bound; a
+   downstream embedding host should expose that host/internal bracket deliberately instead of adding a SQL subject
+   setter.
 5. **Runtime host adapters.** `recordHostEvent` is available; add concrete Pi/workbench hook adapters only when a
    consumer reads those event receipts.
 

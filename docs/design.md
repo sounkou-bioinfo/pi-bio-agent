@@ -763,9 +763,11 @@ canonicalized as sorted unique sets before registration so a profile policy is n
 duplicates. Profile refresh uses the same ducknng upsert path through `refreshDucknngHttpProfile`, returning
 previous/current redacted receipts while leaving token refresh/storage with the host. The local ducknng runtime
 fixture now covers `tls+tcp://` RPC with a host-provisioned self-signed TLS handle, mTLS client-certificate
-rejection, and exact peer-identity allow-list admission/denial. The remaining gaps are `wss`/server-push app
-subscriptions and an explicit ducknng host-only API for embedded subject bracketing; today subject restriction is
-intentionally bound through ducknng's service/session execution subject.
+rejection, and exact peer-identity allow-list admission/denial. The `ducknng` runtime now carries execution subjects
+through service dispatch, HTTP route handling, and connection-id bindings. Subject-restricted profiles keep working
+across DuckDB worker-thread execution; SQL cannot set that subject. The remaining gaps are `wss`/server-push app
+subscriptions and application-facing adapters that expose ducknng's host/internal subject bracketing to embedding
+hosts that are not routing through a ducknng service.
 
 ## Progressive disclosure
 

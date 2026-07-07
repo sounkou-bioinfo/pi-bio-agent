@@ -796,9 +796,10 @@ Open library questions to resolve before claiming that position:
   - rotation/refresh: `refreshDucknngHttpProfile` re-commissions the same profile id through ducknng's upsert path
     and returns previous/current redacted receipts; host auth storage such as Pi `AuthStorage` still owns how a fresh
     token is obtained and must pass it only as a bound parameter, never SQL text;
-  - embedded-host subject bracketing: ducknng services install the execution subject; pure in-process hosts still
-    need a clean bracketing API if they want subject-restricted profiles without routing through ducknng service
-    dispatch;
+  - embedded-host subject bracketing: `ducknng` services and HTTP routes install the execution subject, and
+    connection-id bindings carry it through DuckDB worker-thread execution. SQL cannot set the subject. Pure
+    in-process hosts that do not route through ducknng service dispatch still need a deliberate application-facing
+    adapter over ducknng's host/internal bracketing surface;
   - whole-header ownership policy: if a deployment needs to forbid all caller-supplied headers except an allowlist,
     that must be explicit profile metadata, not a hardcoded taxonomy of auth-looking header names;
   - DuckDB Secret Manager integration remains useful as a future storage/provider backend, but ducknng still needs
@@ -812,9 +813,10 @@ Open library questions to resolve before claiming that position:
   an SSE route served by ducknng and consumed with `ducknng_ncurl`, scoped HTTP profile receipts pinned into replay
   and action-cache keys, profile rotation through `refreshDucknngHttpProfile`, gated subject-restricted profile auth
   when the loaded ducknng build exposes execution subjects, and a local `tls+tcp://` fixture for TLS/mTLS client
-  authentication plus exact peer-allowlist admit/deny. Remaining conformance targets before product claims are now
-  narrower: `wss`/server-push subscriptions, embedded-host subject bracketing for non-service hosts, and optional
-  whole-header ownership policy when a deployment needs it.
+  authentication plus exact peer-allowlist admit/deny. The `ducknng` service/HTTP-route execution-subject and
+  connection-binding path now exists; remaining conformance targets before product claims are narrower:
+  `wss`/server-push subscriptions, a non-SQL embedded-host adapter over that subject bracket for non-service hosts,
+  and optional whole-header ownership policy when a deployment needs it.
 - **Token rotation/refresh seam:** reuse the Pi pattern rather than inventing manifest config. Pi's
   `AuthStorage` stores API keys/OAuth credentials in a locked 0600 file, refreshes OAuth under lock, and returns an
   access token only at request time. `http.get` supports dynamic refresh because `withAuth` calls `getAuthHeaders`
