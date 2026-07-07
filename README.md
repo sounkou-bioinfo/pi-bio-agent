@@ -66,20 +66,21 @@ pi \
 
 Manifest path: `.pi/bio-agent/readme-clinvar-tp53.json`
 
+SQL:
+
 ``` sql
 WITH distinct_calls AS (
   SELECT DISTINCT CHROM, POS, REF, ALT, significance
-  FROM clinvar,
-       UNNEST(INFO_CLNSIG) AS u(significance)
+  FROM clinvar, UNNEST(INFO_CLNSIG) AS u(significance)
   WHERE significance IS NOT NULL
 )
-SELECT significance, COUNT(*) AS n
+SELECT significance AS "clinical-significance", COUNT(*) AS n
 FROM distinct_calls
 GROUP BY significance
 ORDER BY n DESC, significance;
 ```
 
-| significance                                 |    n |
+| clinical-significance                        |    n |
 |----------------------------------------------|-----:|
 | Pathogenic                                   | 3593 |
 | Conflicting_classifications_of_pathogenicity | 2917 |
@@ -298,6 +299,39 @@ unavailable. If no `ComputeRunner` is injected, `compute.run` is
 unavailable. The library validates manifests, SQL shape, receipts, and
 replay. The host owns filesystem, network, credentials, and process
 isolation.
+
+For credentialed SQL-native HTTP, the CLI can commission a ducknng HTTP
+profile on the same DuckDB connection as the run. The profile file
+contains non-secret policy plus a credential source; the token comes
+from env or stdin, and replay records only the redacted profile receipt
+digest.
+
+``` json
+{
+  "profileId": "clinvar-read",
+  "scheme": "https",
+  "host": "api.example.org",
+  "pathPrefix": "/clinvar",
+  "method": "GET",
+  "tlsRequired": true,
+  "authHeaderName": "Authorization",
+  "authHeaderValueEnv": "CLINVAR_TOKEN",
+  "allowSubjects": ["case:alpha"]
+}
+```
+
+``` sh
+pi-bio-agent query credentialed-manifest.json \
+  --db :memory: \
+  --init-sql "LOAD ducknng" \
+  --ducknng-http-profile ./clinvar-profile.json \
+  --sql "SELECT * FROM secured_table LIMIT 5"
+```
+
+`credentialed-manifest.json` is the host/app manifest whose
+`ducknng_ncurl_table` call names the profile id `clinvar-read`;
+`CLINVAR_TOKEN` is supplied by the host environment or secret manager,
+and the secret never appears in the manifest, SQL, or argv.
 
 ## Ledger
 

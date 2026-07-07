@@ -15,6 +15,11 @@ import { installSkillUsage, mainInstallCodexSkill, mainInstallSkill } from "./in
 const out = (line: string) => console.log(line);
 const err = (line: string) => console.error(line);
 const [group, ...rest] = process.argv.slice(2);
+const readStdin = async (): Promise<string> => {
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
+  return Buffer.concat(chunks).toString("utf8");
+};
 
 const usage = (): string => [
   "usage: pi-bio-agent <query|run|memory|install-skill|install-codex-skill> ...",
@@ -27,7 +32,7 @@ const usage = (): string => [
 ].join("\n");
 
 const dispatch = (): Promise<number> => {
-  if (group === "query" || group === "run") return mainRun(group, rest, { cwd: process.cwd(), out, err });
+  if (group === "query" || group === "run") return mainRun(group, rest, { cwd: process.cwd(), out, err, env: process.env, readStdin });
   if (group === "memory") return mainMemory(rest, { cwd: process.cwd(), out, err });
   if (group === "install-skill") return mainInstallSkill(rest, { out, err });
   if (group === "install-codex-skill") return mainInstallCodexSkill(rest, { out, err });

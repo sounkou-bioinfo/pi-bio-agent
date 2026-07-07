@@ -116,17 +116,13 @@ consumer-pulled, or a non-goal.
 2. **Concrete host adapters over `recordHostEvent`.** The primitive exists; the open work is the adapter layer:
    Pi/workbench/scheduler hooks for steers, interrupts, compaction, session switching, context digests, lease loss,
    and governance events that a consumer actually reads. Do not add a closed event taxonomy.
-3. **Host capability operator ergonomics.** The library pieces exist (`duckdbInitSql`, protected session variables,
-   host capability receipts, and ducknng profile helpers), but the operator story must stay crisp. Add a small
-   profile/admin CLI only when a host needs it; it must read secrets from host storage/stdin/env, never from
-   manifests, SQL text, or argv, and it must emit only secret-free receipts.
-4. **Durable workflow dogfood over the closed lifecycle.** The async lifecycle and checkpoint resume helper are
+3. **Durable workflow dogfood over the closed lifecycle.** The async lifecycle and checkpoint resume helper are
    built. The remaining work is to dogfood them with real R/Python/bash/NNG/scheduler-backed steps and prove
    restart/reclaim behavior through the ledger. This is not a request for another workflow engine.
-5. **Substrate skill and non-Pi host dogfood.** The packaged skill should keep onboarding weaker hosts into the
+4. **Substrate skill and non-Pi host dogfood.** The packaged skill should keep onboarding weaker hosts into the
    substrate: write or inspect a manifest, discover schemas with `DESCRIBE` / `SUMMARIZE`, run bounded SQL, walk the
    ledger/graph when present, and promote only repeated workflows into thin playbooks.
-6. **Docs hygiene.** Keep README and guides action-first: real commands, real code chunks, no fake text-block
+5. **Docs hygiene.** Keep README and guides action-first: real commands, real code chunks, no fake text-block
    architecture diagrams, no speculative hostfs claims, and no stale "process transport" lane. Claims should point
    to commands, tests, or examples that currently run.
 
@@ -176,6 +172,12 @@ consumer-pulled, or a non-goal.
   and manifest `params.table` values; catalog-style schema discovery can still force the inspected table. Ambiguous
   table-to-resource mappings fail clearly. Evidence: [resource-forcing.ts](../src/core/resource-forcing.ts),
   [run-store.ts](../src/hosts/run-store.ts), [host-run-operation.test.ts](../test/host-run-operation.test.ts).
+- **Host capability CLI profile commissioning.** `pi-bio-agent query` / `run` accept
+  `--ducknng-http-profile <json>` as a host-owned runtime adapter. The profile JSON names only non-secret policy and
+  a credential source (`authHeaderValueEnv` or `authHeaderValueStdin`); the run registers the ducknng HTTP profile
+  on the same DuckDB connection before resources resolve, then pins only the redacted receipt digest in
+  replay/provenance. Evidence: [run.ts](../src/cli/run.ts), [run-store.ts](../src/hosts/run-store.ts),
+  [cli-run.test.ts](../test/cli-run.test.ts).
 
 ### Non-Goals In Core
 

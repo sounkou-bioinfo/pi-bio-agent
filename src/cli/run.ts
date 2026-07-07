@@ -1,8 +1,9 @@
 import { promises as fs } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import type { SqlConn } from "../core/ports.js";
 import { runBioOperationFromManifest, runBioQueryFromManifest } from "../hosts/run-store.js";
 import { openBioStore } from "../hosts/bio-store.js";
+import type { DucknngHttpProfileSpec } from "../duckdb/http-profiles.js";
 
 // The `query` / `run` CLI engine — the substrate's actual value at a provider-agnostic entry point (not Pi-only).
 // It wraps the SAME tested host functions the Pi extension uses (runBioQueryFromManifest / runBioOperationFromManifest),
@@ -20,6 +21,8 @@ export interface RunCliDeps {
   cwd: string;
   out: (line: string) => void;
   err: (line: string) => void;
+  env?: NodeJS.ProcessEnv;
+  readStdin?: () => Promise<string>;
 }
 
 /** Parse `--key value` and `--key=value` pairs after the positional manifest path. Repeated keys keep the last.
@@ -67,9 +70,9 @@ function parseBindings(raw: string | undefined): Record<string, unknown> | undef
 
 const USAGE =
   "usage:\n" +
-  "  pi-bio-agent query <manifest.json> --db <path|:memory:> --sql \"<SELECT/WITH/DESCRIBE/SUMMARIZE>\" [--resources a,b] [--bindings '{...}'] [--init-sql \"INSTALL ...; LOAD ...\"] [--remote-cache-scope <scope>] [--run-id id] [--ledger <path|auto> [--author name]]\n" +
-  "  pi-bio-agent run   <manifest.json> --db <path|:memory:> --operation <id> [--bindings '{...}'] [--remote-cache-scope <scope>] [--run-id id] [--ledger <path|auto> [--author name]]\n" +
-  "  --ledger records the run as a run:<id> fact in the shared bio_observations store (path, or 'auto' for the project default); --author attributes it (default 'cli'); --remote-cache-scope enables host-scoped shared HTTP/CAS reuse.";
+  "  pi-bio-agent query <manifest.json> --db <path|:memory:> --sql \"<SELECT/WITH/DESCRIBE/SUMMARIZE>\" [--resources a,b] [--bindings '{...}'] [--init-sql \"INSTALL ...; LOAD ...\"] [--ducknng-http-profile <json>] [--remote-cache-scope <scope>] [--run-id id] [--ledger <path|auto> [--author name]]\n" +
+  "  pi-bio-agent run   <manifest.json> --db <path|:memory:> --operation <id> [--bindings '{...}'] [--init-sql \"INSTALL ...; LOAD ...\"] [--ducknng-http-profile <json>] [--remote-cache-scope <scope>] [--run-id id] [--ledger <path|auto> [--author name]]\n" +
+  "  --ledger records the run as a run:<id> fact in the shared bio_observations store (path, or 'auto' for the project default); --author attributes it (default 'cli'); --remote-cache-scope enables host-scoped shared HTTP/CAS reuse; --ducknng-http-profile commissions a host HTTP profile on this run's DuckDB connection using authHeaderValueEnv or authHeaderValueStdin.";
 
 /** Split a `;`-separated SQL string into statements WITHOUT splitting a `;` inside a single-quoted string literal
  *  (with `''` escapes). Enough for the provisioning escape hatch (`SET VARIABLE tls = fn('a;b')`); not a full
@@ -90,6 +93,58 @@ export function splitSqlStatements(sql: string): string[] {
   return out;
 }
 
+type CliDucknngProfileSpec = Omit<DucknngHttpProfileSpec, "authHeaderValue"> & {
+  authHeaderValueEnv?: string;
+  authHeaderValueStdin?: boolean;
+};
+
+function stripOneTrailingNewline(value: string): string {
+  return value.endsWith("\r\n") ? value.slice(0, -2) : value.endsWith("\n") ? value.slice(0, -1) : value;
+}
+
+function profileEntries(input: unknown): CliDucknngProfileSpec[] {
+  const entries = Array.isArray(input) ? input : [input];
+  if (entries.length === 0) throw new Error("profile file must contain one profile object or a non-empty array");
+  return entries.map((entry, i) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new Error(`profile[${i}] must be an object`);
+    const r = entry as Record<string, unknown>;
+    if (r.authHeaderValue !== undefined) throw new Error(`profile[${i}] must not contain authHeaderValue; use authHeaderValueEnv or authHeaderValueStdin`);
+    return r as unknown as CliDucknngProfileSpec;
+  });
+}
+
+export async function loadDucknngHttpProfiles(path: string | undefined, deps: RunCliDeps): Promise<DucknngHttpProfileSpec[] | undefined> {
+  if (path === undefined) return undefined;
+  const text = await fs.readFile(resolve(deps.cwd, path), "utf8");
+  let parsed: unknown;
+  try { parsed = JSON.parse(text); } catch { throw new Error("--ducknng-http-profile must be valid JSON"); }
+  const env = deps.env ?? process.env;
+  let stdinSecret: string | undefined;
+  const readStdinSecret = async (): Promise<string> => {
+    if (stdinSecret !== undefined) return stdinSecret;
+    if (!deps.readStdin) throw new Error("authHeaderValueStdin requires a CLI stdin reader");
+    stdinSecret = stripOneTrailingNewline(await deps.readStdin());
+    return stdinSecret;
+  };
+  const entries = profileEntries(parsed);
+  if (entries.filter((entry) => entry.authHeaderValueStdin === true).length > 1) {
+    throw new Error("at most one ducknng HTTP profile may read authHeaderValueStdin");
+  }
+  const out: DucknngHttpProfileSpec[] = [];
+  for (const [i, entry] of entries.entries()) {
+    const fromEnv = entry.authHeaderValueEnv;
+    const fromStdin = entry.authHeaderValueStdin === true;
+    if (fromEnv !== undefined && (typeof fromEnv !== "string" || fromEnv.length === 0)) throw new Error(`profile[${i}].authHeaderValueEnv must be a non-empty string`);
+    if (fromEnv !== undefined && fromStdin) throw new Error(`profile[${i}] must choose only one of authHeaderValueEnv or authHeaderValueStdin`);
+    if (fromEnv === undefined && !fromStdin) throw new Error(`profile[${i}] must declare authHeaderValueEnv or authHeaderValueStdin`);
+    const authHeaderValue = fromEnv !== undefined ? env[fromEnv] : await readStdinSecret();
+    if (typeof authHeaderValue !== "string" || authHeaderValue.length === 0) throw new Error(`profile[${i}] credential source is empty or unset`);
+    const { authHeaderValueEnv: _env, authHeaderValueStdin: _stdin, ...profile } = entry;
+    out.push({ ...(profile as Omit<DucknngHttpProfileSpec, "authHeaderValue">), authHeaderValue });
+  }
+  return out;
+}
+
 export async function mainRun(sub: string, argv: string[], deps: RunCliDeps): Promise<number> {
   const [manifestPath, ...rest] = argv;
   if (!manifestPath || manifestPath.startsWith("--")) { deps.err(USAGE); return 2; }
@@ -101,7 +156,7 @@ export async function mainRun(sub: string, argv: string[], deps: RunCliDeps): Pr
     // PER-SUBCOMMAND flags, not a shared set: `run --resources` / `query --operation` would otherwise be accepted
     // and SILENTLY IGNORED (a `run` still resolves the operation's own requiredResources — the caller's --resources
     // exclusion is a no-op), which is exactly the surprising fall-through the unknown-flag hardening exists to stop.
-    const COMMON = ["db", "bindings", "run-id", "init-sql", "ledger", "author", "remote-cache-scope"];
+    const COMMON = ["db", "bindings", "run-id", "init-sql", "ledger", "author", "remote-cache-scope", "ducknng-http-profile"];
     const KNOWN = new Set(sub === "query" ? [...COMMON, "sql", "resources"] : [...COMMON, "operation"]);
     const unknown = Object.keys(flags).filter((k) => !KNOWN.has(k));
     if (unknown.length) throw new Error(`unknown flag(s) for '${sub}': ${unknown.map((k) => `--${k}`).join(", ")}`); // a typo / wrong-subcommand flag must not silently fall back
@@ -117,6 +172,16 @@ export async function mainRun(sub: string, argv: string[], deps: RunCliDeps): Pr
   const initStmts = flags["init-sql"] ? splitSqlStatements(flags["init-sql"]) : [];
   const duckdbInitSql = initStmts.length ? initStmts : undefined;
   const remoteCacheScope = flags["remote-cache-scope"];
+  if (sub === "query" && !flags.sql) { deps.err("query requires --sql <read-only result statement>"); deps.err(USAGE); return 2; }
+  if (sub === "run" && !flags.operation) { deps.err("run requires --operation <operationId>"); deps.err(USAGE); return 2; }
+  if (sub !== "query" && sub !== "run") { deps.err(USAGE); return 2; }
+  let ducknngHttpProfiles: DucknngHttpProfileSpec[] | undefined;
+  try {
+    ducknngHttpProfiles = await loadDucknngHttpProfiles(flags["ducknng-http-profile"], deps);
+  } catch (e) {
+    deps.err(`--ducknng-http-profile: ${e instanceof Error ? e.message : String(e)}`);
+    return 2;
+  }
   // Optional LEDGER opt-in: fold this run into the shared bio_observations store as a `run:<id>` fact — the thesis'
   // "compute status is a row in the one ledger" demonstrated from the provider-agnostic CLI, not just the extension.
   // EXPLICIT + path-specified (`--ledger <path|auto>`), never an ambient default (the CLI's visible-choice
@@ -131,16 +196,14 @@ export async function mainRun(sub: string, argv: string[], deps: RunCliDeps): Pr
       return 1;
     }
   }
-  const common = { cwd: deps.cwd, dbPath, manifestPath, runId, bindings, duckdbInitSql, remoteCacheScope, ...(ledger ? { store: ledger.conn, author: flags.author ?? "cli" } : {}) };
+  const common = { cwd: deps.cwd, dbPath, manifestPath, runId, bindings, duckdbInitSql, remoteCacheScope, ducknngHttpProfiles, ...(ledger ? { store: ledger.conn, author: flags.author ?? "cli" } : {}) };
 
   let res;
   try {
     if (sub === "query") {
-      if (!flags.sql) { deps.err("query requires --sql <read-only result statement>"); deps.err(USAGE); return 2; }
       const resources = flags.resources ? flags.resources.split(",").map((s) => s.trim()).filter(Boolean) : undefined;
       res = await runBioQueryFromManifest({ ...common, sql: flags.sql, resources });
     } else if (sub === "run") {
-      if (!flags.operation) { deps.err("run requires --operation <operationId>"); deps.err(USAGE); return 2; }
       res = await runBioOperationFromManifest({ ...common, operationId: flags.operation });
     } else {
       deps.err(USAGE);

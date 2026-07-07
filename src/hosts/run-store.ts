@@ -6,6 +6,7 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { createBioRegistry, describeManifest, validateBioManifest, type BioRegistry, type BioManifest, type ManifestDescription, type ResolutionReceipt } from "../core/manifest.js";
 import { inferQueryResourceClosure } from "../core/resource-forcing.js";
+import { refreshDucknngHttpProfile, type DucknngHttpProfileSpec } from "../duckdb/http-profiles.js";
 import { recordRunObservation, type RunObservation } from "./run-observations.js";
 import { actionCachePut, actionInputDigest } from "./action-cache.js";
 import type { CasStore } from "../core/cas.js";
@@ -164,6 +165,12 @@ function hostCapabilityReceiptRefs(receipts: readonly HostCapabilityReceipt[] | 
     const digest = hostCapabilityReceiptDigest(receipt);
     return { schema: receipt.schema, digest };
   }).sort((a, b) => a.digest === b.digest ? a.schema.localeCompare(b.schema) : a.digest.localeCompare(b.digest));
+}
+
+function mergeHostCapabilityRefs(...groups: Array<Array<{ schema: string; digest: `sha256:${string}` }>>): Array<{ schema: string; digest: `sha256:${string}` }> {
+  const deduped = new Map<string, { schema: string; digest: `sha256:${string}` }>();
+  for (const ref of groups.flat()) deduped.set(`${ref.schema}\0${ref.digest}`, ref);
+  return [...deduped.values()].sort((a, b) => a.digest === b.digest ? a.schema.localeCompare(b.schema) : a.digest.localeCompare(b.digest));
 }
 
 function hostCapabilityProvenance(refs: Array<{ schema: string; digest: `sha256:${string}` }>): Provenance[] {
@@ -354,6 +361,9 @@ export interface RunOperationRequest {
   /** Secret-free host capability policy receipts that affect the run, e.g. a ducknng HTTP profile receipt. The
    *  run pins only their digests in replay/action keys and references those digests in run provenance. */
   hostCapabilityReceipts?: readonly HostCapabilityReceipt[];
+  /** Host-commissioned ducknng HTTP profiles installed on this run's DuckDB connection before resources resolve.
+   *  Credential values are runtime-only; redacted profile receipts are pinned as host capability receipts. */
+  ducknngHttpProfiles?: readonly DucknngHttpProfileSpec[];
 }
 
 /** CAS content addresses for a run's immutable outputs — the bytes live in CAS (outside the DB), the fact + this
@@ -540,6 +550,7 @@ async function runAndPersist(
   sqlPolicy?: SqlConnPolicy,
   replay?: RunReplaySpec,
   hostCapabilityRefs: Array<{ schema: string; digest: `sha256:${string}` }> = [],
+  ducknngHttpProfiles?: readonly DucknngHttpProfileSpec[],
   runLog?: { store: SqlConn; author?: string },
   cas?: CasStore,
   casMetadata?: { conn: SqlConn; nowMs?: number },
@@ -566,6 +577,8 @@ async function runAndPersist(
   }
   const rawConn = duckdbNodeConn(connection);
   const conn = sqlPolicy ? wrapSqlConn(rawConn, sqlPolicy) : rawConn;
+  let effectiveHostCapabilityRefs = [...hostCapabilityRefs];
+  let effectiveReplay = replay;
   const casMetadataNowMs = (): number => casMetadata?.nowMs ?? Date.now();
   const runCasRefId = `run:${runId}`;
   const pendingRunCasRefId = `${runCasRefId}:pending:${randomUUID()}`;
@@ -634,10 +647,18 @@ async function runAndPersist(
     // must declare their names in `protectedSessionVariables`. The ad-hoc query path then blocks getvariable(name)
     // and duckdb_variables(); declared operations remain the host-authored path for intentional use.
     if (initSql) for (const stmt of initSql) await conn.run(stmt);
+    if (ducknngHttpProfiles?.length) {
+      const receipts = [];
+      for (const profile of ducknngHttpProfiles) receipts.push((await refreshDucknngHttpProfile(conn, profile)).current);
+      effectiveHostCapabilityRefs = mergeHostCapabilityRefs(effectiveHostCapabilityRefs, hostCapabilityReceiptRefs(receipts));
+      if (effectiveReplay && effectiveHostCapabilityRefs.length) {
+        effectiveReplay = { ...effectiveReplay, hostReceiptDigests: effectiveHostCapabilityRefs.map((r) => r.digest) };
+      }
+    }
     try {
       const { run, result, receipts } = await body(conn, protectedVariableNames);
-      const attributedRun = annotateRunWithHostCapabilities(run, hostCapabilityRefs);
-      let enriched = replay ? enrichReplay(replay, receipts) : undefined;
+      const attributedRun = annotateRunWithHostCapabilities(run, effectiveHostCapabilityRefs);
+      let enriched = effectiveReplay ? enrichReplay(effectiveReplay, receipts) : undefined;
       // result rows -> CAS FIRST (needed to retarget the artifact below); the run:<id> fact references it by digest.
       const resultDigest = await putCas(result.rows);
       // PIN the result-content digest into the replay, so reproduce() can verify the OUTPUT matched, not just the
@@ -695,7 +716,7 @@ async function runAndPersist(
       // visible as succeeded before it actually completed. Injected `now` (tests) collapses this to the fixed value.
       const completedAt = injectedNow ?? systemClock();
       // Datomic + CAS: record the run as a fact in the ONE store, referencing content by digest (bytes stay outside).
-      await recordRun(runLog, completedAt, { runId, identity, kind, status: attributedRun.status, error: undefined, dir: persisted.dir, replay, enriched, resultDigest, receiptsDigest, replayDigest, runObjectDigest });
+      await recordRun(runLog, completedAt, { runId, identity, kind, status: attributedRun.status, error: undefined, dir: persisted.dir, replay: effectiveReplay, enriched, resultDigest, receiptsDigest, replayDigest, runObjectDigest });
       // ActionCache (LLVM CAS): map this input's CASID -> the result's CASID, so an identical future run can be
       // memoized/deduped and reproduce() has an input->output handle. Only when both a CAS and the store are present.
       // SKIP a run with a LIVE SOURCE: its sourceReceiptDigests are blind to the source's CONTENT (sql_materialize /
@@ -750,8 +771,8 @@ async function runAndPersist(
       // A run that started and failed at runtime persists a failed-run receipt and returns ok:false; the
       // failure is auditable, not lost. Pre-flight/config errors (which never became a run) still throw.
       try {
-        const enriched = replay ? enrichReplay(replay, error.receipts) : undefined;
-        const attributedRun = annotateRunWithHostCapabilities(error.run, hostCapabilityRefs);
+        const enriched = effectiveReplay ? enrichReplay(effectiveReplay, error.receipts) : undefined;
+        const attributedRun = annotateRunWithHostCapabilities(error.run, effectiveHostCapabilityRefs);
         // SAME lean-mode data-loss fix as the success path: CAS-write the failed run's receipts/replay BEFORE
         // persistFailedRun deletes/skips the JSON files, so a crash/failed-put can't strand the provenance bytes.
         const receiptsDigest = await putCas(error.receipts);
@@ -780,7 +801,7 @@ async function runAndPersist(
           await clearRunCasRefsAfterCommit();
         }
         const failedAt = injectedNow ?? systemClock(); // FAILURE time, not run start (see the success path)
-        await recordRun(runLog, failedAt, { runId, identity, kind, status: attributedRun.status, error: error.message, dir: persisted.dir, replay, enriched, receiptsDigest, replayDigest });
+        await recordRun(runLog, failedAt, { runId, identity, kind, status: attributedRun.status, error: error.message, dir: persisted.dir, replay: effectiveReplay, enriched, receiptsDigest, replayDigest });
         const casRefs = cas ? { receipts: receiptsDigest, replay: replayDigest } : undefined;
         return { ok: false, runId, operationId: identity, status: error.run.status, error: error.message, casRefs, runDir: persisted.dir };
       } catch (innerError) {
@@ -835,7 +856,7 @@ export async function runBioOperationFromManifest(req: RunOperationRequest): Pro
     ...(hostCapabilityRefs.length ? { hostReceiptDigests: hostCapabilityRefs.map((r) => r.digest) } : {}),
     ...(proc ? { compute: proc } : {}),
   };
-  return runAndPersist(req.cwd, req.dbPath, runId, req.operationId, "operation", (conn) => runOperation(registry, conn, { operationId: req.operationId, runId, now, signal: req.signal, cas: req.cas, remoteCacheScope: req.remoteCacheScope }), req.now, req.duckdbInitSql, req.bindings, req.protectedSessionBindings, req.protectedSessionVariables, req.duckdbConfig, req.sqlPolicy, replay, hostCapabilityRefs, req.store ? { store: req.store, author: req.author } : undefined, req.cas, req.casMetadata, req.serialize);
+  return runAndPersist(req.cwd, req.dbPath, runId, req.operationId, "operation", (conn) => runOperation(registry, conn, { operationId: req.operationId, runId, now, signal: req.signal, cas: req.cas, remoteCacheScope: req.remoteCacheScope }), req.now, req.duckdbInitSql, req.bindings, req.protectedSessionBindings, req.protectedSessionVariables, req.duckdbConfig, req.sqlPolicy, replay, hostCapabilityRefs, req.ducknngHttpProfiles, req.store ? { store: req.store, author: req.author } : undefined, req.cas, req.casMetadata, req.serialize);
 }
 
 export interface RunQueryRequest {
@@ -889,6 +910,9 @@ export interface RunQueryRequest {
   sqlPolicy?: SqlConnPolicy;
   /** Secret-free host capability policy receipts that affect the run, e.g. a ducknng HTTP profile receipt. */
   hostCapabilityReceipts?: readonly HostCapabilityReceipt[];
+  /** Host-commissioned ducknng HTTP profiles installed on this run's DuckDB connection before resources resolve.
+   *  Credential values are runtime-only; redacted profile receipts are pinned as host capability receipts. */
+  ducknngHttpProfiles?: readonly DucknngHttpProfileSpec[];
 }
 
 /**
@@ -922,5 +946,5 @@ export async function runBioQueryFromManifest(req: RunQueryRequest): Promise<Run
     ...(hostCapabilityRefs.length ? { hostReceiptDigests: hostCapabilityRefs.map((r) => r.digest) } : {}),
     ...(proc ? { compute: proc } : {}),
   };
-  return runAndPersist(req.cwd, req.dbPath, runId, "ad-hoc.query", "query", (conn, protectedSessionVariables) => runQuery(registry, conn, { sql: req.sql, resources, runId, now, signal: req.signal, cas: req.cas, remoteCacheScope: req.remoteCacheScope, protectedSessionVariables }), req.now, req.duckdbInitSql, req.bindings, req.protectedSessionBindings, req.protectedSessionVariables, req.duckdbConfig, req.sqlPolicy, replay, hostCapabilityRefs, req.store ? { store: req.store, author: req.author } : undefined, req.cas, req.casMetadata, req.serialize);
+  return runAndPersist(req.cwd, req.dbPath, runId, "ad-hoc.query", "query", (conn, protectedSessionVariables) => runQuery(registry, conn, { sql: req.sql, resources, runId, now, signal: req.signal, cas: req.cas, remoteCacheScope: req.remoteCacheScope, protectedSessionVariables }), req.now, req.duckdbInitSql, req.bindings, req.protectedSessionBindings, req.protectedSessionVariables, req.duckdbConfig, req.sqlPolicy, replay, hostCapabilityRefs, req.ducknngHttpProfiles, req.store ? { store: req.store, author: req.author } : undefined, req.cas, req.casMetadata, req.serialize);
 }

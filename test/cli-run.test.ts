@@ -11,12 +11,32 @@ import * as sdk from "../src/index.js";
 // The `query`/`run` CLI engine wraps the SAME tested host functions the Pi extension uses. Exercised over the
 // pure-SQL variant-counts example (no network, no process — the CLI's fail-closed default suffices).
 const MANIFEST = "examples/variant-counts/manifest.json";
+const RHI_MANIFEST = "examples/rare-high-impact/manifest.json";
 
 function sink() {
   const out: string[] = [];
   const err: string[] = [];
   return { out, err, deps: { cwd: process.cwd(), out: (l: string) => out.push(l), err: (l: string) => err.push(l) } };
 }
+
+const PROFILE_MACROS = [
+  "CREATE MACRO ducknng_register_http_profile(a,b,c,d,e,f,g,h,i,j,k) AS true",
+  `CREATE MACRO ducknng_list_http_profiles() AS TABLE SELECT
+    'cli-auth-profile'::VARCHAR profile_id,
+    'https'::VARCHAR scheme,
+    'api.example.test'::VARCHAR host,
+    NULL::INTEGER port,
+    false has_port,
+    '/v1'::VARCHAR path_prefix,
+    'GET'::VARCHAR "method",
+    true tls_required,
+    '["Authorization"]'::VARCHAR auth_header_names_json,
+    1::UBIGINT "version",
+    1::UBIGINT created_ms,
+    1::UBIGINT updated_ms,
+    0::UBIGINT expires_at_ms,
+    '["case:alpha","case:beta"]'::VARCHAR allow_subjects_json`,
+].join(";");
 
 describe("cli: query/run over a manifest (provider-agnostic entry point)", () => {
   test("query runs the agent's ad-hoc SQL and prints the answer rows", async () => {
@@ -119,6 +139,120 @@ describe("cli: query/run over a manifest (provider-agnostic entry point)", () =>
     const printed = JSON.parse(s.out.join("\n")) as { ok: boolean; rows: Array<{ consequence: string }> };
     assert.equal(printed.ok, true);
     assert.deepEqual(printed.rows.map((r) => r.consequence), ["missense", "stop_gained", "synonymous"]);
+  });
+
+  test("--ducknng-http-profile commissions a runtime profile and pins only its redacted receipt", async () => {
+    const dir = await fsp.mkdtemp(join(tmpdir(), "cli-profile-"));
+    const profilePath = join(dir, "profile.json");
+    await fsp.writeFile(profilePath, JSON.stringify({
+      profileId: "cli-auth-profile",
+      scheme: "https",
+      host: "api.example.test",
+      pathPrefix: "/v1",
+      method: "GET",
+      tlsRequired: true,
+      authHeaderName: "Authorization",
+      authHeaderValueEnv: "PI_BIO_TEST_TOKEN",
+      allowSubjects: ["case:beta", "case:alpha"],
+    }), "utf8");
+    const s = sink();
+    const code = await mainRun("query", [
+      MANIFEST,
+      "--db", ":memory:",
+      "--init-sql", PROFILE_MACROS,
+      "--ducknng-http-profile", profilePath,
+      "--sql", "SELECT count(*) AS n FROM variants",
+      "--run-id", "cli-profile",
+    ], { ...s.deps, env: { PI_BIO_TEST_TOKEN: "Bearer super-secret" } });
+    assert.equal(code, 0, s.err.join("\n"));
+    const printed = JSON.parse(s.out.join("\n")) as { runDir: string };
+    const replay = JSON.parse(await fsp.readFile(join(printed.runDir, "replay.json"), "utf8")) as { hostReceiptDigests?: string[] };
+    assert.equal(replay.hostReceiptDigests?.length, 1);
+    assert.match(replay.hostReceiptDigests![0]!, /^sha256:[0-9a-f]{64}$/);
+    const run = JSON.parse(await fsp.readFile(join(printed.runDir, "run.json"), "utf8"));
+    const serialized = JSON.stringify({ replay, run });
+    assert.match(serialized, /host\.capability:pi-bio\.ducknng_http_profile_receipt\.v1/);
+    assert.doesNotMatch(serialized, /super-secret|Bearer|case:alpha|case:beta/);
+  });
+
+  test("--ducknng-http-profile refuses raw secret values in the profile file", async () => {
+    const dir = await fsp.mkdtemp(join(tmpdir(), "cli-profile-"));
+    const profilePath = join(dir, "profile.json");
+    await fsp.writeFile(profilePath, JSON.stringify({
+      profileId: "bad-profile",
+      scheme: "https",
+      host: "api.example.test",
+      pathPrefix: "/",
+      authHeaderName: "Authorization",
+      authHeaderValue: "Bearer should-not-appear",
+    }), "utf8");
+    const s = sink();
+    const code = await mainRun("query", [
+      MANIFEST,
+      "--db", ":memory:",
+      "--ducknng-http-profile", profilePath,
+      "--sql", "SELECT 1",
+    ], s.deps);
+    assert.equal(code, 2);
+    assert.match(s.err.join("\n"), /must not contain authHeaderValue/);
+    assert.doesNotMatch(s.err.join("\n"), /should-not-appear/);
+  });
+
+  test("--ducknng-http-profile does not read stdin before required command args validate", async () => {
+    const dir = await fsp.mkdtemp(join(tmpdir(), "cli-profile-"));
+    const profilePath = join(dir, "profile.json");
+    await fsp.writeFile(profilePath, JSON.stringify({
+      profileId: "cli-auth-profile",
+      scheme: "https",
+      host: "api.example.test",
+      pathPrefix: "/v1",
+      authHeaderName: "Authorization",
+      authHeaderValueStdin: true,
+    }), "utf8");
+    let stdinReads = 0;
+    const s = sink();
+    const code = await mainRun("query", [
+      MANIFEST,
+      "--db", ":memory:",
+      "--ducknng-http-profile", profilePath,
+    ], { ...s.deps, readStdin: async () => { stdinReads++; return "Bearer should-not-read\n"; } });
+    assert.equal(code, 2);
+    assert.equal(stdinReads, 0);
+    assert.match(s.err.join("\n"), /query requires --sql/);
+  });
+
+  test("--ducknng-http-profile works for declared operation runs with an stdin secret", async () => {
+    const dir = await fsp.mkdtemp(join(tmpdir(), "cli-profile-"));
+    const profilePath = join(dir, "profile.json");
+    await fsp.writeFile(profilePath, JSON.stringify({
+      profileId: "cli-auth-profile",
+      scheme: "https",
+      host: "api.example.test",
+      pathPrefix: "/v1",
+      method: "GET",
+      tlsRequired: true,
+      authHeaderName: "Authorization",
+      authHeaderValueStdin: true,
+      allowSubjects: ["case:alpha"],
+    }), "utf8");
+    let stdinReads = 0;
+    const s = sink();
+    const code = await mainRun("run", [
+      RHI_MANIFEST,
+      "--db", ":memory:",
+      "--init-sql", PROFILE_MACROS,
+      "--ducknng-http-profile", profilePath,
+      "--operation", "rare_high_impact.report",
+      "--run-id", "cli-profile-run",
+    ], { ...s.deps, readStdin: async () => { stdinReads++; return "Bearer stdin-secret\n"; } });
+    assert.equal(code, 0, s.err.join("\n"));
+    assert.equal(stdinReads, 1);
+    const printed = JSON.parse(s.out.join("\n")) as { runDir: string };
+    const replay = JSON.parse(await fsp.readFile(join(printed.runDir, "replay.json"), "utf8")) as { hostReceiptDigests?: string[] };
+    assert.equal(replay.hostReceiptDigests?.length, 1);
+    const serialized = JSON.stringify({ replay, run: JSON.parse(await fsp.readFile(join(printed.runDir, "run.json"), "utf8")) });
+    assert.match(serialized, /host\.capability:pi-bio\.ducknng_http_profile_receipt\.v1/);
+    assert.doesNotMatch(serialized, /stdin-secret|Bearer|case:alpha/);
   });
 });
 
