@@ -75,7 +75,7 @@
     "dogfood:substrate-skill": "npm run build && node scripts/substrate-skill-dogfood.mjs",
     "dogfood:bring-it-home": "npm run build && node scripts/bring-it-home-dogfood.mjs",
     "dogfood:sdk-host-embedding": "npm run build && node scripts/sdk-host-embedding.mjs",
-    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "build": "rm -rf dist && node ./node_modules/typescript/bin/tsc -p tsconfig.build.json",
     "prepare": "npm run build",
     "readme:tools": "node scripts/generate-readme-tools.mjs",
     "check:readme-tools": "node scripts/generate-readme-tools.mjs --check"
