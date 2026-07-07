@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { mainMemory } from "./memory.js";
 import { mainRun } from "./run.js";
+import { mainInstallCodexSkill } from "./install-codex-skill.js";
 
 /**
  * Thin process wrapper around the testable CLI engines. Each engine takes injected deps (out/err sinks) and
@@ -8,6 +9,7 @@ import { mainRun } from "./run.js";
  * DuckDB driver, process argv/cwd, stdout, and process.exit. Groups:
  *   query / run   — run a manifest's ad-hoc SQL or a declared operation (the substrate's value, provider-agnostic)
  *   memory        — read the temporal memory store (list / show / history, as-of)
+ *   install-codex-skill — install the packaged substrate skill into Codex's skill root
  */
 const out = (line: string) => console.log(line);
 const err = (line: string) => console.error(line);
@@ -16,7 +18,8 @@ const [group, ...rest] = process.argv.slice(2);
 const dispatch = (): Promise<number> => {
   if (group === "query" || group === "run") return mainRun(group, rest, { cwd: process.cwd(), out, err });
   if (group === "memory") return mainMemory(rest, { cwd: process.cwd(), out, err });
-  err("usage: pi-bio-agent <query|run|memory> ...\n  query/run <manifest.json> --db <path> [--sql/--operation ...]\n  memory <list|show|history> [slug] [--as-of <iso>]");
+  if (group === "install-codex-skill") return mainInstallCodexSkill(rest, { out, err });
+  err("usage: pi-bio-agent <query|run|memory|install-codex-skill> ...\n  query/run <manifest.json> --db <path> [--sql/--operation ...]\n  memory <list|show|history> [slug] [--as-of <iso>]\n  install-codex-skill [--force] [--dest <dir>]");
   return Promise.resolve(2);
 };
 

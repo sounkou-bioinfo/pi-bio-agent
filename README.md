@@ -64,9 +64,7 @@ pi \
   "SQL, and a Markdown result table."
 ```
 
-Manifest path: `.pi/bio-agent/readme-clinvar-tp53.json`
-
-SQL:
+`.pi/bio-agent/readme-clinvar-tp53.json`
 
 ``` sql
 WITH distinct_calls AS (
@@ -78,7 +76,7 @@ WITH distinct_calls AS (
 SELECT significance, COUNT(*) AS n
 FROM distinct_calls
 GROUP BY significance
-ORDER BY n DESC;
+ORDER BY n DESC, significance
 ```
 
 | significance                                 |    n |
@@ -544,13 +542,34 @@ write a manifest, inspect tables with `DESCRIBE` / `SUMMARIZE`, run
 read-only SQL through `pi-bio-agent query`, and promote only stable
 workflows to thin playbooks.
 
-Install it into Codex from a checkout:
+Install CLI + Codex skill directly from GitHub, without cloning:
 
 ``` sh
+npm install -g github:sounkou-bioinfo/pi-bio-agent
+pi-bio-agent install-codex-skill
+```
+
+The first command installs the CLI. The second copies the packaged
+`skills/pi-bio-agent/` directory into Codex’s skill root. Restart Codex
+after installing the skill.
+
+From a checkout, install the skill for local development:
+
+``` sh
+npm install
+npm run build
 npm run install:codex-skill
 ```
 
-Install it into Codex directly from GitHub:
+That installs the skill only. Link the checkout CLI when you also want
+`pi-bio-agent` on `PATH`:
+
+``` sh
+npm run install:codex-skill -- --link-cli
+```
+
+Codex’s generic GitHub skill installer also works, but it installs only
+the skill, not the CLI:
 
 ``` sh
 python ~/.codex/skills/.system/skill-installer/scripts/install-skill-from-github.py \
