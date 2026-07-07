@@ -80,7 +80,7 @@ A query that fails at runtime (e.g. a missing column) returns `{ ok: false, erro
 Downstream applications should import the substrate through package exports, not private source paths:
 
 ```ts
-import { runBioQueryFromManifest } from "pi-bio-agent";
+import { runBioQueryFromManifest, type CasStore } from "pi-bio-agent";
 import { validateBioManifest } from "pi-bio-agent/core";
 import { duckdbNodeConn } from "pi-bio-agent/duckdb";
 import { fsCasStore, runJobStepWithCheckpoint } from "pi-bio-agent/hosts";
@@ -91,6 +91,10 @@ ports; `pi-bio-agent` supplies contracts, validators, DuckDB adapters, runs, CAS
 job/checkpoint helpers. If an application needs a stable type that is not importable through `pi-bio-agent`,
 `pi-bio-agent/core`, `pi-bio-agent/duckdb`, or `pi-bio-agent/hosts`, treat that as an SDK export gap rather than
 importing from `src/`.
+
+```ts
+const cas: CasStore = fsCasStore(".pi/bio-agent/cas");
+```
 
 For high-level manifest runs, pass host policy as a function on the request. The simplest useful policy is audit:
 

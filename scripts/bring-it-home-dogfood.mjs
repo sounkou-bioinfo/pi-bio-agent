@@ -142,6 +142,7 @@ import {
   ingestSessionJsonl,
   exportTrainingCorpusParquet,
   type HostCapabilityReceipt,
+  type CasStore,
 } from "pi-bio-agent";
 import {
   validateBioManifest,
@@ -187,10 +188,12 @@ const request: RunQueryRequest = {
 };
 const renvEnv = envDescriptorFromRenvLock(JSON.stringify({ Packages: { renv: { Package: "renv", Version: "1.0.0" } } }), { path: "renv.lock" });
 const scopedConn: SqlConn = wrapSqlConn({ all: async () => [], run: async () => undefined }, policy);
+const cas: CasStore = fsCasStore("cas");
 
 void validateBioManifest(manifest);
 void envDigest(renvEnv);
 void scopedConn;
+void cas;
 void request;
 void runBioQueryFromManifest;
 void recordHostEvent;
