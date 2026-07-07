@@ -66,12 +66,14 @@ pi \
 
 Manifest path: `.pi/bio-agent/readme-clinvar-tp53.json`
 
+SQL:
+
 ``` sql
 WITH distinct_calls AS (
-  SELECT DISTINCT CHROM, POS, REF, ALT, u.significance
+  SELECT DISTINCT CHROM, POS, REF, ALT, significance
   FROM clinvar,
        UNNEST(INFO_CLNSIG) AS u(significance)
-  WHERE u.significance IS NOT NULL
+  WHERE significance IS NOT NULL
 )
 SELECT significance, COUNT(*) AS n
 FROM distinct_calls
@@ -389,11 +391,38 @@ npm run dogfood:bring-it-home
     "host_event": 1,
     "job_step_checkpoint": 2
   },
+  "ducknngProfile": {
+    "version": "2",
+    "receiptChanged": true,
+    "subjectRestriction": {
+      "restricted": true,
+      "count": 2,
+      "digest": "sha256:ceee9bcb816bd665d011958ad04d1fdfdcb0230ac619ea4a59afaedc002dc953"
+    }
+  },
+  "casMetadata": {
+    "casMetadataRefs": 4
+  },
+  "graphProjection": {
+    "external": {
+      "edgeCount": 3,
+      "closureCount": 3
+    },
+    "internal": {
+      "edgeCountAtLeast4": true,
+      "closureCountAtLeast3": true
+    }
+  },
   "trainingCorpus": {
     "toolCalls": 1,
     "runs": 2,
     "hostEvents": 1,
     "parquetReadbackRows": 1
+  },
+  "sdkConsumer": {
+    "publicExportsOnly": true,
+    "runtimeImports": true,
+    "packageSource": "npm-pack"
   },
   "queueCancel": {
     "staleWriteRejected": true,

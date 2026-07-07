@@ -91,7 +91,17 @@ knitr::knit_engines$set(dogfood = function(options) {
   summary <- jsonlite::fromJSON(substr(out_txt, start, nchar(out_txt)), simplifyVector = FALSE)
   proof <- list(
     observationCounts = summary$observationCounts[c("executes", "invoked_by", "tool_call", "run", "host_event", "job_step_checkpoint")],
+    ducknngProfile = summary$ducknngProfileReceipt[c("version", "receiptChanged", "subjectRestriction")],
+    casMetadata = summary$hostCapabilityRun[c("casMetadataRefs")],
+    graphProjection = list(
+      external = summary$externalProjection[c("edgeCount", "closureCount")],
+      internal = list(
+        edgeCountAtLeast4 = summary$internalProjection$edgeCount >= 4,
+        closureCountAtLeast3 = summary$internalProjection$closureCount >= 3
+      )
+    ),
     trainingCorpus = summary$trainingCorpus[c("toolCalls", "runs", "hostEvents", "parquetReadbackRows")],
+    sdkConsumer = summary$sdkConsumer[c("publicExportsOnly", "runtimeImports", "packageSource")],
     queueCancel = summary$queueCancel[c("staleWriteRejected", "resumedPhase")],
     renvEnvironment = summary$renvEnvironment[c("rVersion", "bioconductor", "envStatus", "artifactRows")]
   )
@@ -236,7 +246,7 @@ query examples/run-ledger/manifest.json --db :memory: --sql "SELECT tool, status
 
 Run the compact all-primitives dogfood:
 
-```{dogfood, cache=TRUE}
+```{dogfood}
 npm run dogfood:bring-it-home
 ```
 
