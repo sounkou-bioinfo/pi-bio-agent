@@ -100,10 +100,13 @@ the related code.
   compute specialization; the durable run queue is the replay/run specialization. Queue rows and leases coordinate
   mutable work; recorded wakeup/checkpoint observations are durable state; raw transport wakeups are optional
   carriers unless a backend gives them durable stream semantics. Step checkpoints are the resume primitive: code
-  outside a step may replay after a crash, compaction, or lease expiry, while a completed step result is read back
-  and not re-executed. Because backend cancellation is only best-effort, queue workers must publish status/result
-  through live-claim-gated helpers (`recordJobClaimStatus`, `recordJobClaimResult`); a late worker whose lease was
-  cancelled or reclaimed is rejected by the ledger write path. `src/hosts/job-store.ts` exposes the narrow helper
+  outside a step may replay after a crash, compaction, or lease expiry, while a completed prefix is read back and
+  execution resumes from the first missing step. The suffix is rerun, not blindly reused, so stale downstream
+  checkpoints cannot survive a partial or corrupt attempt; checkpoint reuse is also gated by the replay digest so a
+  reused step belongs to the same run spec. Because backend cancellation is only best-effort, queue workers must
+  publish status/result through live-claim-gated helpers (`recordJobClaimStatus`,
+  `recordJobClaimResult`); a late worker whose lease was cancelled or reclaimed is rejected by the ledger write
+  path. `src/hosts/job-store.ts` exposes the narrow helper
   (`runJobStepWithCheckpoint`) and the sequential-plan helper (`runJobStepsWithCheckpoints`) over
   `job_step_checkpoint` observations; neither is a workflow engine. Receipts, replay specs, CAS result/artifact
   digests, and `bio_observations` prove what happened. See `src/core/ports.ts`,

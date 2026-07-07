@@ -187,6 +187,12 @@ function parseStepCheckpoint<T extends JsonValue>(runId: string, stepId: string,
   };
 }
 
+function assertCheckpointReplayDigest(checkpoint: JobStepCheckpoint<JsonValue>, expectedDigest: string): void {
+  if (checkpoint.replayDigest !== expectedDigest) {
+    throw new Error(`job-store: checkpoint step '${checkpoint.runId}/${checkpoint.stepId}' replay digest does not match the current replay digest`);
+  }
+}
+
 async function persistJob(cwd: string, rec: JobRecord): Promise<void> {
   await fs.mkdir(jobsDir(cwd), { recursive: true });
   const path = jobFile(cwd, rec.runId);
@@ -266,14 +272,18 @@ export async function recordJobStepCheckpoint<T extends JsonValue = JsonValue>(c
   };
 }
 
-/** Execute one step only if its checkpoint is missing. This is the resume primitive for workflow-shaped jobs:
- * completed steps are durable observations, and restarted code continues from the first missing step. */
+/** Execute one step only if its checkpoint is missing. This is useful for an isolated idempotent step. For a
+ * sequential workflow, use `runJobStepsWithCheckpoints`, which reuses only the completed prefix and reruns the
+ * suffix from the first missing step. */
 export async function runJobStepWithCheckpoint<T extends JsonValue = JsonValue>(
   conn: SqlConn,
   req: RunJobStepWithCheckpointRequest<T>,
 ): Promise<JobStepCheckpoint<T> & { reused: boolean }> {
   const existing = await readJobStepCheckpoint<T>(conn, req.runId, req.stepId);
-  if (existing) return { ...existing, reused: true };
+  if (existing) {
+    assertCheckpointReplayDigest(existing, req.replayDigest);
+    return { ...existing, reused: true };
+  }
   const value = await req.run();
   const recorded = await recordJobStepCheckpoint(conn, { ...req, value });
   return { ...recorded, reused: false };
@@ -312,17 +322,51 @@ export async function runJobStepsWithCheckpoints(
     return cp.value as T;
   };
   const context: RunJobStepsWithCheckpointsContext = { runId: req.runId, completed, valueOf };
+  const existingByStep = new Map<string, JobStepCheckpoint<JsonValue>>();
+  let firstMissingIndex = -1;
 
-  for (const step of req.steps) {
-    const checkpoint = await runJobStepWithCheckpoint<JsonValue>(conn, {
-      runId: req.runId,
-      stepId: step.stepId,
-      recordedAt: step.recordedAt ?? req.recordedAt,
-      source: step.source ?? req.source,
-      replayDigest: step.replayDigest ?? req.replayDigest,
-      attempt: step.attempt ?? req.attempt,
-      run: () => step.run(context),
-    });
+  for (let i = 0; i < req.steps.length; i++) {
+    const step = req.steps[i]!;
+    const existing = await readJobStepCheckpoint<JsonValue>(conn, req.runId, step.stepId);
+    if (existing) {
+      assertCheckpointReplayDigest(existing, step.replayDigest ?? req.replayDigest);
+      existingByStep.set(step.stepId, existing);
+    } else if (firstMissingIndex < 0) {
+      firstMissingIndex = i;
+    }
+  }
+
+  if (firstMissingIndex >= 0) {
+    for (let i = firstMissingIndex; i < req.steps.length; i++) {
+      const step = req.steps[i]!;
+      const existing = existingByStep.get(step.stepId);
+      if (!existing) continue;
+      const recordedAt = step.recordedAt ?? req.recordedAt;
+      if (!afterTs(recordedAt, existing.recordedAt)) {
+        throw new Error(`job-store: checkpoint step '${step.stepId}' already has a later/equal checkpoint at '${existing.recordedAt}'; record after it to resume from an earlier missing step`);
+      }
+    }
+  }
+
+  for (let i = 0; i < req.steps.length; i++) {
+    const step = req.steps[i]!;
+    const existing = existingByStep.get(step.stepId);
+    let checkpoint: JobStepCheckpoint<JsonValue> & { reused: boolean };
+    if (existing && (firstMissingIndex < 0 || i < firstMissingIndex)) {
+      checkpoint = { ...existing, reused: true };
+    } else {
+      const value = await step.run(context);
+      const recorded = await recordJobStepCheckpoint<JsonValue>(conn, {
+        runId: req.runId,
+        stepId: step.stepId,
+        value,
+        recordedAt: step.recordedAt ?? req.recordedAt,
+        source: step.source ?? req.source,
+        replayDigest: step.replayDigest ?? req.replayDigest,
+        attempt: step.attempt ?? req.attempt,
+      });
+      checkpoint = { ...recorded, reused: false };
+    }
     completed.set(step.stepId, checkpoint);
     resultSteps.push(checkpoint);
   }

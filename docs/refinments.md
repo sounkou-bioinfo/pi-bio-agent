@@ -855,15 +855,18 @@ Open library questions to resolve before claiming that position:
 
   The important application primitive is the **step checkpoint**, not only the queue. A task can be decomposed into
   ordered steps whose successful return values are retained; after a worker crash, lease expiry, or agent
-  compaction/resume, the next attempt should read completed step checkpoints and continue from the first missing
-  step. This applies equally to Nextflow-shaped compute stages, long API jobs, and agent turns. The first local
-  dogfood is `test/absurd-queue-push-dogfood.test.ts`: attempt 1 records an `extract` step, its lease expires,
-  attempt 2 reclaims the job, reuses that checkpoint without re-running it, records the `summarize` step, and
-  completes through the same live-claim-gated ledger result/status slots. The repeated checkpoint pattern is now
-  lifted into `runJobStepWithCheckpoint` / `recordJobStepCheckpoint` in `src/hosts/job-store.ts`: a caller-owned step
-  id maps to an encoded `job:<runId>:step:<encodedStepId>` slot, the helper reads that slot first, runs only if
-  missing, and records a `job_step_checkpoint` value carrying the replay digest. This is the resume convention, not
-  an orchestration engine.
+  compaction/resume, the next attempt should read the completed checkpoint prefix and continue from the first
+  missing step; later suffix checkpoints are rerun rather than reused, because they may have been computed from a
+  stale or absent upstream value. Prefix reuse is replay-digest gated, so a step from a different run spec is not
+  silently adopted. This applies equally to Nextflow-shaped compute stages, long API jobs, and agent turns. The
+  first local dogfood is `test/absurd-queue-push-dogfood.test.ts`: attempt 1 records an `extract` step,
+  its lease expires, attempt 2 reclaims the job, reuses that checkpoint without re-running it, records the
+  `summarize` step, and completes through the same live-claim-gated ledger result/status slots. The repeated
+  checkpoint pattern is now lifted into `runJobStepWithCheckpoint` / `recordJobStepCheckpoint` in
+  `src/hosts/job-store.ts`: a caller-owned step
+  id maps to an encoded `job:<runId>:step:<encodedStepId>` slot, the single-step helper reads that slot first, and
+  the sequential helper reuses only the checkpoint prefix before recording fresh suffix checkpoints with the replay
+  digest. This is the resume convention, not an orchestration engine.
 
   Do not add an Absurd type system to core. The core should expose the narrow structural contracts an Absurd-like
   backend needs to satisfy: replay spec in, async handle out, status/progress observations, checkpoint/event ids,
