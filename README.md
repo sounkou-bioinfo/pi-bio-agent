@@ -535,6 +535,34 @@ calls (`npm run readme:tools`); `npm run check` fails if it drifts.
 Project-local skills and the memory store live under `.pi/bio-agent/` in
 the current project.
 
+## Non-Pi agent hosts
+
+The package also ships a plain agent skill at `skills/pi-bio-agent/`. It
+is not a Pi extension; it is a small procedural guide for Codex,
+ClawBio-like hosts, or other agents to use this repo as a substrate:
+write a manifest, inspect tables with `DESCRIBE` / `SUMMARIZE`, run
+read-only SQL through `pi-bio-agent query`, and promote only stable
+workflows to thin playbooks.
+
+Install it into Codex from a checkout:
+
+``` sh
+npm run install:codex-skill
+```
+
+Install it into Codex directly from GitHub:
+
+``` sh
+python ~/.codex/skills/.system/skill-installer/scripts/install-skill-from-github.py \
+  --repo sounkou-bioinfo/pi-bio-agent \
+  --path skills/pi-bio-agent
+```
+
+For other hosts, copy or link `skills/pi-bio-agent/` into that host’s
+skill/playbook directory and call the `pi-bio-agent` CLI as the
+execution surface. The skill is guidance; manifests, SQL, receipts, CAS,
+and observations remain the computation.
+
 ## Docs
 
 Start with the [user guide](docs/guide.md): write a manifest, run an
