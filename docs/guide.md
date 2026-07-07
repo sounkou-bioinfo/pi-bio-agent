@@ -92,6 +92,16 @@ job/checkpoint helpers. If an application needs a stable type that is not import
 `pi-bio-agent/core`, `pi-bio-agent/duckdb`, or `pi-bio-agent/hosts`, treat that as an SDK export gap rather than
 importing from `src/`.
 
+The runnable host-embedding check is:
+
+```sh
+npm run dogfood:sdk-host-embedding
+```
+
+It imports from `pi-bio-agent`, injects a DuckDB `SqlConn`, `CasStore`, `ComputeRunner`, SQL policy, host capability
+receipt, and CAS metadata authority, then runs a real files-only `compute.run` manifest and verifies run facts, CAS
+roots, artifact rows, and replay-pinned host receipt digests.
+
 ```ts
 const cas: CasStore = fsCasStore(".pi/bio-agent/cas");
 ```

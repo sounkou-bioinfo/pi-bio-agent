@@ -64,8 +64,12 @@ These items are no longer open substrate work in `pi-bio-agent`.
   tables and Parquet receipts from the ledger. Redaction policy and labels are application-owned. Evidence:
   [training-corpus.ts](../src/hosts/training-corpus.ts), [training-corpus.test.ts](../test/training-corpus.test.ts).
 - **SDK surface is externally checked.** Root, `/core`, `/duckdb`, and `/hosts` exports cover the host-facing types
-  and helpers used by a packed downstream consumer. Evidence: [package.json](../package.json),
-  [guide.md](guide.md), [bring-it-home-dogfood.test.ts](../test/bring-it-home-dogfood.test.ts).
+  and helpers used by a packed downstream consumer; a runnable host-embedding dogfood imports from `pi-bio-agent`
+  and composes `SqlConn`, `CasStore`, `ComputeRunner`, SQL policy, host capability receipts, and CAS metadata over a
+  real run. Evidence: [package.json](../package.json), [guide.md](guide.md),
+  [sdk-host-embedding.mjs](../scripts/sdk-host-embedding.mjs),
+  [sdk-host-embedding.test.ts](../test/sdk-host-embedding.test.ts),
+  [bring-it-home-dogfood.test.ts](../test/bring-it-home-dogfood.test.ts).
 - **ducknng profile receipts are pinned without secrets.** Profile receipts carry redacted scope/version/subject
   digests; host capability receipt digests affect replay/provenance/action-cache keys. Caller SQL cannot override a
   host-owned profile auth header. Evidence: [http-profiles.ts](../src/duckdb/http-profiles.ts),
@@ -75,11 +79,12 @@ The compact proof is:
 
 ```sh
 npm run dogfood:bring-it-home
+npm run dogfood:sdk-host-embedding
 ```
 
-It exercises host-event receipts, step checkpoints/resume, graph projection, ducknng profile receipts, SDK exports,
-training-corpus Parquet export/readback, session tool-call/run stitching, CAS metadata roots, and real process compute
-when R is available.
+Together these commands exercise host-event receipts, step checkpoints/resume, graph projection, ducknng profile
+receipts, public SDK imports, training-corpus Parquet export/readback, session tool-call/run stitching, CAS metadata
+roots, host policy hooks, and real process compute when R is available.
 
 ## Remaining Work
 
@@ -121,6 +126,7 @@ npm run check:docs
 npm run check:examples
 npm run check:readme-tools
 npm run dogfood:bring-it-home
+npm run dogfood:sdk-host-embedding
 ```
 
 For review, use a persistent Pi review session as described in [AGENTS.md](../AGENTS.md). The review should ask from
