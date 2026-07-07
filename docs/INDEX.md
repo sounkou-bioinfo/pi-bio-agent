@@ -15,7 +15,7 @@
 
 - [Concurrent memory — running the store over a ducknng server](concurrency.md) — Read before running pi-bio-agent memory across projects, processes, agents, or machines. Explains the three store access modes and how to inject a server-backed store. _(memory, store, concurrency, ducknng, sharing)_
 - [Deriving the abstractions](abstraction-derivation.md) — Read to see why the core primitives exist and where machine-studying fits. _(abstractions, primitives, machine-studying)_
-- [Design notes](design.md) — Read before changing core boundaries, adapters, storage, skills, or the harness-adaptation surface. _(architecture, boundaries, adapters, harness)_
+- [Design notes](design.md) — Read before changing core contracts, adapters, storage, skills, or the harness-adaptation surface. _(architecture, contracts, adapters, harness)_
 - [Domain model](domain-model.md) — Read before adding any core type or manifest — kernel slots, resources/CAS/resolvers, temporality, manifests, and execution backends. _(domain-model, resources, resolvers, temporality, manifests, execution-backends)_
 - [DuckDB substrate](duckdb-substrate.md) — Read before using DuckDB tables, extensions, or SQL surfaces over bio data. _(duckdb, sql, extensions, substrate)_
 - [Machine studying lineage](machine-studying-lineage.md) — Read to understand what 'study' means here (machine studying) and how it lands on graphs. _(machine-studying, study-notes, graph-bet, lineage)_

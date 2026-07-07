@@ -1,8 +1,8 @@
 ---
 type: Reference
 title: Design notes
-description: "Read before changing core boundaries, adapters, storage, skills, or the harness-adaptation surface."
-tags: [architecture, boundaries, adapters, harness]
+description: "Read before changing core contracts, adapters, storage, skills, or the harness-adaptation surface."
+tags: [architecture, contracts, adapters, harness]
 ---
 
 # Design notes
@@ -16,7 +16,7 @@ operations, skills, and study notes compose those primitives for particular work
 1. **The manifest is the program; TypeScript is the interpreter.** Manifests, SQL, resources, and ontology data
    are the program; core is a small set of generic primitives that runs them. A new question or data source is a
    new application-owned manifest or operation spec, not a new core file. If a question needs bespoke TypeScript instead of a
-   manifest, SQL, or adapter, the design has failed at its own boundary and should be redesigned as data.
+   manifest, SQL, or adapter, the design has failed its own test and should be redesigned as data.
 
 2. **In SQL we trust: four legs on one DuckDB substrate.**
    - **Data**: files and formats as SQL (`file_scan`, `duckhts` for VCF/BAM/BED/…). The bet includes the large DuckDB community extension ecosystem: new formats should usually arrive as extensions/table functions, not bespoke framework parsers.
@@ -33,8 +33,8 @@ operations, skills, and study notes compose those primitives for particular work
 3. **The discipline that keeps the bet honest.** Interfaces are the contract for in-process code; DI injects host
    **effects** (SQL conn, fetch, ComputeRunner, CAS), which **fail closed** when unbound. Identity is a **digest**;
    a human `version` is only a label; a `schema`/`.v1` tag lives only where bytes cross a real serialization/IPC
-   boundary, never on every nested value. Manifests pass a **strict allowlist** so removed surface cannot ride
-   back as inert keys. The **judgment / approval decision** (model or human) is the one irreducible boundary: the
+   seam, never on every nested value. Manifests pass a **strict allowlist** so removed surface cannot ride
+   back as inert keys. The **judgment / approval decision** (model or human) is the one irreducible decision point: the
    substrate records and gates it, never computes it.
 
 4. **Actions over prompts for graph inference.** The ICLR 2026 study
@@ -42,12 +42,12 @@ operations, skills, and study notes compose those primitives for particular work
    substrate bet: LLMs do better on text-rich graph inference when they generate executable code over graph state
    than when graph neighborhoods are serialized into a prompt. That is exactly this repo's graph posture:
    keep nodes, edges, labels, memory, and provenance in DuckDB/SemanticSQL/CAS, then let the agent write bounded
-   SQL or host-approved code to inspect them. Prompt text is for intent and judgment boundaries, not for carrying
+   SQL or host-approved code to inspect them. Prompt text is for intent and judgment, not for carrying
    high-degree neighborhoods, long features, ontology closures, or the run ledger.
 
 5. **Metacurator's determinism gradient closes over the same shape.** Its implementation splits publication
    metadata curation into deterministic tools for lookup, archive, acquire, table loading, ontology grounding,
-   diffing, and reporting, plus a narrow `judge` boundary for table classification, schema mapping, and ontology
+   diffing, and reporting, plus a narrow `judge` seam for table classification, schema mapping, and ontology
    disambiguation. The code-level contract is the important part: models do not mint identifiers or values; they
    emit typed choices that deterministic code validates, applies, records, or rejects. That reconciles with this
    library without adding a new primitive: deterministic work is resolver/materialization/SQL, while the
@@ -60,7 +60,7 @@ the related code.
 
 - **SQL safety needs parser help, but is still only statement-class safety.** The string guard rejects obvious
   writes and stacked statements; DuckDB's `json_serialize_sql` catches dynamic SQL calls like
-  `query()` / `query_table()` across quoted and qualified spellings. This protects the operation boundary, not
+  `query()` / `query_table()` across quoted and qualified spellings. This protects the operation contract, not
   host egress or filesystem access. See `src/core/sql-guard.ts`, `src/core/operations.ts`,
   `src/duckdb/resolvers/duckdb-sql-materialize.ts`, and `test/operations-readonly.test.ts`.
 - **Memoization is proven from plans and ASTs, not from resolver names.** A run is cacheable only when the physical
@@ -76,12 +76,12 @@ the related code.
   favor generated code over typed graph state. For this repo, the generated program should usually be SQL over
   `bio_edges_as_of`, `entailed_edge`, resolver-materialized tables, and run/memory observations. This is why the
   graph substrate must stay queryable and receipted instead of becoming prose context.
-- **A typed judgment boundary is the model's proper home.** Metacurator's `judge` shape is a useful constraint:
+- **A typed judgment seam is the model's proper home.** Metacurator's `judge` shape is a useful constraint:
   table choice, column mapping, candidate disambiguation, and clinical interpretation may need judgment, but the
   model emits typed objects from bounded candidates and deterministic code validates, applies, records, or rejects
   them. Its grounding path performs lookup, round-trip confirmation, branch checks, and obsolete checks before a
   candidate can be chosen. Do not let a model invent identifiers or silently mutate tables.
-- **ducknng HTTP fanout is a real boundary, not an implementation detail.** `ducknng_ncurl_table` is right for one
+- **ducknng HTTP fanout is a real transport seam, not an implementation detail.** `ducknng_ncurl_table` is right for one
   response table. Whole-VCF or paginated annotation needs per-row scalar AIO launch, repeated any-ready drain, and
   status-as-value retry logic; permanent `4xx` terminates, transient `429`/`5xx` retries. See
   `src/duckdb/ncurl-fanout.ts`, `src/duckdb/ncurl-retry.ts`, `test/ncurl-fanout.test.ts`, and
@@ -103,7 +103,7 @@ the related code.
   outside a step may replay after a crash, compaction, or lease expiry, while a completed step result is read back
   and not re-executed. Because backend cancellation is only best-effort, queue workers must publish status/result
   through live-claim-gated helpers (`recordJobClaimStatus`, `recordJobClaimResult`); a late worker whose lease was
-  cancelled or reclaimed is rejected at the ledger boundary. `src/hosts/job-store.ts` exposes the narrow helper
+  cancelled or reclaimed is rejected by the ledger write path. `src/hosts/job-store.ts` exposes the narrow helper
   (`runJobStepWithCheckpoint`) and the sequential-plan helper (`runJobStepsWithCheckpoints`) over
   `job_step_checkpoint` observations; neither is a workflow engine. Receipts, replay specs, CAS result/artifact
   digests, and `bio_observations` prove what happened. See `src/core/ports.ts`,
@@ -112,37 +112,18 @@ the related code.
   `src/duckdb/resolvers/compute-run.ts`,
   `examples/compute-run/`, and `examples/compute-artifacts/`.
 
-## Main boundary
+<a id="main-boundary"></a>
 
-```text
-Host surfaces
-  Pi extension                                   (built)
-  CLI (pi-bio-agent bin)                         (built)
-  SDK (importable: ., ./core, ./duckdb, ./hosts) (built)
-  JSON-RPC / MCP server surface                  (later)
+## Main Interfaces
 
-Core contracts
-  BioManifest (the program: provides resources/resolvers/operations/termSets)
-  BioOperationSpec / operation descriptor
-  ResourceHandle / BioResolverSpec / VirtualResourceSpec / CAS handle
-  BioRunSpec / run record / events
-  ontology and KG rows
-  study notes / OKF-compatible bundles
-
-Execution adapters
-  DuckDB read-only SQL                          (the substrate)
-  ducknng    network as SQL (ncurl_table/_aio), cross-process shared-DB RPC (run_rpc),
-             and NNG topologies (pub/sub, push/pull, survey, bus, pair) — the
-             DuckDB extension that makes network/distributed/multi-agent coordination SQL-native
-  duckhts    HTS readers (VCF/BCF, BAM/CRAM, BED/GFF, tabix) as SQL table functions
-  compute    out-of-process R / Python / Go / shell over Arrow IPC (the compute pillar)
-  http.get   TS resolver + injected fetch — an explicit JS-fetch port for hosts that choose that path
-
-Storage/index adapters
-  filesystem study bundles
-  local CAS/cache
-  DuckDB catalog, FTS, KG, ontology, run ledger
-```
+- **Host surfaces:** Pi extension, CLI, and SDK exports (`.`, `./core`, `./duckdb`, `./hosts`) are built.
+  JSON-RPC and MCP are later transports over the same library API.
+- **Core contracts:** `BioManifest`, `BioOperationSpec`, `ResourceHandle`, `BioResolverSpec`,
+  `VirtualResourceSpec`, CAS handles, `BioRunSpec`, run records/events, ontology/KG rows, and study notes.
+- **Execution adapters:** DuckDB read-only SQL; ducknng network/RPC/topologies as SQL-native transport;
+  duckhts HTS table functions; `compute.run` over an injected async runner; and explicit `http.get` over an
+  injected `fetch` for hosts that choose the JS-fetch path.
+- **Storage/index adapters:** filesystem study bundles, local CAS/cache, DuckDB catalog/FTS/KG/ontology/run ledger.
 
 A Pi tool is a **host surface**, not the same kind of thing as HTTP, DuckDB, MCP, or code execution. The host surface exposes registered capabilities to the current agent. Execution adapters do the actual work behind the contracts.
 
@@ -182,7 +163,7 @@ the abstraction abstracts, never the future ones it might serve.**
 ### Host-Controlled Effects
 
 > **The library is a substrate + receipt system, not a network/filesystem sandbox.** Like Pi, it gives
-> powerful local execution and leaves the *risk boundary* to the host/deployment: container, seccomp,
+> powerful local execution and leaves risk control to the host/deployment: container, seccomp,
 > Firecracker/microVMs, a downstream [Gondolin](https://github.com/earendil-works/gondolin)-style VM control
 > plane, the Pi runtime, corporate egress, or a user-supplied sandbox extension. DuckDB's replacement scans
 > (`FROM 'x.parquet'`), httpfs remote reads, and extension autoloading are host-provisioned capabilities;
@@ -201,7 +182,7 @@ URIs if the environment allows): the host decides whether egress is possible, th
 happened. A strict "no external I/O / CAS-snapshot-first" profile is an **optional host policy**, not the default
 stance.
 
-When a downstream application needs a real VM boundary, keep it downstream: the host can run Pi, worker
+When a downstream application needs real VM isolation, keep it downstream: the host can run Pi, worker
 processes, or stateful tools inside a Gondolin-style microVM and inject only the ports that application authorizes
 (`fetch`, `SqlConn`, `ComputeRunner`, CAS, and the ledger). That strengthens effect isolation without changing
 manifest semantics or pretending SQL validation is a sandbox.

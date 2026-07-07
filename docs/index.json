@@ -90,10 +90,10 @@
       "path": "docs/design.md",
       "type": "Reference",
       "title": "Design notes",
-      "description": "Read before changing core boundaries, adapters, storage, skills, or the harness-adaptation surface.",
+      "description": "Read before changing core contracts, adapters, storage, skills, or the harness-adaptation surface.",
       "tags": [
         "architecture",
-        "boundaries",
+        "contracts",
         "adapters",
         "harness"
       ]
