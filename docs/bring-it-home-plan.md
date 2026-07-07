@@ -229,7 +229,9 @@ carry token values or subject ids, while the ducknng SQL HTTP integration tests 
 admission when the installed extension exposes that API.
 Connector runs can now accept those secret-free receipts as host capability receipts: replay pins only
 `hostReceiptDigests`, run/artifact provenance references `host.capability:<schema>` by digest, and the action-cache key
-changes when the host policy receipt changes. Reproduction fails closed unless the same receipt is re-supplied.
+changes when the host policy receipt changes. Reproduction fails closed unless the same receipt is re-supplied. Known
+ducknng profile receipts are self-checked before use: their `policyDigest` must match the canonical digest of the
+redacted receipt body, and raw subject lists or extra secret-bearing fields are rejected.
 `refreshDucknngHttpProfile` covers the rotation seam without a drop/register gap: the host refreshes credential
 material, re-commissions the same profile id through ducknng's upsert path, and receives previous/current redacted
 receipts. Tokens remain host-owned bound parameters, never SQL text or replay data. Today ducknng's execution subject

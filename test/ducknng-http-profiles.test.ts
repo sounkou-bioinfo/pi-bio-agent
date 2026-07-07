@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import type { SqlConn } from "../src/core/ports.js";
+import { hostCapabilityReceiptDigest } from "../src/core/reproducibility.js";
 import {
   DUCKNNG_HTTP_PROFILE_RECEIPT_SCHEMA,
   ducknngHttpProfileReceiptFromInfo,
@@ -120,6 +121,41 @@ describe("ducknng HTTP profile receipts", () => {
     const serialized = JSON.stringify(receipt);
     assert.doesNotMatch(serialized, /Bearer|token|secret|case:alpha|case:beta/i);
     assert.equal(receipt.subjectRestriction.digest, ducknngHttpProfileReceiptFromInfo({ ...info, allowSubjectsJson: "[\"case:alpha\",\"case:beta\"]" }).subjectRestriction.digest);
+    assert.equal(hostCapabilityReceiptDigest(receipt), receipt.policyDigest);
+  });
+
+  test("known ducknng receipts fail closed when the redacted body and policy digest diverge", () => {
+    const receipt = ducknngHttpProfileReceiptFromInfo({
+      profileId: "clinvar-read",
+      scheme: "https",
+      host: "api.example.test",
+      port: 443,
+      hasPort: true,
+      pathPrefix: "/v1/clinvar",
+      method: "GET",
+      tlsRequired: true,
+      authHeaderNamesJson: "[\"Authorization\"]",
+      version: 7n,
+      createdMs: 1783283000000n,
+      updatedMs: 1783283060000n,
+      expiresAtMs: 1783286600000n,
+      allowSubjectsJson: "[\"case:alpha\"]",
+    });
+    const receiptWithRawSubjects = { ...receipt, allowSubjects: ["case:alpha"] } as unknown as Parameters<typeof hostCapabilityReceiptDigest>[0];
+    const receiptWithoutRestrictionDigest = { ...receipt, subjectRestriction: { restricted: true, count: 1 } } as unknown as Parameters<typeof hostCapabilityReceiptDigest>[0];
+
+    assert.throws(
+      () => hostCapabilityReceiptDigest({ ...receipt, policyDigest: `sha256:${"0".repeat(64)}` }),
+      /policyDigest does not match/,
+    );
+    assert.throws(
+      () => hostCapabilityReceiptDigest(receiptWithRawSubjects),
+      /only its redacted policy fields/,
+    );
+    assert.throws(
+      () => hostCapabilityReceiptDigest(receiptWithoutRestrictionDigest),
+      /subjectRestriction must be redacted/,
+    );
   });
 
   test("omits default ports and absent subject restrictions from the receipt", () => {

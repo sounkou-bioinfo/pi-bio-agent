@@ -156,7 +156,7 @@ describe("C2: reproduce() compares deterministic receipt content, not wall-clock
     await assert.rejects(() => reproduceRun({ cwd, replay, cas }), /hostReceiptDigests/);
     await assert.rejects(
       () => reproduceRun({ cwd, replay, cas, hostCapabilityReceipts: [{ ...receipt, policyDigest: `sha256:${"0".repeat(64)}` }] }),
-      /hostCapabilityReceipts/,
+      /policyDigest does not match the redacted receipt body/,
     );
     const rep = await reproduceRun({ cwd, replay, cas, hostCapabilityReceipts: [secondReceipt, receipt] });
     assert.equal(rep.matched, true);

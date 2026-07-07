@@ -276,10 +276,74 @@ export interface HostCapabilityReceipt {
 }
 
 const HOST_RECEIPT_DIGEST = /^sha256:[0-9a-f]{64}$/;
+const DUCKNNG_HTTP_PROFILE_RECEIPT_SCHEMA = "pi-bio.ducknng_http_profile_receipt.v1";
+const DECIMAL_TEXT = /^(0|[1-9][0-9]*)$/;
+
+function ducknngHttpProfileReceiptDigest(receipt: HostCapabilityReceipt): `sha256:${string}` {
+  const r = receipt as unknown as Record<string, unknown>;
+  const fail = (reason: string): never => { throw new Error(`ducknng HTTP profile receipt ${reason}`); };
+  const topKeys = Object.keys(r).sort();
+  const expectedTopKeys = ["authHeaderNames", "createdMs", "expiresAtMs", "policyDigest", "profileId", "schema", "scope", "subjectRestriction", "updatedMs", "version"].sort();
+  if (JSON.stringify(topKeys) !== JSON.stringify(expectedTopKeys)) fail("must contain only its redacted policy fields");
+  if (typeof r.profileId !== "string" || !r.profileId) fail("requires profileId");
+  if (!r.scope || typeof r.scope !== "object" || Array.isArray(r.scope)) fail("requires scope object");
+  const scope = r.scope as Record<string, unknown>;
+  const scopeKeys = Object.keys(scope).sort();
+  const expectedScopeKeys = ["host", "method", "pathPrefix", "port", "scheme", "tlsRequired"].sort();
+  if (JSON.stringify(scopeKeys) !== JSON.stringify(expectedScopeKeys)) fail("scope must contain only scheme/host/port/pathPrefix/method/tlsRequired");
+  if (typeof scope.scheme !== "string" || typeof scope.host !== "string" || typeof scope.pathPrefix !== "string" || typeof scope.method !== "string") fail("scope string fields are required");
+  if (scope.port !== null && (typeof scope.port !== "number" || !Number.isInteger(scope.port) || scope.port < 1 || scope.port > 65535)) fail("scope.port must be null or a TCP port");
+  if (typeof scope.tlsRequired !== "boolean") fail("scope.tlsRequired must be boolean");
+  if (!Array.isArray(r.authHeaderNames) || r.authHeaderNames.some((x) => typeof x !== "string" || x.length === 0)) fail("authHeaderNames must be a string array");
+  for (const key of ["version", "createdMs", "updatedMs"] as const) {
+    if (typeof r[key] !== "string" || !DECIMAL_TEXT.test(r[key])) fail(`${key} must be decimal text`);
+  }
+  if (r.expiresAtMs !== null && (typeof r.expiresAtMs !== "string" || !DECIMAL_TEXT.test(r.expiresAtMs))) fail("expiresAtMs must be null or decimal text");
+  if (!r.subjectRestriction || typeof r.subjectRestriction !== "object" || Array.isArray(r.subjectRestriction)) fail("requires subjectRestriction object");
+  const restriction = r.subjectRestriction as Record<string, unknown>;
+  const restrictionKeys = Object.keys(restriction).sort();
+  const restricted = restriction.restricted === true;
+  const expectedRestrictionKeys = restricted ? ["count", "digest", "restricted"].sort() : ["count", "restricted"].sort();
+  if (JSON.stringify(restrictionKeys) !== JSON.stringify(expectedRestrictionKeys)) fail("subjectRestriction must be redacted to restricted/count/digest");
+  if (typeof restriction.restricted !== "boolean") fail("subjectRestriction.restricted must be boolean");
+  if (typeof restriction.count !== "number" || !Number.isInteger(restriction.count) || restriction.count < 0) fail("subjectRestriction.count must be a non-negative integer");
+  const restrictionCount = restriction.count as number;
+  if (restricted) {
+    if (restrictionCount < 1) fail("restricted subject lists must have a positive count");
+    if (typeof restriction.digest !== "string" || !HOST_RECEIPT_DIGEST.test(restriction.digest)) fail("subjectRestriction.digest must be sha256:<64 hex>");
+  } else if (restrictionCount !== 0) {
+    fail("unrestricted subjectRestriction count must be zero");
+  }
+  if (typeof r.policyDigest !== "string" || !HOST_RECEIPT_DIGEST.test(r.policyDigest)) fail("policyDigest must be sha256:<64 hex>");
+  const body = {
+    schema: DUCKNNG_HTTP_PROFILE_RECEIPT_SCHEMA,
+    profileId: r.profileId,
+    scope: {
+      scheme: scope.scheme,
+      host: scope.host,
+      port: scope.port,
+      pathPrefix: scope.pathPrefix,
+      method: scope.method,
+      tlsRequired: scope.tlsRequired,
+    },
+    authHeaderNames: r.authHeaderNames,
+    version: r.version,
+    createdMs: r.createdMs,
+    updatedMs: r.updatedMs,
+    expiresAtMs: r.expiresAtMs,
+    subjectRestriction: restricted
+      ? { restricted: true, count: restrictionCount, digest: restriction.digest }
+      : { restricted: false, count: 0 },
+  };
+  const digest = canonicalDigest(body);
+  if (r.policyDigest !== digest) fail("policyDigest does not match the redacted receipt body");
+  return digest;
+}
 
 export function hostCapabilityReceiptDigest(receipt: HostCapabilityReceipt): `sha256:${string}` {
   if (!receipt || typeof receipt !== "object" || Array.isArray(receipt)) throw new Error("host capability receipt must be an object");
   if (typeof receipt.schema !== "string" || !receipt.schema.trim()) throw new Error("host capability receipt requires a schema string");
+  if (receipt.schema === DUCKNNG_HTTP_PROFILE_RECEIPT_SCHEMA) return ducknngHttpProfileReceiptDigest(receipt);
   if (receipt.policyDigest !== undefined) {
     if (typeof receipt.policyDigest !== "string" || !HOST_RECEIPT_DIGEST.test(receipt.policyDigest)) throw new Error("host capability receipt policyDigest must be sha256:<64 hex>");
     return receipt.policyDigest as `sha256:${string}`;

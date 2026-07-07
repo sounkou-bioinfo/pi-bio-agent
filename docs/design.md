@@ -770,7 +770,9 @@ The host-auth pattern to reuse from Pi is locked `AuthStorage` plus OAuth refres
 before commissioning or rotating the profile and persist only digests/config provenance, never token values. Profile
 commissioning now returns a secret-free receipt derived from ducknng's redacted profile listing (profile id, scope,
 version/timestamps/expiry, auth header names, and subject-restriction digest), and connector runs pin that policy by
-digest in replay/action keys and run/artifact provenance without recording credentials. Subject allow-lists are
+digest in replay/action keys and run/artifact provenance without recording credentials. The ducknng receipt schema is
+known to the host-capability digest path, so a supplied receipt must be exactly the redacted shape and its
+`policyDigest` must match that canonical body before it can affect replay or reproduction. Subject allow-lists are
 canonicalized as sorted unique sets before registration so a profile policy is not sensitive to caller order or
 duplicates. Profile refresh uses the same ducknng upsert path through `refreshDucknngHttpProfile`, returning
 previous/current redacted receipts while leaving token refresh/storage with the host. The remaining gaps are
