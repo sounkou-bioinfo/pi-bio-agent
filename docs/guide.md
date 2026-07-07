@@ -92,23 +92,28 @@ job/checkpoint helpers. If an application needs a stable type that is not import
 `pi-bio-agent/core`, `pi-bio-agent/duckdb`, or `pi-bio-agent/hosts`, treat that as an SDK export gap rather than
 importing from `src/`.
 
-For high-level manifest runs, pass host policy as a function on the request:
+For high-level manifest runs, pass host policy as a function on the request. The simplest useful policy is audit:
 
 ```ts
+const executedSql: Array<{ method: string; sql: string }> = [];
+
 await runBioQueryFromManifest({
   cwd,
   dbPath: ":memory:",
   manifestPath: "manifest.json",
   sql,
-  sqlPolicy: ({ sql }) => {
-    audit(sql);
-    if (disallowed(sql)) throw new Error("host policy denied SQL");
+  sqlPolicy: ({ method, sql }) => {
+    executedSql.push({ method, sql });
   },
 });
 ```
 
 That policy sees the connection bootstrap SQL, resolver materialization SQL, DuckDB parser/introspection SQL, and the
-final query. Hosts using lower-level APIs can instead wrap the connection they already own with `wrapSqlConn`.
+final query. Hosts using lower-level APIs can instead wrap the connection they already own with `wrapSqlConn`. For SQL
+relation visibility, scope the injected `SqlConn` so hidden objects are unreachable through ordinary reads and
+catalog/introspection statements. Ducknng profiles are the corresponding network/profile admission mechanism for
+credentialed HTTP/RPC. Do not special-case `DESCRIBE` or `SUMMARIZE` inside `bio_query`; they are ordinary DuckDB
+introspection over whatever relations the host made visible.
 
 ### When to declare an operation
 
