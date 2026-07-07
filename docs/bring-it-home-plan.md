@@ -96,28 +96,44 @@ roots, host policy hooks, and real process compute when R is available.
 
 ## Remaining Work
 
-These are the remaining lanes. They should not become new core abstractions until an application proves a gap.
+These are the remaining lanes. Several are required to bring the substrate home; the constraint is that they should
+close over existing primitives and concrete consumers, not become speculative taxonomies.
 
-1. **Scoped relation/resource visibility, if a host proves it needs more than port wrapping.** The current pattern is
+1. **Remote cache-scope consistency.** `remoteCacheScope` is already the host-owned isolation key for shared HTTP/CAS
+   reuse. Thread it through packaged run requests and Pi/SDK callers so `bio_query` / `bio_run_operation` have the
+   same cache semantics as direct resolver use. Do not force a scope: hosts that do not supply one should keep the
+   current fail-closed/no-cross-db-reuse behavior.
+2. **Lazy resource forcing.** Resolve only the declared resources a query or operation actually names, while keeping
+   the manifest contract explicit and fail-closed. This is required for larger manifests and agent-authored
+   manifests, not a new resource model.
+3. **ducknng/quack sibling upload and shared-data path.** Use the sibling transport that fits the operation:
+   ducknng RPC is the proven mutable-state path; append/share or upload-shaped paths may use quack where that fits.
+   Keep this in the sibling transport/host layer and surface it to core through receipts, `SqlConn`, CAS, and
+   resolver handles.
+4. **Scoped relation/resource visibility.** The current pattern is
    a host-owned `SqlConn` wrapper: a host that hides a relation should deny `SELECT`, `DESCRIBE`, `SUMMARIZE`, and
    catalog/introspection reads on that injected connection. `ducknng` HTTP profile admission is the corresponding
    network/profile gate. Do not add ad-hoc SQL string guards here. If a real embedding host needs centrally managed,
    subject-scoped relation or resource visibility across remote services, implement it as a host/ducknng admission
    feature and receipt it.
-2. **Training corpus hardening.** App-driven redaction policy, label schema, export contract, and VARIANT-shredded
-   Parquet when a real downstream corpus consumer benefits from nested typed columns. The base ledger remains
-   `value_json`.
-3. **Graphics/report metadata from real reports.** Core has `recordArtifactReference`; richer renderer metadata should
-   be added only when a downstream R/Python/HTML report path emits it.
-4. **SDK maintenance.** Add public exports only when a sibling app needs a stable type, and prove each export through
-   the packed external-consumer dogfood.
-5. **Host adapters.** `recordHostEvent` is available. Concrete Pi/workbench/scheduler hook adapters should record only
-   events the host actually emits, and only when a consumer reads those receipts.
+5. **Training corpus hardening.** This is required, not optional: redaction policy, label schema, export contract,
+   and VARIANT-shredded Parquet for nested session/tool/run payloads. The base ledger remains `value_json`; typed
+   Parquet is a derived export for downstream corpus consumers.
+6. **Graphics/report metadata from real reports.** Core has `recordArtifactReference`; richer renderer metadata is
+   required once R/Python/HTML report paths emit it. Add fields from real artifacts and report consumers, not from a
+   guessed plot-table schema.
+7. **SDK maintenance.** Required exports should follow real sibling consumers. Each new public type/helper needs a
+   packed external-consumer dogfood so the library boundary stays usable from outside the repo.
+8. **Host adapters over `recordHostEvent`.** `recordHostEvent` is available; concrete Pi/workbench/scheduler hook
+   adapters are required where control events affect training, replay, steering, interruption, or governance. They
+   should record only events the host actually emits and only the receipts a consumer reads.
 
 ## Non-Goals In Core
 
 - New biomedical helpers for individual questions.
-- Topology primitives for swarms, forks, or resumes. Use caller-owned nodes plus ordinary edges.
+- A closed topology taxonomy or special `topology:` node kind in core. Multi-agent, fork/resume, and workflow
+  correlation are required, but they are expressed with caller-owned `workflow:`, `session:`, `step:`, or similar
+  nodes plus ordinary edges.
 - Special hiding rules for `DESCRIBE` or `SUMMARIZE`; they are ordinary DuckDB inspection over relations the host made
   visible.
 - Process-first operation syntax as a separate primitive. `compute.run` already provides process/argv execution,

@@ -559,9 +559,10 @@ change with a preserved mtime can't false-hit). It is correct, not a stale-cache
 byte storage (CAS) for cross-db reuse, and remote freshness via HTTP cache validation (ETag `If-None-Match` →
 `304`, the shared index scoped per host `remoteCacheScope`). Scope note: `remoteCacheScope` is a
 `ResolutionContext` field, so the cross-db shared-remote reuse is active for a host that drives resolvers directly;
-the packaged run tools (`bio_query`/`bio_run_operation` → `runQuery`/`runOperation`) do not yet thread it, so
+the packaged run tools (`bio_query`/`bio_run_operation` -> `runQuery`/`runOperation`) do not yet thread it, so
 that path does per-db 304 revalidation without the cross-db shared remote index. Threading `remoteCacheScope`
-through the run requests is a named, host-owned leftover, not an advertised default. `sql_materialize` reads arbitrary SQL/live sources
+through the run requests is required for consistency, but it must remain host-supplied: hosts that do not supply a
+scope keep the current fail-closed/no-cross-db-reuse behavior. `sql_materialize` reads arbitrary SQL/live sources
 and can't cheaply content-pin its inputs, so it is deliberately not memoized (it declares `live_source`; a run
 over a live source is not put in the ActionCache and is `not_reproducible` without a CAS output pin). Derived tables (`scale_members`,
 `entailed_edge`) are pure and trivially safe (recompute). **`as_of` is now built** (Phase 4.0a): the temporal
