@@ -20,7 +20,7 @@
       "path": "docs/bring-it-home-plan.md",
       "type": "Proposal",
       "title": "Bring-it-home plan — core substrate closure",
-      "description": "Core-library closure status after the workbench split: landed primitives, current dogfood proof, and the remaining SDK, artifact, corpus, and ducknng provenance work.",
+      "description": "Core-library closure ledger after the workbench split: what is closed in pi-bio-agent, what proves it, and what remains outside core.",
       "tags": [
         "roadmap",
         "substrate",
