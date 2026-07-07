@@ -43,6 +43,33 @@ export interface SqlConn {
   run(sql: string, params?: readonly unknown[]): Promise<void>;
 }
 
+export interface SqlConnPolicyContext {
+  method: "all" | "run";
+  sql: string;
+  params?: readonly unknown[];
+}
+
+export type SqlConnPolicy = (ctx: SqlConnPolicyContext) => void | Promise<void>;
+
+/** Wrap a SQL execution port with host-owned policy.
+ *
+ * This is intentionally only port composition. The library does not define a table-visibility taxonomy or a sandbox;
+ * a host supplies the policy it actually needs, and the same wrapper covers query guards, audit hooks, subject-scoped
+ * relation visibility, or deployment-specific denial rules.
+ */
+export function wrapSqlConn(inner: SqlConn, policy: SqlConnPolicy): SqlConn {
+  return {
+    all: async (sql, params) => {
+      await policy({ method: "all", sql, params });
+      return inner.all(sql, params);
+    },
+    run: async (sql, params) => {
+      await policy({ method: "run", sql, params });
+      return inner.run(sql, params);
+    },
+  };
+}
+
 /**
  * What a host passes into a resolution: the execution port plus an injectable clock for deterministic
  * receipts/tests. Deliberately spare — no policy, no network handle, no secrets. A resolver reads only what

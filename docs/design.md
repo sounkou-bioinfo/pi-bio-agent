@@ -208,9 +208,10 @@ manifest semantics or pretending SQL validation is a sandbox.
 **The host-control surface is the injected ports, not a separate hook framework.** Pi-agent-core makes
 lifecycle hooks (before/after, context transforms) central, and that pattern is real, but in *our* shape it is
 already spelled as dependency injection, so a second hook system would be sugar over composition we have. A
-host that wants policy wraps the port it already supplies: decorate `SqlConn` and you have `validateSql` /
-`beforeQuery` over every execution (a strict no-external-I/O profile is a ~5-line `SqlConn` decorator: [`host-policy-via-ports.test.ts`](../test/host-policy-via-ports.test.ts) proves it enforces what the library
-deliberately stopped enforcing); decorate a bound `BioResolverImpl` for `beforeResolve` / `afterResolve`;
+host that wants policy wraps the port it already supplies: decorate `SqlConn` with `wrapSqlConn` and you have
+`validateSql` / `beforeQuery` over every execution. [`host-policy-via-ports.test.ts`](../test/host-policy-via-ports.test.ts)
+proves both a strict no-external-I/O profile and a subject-scoped relation-visibility policy that denies `SELECT`,
+`DESCRIBE`, and `SUMMARIZE` over hidden relations using DuckDB parser output. Decorate a bound `BioResolverImpl` for `beforeResolve` / `afterResolve`;
 `runOperation` returns `{run, result, receipts}`, so before/after the call *is* `beforeRun` / `afterRun`. An
 explicit `ExecutionPolicy` facade earns its place only when a real host needs cross-cutting, phase-aware policy
 across all resolves + SQL + runs at once that decorating individual ports cannot express cleanly, and then it
@@ -788,6 +789,9 @@ Context should carry compact indexes, not every body/schema/result:
   (`DESCRIBE`, `SUMMARIZE`, `COUNT`, `LIMIT`, filtered projections)
 
 Do not solve context overload by hiding capabilities that the agent legitimately needs. Preserve capability, but make disclosure cheap and explicit. In particular, `bio_query` is already the inspection loop: it can create a scoped view when useful and return only the rows the SQL asks for. Model-facing truncation is a presentation decision; artifact capture and run recording keep handles, receipts, and CAS bytes intact.
+If a host needs tenant/subject visibility, scope the injected `SqlConn` or ducknng profile so hidden relations are
+not reachable through ordinary reads or catalog/introspection statements. Do not make `DESCRIBE`/`SUMMARIZE` special
+in the core query guard; once a relation is visible to `SELECT`, those forms are ordinary read-only disclosure.
 
 ## Long-running work
 

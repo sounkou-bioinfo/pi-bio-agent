@@ -97,6 +97,7 @@ import {
   validateBioManifest,
   envDescriptorFromRenvLock,
   envDigest,
+  wrapSqlConn,
   type BioManifest,
   type SqlConn,
 } from "pi-bio-agent/core";
@@ -130,9 +131,13 @@ const request: RunQueryRequest = {
   hostCapabilityReceipts: [receipt],
 };
 const renvEnv = envDescriptorFromRenvLock(JSON.stringify({ Packages: { renv: { Package: "renv", Version: "1.0.0" } } }), { path: "renv.lock" });
+const scopedConn: SqlConn = wrapSqlConn({ all: async () => [], run: async () => undefined }, ({ sql }) => {
+  if (!sql.trim()) throw new Error("empty SQL");
+});
 
 void validateBioManifest(manifest);
 void envDigest(renvEnv);
+void scopedConn;
 void request;
 void runBioQueryFromManifest;
 void recordHostEvent;

@@ -118,6 +118,8 @@ Likely cleanup:
 
 - package-root or subpath exports for the host-facing types that apps already need, especially CAS/store types and
   run/job request/result types;
+- `wrapSqlConn` for host-owned SQL policy over the same execution port, so relation visibility, no-external-I/O
+  profiles, query audit, or subject-scoped deployment rules are composition instead of a second hook framework;
 - a short import guide showing the intended dependency direction: app imports `pi-bio-agent` primitives, injects host
   ports, and keeps application behavior out of core;
 - tests that compile a small external-style consumer against the public exports.
@@ -126,7 +128,9 @@ Likely cleanup:
 dogfood command builds `dist`, creates an `npm pack` tarball, installs that packed artifact into a temporary consumer
 project, and typechecks imports of the host-facing run, CAS, job, graph-projection, reproducibility, and manifest
 contracts through those public exports only. The same temp consumer then runs a Node ESM smoke import to catch
-declaration/runtime export mismatches.
+declaration/runtime export mismatches. The host-policy test now uses the exported `wrapSqlConn` helper to prove that
+no-external-I/O and subject-scoped relation visibility are host-owned port policies, including `DESCRIBE`/`SUMMARIZE`
+over hidden relations and common catalog disclosure channels, not new `bio_query` statement classes.
 
 **Done when.** This stays consumer-driven: if a real sibling app needs a stable type and cannot import it through one
 of those public entry points, add the export with a consumer compile check. Do not add private-path imports or local
