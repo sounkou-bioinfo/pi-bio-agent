@@ -128,10 +128,10 @@ inside each durable step where their domain requires it.
 **Goal.** Downstream applications should consume stable substrate APIs without reaching through private paths or
 duplicating local types.
 
-Likely cleanup:
+Closed cleanup:
 
-- package-root or subpath exports for the host-facing types that apps already need, especially CAS/store types and
-  run/job request/result types;
+- `CasStore` is exported through the public core/root SDK surface, so downstream hosts can type an injected CAS
+  capability without importing from private source paths or deriving `ReturnType<typeof fsCasStore>`;
 - `wrapSqlConn` for host-owned SQL policy over the same execution port, so relation visibility, no-external-I/O
   profiles, query audit, or subject-scoped deployment rules are composition instead of a second hook framework;
 - a short import guide showing the intended dependency direction: app imports `pi-bio-agent` primitives, injects host
@@ -140,17 +140,17 @@ Likely cleanup:
 
 **Current proof.** `package.json` exposes the root, `/core`, `/duckdb`, and `/hosts` entry points. The bring-it-home
 dogfood command builds `dist`, creates an `npm pack` tarball, installs that packed artifact into a temporary consumer
-project, and typechecks imports of the host-facing run, CAS, job, graph-projection, reproducibility, and manifest
-contracts through those public exports only. The same temp consumer then runs a Node ESM smoke import to catch
-declaration/runtime export mismatches. The host-policy test now uses the exported `wrapSqlConn` helper to prove that
+project, and typechecks imports of the host-facing run, `CasStore`, job, graph-projection, reproducibility, and manifest
+contracts through those public exports only. The same temp consumer then runs a Node ESM smoke import for callable
+exports to catch declaration/runtime export mismatches. The host-policy test now uses the exported `wrapSqlConn` helper to prove that
 no-external-I/O and subject-scoped relation visibility are host-owned port policies, including `DESCRIBE`/`SUMMARIZE`
 over hidden relations and common catalog disclosure channels, not new `bio_query` statement classes. The same test
 also proves the high-level manifest runners accept a `sqlPolicy` function, so embedding apps can audit or deny the
 execution connection they did not open themselves.
 
-**Done when.** This stays consumer-driven: if a real sibling app needs a stable type and cannot import it through one
-of those public entry points, add the export with a consumer compile check. Do not add private-path imports or local
-copies of core contracts downstream.
+**Done when.** This stays consumer-driven: if a real sibling app needs another stable type and cannot import it
+through one of those public entry points, add that export with a consumer compile check. Do not add private-path
+imports or local copies of core contracts downstream.
 
 ### 4. Foreign Graph Projection Profiles
 
@@ -275,8 +275,9 @@ exposure or consumer-owned:
 
 ## Sequencing
 
-1. **SDK surface polish.** Do this as soon as the downstream workbench imports awkward private paths; let real usage
-   decide the exports.
+1. **SDK surface polish.** The first real workbench gap (`CasStore` as a public SDK type) is closed and dogfooded.
+   Continue this as a consumer-driven maintenance lane: add only exports that a sibling app actually needs, and prove
+   each one through the packed external-consumer check.
 2. **Foreign graph projection breadth only when forced.** The first real external graph source is in place through
    Monarch KGX over HTTP. Do not add a SemanticSQL generator preemptively; add source-specific staging SQL/views when
    a workflow actually reads them.
