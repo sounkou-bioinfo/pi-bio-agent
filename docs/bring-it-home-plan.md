@@ -251,16 +251,23 @@ redacted receipt body, and raw subject lists or extra secret-bearing fields are 
 material, re-commissions the same profile id through ducknng's upsert path, and receives previous/current redacted
 receipts. Tokens remain host-owned bound parameters, never SQL text or replay data. The bring-it-home dogfood now
 exercises this helper contract against a fake `SqlConn`: it commissions and rotates a subject-restricted profile,
-pins the rotated receipt into a run, and proves replay/reproduce use only the receipt digest. Real ducknng runtime
-profile admission is still covered by the gated SQL HTTP tests when the installed extension exposes that API. A
-gated local ducknng runtime fixture also exercises `tls+tcp://` RPC with a host-provisioned self-signed TLS handle,
-mTLS client-certificate rejection, and exact peer-identity allow-list admission/denial. Today ducknng's execution
-subject is bound by its service/session machinery; this repository should not invent an embedded subject switch until
-ducknng exposes one as a host-only API.
+pins the rotated receipt into a run, and proves replay/reproduce use only the receipt digest. No current example
+teaches agent-visible secret headers or bearer tokens in manifest SQL. The remaining `http.get` + `withAuth` examples
+are deliberately the separate JS-fetch resolver path for hosts that choose it; they are not profile-auth workarounds.
+Real ducknng runtime profile admission is still covered by the gated SQL HTTP tests when the installed extension
+exposes that API. A gated local ducknng runtime fixture also exercises `tls+tcp://` RPC with a host-provisioned
+self-signed TLS handle, mTLS client-certificate rejection, and exact peer-identity allow-list admission/denial.
 
-**Done when.** Credentialed HTTP examples use subject-scoped profiles with no secrets in SQL, restricted profiles are
-invisible/unusable to non-admitted subjects, and workaround-shaped token plumbing is removed where profiles cover the
-use case.
+**Done when.** The core profile receipt path is done for this repository. Remaining work is either upstream in
+ducknng or consumer-owned:
+
+- ducknng may add a host-only embedded subject bracket so an embedding service can execute a query as subject X
+  without relying on the current service/session execution-subject mechanism;
+- a credentialed downstream app should use scoped profiles for SQL-native HTTP and pin the returned receipt digest
+  into run replay/provenance;
+- if a host needs relation/resource visibility, it should scope the injected `SqlConn` or ducknng service profile so
+  hidden objects are unreachable through ordinary reads and catalog/introspection statements. Core should not add a
+  special `DESCRIBE`/`SUMMARIZE` hiding rule.
 
 ## Sequencing
 
@@ -273,8 +280,9 @@ use case.
    remaining work is richer run-produced figure metadata when a downstream report path needs it.
 4. **ducknng profile cleanup.** Secret-free profile receipts are pinned into connector run replay/provenance/action
    keys, refresh/rotation uses the same ducknng upsert receipt path, and subject restrictions are canonicalized before
-   registration. Next work is replacing remaining workaround-shaped token plumbing in real credentialed examples; an
-   embedded subject bracket belongs in ducknng first, because the current subject mechanism is service/session-bound.
+   registration. Next work is downstream/upstream: real credentialed apps should use the profile path instead of
+   ad-hoc token plumbing, and an embedded subject bracket belongs in ducknng first because the current subject
+   mechanism is service/session-bound.
 5. **Runtime host adapters.** `recordHostEvent` is available; add concrete Pi/workbench hook adapters only when a
    consumer reads those event receipts.
 
