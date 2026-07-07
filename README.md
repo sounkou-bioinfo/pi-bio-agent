@@ -64,7 +64,7 @@ pi \
   "SQL, and a Markdown result table."
 ```
 
-`.pi/bio-agent/readme-clinvar-tp53.json`
+Manifest path: `.pi/bio-agent/readme-clinvar-tp53.json`
 
 ``` sql
 WITH distinct_calls AS (
@@ -533,39 +533,61 @@ calls (`npm run readme:tools`); `npm run check` fails if it drifts.
 Project-local skills and the memory store live under `.pi/bio-agent/` in
 the current project.
 
-## Non-Pi agent hosts
+## Host-neutral agent skill
 
 The package also ships a plain agent skill at `skills/pi-bio-agent/`. It
-is not a Pi extension; it is a small procedural guide for Codex,
-ClawBio-like hosts, or other agents to use this repo as a substrate:
-write a manifest, inspect tables with `DESCRIBE` / `SUMMARIZE`, run
-read-only SQL through `pi-bio-agent query`, and promote only stable
-workflows to thin playbooks.
+is not a Pi extension and not a per-question biomedical skill. It is a
+procedural guide for any agent host: write a manifest, inspect DuckDB
+tables with `DESCRIBE` / `SUMMARIZE`, run read-only SQL through
+`pi-bio-agent query`, and promote only stable workflows to thin
+playbooks.
 
-Install CLI + Codex skill directly from GitHub, without cloning:
+Install the skill directly from GitHub into any host’s skill/playbook
+directory, without cloning:
+
+``` sh
+npx --yes github:sounkou-bioinfo/pi-bio-agent install-skill --dest /path/to/host/skills
+```
+
+That is the generic path for Claude Code, opencode, Pi installations
+that use a skill directory, ClawBio-like hosts, or any other agent
+system. Use the directory that the host itself documents or configures.
+The installer copies `skills/pi-bio-agent/` into that directory and does
+not assume the host’s runtime API.
+
+Install the CLI persistently when the host should call
+`pi-bio-agent query` / `pi-bio-agent run` later:
 
 ``` sh
 npm install -g github:sounkou-bioinfo/pi-bio-agent
-pi-bio-agent install-codex-skill
+pi-bio-agent install-skill --dest /path/to/host/skills
 ```
 
-The first command installs the CLI. The second copies the packaged
-`skills/pi-bio-agent/` directory into Codex’s skill root. Restart Codex
-after installing the skill.
+Codex is only a preset because its skill root is conventional in this
+environment:
+
+``` sh
+npx --yes github:sounkou-bioinfo/pi-bio-agent install-skill --host codex
+```
+
+The older alias still works:
+
+``` sh
+pi-bio-agent install-codex-skill
+```
 
 From a checkout, install the skill for local development:
 
 ``` sh
 npm install
 npm run build
-npm run install:codex-skill
+npm run install:skill -- --dest /path/to/host/skills
 ```
 
-That installs the skill only. Link the checkout CLI when you also want
-`pi-bio-agent` on `PATH`:
+Link the checkout CLI when you also want `pi-bio-agent` on `PATH`:
 
 ``` sh
-npm run install:codex-skill -- --link-cli
+npm run install:skill -- --dest /path/to/host/skills --link-cli
 ```
 
 Codex’s generic GitHub skill installer also works, but it installs only
@@ -577,10 +599,8 @@ python ~/.codex/skills/.system/skill-installer/scripts/install-skill-from-github
   --path skills/pi-bio-agent
 ```
 
-For other hosts, copy or link `skills/pi-bio-agent/` into that host’s
-skill/playbook directory and call the `pi-bio-agent` CLI as the
-execution surface. The skill is guidance; manifests, SQL, receipts, CAS,
-and observations remain the computation.
+The skill is guidance; manifests, SQL, receipts, CAS, and observations
+remain the computation.
 
 ## Docs
 
