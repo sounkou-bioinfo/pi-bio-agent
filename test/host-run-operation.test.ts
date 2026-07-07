@@ -7,6 +7,7 @@ import type { BioManifest } from "../src/core/manifest.js";
 import type { RunReplaySpec } from "../src/core/reproducibility.js";
 import type { FetchLike } from "../src/duckdb/resolvers/http-table-scan.js";
 import { ducknngHttpProfileReceiptFromInfo } from "../src/duckdb/http-profiles.js";
+import { fsCasStore } from "../src/hosts/fs-cas.js";
 import { persistRun, persistFailedRun, runBioOperationFromManifest, runBioQueryFromManifest, runsRoot } from "../src/hosts/run-store.js";
 
 // End-to-end through the host: a manifest JSON on disk -> validated registry -> built-in resolvers -> a
@@ -221,6 +222,74 @@ describe("host: bio_run_operation end-to-end", () => {
     assert.equal(res.ok, true);
     if (!res.ok) throw new Error("unreachable");
     assert.equal(res.rowCount, 2);
+  });
+
+  test("remoteCacheScope threads through high-level query and operation runs for scoped CAS/ETag reuse", async () => {
+    const netManifest: BioManifest = {
+      schema: "pi-bio.manifest.v1", id: "net-cache-scope", version: "0.1.0",
+      title: "Net cache scope", description: "HTTP cache scope propagation.",
+      provides: {
+        resolvers: [{ id: "http.get", version: "0.1.0", title: "HTTP get", description: "Fetch a URL into a table.", output: { mode: "table" } }],
+        resources: [{ id: "candidates", title: "Candidates", kind: "virtual", resolver: "http.get", params: { url: "https://example.org/candidates.json", table: "candidates", format: "json" } }],
+        operations: [{
+          id: "list.candidates", version: "0.1.0", title: "List", description: "List candidates.",
+          transport: "duckdb.sql", inputSchema: { type: "object" },
+          sql: { sqlTemplate: "SELECT obo_id FROM candidates ORDER BY obo_id", readOnly: true, requiredResources: ["candidates"] },
+        }],
+      },
+    };
+    const cwd = await tmpProject(netManifest);
+    const cas = fsCasStore(await fs.mkdtemp(join(tmpdir(), "pi-bio-run-cas-")));
+    let bodyDownloads = 0;
+    const fetchImpl: FetchLike = async (_u, init) => {
+      const h = { get: (n: string) => (n.toLowerCase() === "etag" ? "etag-1" : null) };
+      if (init?.headers?.["If-None-Match"] === "etag-1") return { ok: false, status: 304, text: async () => "", headers: h };
+      bodyDownloads++;
+      return { ok: true, status: 200, text: async () => JSON.stringify([{ obo_id: "MONDO:0004979" }]), headers: h };
+    };
+
+    const first = await runBioQueryFromManifest({
+      cwd, dbPath: ":memory:", manifestPath: "manifest.json", sql: "SELECT obo_id FROM candidates",
+      network: { fetch: fetchImpl }, cas, remoteCacheScope: "public", runId: "scoped-query", now: "T1",
+    });
+    assert.equal(first.ok, true);
+    assert.equal(bodyDownloads, 1);
+
+    const second = await runBioOperationFromManifest({
+      cwd, dbPath: ":memory:", manifestPath: "manifest.json", operationId: "list.candidates",
+      network: { fetch: fetchImpl }, cas, remoteCacheScope: "public", runId: "scoped-operation", now: "T2",
+    });
+    assert.equal(second.ok, true);
+    assert.equal(bodyDownloads, 1, "operation path reused the scoped CAS/ETag entry seeded by the query path");
+  });
+
+  test("remoteCacheScope remains opt-in: high-level runs with CAS but no scope do not use cross-db remote reuse", async () => {
+    const netManifest: BioManifest = {
+      schema: "pi-bio.manifest.v1", id: "net-cache-noscope", version: "0.1.0",
+      title: "Net cache no scope", description: "No cross-db reuse without a host scope.",
+      provides: {
+        resolvers: [{ id: "http.get", version: "0.1.0", title: "HTTP get", description: "Fetch a URL into a table.", output: { mode: "table" } }],
+        resources: [{ id: "candidates", title: "Candidates", kind: "virtual", resolver: "http.get", params: { url: "https://example.org/private.json", table: "candidates", format: "json" } }],
+      },
+    };
+    const cwd = await tmpProject(netManifest);
+    const cas = fsCasStore(await fs.mkdtemp(join(tmpdir(), "pi-bio-run-cas-")));
+    let bodyDownloads = 0;
+    const fetchImpl: FetchLike = async (_u, init) => {
+      const h = { get: (n: string) => (n.toLowerCase() === "etag" ? "etag-1" : null) };
+      if (init?.headers?.["If-None-Match"] === "etag-1") return { ok: false, status: 304, text: async () => "", headers: h };
+      bodyDownloads++;
+      return { ok: true, status: 200, text: async () => JSON.stringify([{ obo_id: "MONDO:0004979" }]), headers: h };
+    };
+
+    for (const runId of ["noscope-1", "noscope-2"]) {
+      const res = await runBioQueryFromManifest({
+        cwd, dbPath: ":memory:", manifestPath: "manifest.json", sql: "SELECT obo_id FROM candidates",
+        network: { fetch: fetchImpl }, cas, runId, now: "T1",
+      });
+      assert.equal(res.ok, true);
+    }
+    assert.equal(bodyDownloads, 2, "without a host-provided scope the shared remote index is skipped entirely");
   });
 
   test("fails closed on an invalid manifest", async () => {

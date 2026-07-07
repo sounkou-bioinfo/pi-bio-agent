@@ -63,11 +63,14 @@ export async function runQuery(
     signal?: AbortSignal;
     /** CAS mode, forwarded to each resolver's context (byte snapshot + cross-db reuse). */
     cas?: CasStore;
+    /** Host-owned cross-db remote-cache isolation scope, forwarded to resolvers. Absent keeps fail-closed
+     *  no-cross-db-reuse behavior. */
+    remoteCacheScope?: string;
     /** Host-declared protected session variables that ad-hoc agent SQL must not read with getvariable() or enumerate. */
     protectedSessionVariables?: readonly string[];
   },
 ): Promise<{ result: OperationResult; run: BioRunRecord; receipts: ResolutionReceipt[] }> {
-  const { resources, runId, now, params = [], signal, cas } = opts;
+  const { resources, runId, now, params = [], signal, cas, remoteCacheScope } = opts;
   const id = opts.id ?? "ad-hoc.query";
   const isNamed = opts.id !== undefined;
   const safeSql = isNamed
@@ -94,7 +97,7 @@ export async function runQuery(
   const receipts: ResolutionReceipt[] = [];
   try {
     for (const rid of resources) {
-      receipts.push(await registry.resolveResource(rid, { conn, now, signal, cas }));
+      receipts.push(await registry.resolveResource(rid, { conn, now, signal, cas, remoteCacheScope }));
     }
     // Ordinal scales as data: project every ordered TermSet into `scale_members` so the SQL can JOIN and
     // threshold/ORDER BY on rank. Derived from declared manifest data (no external source, no receipt).
@@ -142,7 +145,7 @@ export async function runQuery(
 export async function runOperation(
   registry: BioRegistry,
   conn: SqlConn,
-  opts: { operationId: string; resources?: string[]; params?: readonly unknown[]; runId: string; now: string; signal?: AbortSignal; cas?: CasStore },
+  opts: { operationId: string; resources?: string[]; params?: readonly unknown[]; runId: string; now: string; signal?: AbortSignal; cas?: CasStore; remoteCacheScope?: string },
 ): Promise<{ result: OperationResult; run: BioRunRecord; receipts: ResolutionReceipt[] }> {
   const { operationId } = opts;
   const op = registry.getOperation(operationId);
@@ -156,7 +159,7 @@ export async function runOperation(
     if (uncovered.length) throw new Error(`operation '${operationId}': provided resources do not cover required resource(s): ${uncovered.join(", ")}`);
   }
   return runQuery(registry, conn, {
-    sql: op.sql.sqlTemplate, resources, runId: opts.runId, now: opts.now, params: opts.params, signal: opts.signal, cas: opts.cas,
+    sql: op.sql.sqlTemplate, resources, runId: opts.runId, now: opts.now, params: opts.params, signal: opts.signal, cas: opts.cas, remoteCacheScope: opts.remoteCacheScope,
     id: op.id, version: op.version, title: op.title, description: op.description,
   });
 }

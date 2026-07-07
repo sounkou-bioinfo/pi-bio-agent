@@ -67,9 +67,9 @@ function parseBindings(raw: string | undefined): Record<string, unknown> | undef
 
 const USAGE =
   "usage:\n" +
-  "  pi-bio-agent query <manifest.json> --db <path|:memory:> --sql \"<SELECT/WITH/DESCRIBE/SUMMARIZE>\" [--resources a,b] [--bindings '{...}'] [--init-sql \"INSTALL ...; LOAD ...\"] [--run-id id] [--ledger <path|auto> [--author name]]\n" +
-  "  pi-bio-agent run   <manifest.json> --db <path|:memory:> --operation <id> [--bindings '{...}'] [--run-id id] [--ledger <path|auto> [--author name]]\n" +
-  "  --ledger records the run as a run:<id> fact in the shared bio_observations store (path, or 'auto' for the project default); --author attributes it (default 'cli').";
+  "  pi-bio-agent query <manifest.json> --db <path|:memory:> --sql \"<SELECT/WITH/DESCRIBE/SUMMARIZE>\" [--resources a,b] [--bindings '{...}'] [--init-sql \"INSTALL ...; LOAD ...\"] [--remote-cache-scope <scope>] [--run-id id] [--ledger <path|auto> [--author name]]\n" +
+  "  pi-bio-agent run   <manifest.json> --db <path|:memory:> --operation <id> [--bindings '{...}'] [--remote-cache-scope <scope>] [--run-id id] [--ledger <path|auto> [--author name]]\n" +
+  "  --ledger records the run as a run:<id> fact in the shared bio_observations store (path, or 'auto' for the project default); --author attributes it (default 'cli'); --remote-cache-scope enables host-scoped shared HTTP/CAS reuse.";
 
 /** Split a `;`-separated SQL string into statements WITHOUT splitting a `;` inside a single-quoted string literal
  *  (with `''` escapes). Enough for the provisioning escape hatch (`SET VARIABLE tls = fn('a;b')`); not a full
@@ -101,7 +101,7 @@ export async function mainRun(sub: string, argv: string[], deps: RunCliDeps): Pr
     // PER-SUBCOMMAND flags, not a shared set: `run --resources` / `query --operation` would otherwise be accepted
     // and SILENTLY IGNORED (a `run` still resolves the operation's own requiredResources — the caller's --resources
     // exclusion is a no-op), which is exactly the surprising fall-through the unknown-flag hardening exists to stop.
-    const COMMON = ["db", "bindings", "run-id", "init-sql", "ledger", "author"];
+    const COMMON = ["db", "bindings", "run-id", "init-sql", "ledger", "author", "remote-cache-scope"];
     const KNOWN = new Set(sub === "query" ? [...COMMON, "sql", "resources"] : [...COMMON, "operation"]);
     const unknown = Object.keys(flags).filter((k) => !KNOWN.has(k));
     if (unknown.length) throw new Error(`unknown flag(s) for '${sub}': ${unknown.map((k) => `--${k}`).join(", ")}`); // a typo / wrong-subcommand flag must not silently fall back
@@ -116,6 +116,7 @@ export async function mainRun(sub: string, argv: string[], deps: RunCliDeps): Pr
   // `;`-separated statements. This is how a networked connector gets ducknng + TLS; it is NOT agent SQL.
   const initStmts = flags["init-sql"] ? splitSqlStatements(flags["init-sql"]) : [];
   const duckdbInitSql = initStmts.length ? initStmts : undefined;
+  const remoteCacheScope = flags["remote-cache-scope"];
   // Optional LEDGER opt-in: fold this run into the shared bio_observations store as a `run:<id>` fact — the thesis'
   // "compute status is a row in the one ledger" demonstrated from the provider-agnostic CLI, not just the extension.
   // EXPLICIT + path-specified (`--ledger <path|auto>`), never an ambient default (the CLI's visible-choice
@@ -130,7 +131,7 @@ export async function mainRun(sub: string, argv: string[], deps: RunCliDeps): Pr
       return 1;
     }
   }
-  const common = { cwd: deps.cwd, dbPath, manifestPath, runId, bindings, duckdbInitSql, ...(ledger ? { store: ledger.conn, author: flags.author ?? "cli" } : {}) };
+  const common = { cwd: deps.cwd, dbPath, manifestPath, runId, bindings, duckdbInitSql, remoteCacheScope, ...(ledger ? { store: ledger.conn, author: flags.author ?? "cli" } : {}) };
 
   let res;
   try {

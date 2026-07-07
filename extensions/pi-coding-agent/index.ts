@@ -230,6 +230,9 @@ export interface BioExtensionOptions {
   /** CAS grant: a content-addressed store so `compute.run` can capture declared FILE outputs by digest, and
    *  runs can serialize result/receipts/replay bytes outside the DB. Absent => file outputs fail closed. */
   cas?: CasStore;
+  /** Host-owned cross-db remote-cache isolation scope. This is intentionally not a tool parameter: the host decides
+   *  whether shared HTTP/CAS reuse is public, per-principal, or disabled. */
+  remoteCacheScope?: string;
   /** Host-owned DuckDB session variables, bound after ordinary agent `bindings`, digested but not serialized in
    *  replay.json, and blocked from ad-hoc `bio_query` reads by name. This is a host composition hook, never a tool
    *  parameter; declared operations may intentionally consume these values. */
@@ -251,6 +254,7 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
   const network = options.network;
   const computeGrant = options.compute; // threaded into runs so compute.run can bind
   const cas = options.cas; // the CAS grant (file outputs + byte serialization); absent => file outputs fail closed
+  const remoteCacheScope = options.remoteCacheScope;
   const protectedSessionBindings = options.protectedSessionBindings;
   const protectedSessionVariables = options.protectedSessionVariables;
   const author = options.author ?? "agent:local";
@@ -462,7 +466,7 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
       // not strip unknown keys. network/signal are host-composed, never agent-supplied.
       const { dbPath, manifestPath, operationId, runId } = params;
       return text(await withRunLog(openStore, ctx.cwd, dbPath, async (storeConn) => {
-        const out = await runBioOperationFromManifest({ cwd: ctx.cwd, dbPath, manifestPath, operationId, runId, network, compute: computeGrant, cas, protectedSessionBindings, protectedSessionVariables, signal, store: storeConn, author });
+        const out = await runBioOperationFromManifest({ cwd: ctx.cwd, dbPath, manifestPath, operationId, runId, network, compute: computeGrant, cas, remoteCacheScope, protectedSessionBindings, protectedSessionVariables, signal, store: storeConn, author });
         await recordToolRunLink(storeConn, ctx, id, "bio_run_operation", out.runId);
         return out;
       }));
@@ -485,7 +489,7 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
       // Only schema-approved fields (see bio_run_operation): never spread untrusted params into the host runner.
       const { dbPath, manifestPath, sql, resources, bindings, runId } = params;
       return text(await withRunLog(openStore, ctx.cwd, dbPath, async (storeConn) => {
-        const out = await runBioQueryFromManifest({ cwd: ctx.cwd, dbPath, manifestPath, sql, resources, bindings, runId, network, compute: computeGrant, cas, protectedSessionBindings, protectedSessionVariables, signal, store: storeConn, author });
+        const out = await runBioQueryFromManifest({ cwd: ctx.cwd, dbPath, manifestPath, sql, resources, bindings, runId, network, compute: computeGrant, cas, remoteCacheScope, protectedSessionBindings, protectedSessionVariables, signal, store: storeConn, author });
         await recordToolRunLink(storeConn, ctx, id, "bio_query", out.runId);
         return out;
       }));

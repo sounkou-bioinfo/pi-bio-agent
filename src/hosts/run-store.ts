@@ -323,6 +323,10 @@ export interface RunOperationRequest {
   /** CAS mode (host opt-in): a content-addressed byte store. Present = resolvers snapshot bytes into it and
    *  reuse them across dbs/runs; absent = fast mode. */
   cas?: CasStore;
+  /** Host-owned cross-db remote-cache isolation scope. Present = resolvers may use scoped shared remote freshness
+   *  indexes (for example `(scope,url)->ETag+CAS`); absent = skip cross-db remote reuse, avoiding cross-tenant
+   *  leakage by default. */
+  remoteCacheScope?: string;
   /** Optional CAS metadata on the same SqlConn as `store`. With `cas`, run result/receipt/replay/run-object CAS
    *  bytes are registered as objects and rooted by `run:<id>` refs for metadata-driven shared-CAS GC. Without `cas`,
    *  the authority is used only to clear stale refs for this run id after a non-CAS reuse commits. */
@@ -817,7 +821,7 @@ export async function runBioOperationFromManifest(req: RunOperationRequest): Pro
     ...(hostCapabilityRefs.length ? { hostReceiptDigests: hostCapabilityRefs.map((r) => r.digest) } : {}),
     ...(proc ? { compute: proc } : {}),
   };
-  return runAndPersist(req.cwd, req.dbPath, runId, req.operationId, "operation", (conn) => runOperation(registry, conn, { operationId: req.operationId, runId, now, signal: req.signal, cas: req.cas }), req.now, req.duckdbInitSql, req.bindings, req.protectedSessionBindings, req.protectedSessionVariables, req.duckdbConfig, req.sqlPolicy, replay, hostCapabilityRefs, req.store ? { store: req.store, author: req.author } : undefined, req.cas, req.casMetadata, req.serialize);
+  return runAndPersist(req.cwd, req.dbPath, runId, req.operationId, "operation", (conn) => runOperation(registry, conn, { operationId: req.operationId, runId, now, signal: req.signal, cas: req.cas, remoteCacheScope: req.remoteCacheScope }), req.now, req.duckdbInitSql, req.bindings, req.protectedSessionBindings, req.protectedSessionVariables, req.duckdbConfig, req.sqlPolicy, replay, hostCapabilityRefs, req.store ? { store: req.store, author: req.author } : undefined, req.cas, req.casMetadata, req.serialize);
 }
 
 export interface RunQueryRequest {
@@ -843,6 +847,10 @@ export interface RunQueryRequest {
   signal?: AbortSignal;
   /** CAS mode (host opt-in): a content-addressed byte store for cross-db byte reuse. */
   cas?: CasStore;
+  /** Host-owned cross-db remote-cache isolation scope. Present = resolvers may use scoped shared remote freshness
+   *  indexes (for example `(scope,url)->ETag+CAS`); absent = skip cross-db remote reuse, avoiding cross-tenant
+   *  leakage by default. */
+  remoteCacheScope?: string;
   /** Optional CAS metadata on the same SqlConn as `store`. With `cas`, run result/receipt/replay/run-object CAS
    *  bytes are registered as objects and rooted by `run:<id>` refs for metadata-driven shared-CAS GC. Without `cas`,
    *  the authority is used only to clear stale refs for this run id after a non-CAS reuse commits. */
@@ -900,5 +908,5 @@ export async function runBioQueryFromManifest(req: RunQueryRequest): Promise<Run
     ...(hostCapabilityRefs.length ? { hostReceiptDigests: hostCapabilityRefs.map((r) => r.digest) } : {}),
     ...(proc ? { compute: proc } : {}),
   };
-  return runAndPersist(req.cwd, req.dbPath, runId, "ad-hoc.query", "query", (conn, protectedSessionVariables) => runQuery(registry, conn, { sql: req.sql, resources, runId, now, signal: req.signal, cas: req.cas, protectedSessionVariables }), req.now, req.duckdbInitSql, req.bindings, req.protectedSessionBindings, req.protectedSessionVariables, req.duckdbConfig, req.sqlPolicy, replay, hostCapabilityRefs, req.store ? { store: req.store, author: req.author } : undefined, req.cas, req.casMetadata, req.serialize);
+  return runAndPersist(req.cwd, req.dbPath, runId, "ad-hoc.query", "query", (conn, protectedSessionVariables) => runQuery(registry, conn, { sql: req.sql, resources, runId, now, signal: req.signal, cas: req.cas, remoteCacheScope: req.remoteCacheScope, protectedSessionVariables }), req.now, req.duckdbInitSql, req.bindings, req.protectedSessionBindings, req.protectedSessionVariables, req.duckdbConfig, req.sqlPolicy, replay, hostCapabilityRefs, req.store ? { store: req.store, author: req.author } : undefined, req.cas, req.casMetadata, req.serialize);
 }

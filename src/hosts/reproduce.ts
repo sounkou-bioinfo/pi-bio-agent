@@ -60,6 +60,9 @@ export interface ReproduceRequest {
   network?: { fetch: FetchLike };
   compute?: { runner: ComputeRunner };
   cas?: CasStore;
+  /** Host-owned cross-db remote-cache isolation scope for the re-run. Not stored in replay; receipts/content
+   *  still decide whether reproduction matched. */
+  remoteCacheScope?: string;
   /** the host re-supplies the DuckDB config (it may bear secrets, so it is NOT stored in the replay — only its
    *  digest is). reproduce re-applies it and verifies it matches the pinned `duckdbConfigDigest`, failing closed. */
   duckdbConfig?: Record<string, string>;
@@ -144,7 +147,7 @@ export async function reproduceRun(req: ReproduceRequest): Promise<ReproduceResu
   const base = {
     cwd: req.cwd, dbPath: req.dbPath ?? ":memory:", manifestPath: replay.manifest!.path!,
     bindings: replay.bindings, duckdbInitSql: req.duckdbInitSql, protectedSessionBindings: req.protectedSessionBindings, protectedSessionVariables: req.protectedSessionVariables, duckdbConfig: req.duckdbConfig, hostCapabilityReceipts: req.hostCapabilityReceipts,
-    network: req.network, compute: req.compute, cas: req.cas,
+    network: req.network, compute: req.compute, cas: req.cas, remoteCacheScope: req.remoteCacheScope,
     runId: `reproduce-${shortId}${suffix}`, now: req.now,
   };
 

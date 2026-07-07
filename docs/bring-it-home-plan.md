@@ -82,6 +82,12 @@ These items are no longer open substrate work in `pi-bio-agent`.
   [ducknng HTTP profile tests](https://github.com/sounkou-bioinfo/ducknng/blob/395ed5c/test/sql/ducknng_http_profiles.test),
   [ducknng mTLS tests](https://github.com/sounkou-bioinfo/ducknng/blob/395ed5c/test/sql/ducknng_mtls_auth.test),
   [ducknng peer-allowlist tests](https://github.com/sounkou-bioinfo/ducknng/blob/395ed5c/test/sql/ducknng_peer_allowlist.test).
+- **Remote HTTP/CAS reuse is scoped consistently.** `remoteCacheScope` is the host-owned isolation key for shared
+  remote freshness and CAS reuse. It now threads through direct resolver use, `runQuery` / `runOperation`, packaged
+  `runBioQueryFromManifest` / `runBioOperationFromManifest`, reproduce, the CLI host flag, and the Pi extension host
+  option. Absence still skips cross-db remote reuse. Evidence: [operations.ts](../src/core/operations.ts),
+  [run-store.ts](../src/hosts/run-store.ts), [reproduce.ts](../src/hosts/reproduce.ts),
+  [host-run-operation.test.ts](../test/host-run-operation.test.ts).
 
 The compact proof is:
 
@@ -99,32 +105,28 @@ roots, host policy hooks, and real process compute when R is available.
 These are the remaining lanes. Several are required to bring the substrate home; the constraint is that they should
 close over existing primitives and concrete consumers, not become speculative taxonomies.
 
-1. **Remote cache-scope consistency.** `remoteCacheScope` is already the host-owned isolation key for shared HTTP/CAS
-   reuse. Thread it through packaged run requests and Pi/SDK callers so `bio_query` / `bio_run_operation` have the
-   same cache semantics as direct resolver use. Do not force a scope: hosts that do not supply one should keep the
-   current fail-closed/no-cross-db-reuse behavior.
-2. **Lazy resource forcing.** Resolve only the declared resources a query or operation actually names, while keeping
+1. **Lazy resource forcing.** Resolve only the declared resources a query or operation actually names, while keeping
    the manifest contract explicit and fail-closed. This is required for larger manifests and agent-authored
    manifests, not a new resource model.
-3. **ducknng/quack sibling upload and shared-data path.** Use the sibling transport that fits the operation:
+2. **ducknng/quack sibling upload and shared-data path.** Use the sibling transport that fits the operation:
    ducknng RPC is the proven mutable-state path; append/share or upload-shaped paths may use quack where that fits.
    Keep this in the sibling transport/host layer and surface it to core through receipts, `SqlConn`, CAS, and
    resolver handles.
-4. **Scoped relation/resource visibility.** The current pattern is
+3. **Scoped relation/resource visibility.** The current pattern is
    a host-owned `SqlConn` wrapper: a host that hides a relation should deny `SELECT`, `DESCRIBE`, `SUMMARIZE`, and
    catalog/introspection reads on that injected connection. `ducknng` HTTP profile admission is the corresponding
    network/profile gate. Do not add ad-hoc SQL string guards here. If a real embedding host needs centrally managed,
    subject-scoped relation or resource visibility across remote services, implement it as a host/ducknng admission
    feature and receipt it.
-5. **Training corpus hardening.** This is required, not optional: redaction policy, label schema, export contract,
+4. **Training corpus hardening.** This is required, not optional: redaction policy, label schema, export contract,
    and VARIANT-shredded Parquet for nested session/tool/run payloads. The base ledger remains `value_json`; typed
    Parquet is a derived export for downstream corpus consumers.
-6. **Graphics/report metadata from real reports.** Core has `recordArtifactReference`; richer renderer metadata is
+5. **Graphics/report metadata from real reports.** Core has `recordArtifactReference`; richer renderer metadata is
    required once R/Python/HTML report paths emit it. Add fields from real artifacts and report consumers, not from a
    guessed plot-table schema.
-7. **SDK maintenance.** Required exports should follow real sibling consumers. Each new public type/helper needs a
+6. **SDK maintenance.** Required exports should follow real sibling consumers. Each new public type/helper needs a
    packed external-consumer dogfood so the library boundary stays usable from outside the repo.
-8. **Host adapters over `recordHostEvent`.** `recordHostEvent` is available; concrete Pi/workbench/scheduler hook
+7. **Host adapters over `recordHostEvent`.** `recordHostEvent` is available; concrete Pi/workbench/scheduler hook
    adapters are required where control events affect training, replay, steering, interruption, or governance. They
    should record only events the host actually emits and only the receipts a consumer reads.
 
