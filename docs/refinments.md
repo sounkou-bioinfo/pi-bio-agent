@@ -809,18 +809,19 @@ Open library questions to resolve before claiming that position:
 - **ducknng auth/state validation:** already exercised in-tree: `ducknng_ncurl_table` against local HTTP fixtures,
   scalar AIO fanout/retry, `ducknng_run_rpc` / `ducknng_query_rpc` mutable shared state, and NNG socket
   reachability. Also checked: local MCP-style `initialize` -> `Mcp-Session-Id` -> `tools/list` header threading,
-  an SSE route served by ducknng and consumed with `ducknng_ncurl`, and, when the loaded ducknng build supports it,
-  scoped and subject-restricted HTTP profile auth where SQL passes only `profile_id`. Still unproven and should be a
-  conformance target before product claims: `wss`/server-push subscriptions, TLS/mTLS auth fixtures in this repo,
-  profile rotation/refresh hooks, embedded-host subject bracketing for non-service hosts, and profile-aware
-  receipts/replay/action-cache scoping.
-- **Token rotation/refresh boundary:** reuse the Pi pattern rather than inventing manifest config. Pi's
+  an SSE route served by ducknng and consumed with `ducknng_ncurl`, scoped HTTP profile receipts pinned into replay
+  and action-cache keys, profile rotation through `refreshDucknngHttpProfile`, gated subject-restricted profile auth
+  when the loaded ducknng build exposes execution subjects, and a local `tls+tcp://` fixture for TLS/mTLS client
+  authentication plus exact peer-allowlist admit/deny. Remaining conformance targets before product claims are now
+  narrower: `wss`/server-push subscriptions, embedded-host subject bracketing for non-service hosts, and optional
+  whole-header ownership policy when a deployment needs it.
+- **Token rotation/refresh seam:** reuse the Pi pattern rather than inventing manifest config. Pi's
   `AuthStorage` stores API keys/OAuth credentials in a locked 0600 file, refreshes OAuth under lock, and returns an
   access token only at request time. `http.get` supports dynamic refresh because `withAuth` calls `getAuthHeaders`
   per request and host auth wins over manifest headers. For the ducknng SQL path, the host should resolve or refresh
   the token, register/update the scoped HTTP profile on the execution connection, and give agent SQL only the
   profile id.
-- **Downstream VM boundary:** if an application needs stronger execution isolation than local child-process compute or a
+- **Downstream VM seam:** if an application needs stronger execution isolation than local child-process compute or a
   bubblewrap-style wrapper, use a downstream microVM host such as
   [Gondolin](https://github.com/earendil-works/gondolin), not a new core sandbox model. Gondolin's useful pattern
   is VM execution with host-mediated HTTP/TLS, filesystem policy, and placeholder secret substitution scoped by
@@ -842,10 +843,13 @@ Open library questions to resolve before claiming that position:
   claims; `extend_claim` is heartbeat; `await_event` parks a run as sleeping; `emit_event` is first-write-wins and
   wakes sleepers. That maps cleanly to our shape: task/run tables become an `AsyncRunner` backend; checkpoints and
   intermediate results become CAS handles plus ledger observations; event waits are coordination facts; terminal
-  receipts and result digests remain the reproducibility authority. Remaining library work is event keys,
-  idempotency keys, checkpoint/result handles, and push wakeups over ducknng/Quack/websocket/CLI. Be precise about
-  push: a durable event log can be authoritative; a raw live transport frame is only a wakeup unless the backend
-  gives it durable/acknowledged stream semantics.
+  receipts and result digests remain the reproducibility authority. The core closure is now the narrow runner plus
+  checkpoint convention: status/result slots, queue claims, live-claim-gated writes, `recordHostEvent` for runtime
+  control receipts, `runJobStepWithCheckpoint` / `runJobStepsWithCheckpoints` for completed step reuse, and ducknng
+  push frames as optional wakeups. Remaining work is consumer/backend-specific: idempotency-key conventions, event
+  waits, and durable stream semantics only when a real queue or application needs them. Be precise about push: a
+  durable event log can be authoritative; a raw live transport frame is only a wakeup unless the backend gives it
+  durable/acknowledged stream semantics.
 
   The important application primitive is the **step checkpoint**, not only the queue. A task can be decomposed into
   ordered steps whose successful return values are retained; after a worker crash, lease expiry, or agent
