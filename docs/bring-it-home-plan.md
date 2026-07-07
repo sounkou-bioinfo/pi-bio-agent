@@ -70,10 +70,16 @@ These items are no longer open substrate work in `pi-bio-agent`.
   [sdk-host-embedding.mjs](../scripts/sdk-host-embedding.mjs),
   [sdk-host-embedding.test.ts](../test/sdk-host-embedding.test.ts),
   [bring-it-home-dogfood.test.ts](../test/bring-it-home-dogfood.test.ts).
-- **ducknng profile receipts are pinned without secrets.** Profile receipts carry redacted scope/version/subject
-  digests; host capability receipt digests affect replay/provenance/action-cache keys. Caller SQL cannot override a
-  host-owned profile auth header. Evidence: [http-profiles.ts](../src/duckdb/http-profiles.ts),
-  [ducknng-http-profiles.test.ts](../test/ducknng-http-profiles.test.ts), [ducknng-sql-http.test.ts](../test/ducknng-sql-http.test.ts).
+- **ducknng profile receipts and HTTP profile admission are pinned without secrets.** Profile receipts carry
+  redacted scope/version/subject digests; host capability receipt digests affect replay/provenance/action-cache keys.
+  Caller SQL cannot override a host-owned profile auth header. The sibling `ducknng` HTTP profile tests cover
+  credential rotation, header-collision rejection, subject allowlists, scoped profile listing, service request
+  subject bracketing, and streaming-query session subject bracketing. Core receipt evidence plus sibling profile
+  conformance evidence:
+  [http-profiles.ts](../src/duckdb/http-profiles.ts),
+  [ducknng-http-profiles.test.ts](../test/ducknng-http-profiles.test.ts),
+  [ducknng-sql-http.test.ts](../test/ducknng-sql-http.test.ts),
+  [ducknng HTTP profile tests](https://github.com/sounkou-bioinfo/ducknng/blob/395ed5c/test/sql/ducknng_http_profiles.test).
 
 The compact proof is:
 
@@ -90,9 +96,10 @@ roots, host policy hooks, and real process compute when R is available.
 
 These are the remaining lanes. They should not become new core abstractions until an application proves a gap.
 
-1. **ducknng subject/auth depth.** Finish the sibling `ducknng` runtime and adapter work: host-only subject bracketing
-   for non-service embedding hosts, profile rotation ergonomics, TLS/mTLS fixture breadth, and possibly scoped
-   relation/resource visibility. Keep this in ducknng plus secret-free receipts, not SQL string guards.
+1. **Scoped relation/resource visibility, if a host proves it needs it.** HTTP profile admission now lives in
+   sibling `ducknng` plus secret-free receipts. Do not add SQL string guards in this repo. If a real embedding host
+   needs subject-scoped relation or resource visibility beyond its wrapped `SqlConn`, implement it as a host/ducknng
+   admission feature and receipt it.
 2. **Training corpus hardening.** App-driven redaction policy, label schema, export contract, and VARIANT-shredded
    Parquet when a real downstream corpus consumer benefits from nested typed columns. The base ledger remains
    `value_json`.
