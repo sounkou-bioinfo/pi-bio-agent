@@ -82,8 +82,13 @@ The core must not know another host's event vocabulary. A host may choose kinds 
 `scheduler.lease_lost`; those names are not core semantics. If an application wants domain meaning, it records its own
 domain observation explicitly.
 
-**Done when.** The helper is exported, tested for open kinds and graph projection, and any host adapter that uses it is
-thin: it records only events the host actually emits and does not infer intent from transcript text.
+**Current proof.** The helper is exported from the public package surface and tested for open host-owned kinds,
+stable identity, fail-closed link validation, and ordinary graph projection through `bio_edges_as_of`. The
+bring-it-home dogfood records a `workbench.input.steer` receipt with two links, and the training-corpus export reads
+host events into the digest-only corpus without learning a host taxonomy.
+
+**Done when.** The core primitive is done. Remaining work is adapter-owned: a Pi, workbench, or scheduler adapter may
+record only events that the host actually emits, and must not infer runtime intent from transcript text.
 
 ### 2. Workflow Step Checkpoint Convention
 
@@ -108,8 +113,15 @@ read checkpoints first, run only missing sequential steps, and record completed 
 Step dependencies are not inferred; a step declares its real dependency by reading earlier checkpoint values through
 the helper context, or by recording explicit graph edges in the application/workflow layer.
 
-**Done when.** A downstream workflow uses the helper in anger, is killed mid-run, resumes against the same store,
-skips completed steps from checkpoint facts, and still produces reproducible run/CAS evidence for each completed step.
+**Current proof.** The focused tests prove a sequential plan reuses a completed prefix checkpoint after restart and
+fails closed when a step asks for a missing/future checkpoint. The Absurd-style queue dogfood proves the distributed
+case: attempt 1 records an `extract` step, its lease expires, attempt 2 reclaims the job, reuses the checkpoint without
+rerunning extraction, records the next step, and completes through the same live-claim-gated status/result slots. The
+bring-it-home dogfood uses the public helper on a slash-bearing step id and verifies the resumed execution counts.
+
+**Done when.** The core convention is done. Remaining work is consumer-owned: real applications should use these
+helpers for staged workflows, keep step bodies idempotent around the checkpoint boundary, and attach run/CAS evidence
+inside each durable step where their domain requires it.
 
 ### 3. SDK Surface Polish
 
