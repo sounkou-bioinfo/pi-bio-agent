@@ -56,7 +56,7 @@ describe("example: OLS4 grounding is SQL all the way down (ducknng_ncurl)", { sk
   test("fails closed when {query} has no binding (url_encode(NULL) -> NULL url -> auditable failed run)", async () => {
     const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-ols4-"));
     const out = await runBioQueryFromManifest({
-      cwd, dbPath: ":memory:", manifestPath: MANIFEST, sql: "SELECT 1",
+      cwd, dbPath: ":memory:", manifestPath: MANIFEST, sql: "SELECT count(*) AS n FROM ols4_candidates",
       duckdbInitSql: PROVISION, duckdbConfig: { allow_unsigned_extensions: "true" },
       bindings: { ols4_base: "http://127.0.0.1:45581" }, // no query -> the composed URL is NULL; no server needed
       runId: "g2", now: "T1",

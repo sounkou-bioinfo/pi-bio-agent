@@ -20,3 +20,4 @@ export * from "./study.js";
 export * from "./reproducibility.js";
 export * from "./jobs.js";
 export * from "./graph-projection.js";
+export * from "./resource-forcing.js";

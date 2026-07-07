@@ -108,28 +108,25 @@ consumer-pulled, or a non-goal.
 
 ### Active / Not Deferred
 
-1. **Lazy resource forcing.** Resolve only the declared resources a query or operation actually names, while keeping
-   the manifest contract explicit and fail-closed. This is required for larger manifests and agent-authored
-   manifests, not a new resource model.
-2. **ducknng/quack sibling upload and shared-data path.** Use the sibling transport that fits the operation:
+1. **ducknng/quack sibling upload and shared-data path.** Use the sibling transport that fits the operation:
    ducknng RPC is the proven mutable-state path; append/share or upload-shaped paths may use quack where that fits.
    Keep this in the sibling transport/host layer and surface it to core through receipts, `SqlConn`, CAS, and
    resolver handles. `remoteCacheScope` consistency is required wherever shared remote freshness or shared CAS reuse
    is exposed.
-3. **Concrete host adapters over `recordHostEvent`.** The primitive exists; the open work is the adapter layer:
+2. **Concrete host adapters over `recordHostEvent`.** The primitive exists; the open work is the adapter layer:
    Pi/workbench/scheduler hooks for steers, interrupts, compaction, session switching, context digests, lease loss,
    and governance events that a consumer actually reads. Do not add a closed event taxonomy.
-4. **Host capability operator ergonomics.** The library pieces exist (`duckdbInitSql`, protected session variables,
+3. **Host capability operator ergonomics.** The library pieces exist (`duckdbInitSql`, protected session variables,
    host capability receipts, and ducknng profile helpers), but the operator story must stay crisp. Add a small
    profile/admin CLI only when a host needs it; it must read secrets from host storage/stdin/env, never from
    manifests, SQL text, or argv, and it must emit only secret-free receipts.
-5. **Durable workflow dogfood over the closed lifecycle.** The async lifecycle and checkpoint resume helper are
+4. **Durable workflow dogfood over the closed lifecycle.** The async lifecycle and checkpoint resume helper are
    built. The remaining work is to dogfood them with real R/Python/bash/NNG/scheduler-backed steps and prove
    restart/reclaim behavior through the ledger. This is not a request for another workflow engine.
-6. **Substrate skill and non-Pi host dogfood.** The packaged skill should keep onboarding weaker hosts into the
+5. **Substrate skill and non-Pi host dogfood.** The packaged skill should keep onboarding weaker hosts into the
    substrate: write or inspect a manifest, discover schemas with `DESCRIBE` / `SUMMARIZE`, run bounded SQL, walk the
    ledger/graph when present, and promote only repeated workflows into thin playbooks.
-7. **Docs hygiene.** Keep README and guides action-first: real commands, real code chunks, no fake text-block
+6. **Docs hygiene.** Keep README and guides action-first: real commands, real code chunks, no fake text-block
    architecture diagrams, no speculative hostfs claims, and no stale "process transport" lane. Claims should point
    to commands, tests, or examples that currently run.
 
@@ -174,6 +171,11 @@ consumer-pulled, or a non-goal.
   redaction remain consumer-pulled.
 - **Base SDK packaging.** Root, `/core`, `/duckdb`, and `/hosts` exports are checked by a packed downstream
   embedding dogfood. Expansion remains consumer-driven.
+- **Lazy resource forcing.** Ad-hoc `bio_query` no longer resolves every manifest resource by default. When
+  `resources` is omitted, the host infers the minimal resource set from DuckDB parser-discovered table references
+  and manifest `params.table` values; catalog-style schema discovery can still force the inspected table. Ambiguous
+  table-to-resource mappings fail clearly. Evidence: [resource-forcing.ts](../src/core/resource-forcing.ts),
+  [run-store.ts](../src/hosts/run-store.ts), [host-run-operation.test.ts](../test/host-run-operation.test.ts).
 
 ### Non-Goals In Core
 

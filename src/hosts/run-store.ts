@@ -5,6 +5,7 @@ import { RUN_REPLAY_SPEC_SCHEMA, receiptContentDigest, canonicalDigest, hostCapa
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { createBioRegistry, describeManifest, validateBioManifest, type BioRegistry, type BioManifest, type ManifestDescription, type ResolutionReceipt } from "../core/manifest.js";
+import { inferQueryResourceClosure } from "../core/resource-forcing.js";
 import { recordRunObservation, type RunObservation } from "./run-observations.js";
 import { actionCachePut, actionInputDigest } from "./action-cache.js";
 import type { CasStore } from "../core/cas.js";
@@ -394,6 +395,19 @@ async function prepareRegistry(req: { cwd: string; manifestPath: string; network
     if (impl) registry.bindResolverImpl(r.id, impl);
   }
   return { registry, manifest, raw, manifestDigest };
+}
+
+async function inferQueryResourcesFromManifest(manifest: BioManifest, sql: string): Promise<string[]> {
+  const instance = await DuckDBInstance.create(":memory:");
+  let connection: Awaited<ReturnType<typeof instance.connect>> | undefined;
+  try {
+    connection = await instance.connect();
+    const inferred = await inferQueryResourceClosure(duckdbNodeConn(connection), sql, manifest.provides?.resources ?? []);
+    return inferred.resources;
+  } finally {
+    connection?.closeSync();
+    instance.closeSync();
+  }
 }
 
 /** Describe ONE manifest by path (resolved safely within cwd): parse, validate, and summarize its
@@ -830,8 +844,8 @@ export interface RunQueryRequest {
   manifestPath: string;
   /** The read-only SQL to run — usually the AGENT's, written after schema discovery over the resolved tables. */
   sql: string;
-  /** Which declared resources to materialize first; defaults to ALL the manifest declares, so the SQL may
-   *  reference any of their tables. */
+  /** Which declared resources to materialize first. When omitted, the host infers the minimal set from SQL table
+   *  references and manifest resource params.table values; pass explicitly for unusual SQL shapes. */
   resources?: string[];
   runId?: string;
   now?: string;
@@ -893,7 +907,7 @@ export async function runBioQueryFromManifest(req: RunQueryRequest): Promise<Run
   const hostCapabilityRefs = hostCapabilityReceiptRefs(req.hostCapabilityReceipts);
   const protectedNamesDigest = protectedSessionVariablesDigest(req.protectedSessionVariables);
   const { registry, manifest, raw, manifestDigest } = await prepareRegistry(req);
-  const resources = req.resources ?? (manifest.provides?.resources ?? []).map((r) => r.id);
+  const resources = req.resources ?? await inferQueryResourcesFromManifest(manifest, req.sql);
   const now = req.now ?? systemClock();
   const runId = req.runId ?? `query-${Date.now()}-${randomUUID().slice(0, 8)}`; // globally unique: see runBioOperationFromManifest
   const proc = resolvedComputeFacts(manifest, resources);

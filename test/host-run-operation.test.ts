@@ -350,6 +350,81 @@ describe("host: bio_run_operation end-to-end", () => {
     assert.equal(bad.ok, false);
   });
 
+  test("bio_query infers and resolves only the resources referenced by ad-hoc SQL", async () => {
+    const lazyManifest: BioManifest = {
+      schema: "pi-bio.manifest.v1", id: "lazy-ad-hoc-pack", version: "0.1.0",
+      title: "Lazy ad-hoc", description: "Resource inference should not force unrelated resources.",
+      provides: {
+        resolvers: [{ id: "duckdb.file_scan", version: "0.1.0", title: "DuckDB file scan", description: "Read a file.", output: { mode: "table" } }],
+        resources: [
+          { id: "annotated_variants", title: "AV", kind: "virtual", resolver: "duckdb.file_scan", params: { path: "data/annotated_variants.csv", table: "annotated_variants" } },
+          { id: "unused_missing", title: "Missing", kind: "virtual", resolver: "duckdb.file_scan", params: { path: "data/does-not-exist.csv", table: "unused_missing" } },
+        ],
+      },
+    };
+    const cwd = await tmpProject(lazyManifest);
+    const res = await runBioQueryFromManifest({
+      cwd, dbPath: ":memory:", manifestPath: "manifest.json",
+      sql: "SELECT count(*) AS n FROM annotated_variants",
+      runId: "lazy-q", now: "2026-06-28T00:00:00Z",
+    });
+    assert.equal(res.ok, true);
+    const receipts = JSON.parse(await fs.readFile(join(res.runDir, "receipts.json"), "utf8")) as Array<{ resourceId: string }>;
+    assert.deepEqual(receipts.map((r) => r.resourceId), ["annotated_variants"]);
+    const replay = JSON.parse(await fs.readFile(join(res.runDir, "replay.json"), "utf8")) as RunReplaySpec;
+    assert.deepEqual(replay.resources, ["annotated_variants"]);
+
+    const literal = await runBioQueryFromManifest({
+      cwd, dbPath: ":memory:", manifestPath: "manifest.json",
+      sql: "SELECT 'annotated_variants' AS literal",
+      runId: "lazy-literal", now: "2026-06-28T00:00:00Z",
+    });
+    assert.equal(literal.ok, true);
+    const literalReceipts = JSON.parse(await fs.readFile(join(literal.runDir, "receipts.json"), "utf8")) as Array<{ resourceId: string }>;
+    assert.deepEqual(literalReceipts, [], "a matching string literal alone does not force a resource");
+
+    const schema = await runBioQueryFromManifest({
+      cwd, dbPath: ":memory:", manifestPath: "manifest.json",
+      sql: "SELECT column_name FROM information_schema.columns WHERE table_name = 'annotated_variants' ORDER BY column_name",
+      runId: "lazy-schema", now: "2026-06-28T00:00:00Z",
+    });
+    assert.equal(schema.ok, true);
+    const schemaReceipts = JSON.parse(await fs.readFile(join(schema.runDir, "receipts.json"), "utf8")) as Array<{ resourceId: string }>;
+    assert.deepEqual(schemaReceipts.map((r) => r.resourceId), ["annotated_variants"]);
+
+    const duckdbColumns = await runBioQueryFromManifest({
+      cwd, dbPath: ":memory:", manifestPath: "manifest.json",
+      sql: "SELECT column_name FROM duckdb_columns() WHERE table_name = 'annotated_variants' ORDER BY column_name",
+      runId: "lazy-duckdb-columns", now: "2026-06-28T00:00:00Z",
+    });
+    assert.equal(duckdbColumns.ok, true);
+    const duckdbColumnReceipts = JSON.parse(await fs.readFile(join(duckdbColumns.runDir, "receipts.json"), "utf8")) as Array<{ resourceId: string }>;
+    assert.deepEqual(duckdbColumnReceipts.map((r) => r.resourceId), ["annotated_variants"]);
+  });
+
+  test("bio_query resource inference fails clearly when a table maps to multiple resources", async () => {
+    const ambiguousManifest: BioManifest = {
+      schema: "pi-bio.manifest.v1", id: "ambiguous-ad-hoc-pack", version: "0.1.0",
+      title: "Ambiguous ad-hoc", description: "Two resources expose the same table.",
+      provides: {
+        resolvers: [{ id: "duckdb.file_scan", version: "0.1.0", title: "DuckDB file scan", description: "Read a file.", output: { mode: "table" } }],
+        resources: [
+          { id: "a", title: "A", kind: "virtual", resolver: "duckdb.file_scan", params: { path: "data/annotated_variants.csv", table: "dup" } },
+          { id: "b", title: "B", kind: "virtual", resolver: "duckdb.file_scan", params: { path: "data/so_loss_of_function.csv", table: "dup" } },
+        ],
+      },
+    };
+    const cwd = await tmpProject(ambiguousManifest);
+    await assert.rejects(
+      () => runBioQueryFromManifest({
+        cwd, dbPath: ":memory:", manifestPath: "manifest.json",
+        sql: "SELECT count(*) AS n FROM dup",
+        runId: "ambiguous-q", now: "2026-06-28T00:00:00Z",
+      }),
+      /table 'dup' is produced by multiple resources \(a, b\); pass resources explicitly/,
+    );
+  });
+
   test("resolution memoization: a second run over the same file db replays the cached resolution", async () => {
     const cwd = await tmpProject(manifest);
     const base = { cwd, dbPath: "cache.duckdb", manifestPath: "manifest.json", operationId: "rare_high_impact.report" };
