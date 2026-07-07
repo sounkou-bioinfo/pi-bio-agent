@@ -780,10 +780,11 @@ known to the host-capability digest path, so a supplied receipt must be exactly 
 `policyDigest` must match that canonical body before it can affect replay or reproduction. Subject allow-lists are
 canonicalized as sorted unique sets before registration so a profile policy is not sensitive to caller order or
 duplicates. Profile refresh uses the same ducknng upsert path through `refreshDucknngHttpProfile`, returning
-previous/current redacted receipts while leaving token refresh/storage with the host. The remaining gaps are
-`wss`/server-push app subscriptions, TLS/mTLS auth fixtures in this repo, and an explicit ducknng host-only API for
-embedded subject bracketing; today subject restriction is intentionally bound through ducknng's service/session
-execution subject.
+previous/current redacted receipts while leaving token refresh/storage with the host. The local ducknng runtime
+fixture now covers `tls+tcp://` RPC with a host-provisioned self-signed TLS handle, mTLS client-certificate
+rejection, and exact peer-identity allow-list admission/denial. The remaining gaps are `wss`/server-push app
+subscriptions and an explicit ducknng host-only API for embedded subject bracketing; today subject restriction is
+intentionally bound through ducknng's service/session execution subject.
 
 ## Progressive disclosure
 
