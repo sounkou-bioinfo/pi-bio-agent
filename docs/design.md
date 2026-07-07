@@ -421,13 +421,14 @@ For shared CAS, byte lifetime must be row-driven rather than inferred from local
 result/receipt/replay/run-object byte as a `cas_object` and roots it with durable `cas_ref` rows under `run:<id>`.
 The metadata GC then uses refs/leases as the root set instead of scraping run directories or JSON blobs.
 
-Filesystem-shaped access is a possible adapter over this model, not a replacement for it. DuckDB already has
-filesystem-oriented extension work such as [HostFS](https://duckdb.org/community_extensions/extensions/hostfs.html),
-and duckfs-style virtual filesystem experiments are useful prior art for exposing CAS/object metadata as paths.
-If we need that surface, keep it as a host adapter over `cas_object` / `cas_ref` / ledger rows: bytes remain CAS,
-metadata remains SQL, and the mounted/tree view is derived. A DuckTinyCC-style lightweight C extension could be a
-way to prototype such DuckDB-facing adapters without committing to a large C++ extension, but it should be proven
-by a real consumer before becoming core surface.
+Filesystem-shaped access is a possible adapter over this model, not a replacement for it. The relevant shape is a
+DuckDB VFS adapter, where DuckDB file I/O is delegated to a host-controlled filesystem implementation. If we need
+that surface, keep it as a host adapter over `cas_object` / `cas_ref` / ledger rows: bytes remain CAS, metadata
+remains SQL, and any mounted/tree view is derived.
+
+DuckTinyCC is a different tool. It is an in-process C/JIT/FFI-style surface for compiling C and registering DuckDB
+scalar UDFs at runtime. That may be useful for narrow C ABI adapters or hot-path UDFs, but it is trusted native
+code in the DuckDB process, not the filesystem adapter itself and not the default way to run scientific tools.
 
 ### 3. Virtual resources: live or expensive data
 
