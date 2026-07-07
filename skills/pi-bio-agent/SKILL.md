@@ -1,117 +1,102 @@
 ---
 name: pi-bio-agent
-description: "Use pi-bio-agent as a host-neutral substrate for agentic bioinformatics: write manifests, inspect DuckDB tables, compose read-only SQL, run pi-bio-agent query/run through the CLI or Pi tools, and avoid per-question skill sprawl. Use for Codex, ClawBio-like systems, Pi, or any agent host that needs biomedical answers from declared resources, receipts, CAS, and observations rather than model-generated facts."
+description: "Use pi-bio-agent as a host-neutral substrate for agentic bioinformatics: write manifests, inspect DuckDB tables, compose read-only SQL, run Pi bio_* tools or pi-bio-agent query/run, inspect the ledger/graph when present, and avoid per-question skill sprawl. In Pi, prefer extension tools; in Codex, Claude Code, OpenCode, GitHub Copilot CLI, or other hosts, use the CLI. Use when biomedical answers must come from declared resources, receipts, CAS, and observations rather than model-generated facts."
 ---
 
 # Pi Bio Agent
 
-Use this skill when a bioinformatics question should become declared data plus SQL, not a bespoke script or a new
-per-question skill. The substrate is host-neutral: Pi's `bio_*` tools are convenient when present, but the default
-portable path is the `pi-bio-agent` CLI.
+Pi Bio Agent turns biomedical questions into declared resources, DuckDB SQL, optional process compute, receipts, CAS
+artifacts, and observation-ledger facts. The model may route, inspect schemas, write manifests, compose SQL, and
+explain results. The model is not the source of biomedical facts.
 
-## Core Rule
+## What This Is
 
-The model may route, inspect schemas, write manifests, write SQL, and explain results. It is not the source of
-biomedical facts. Facts must come from declared resources, deterministic compute, receipts, CAS artifacts, and
-recorded observations or approvals.
+Pi Bio Agent is a substrate for agent-authored scientific computation:
 
-## Default CLI Loop
+- **Manifests + SQL are the program**: the agent can write code/SQL, but facts come from declared resources and
+  deterministic execution.
+- **DuckDB is the work surface**: files, remote tables, ontology edges, reductions, and many bio formats should become
+  queryable relations.
+- **Provenance is structural**: runs record receipts, replay specs, artifacts, and optional `run:<id>` facts.
+- **Knowledge and memory are graph-shaped**: when a ledger exists, inspect `bio_edges_as_of` / graph windows instead
+  of relying on hidden chat context.
+- **Host capabilities fail closed**: network, compute, credentials, filesystem policy, and extension provisioning are
+  host-granted, not assumed.
 
-1. Create or update a `manifest.json` that declares resources and, for repeated workflows, operations.
-2. Inspect resolved tables with small read-only queries:
+You can trust agent-authored SQL/code only to the extent it is inspected, executed through the substrate, and tied to
+declared inputs, receipts, and replayable evidence.
+
+## Manifest Versus Ad-Hoc Query
+
+- **Manifest**: declares resources, resolvers, table names, host capabilities, and stable operations. It answers:
+  "what data is available, and how is it resolved?"
+- **Ad-hoc query**: the SQL for the current user question, written after inspecting manifest tables. It answers:
+  "what should be computed from those tables now?"
+- Default for a new question: reuse or write a manifest, inspect tables, then call `pi-bio-agent query --sql ...`.
+  Promote SQL into a manifest operation only after it becomes a repeated, tested workflow.
+
+## Choose The Surface
+
+- **Pi with `bio_*` tools**: use `bio_describe_model`, `bio_query`, `bio_run_operation`, and graph/memory tools.
+  The extension provides richer onboarding than this skill and links tool calls to recorded runs.
+- **Any other host, or Pi skill-only**: use the `pi-bio-agent` CLI.
+- **Do not create a new skill for a new question**. First express the question as manifest + SQL or a declared
+  operation.
+
+## Minimal Working Loop
+
+1. Verify the CLI:
+
+   ```sh
+   pi-bio-agent --help
+   ```
+
+   If unavailable, use the package directly:
+
+   ```sh
+   npx --yes github:sounkou-bioinfo/pi-bio-agent --help
+   ```
+
+2. Run one real packaged query before inventing a task-specific manifest:
+
+   ```sh
+   pi-bio-agent query examples/variant-counts/manifest.json \
+     --db :memory: \
+     --sql "SELECT consequence, count(*) AS n FROM variants GROUP BY consequence ORDER BY consequence"
+   ```
+
+3. For the user's task: write or reuse a manifest, inspect tables, then answer with ad-hoc SQL.
 
    ```sh
    pi-bio-agent query manifest.json --db :memory: --sql "DESCRIBE table_name"
    pi-bio-agent query manifest.json --db :memory: --sql "SUMMARIZE table_name"
    pi-bio-agent query manifest.json --db :memory: --sql "SELECT * FROM table_name LIMIT 5"
+   pi-bio-agent query manifest.json --db :memory: --sql "<WITH/SELECT over declared tables>"
    ```
 
-3. Answer the question with one read-only `SELECT` or `WITH` statement:
+4. When provenance matters, add `--ledger auto` and inspect the run/graph afterward.
 
    ```sh
-   pi-bio-agent query manifest.json --db :memory: --sql "<WITH/SELECT/DESCRIBE/SUMMARIZE>"
+   pi-bio-agent query manifest.json --db :memory: --ledger auto --sql "<WITH/SELECT ...>"
    ```
 
-4. For stable workflows, put the SQL in a declared manifest operation and run:
+## Load References As Needed
 
-   ```sh
-   pi-bio-agent run manifest.json --db :memory: --operation operation.id
-   ```
+- Manifest syntax and resolver semantics: [references/manifests.md](references/manifests.md)
+- Query/run CLI, bindings, and operations: [references/query-run.md](references/query-run.md)
+- HTTP, GraphQL, and remote data patterns: [references/http-and-remote.md](references/http-and-remote.md)
+- `compute.run` for R/Python/bash/process work: [references/compute.md](references/compute.md)
+- Ledger and graph inspection: [references/ledger-graph.md](references/ledger-graph.md)
 
-5. When provenance matters, add `--ledger auto` so the run becomes a `run:<id>` fact in the project observation
-   store. Report the manifest path, SQL or operation id, run id, and the answer rows.
+Read only the reference needed for the current task.
 
-## Manifest Pattern
+## Answer Contract
 
-Start with a thin manifest. Add code only when a new reusable resolver/adapter is genuinely needed.
+Return the manifest path, SQL or operation id, run id when available, and concise result rows. Include abstentions or
+unsupported host-capability errors when relevant. For clinical or high-stakes questions, missing evidence is an
+abstention unless declared data supports a stronger claim.
 
-```json
-{
-  "schema": "pi-bio.manifest.v1",
-  "id": "task-name",
-  "version": "0.1.0",
-  "title": "Task name",
-  "description": "Declared resources for an agent-authored SQL answer.",
-  "provides": {
-    "resolvers": [
-      {
-        "id": "duckdb.file_scan",
-        "version": "0.1.0",
-        "title": "DuckDB file scan",
-        "description": "Read a DuckDB-native file into a table.",
-        "output": { "mode": "table" }
-      }
-    ],
-    "resources": [
-      {
-        "id": "variants",
-        "title": "Variants",
-        "kind": "virtual",
-        "resolver": "duckdb.file_scan",
-        "params": { "path": "data/variants.csv", "table": "variants" }
-      }
-    ]
-  }
-}
-```
+## Skill Graduation Rule
 
-For examples, inspect `examples/variant-counts/manifest.json`, `examples/rare-high-impact/manifest.json`,
-`examples/connectors/clinvar-region.json`, and `examples/monarch-kg-http/manifest.json`.
-
-## Resolver Choice
-
-Prefer DuckDB-native surfaces:
-
-- local tabular files: `duckdb.file_scan`
-- reusable SQL projections/views: `duckdb.sql_materialize`
-- HTTP-shaped data when the host grants network: `http.get` or ducknng-backed manifests
-- VCF/BAM/BCF/tabix ranges when provisioned: `duckhts.read_bcf`
-- graph/ontology work: load edge-shaped tables and query them with SQL
-
-Fail clearly when the host has not granted a needed effect. Do not silently fetch, install extensions, read files, or
-call network endpoints outside the manifest and host policy.
-
-## Answering Style
-
-Return the result and the method, not a story:
-
-- manifest path
-- SQL or operation id
-- run id when available
-- concise result rows or counts
-- abstentions and unsupported capabilities when relevant
-
-For rare/high-impact or clinical-style questions, treat missing evidence as an abstention unless the declared data
-supports a stronger claim. Do not call missing population frequency "rare".
-
-## Skills Are Graduation
-
-Do not create a new skill for a new natural-language question. First solve it as manifest + SQL.
-
-Create or update a skill only when the workflow has already stabilized across repeated use and the skill is merely a
-thin playbook: where the manifest lives, which operation or query pattern to run, which fixtures prove it, and what
-output contract to report. A skill must not become the biomedical computation or a hidden script pack. If the skill
-needs facts, it should point back to declared resources and `pi-bio-agent query/run`.
-
-For ClawBio-like systems, the migration path is: keep the host's intent/routing layer, replace per-question scripts
-with manifests and SQL operations, and call `pi-bio-agent query/run` as the compute substrate.
+A workflow may become a skill only after it has stabilized as manifest + SQL/operation with fixtures and an output
+contract. A skill is a thin playbook over the substrate, not the biomedical computation.

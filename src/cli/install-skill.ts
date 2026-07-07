@@ -13,13 +13,29 @@ export interface InstallSkillDeps {
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const defaultSource = join(packageRoot, "skills", "pi-bio-agent");
-const HOSTS = new Set(["codex", "generic"]);
+const HOSTS = [
+  "generic",
+  "pi",
+  "pi-project",
+  "claude",
+  "claude-project",
+  "opencode",
+  "opencode-project",
+  "copilot",
+  "copilot-project",
+  "github-copilot",
+  "github-copilot-project",
+  "codex",
+] as const;
+const HOST_SET = new Set<string>(HOSTS);
+type HostPreset = typeof HOSTS[number];
 
 const usage = (command: "install-skill" | "install-codex-skill"): string => [
-  `usage: pi-bio-agent ${command} [--host codex|generic] [--dest <host-skills-dir>] [--force] [--link]`,
+  `usage: pi-bio-agent ${command} [--host <preset>|--dest <host-skills-dir>] [--force] [--link]`,
   "",
   "Installs the packaged pi-bio-agent substrate skill into an agent host's skill/playbook root.",
-  "--dest is required for generic hosts. --host codex defaults to $CODEX_HOME/skills or ~/.codex/skills.",
+  "Presets: pi, pi-project, claude, claude-project, opencode, opencode-project, copilot, copilot-project, codex.",
+  "--dest is required for generic hosts.",
 ].join("\n");
 
 function codexDestRoot(env: NodeJS.ProcessEnv): string {
@@ -27,7 +43,25 @@ function codexDestRoot(env: NodeJS.ProcessEnv): string {
   return codexHome ? join(codexHome, "skills") : join(homedir(), ".codex", "skills");
 }
 
-function parseArgs(argv: string[], env: NodeJS.ProcessEnv, defaultHost: "codex" | "generic", command: "install-skill" | "install-codex-skill"): { dest: string; force: boolean; link: boolean; host: string } {
+function piDestRoot(env: NodeJS.ProcessEnv): string {
+  const piAgentDir = env.PI_CODING_AGENT_DIR?.trim();
+  return piAgentDir ? join(piAgentDir, "skills") : join(homedir(), ".pi", "agent", "skills");
+}
+
+function presetDestRoot(host: string, env: NodeJS.ProcessEnv): string | undefined {
+  if (host === "codex") return codexDestRoot(env);
+  if (host === "pi") return piDestRoot(env);
+  if (host === "pi-project") return resolve(".pi", "skills");
+  if (host === "claude") return join(homedir(), ".claude", "skills");
+  if (host === "claude-project") return resolve(".claude", "skills");
+  if (host === "opencode") return join(homedir(), ".config", "opencode", "skills");
+  if (host === "opencode-project") return resolve(".opencode", "skills");
+  if (host === "copilot" || host === "github-copilot") return join(homedir(), ".copilot", "skills");
+  if (host === "copilot-project" || host === "github-copilot-project") return resolve(".github", "skills");
+  return undefined;
+}
+
+function parseArgs(argv: string[], env: NodeJS.ProcessEnv, defaultHost: HostPreset, command: "install-skill" | "install-codex-skill"): { dest: string; force: boolean; link: boolean; host: string } {
   const out: { dest?: string; force: boolean; link: boolean; host: string } = { force: false, link: false, host: defaultHost };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -42,7 +76,7 @@ function parseArgs(argv: string[], env: NodeJS.ProcessEnv, defaultHost: "codex" 
     if (arg === "--host") {
       const value = argv[++i];
       if (!value) throw new Error("--host requires a value");
-      if (!HOSTS.has(value)) throw new Error("--host must be one of: codex, generic");
+      if (!HOST_SET.has(value)) throw new Error(`--host must be one of: ${HOSTS.join(", ")}`);
       out.host = value;
       continue;
     }
@@ -57,8 +91,8 @@ function parseArgs(argv: string[], env: NodeJS.ProcessEnv, defaultHost: "codex" 
     }
     throw new Error(`unknown argument '${arg}'`);
   }
-  if (!out.dest && out.host === "codex") out.dest = codexDestRoot(env);
-  if (!out.dest) throw new Error("--dest is required unless --host codex is selected");
+  out.dest ??= presetDestRoot(out.host, env);
+  if (!out.dest) throw new Error("--dest is required unless a host preset is selected");
   return { ...out, dest: out.dest };
 }
 
@@ -78,7 +112,7 @@ async function validateSkill(path: string): Promise<void> {
   if (!/^description:\s*.+$/m.test(text)) throw new Error(`${path}/SKILL.md is missing a description`);
 }
 
-async function installSkill(argv: string[], deps: InstallSkillDeps, defaultHost: "codex" | "generic", command: "install-skill" | "install-codex-skill"): Promise<number> {
+async function installSkill(argv: string[], deps: InstallSkillDeps, defaultHost: HostPreset, command: "install-skill" | "install-codex-skill"): Promise<number> {
   const env = deps.env ?? process.env;
   let opts: { dest: string; force: boolean; link: boolean; host: string };
   try {
@@ -118,7 +152,15 @@ async function installSkill(argv: string[], deps: InstallSkillDeps, defaultHost:
       },
       next: opts.host === "codex"
         ? "Restart Codex to pick up the pi-bio-agent skill."
-        : "Restart or reload the target agent host if it caches skills.",
+        : opts.host === "pi" || opts.host === "pi-project"
+          ? "Run /reload in Pi, or restart Pi, to pick up the pi-bio-agent skill."
+          : opts.host === "claude" || opts.host === "claude-project"
+            ? "Claude Code watches existing skill directories; restart Claude Code if this created the top-level skills directory."
+            : opts.host === "opencode" || opts.host === "opencode-project"
+              ? "Restart or reload OpenCode if it does not pick up the new skill immediately."
+              : opts.host === "copilot" || opts.host === "copilot-project" || opts.host === "github-copilot" || opts.host === "github-copilot-project"
+                ? "Restart GitHub Copilot CLI or the Copilot host if it caches skills."
+                : "Restart or reload the target agent host if it caches skills.",
     }, null, 2));
     return 0;
   } catch (err) {

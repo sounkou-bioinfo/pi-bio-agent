@@ -11,21 +11,59 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const source = join(repoRoot, "skills", "pi-bio-agent");
 const execFileAsync = promisify(execFile);
 const npmCmd = process.platform === "win32" ? "npm.cmd" : "npm";
-const hosts = new Set(["codex", "generic"]);
+const hosts = new Set([
+  "generic",
+  "pi",
+  "pi-project",
+  "claude",
+  "claude-project",
+  "opencode",
+  "opencode-project",
+  "copilot",
+  "copilot-project",
+  "github-copilot",
+  "github-copilot-project",
+  "codex",
+]);
 
 function usage() {
   return [
-    "usage: node scripts/install-skill.mjs [--host codex|generic] [--dest <host-skills-dir>] [--force] [--link] [--link-cli]",
+    "usage: node scripts/install-skill.mjs [--host <preset>|--dest <host-skills-dir>] [--force] [--link] [--link-cli]",
     "",
     "Installs skills/pi-bio-agent into an agent host's skill/playbook root.",
     "--link-cli also runs `npm run build` and `npm link` so `pi-bio-agent` is on PATH.",
-    "--dest is required for generic hosts. --host codex defaults to $CODEX_HOME/skills or ~/.codex/skills.",
+    "Presets: pi, pi-project, claude, claude-project, opencode, opencode-project, copilot, copilot-project, codex.",
+    "--dest is required for generic hosts.",
   ].join("\n");
 }
 
 function codexDestRoot() {
   const codexHome = process.env.CODEX_HOME?.trim();
   return codexHome ? join(codexHome, "skills") : join(homedir(), ".codex", "skills");
+}
+
+function piDestRoot() {
+  const piAgentDir = process.env.PI_CODING_AGENT_DIR?.trim();
+  return piAgentDir ? join(piAgentDir, "skills") : join(homedir(), ".pi", "agent", "skills");
+}
+
+function presetDestRoot(host) {
+  const global = {
+    codex: codexDestRoot,
+    pi: piDestRoot,
+    claude: () => join(homedir(), ".claude", "skills"),
+    opencode: () => join(homedir(), ".config", "opencode", "skills"),
+    copilot: () => join(homedir(), ".copilot", "skills"),
+    "github-copilot": () => join(homedir(), ".copilot", "skills"),
+  }[host];
+  if (global) return global();
+  return {
+    "pi-project": resolve(".pi", "skills"),
+    "claude-project": resolve(".claude", "skills"),
+    "opencode-project": resolve(".opencode", "skills"),
+    "copilot-project": resolve(".github", "skills"),
+    "github-copilot-project": resolve(".github", "skills"),
+  }[host];
 }
 
 function parseArgs(argv) {
@@ -47,7 +85,7 @@ function parseArgs(argv) {
     if (arg === "--host") {
       const value = argv[++i];
       if (!value) throw new Error("--host requires a value");
-      if (!hosts.has(value)) throw new Error("--host must be one of: codex, generic");
+      if (!hosts.has(value)) throw new Error(`--host must be one of: ${Array.from(hosts).join(", ")}`);
       out.host = value;
       continue;
     }
@@ -63,8 +101,8 @@ function parseArgs(argv) {
     }
     throw new Error(`unknown argument '${arg}'`);
   }
-  if (!out.dest && out.host === "codex") out.dest = codexDestRoot();
-  if (!out.dest) throw new Error("--dest is required unless --host codex is selected");
+  out.dest ??= presetDestRoot(out.host);
+  if (!out.dest) throw new Error("--dest is required unless a host preset is selected");
   return out;
 }
 
@@ -137,7 +175,17 @@ try {
         ? "CLI is available on PATH."
         : "Install the CLI separately: run `npm install -g github:sounkou-bioinfo/pi-bio-agent`, or from a checkout run `npm install && npm run build && npm link`, or rerun this installer with `--link-cli`.",
     },
-    next: opts.host === "codex" ? "Restart Codex to pick up the pi-bio-agent skill." : "Restart or reload the target agent host if it caches skills.",
+    next: opts.host === "codex"
+      ? "Restart Codex to pick up the pi-bio-agent skill."
+      : opts.host === "pi" || opts.host === "pi-project"
+        ? "Run /reload in Pi, or restart Pi, to pick up the pi-bio-agent skill."
+        : opts.host === "claude" || opts.host === "claude-project"
+          ? "Claude Code watches existing skill directories; restart Claude Code if this created the top-level skills directory."
+          : opts.host === "opencode" || opts.host === "opencode-project"
+            ? "Restart or reload OpenCode if it does not pick up the new skill immediately."
+            : opts.host === "copilot" || opts.host === "copilot-project" || opts.host === "github-copilot" || opts.host === "github-copilot-project"
+              ? "Restart GitHub Copilot CLI or the Copilot host if it caches skills."
+              : "Restart or reload the target agent host if it caches skills.",
   }, null, 2));
 } catch (err) {
   console.error(err instanceof Error ? err.message : String(err));

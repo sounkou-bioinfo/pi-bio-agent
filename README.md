@@ -76,18 +76,18 @@ WITH distinct_calls AS (
 SELECT significance, COUNT(*) AS n
 FROM distinct_calls
 GROUP BY significance
-ORDER BY n DESC, significance
+ORDER BY n DESC, significance;
 ```
 
 | significance                                 |    n |
 |----------------------------------------------|-----:|
 | Pathogenic                                   | 3593 |
-| Conflicting_classifications_of_pathogenicity | 2918 |
+| Conflicting_classifications_of_pathogenicity | 2917 |
 | Likely_benign                                | 2891 |
 | Uncertain_significance                       | 2445 |
 | Benign                                       |  704 |
 | Likely_pathogenic                            |  263 |
-| Pathogenic/Likely_pathogenic                 |  226 |
+| Pathogenic/Likely_pathogenic                 |  227 |
 | Benign/Likely_benign                         |   94 |
 | not_provided                                 |   49 |
 | no_classification_for_the_single_variant     |    2 |
@@ -121,7 +121,7 @@ pi-bio-agent query .pi/bio-agent/readme-clinvar-tp53.json \
     },
     {
       "significance": "Conflicting_classifications_of_pathogenicity",
-      "n": 2918
+      "n": 2917
     },
     {
       "significance": "Likely_benign",
@@ -141,7 +141,7 @@ pi-bio-agent query .pi/bio-agent/readme-clinvar-tp53.json \
     },
     {
       "significance": "Pathogenic/Likely_pathogenic",
-      "n": 226
+      "n": 227
     },
     {
       "significance": "Benign/Likely_benign",
@@ -549,11 +549,58 @@ directory, without cloning:
 npx --yes github:sounkou-bioinfo/pi-bio-agent install-skill --dest /path/to/host/skills
 ```
 
-That is the generic path for Claude Code, opencode, Pi installations
-that use a skill directory, ClawBio-like hosts, or any other agent
-system. Use the directory that the host itself documents or configures.
-The installer copies `skills/pi-bio-agent/` into that directory and does
-not assume the host’s runtime API.
+That is the generic path for Claude Code, opencode, GitHub Copilot CLI,
+or any other agent system. Use the directory that the host itself
+documents or configures. The installer copies `skills/pi-bio-agent/`
+into that directory and does not assume the host’s runtime API.
+
+Pi users should normally install the full package. That gives Pi the
+`bio_*` extension tools, the plain skill, and the session trace
+integration that links a tool call to the recorded `run:<id>` it
+produced:
+
+``` sh
+pi install git:github.com/sounkou-bioinfo/pi-bio-agent
+/reload
+```
+
+Install only the skill into Pi’s global skill root when you deliberately
+do not want the extension loaded:
+
+``` sh
+npx --yes github:sounkou-bioinfo/pi-bio-agent install-skill --host pi
+```
+
+Install only the skill project-locally for Pi:
+
+``` sh
+npx --yes github:sounkou-bioinfo/pi-bio-agent install-skill --host pi-project
+```
+
+`--host pi` uses `$PI_CODING_AGENT_DIR/skills` when set, otherwise
+`~/.pi/agent/skills`. `--host pi-project` uses `.pi/skills` under the
+current working directory.
+
+Other common agent hosts have presets too:
+
+``` sh
+# Claude Code
+npx --yes github:sounkou-bioinfo/pi-bio-agent install-skill --host claude
+npx --yes github:sounkou-bioinfo/pi-bio-agent install-skill --host claude-project
+
+# OpenCode
+npx --yes github:sounkou-bioinfo/pi-bio-agent install-skill --host opencode
+npx --yes github:sounkou-bioinfo/pi-bio-agent install-skill --host opencode-project
+
+# GitHub Copilot CLI / Copilot agent skills
+npx --yes github:sounkou-bioinfo/pi-bio-agent install-skill --host copilot
+npx --yes github:sounkou-bioinfo/pi-bio-agent install-skill --host copilot-project
+```
+
+These map to each host’s standard Agent Skills roots: Claude
+`~/.claude/skills` and `.claude/skills`; OpenCode
+`~/.config/opencode/skills` and `.opencode/skills`; GitHub Copilot CLI
+`~/.copilot/skills` and `.github/skills`.
 
 Install the CLI persistently when the host should call
 `pi-bio-agent query` / `pi-bio-agent run` later:

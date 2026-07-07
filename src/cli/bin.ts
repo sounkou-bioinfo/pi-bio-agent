@@ -21,7 +21,7 @@ const dispatch = (): Promise<number> => {
   if (group === "memory") return mainMemory(rest, { cwd: process.cwd(), out, err });
   if (group === "install-skill") return mainInstallSkill(rest, { out, err });
   if (group === "install-codex-skill") return mainInstallCodexSkill(rest, { out, err });
-  err("usage: pi-bio-agent <query|run|memory|install-skill|install-codex-skill> ...\n  query/run <manifest.json> --db <path> [--sql/--operation ...]\n  memory <list|show|history> [slug] [--as-of <iso>]\n  install-skill --dest <host-skills-dir> [--force]\n  install-codex-skill [--force] [--dest <dir>]");
+  err("usage: pi-bio-agent <query|run|memory|install-skill|install-codex-skill> ...\n  query/run <manifest.json> --db <path> [--sql/--operation ...]\n  memory <list|show|history> [slug] [--as-of <iso>]\n  install-skill [--host <preset>|--dest <host-skills-dir>] [--force]\n  install-codex-skill [--force] [--dest <dir>]");
   return Promise.resolve(2);
 };
 
