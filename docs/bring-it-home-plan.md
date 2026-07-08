@@ -139,65 +139,46 @@ consumer-pulled, or a non-goal.
 
 ### Active / Not Deferred
 
-1. **Concrete host adapters over `recordHostEvent`.** The primitive exists; the open work is the adapter layer:
-   the Pi extension now records `session_start` / `session_compact` / `session_shutdown` lifecycle hooks as an open
-   `pi_coding_agent.session_lifecycle` host event on the `session:<id>` node after the persisted JSONL snapshot is
-   ingested; the payload includes the raw-session digest and small lifecycle fields (`event_type`, `reason`, and
-   `parent_session_id`) so corpus consumers can distinguish runtime lifecycle/fork intent from transcript content.
-   The bring-it-home dogfood also records scheduler-style queue claim, lease-reclaim, and stale-attempt rejection
-   events as open host facts that the training corpus exports. Newly stamped host-event links are now
-   corpus-readable as redacted rows, so a recorded steer/interrupt/governance event can point at the affected
-   turn/run/workflow without exposing private link attrs. Older unstamped links remain ordinary graph edges rather
-   than being guessed into this exact event-link table. The Pi extension also records `before_agent_start` context
-   receipts and `input` delivery receipts as digests/counts only. The input receipt exposes source and streaming
-   behavior (`steer` / `followUp` when Pi supplies it) plus payload/text/image digests; it does not store prompt text,
-   images, or infer later transform/handled status. The bring-it-home dogfood now records host-owned approval
-   submitted/decided receipts around the existing durable governance gate and proves their stamped links survive into
-   the corpus export. Remaining concrete hook work is interrupt capture when a host exposes a real interrupt event a
-   consumer reads. Do not add a closed event taxonomy.
-2. **Durable workflow dogfood over the closed lifecycle.** The async lifecycle and checkpoint resume helper are
-   built and the bring-it-home dogfood now runs checkpointed bash steps through `nodeComputeRunner`, reuses the
-   completed prefix, reruns the suffix, and proves queue cancellation, expired-lease reclaim, and stale-attempt
-   write rejection through the ledger. A focused test also exercises a real ducknng RPC worker: a separate DuckDB
-   client reports status/result into the shared `job:<runId>` observation slots, and `ledgerJobRunner` /
-   `submitBioJob` / `pollBioJob` read the same data path unchanged. That test is skipped when ducknng is unavailable.
-   In a ducknng-provisioned environment, `npm run dogfood:nng-job-runner` gives explicit non-skipped transport
-   evidence: a separate process writes status over ducknng RPC and the coordinator asserts status/digest history.
-   A focused Python checkpointed-workflow test also proves the same checkpoint/resume convention over real Python child
-   processes through `nodeComputeRunner`. Remaining hardening is to exercise scheduler-native backends when a real
-   consumer needs one. This is not a request for another workflow engine.
-3. **Docs hygiene.** Keep README and guides action-first: real commands, real code chunks, no fake text-block
+1. **Docs hygiene.** Keep README and guides action-first: real commands, real code chunks, no fake text-block
    architecture diagrams, and no speculative filesystem-extension claims. Claims should point to commands, tests, or
    examples that currently run.
 
 ### Consumer-Pulled / Deferred
 
-1. **Scoped relation/resource visibility.** Only build this when a host needs visibility narrower than its injected
+1. **Runtime interrupt/abort host adapters.** The current Pi extension surface records session lifecycle, input
+   delivery, and before-provider context receipts. It should record interrupt/abort receipts only when a host exposes
+   a stable runtime event or when a consumer reads that event. Do not infer interrupts from missing transcript text or
+   from a generic `AbortSignal` without a host-owned event contract.
+2. **Scheduler-native durable backends.** The async lifecycle, durable queue, cancellation, checkpoint resume, local
+   process runner, ducknng RPC worker dogfood, and Python checkpointed workflow path exist. A scheduler-specific
+   backend should be added only when a real SLURM/targets/mirai/nanonext-style consumer needs adapter semantics
+   beyond the current `JobRunner` / checkpoint shape. This is not a request for another workflow engine.
+3. **Scoped relation/resource visibility.** Only build this when a host needs visibility narrower than its injected
    `SqlConn`. The current pattern is a host-owned connection wrapper: hidden relations should fail for `SELECT`,
    `DESCRIBE`, `SUMMARIZE`, and catalog/introspection reads on that connection. For remote services, this belongs in
    host/ducknng admission and receipts, not SQL string guards.
-2. **SemanticSQL policy and ingest adapters.** The source-spec view/projection layer is closed for core. Remaining
+4. **SemanticSQL policy and ingest adapters.** The source-spec view/projection layer is closed for core. Remaining
    work is consumer-pulled: relation-graph equivalence/reflexivity/individual reasoning policy, source-specific
    trust weighting/reconciliation, and thin ontology-ingest resolvers that stage real source artifacts with receipts.
-3. **Training corpus hardening.** Redaction policy, label schema, export contract, and VARIANT-shredded Parquet are
+5. **Training corpus hardening.** Redaction policy, label schema, export contract, and VARIANT-shredded Parquet are
    required once a real corpus consumer exists. The base ledger remains `value_json`; typed Parquet is a derived
    export.
-4. **Renderer/report product metadata.** Core has CAS-addressed figure/report artifacts, declared-output metadata,
+6. **Renderer/report product metadata.** Core has CAS-addressed figure/report artifacts, declared-output metadata,
    automatic compute-output artifact observations, and host-conditional shared-CAS artifact refs for real
    R/Python/bash-produced reports and figures. Richer renderer-specific schemas, review-packet structure, and UI
    report models wait for downstream applications that need them.
-5. **SDK maintenance.** Required exports should follow real sibling consumers. Each new public type/helper needs a
+7. **SDK maintenance.** Required exports should follow real sibling consumers. Each new public type/helper needs a
    packed external-consumer dogfood so the library remains usable outside this repo.
-6. **Workbench package abstractions.** `pi-bio-workbench` should remain a downstream app. Core closes over primitives
+8. **Workbench package abstractions.** `pi-bio-workbench` should remain a downstream app. Core closes over primitives
    only after that app proves repeated shape; clinical genomics is the first binding, not a reason to prebuild a
    framework.
-7. **External tool robustness tests.** `rv`, OpenTargets, Monarch DuckDB, ChEMBL, R `targets`/`mirai`/`nanonext`,
+9. **External tool robustness tests.** `rv`, OpenTargets, Monarch DuckDB, ChEMBL, R `targets`/`mirai`/`nanonext`,
    and similar systems should first enter through manifests, SQL, `compute.run`, and receipts. Add primitives only
    when that route fails for a concrete reason.
-8. **Entity identity normalization.** BioBTree-style KGX exports make this the strongest graph-adjacent candidate:
+10. **Entity identity normalization.** BioBTree-style KGX exports make this the strongest graph-adjacent candidate:
    node category, label, equivalent identifiers, source ids, and node attributes are not edge projection. Keep it
    downstream until Monarch/OpenTargets/BioBTree-like consumers force the same normalized node view.
-9. **ducknng-fs / DuckTinyCC research.** A filesystem-shaped or C-FFI-shaped lane is interesting only when a real
+11. **ducknng-fs / DuckTinyCC research.** A filesystem-shaped or C-FFI-shaped lane is interesting only when a real
    manifest needs it. It is not a current core primitive.
 
 ### Closed / Reclassified From Earlier Backlog
@@ -206,7 +187,9 @@ consumer-pulled, or a non-goal.
   receipts, subject-restriction digests, and action/replay key pinning exist. Remaining work is product conformance
   and host adapter work, not another core auth primitive.
 - **Base durable runner/resume.** `AsyncRunner` is the lifecycle; `JobRunner` and checkpoint helpers specialize it.
-  Resume means completed-prefix checkpoint reuse plus suffix rerun. Evidence: [job-store.ts](../src/hosts/job-store.ts),
+  Resume means completed-prefix checkpoint reuse plus suffix rerun. The bring-it-home dogfood covers checkpointed
+  bash steps, queue cancellation, lease reclaim, stale-attempt rejection, and redacted scheduler host events; focused
+  tests cover a ducknng RPC worker and a real Python checkpointed workflow. Evidence: [job-store.ts](../src/hosts/job-store.ts),
   [ledger-job-runner.test.ts](../test/ledger-job-runner.test.ts),
   [python-workflow-dogfood.test.ts](../test/python-workflow-dogfood.test.ts),
   [bring-it-home-dogfood.mjs](../scripts/bring-it-home-dogfood.mjs), [bring-it-home-dogfood.test.ts](../test/bring-it-home-dogfood.test.ts).
@@ -222,8 +205,7 @@ consumer-pulled, or a non-goal.
   events around the durable approval gate without a closed event model. The Pi extension records session lifecycle
   receipts, `before_agent_start` context receipts, and input delivery receipts as digests/counts only. The corpus
   projection exposes lifecycle type/reason/parentage, input source/streaming behavior/text digest, and event-link
-  targets without raw payloads or raw link attrs. Remaining concrete hooks are consumer-read driven: interrupts only
-  when an app or corpus export actually queries them.
+  targets without raw payloads or raw link attrs.
 - **Foreign graph projection base.** A real external Monarch KGX HTTP path, internal observation-graph projection,
   and generated SemanticSQL `statements` -> `edge` view path exist. Remaining foreign-graph work is consumer
   conformance and adapter pressure, not a new graph primitive.
