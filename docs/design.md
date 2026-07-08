@@ -483,7 +483,8 @@ For sources that arrive in the canonical SemanticSQL base shape, `materializeSem
 stable DuckDB views from staged `statements`: RDF/RDFS typed statement views, labels, definitions, synonyms,
 mappings, deprecated nodes, ontology status, and term rows. It also covers the next upstream compatibility tier:
 RDF list/member views, node/identifier and summary views, OWL node/property classifications, axiom annotation and
-restriction views, and OBO synonym/mapping/contributor/orcid views. Its generated `edge` view follows the
+restriction views, OBO synonym/mapping/contributor/orcid views, and OBO problem views for duplicate labels, trailing
+whitespace, and predicates used with both literal values and object nodes. Its generated `edge` view follows the
 relation-graph shape for named subclass/subproperty rows, `subClassOf someValuesFrom` restriction rows, and selected
 `rdf:type` assertions whose object is a known class; it still does not treat every object triple as a graph edge.
 When a staged `prefix(prefix, base)` table is declared, the generated views canonicalize matching IRIs to CURIEs.

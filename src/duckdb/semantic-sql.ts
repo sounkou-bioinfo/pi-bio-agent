@@ -70,6 +70,10 @@ export interface SemanticSqlSourceViewTargets {
   creatorTable?: string;
   orcidTable?: string;
   axiomDbxrefAnnotationTable?: string;
+  trailingWhitespaceProblemTable?: string;
+  propertyUsedWithDatatypeValuesAndObjectsTable?: string;
+  nodeWithTwoLabelsProblemTable?: string;
+  allProblemsTable?: string;
   termsTable?: string;
 }
 
@@ -159,6 +163,10 @@ export interface MaterializedSemanticSqlViews {
   creatorTable: string;
   orcidTable: string;
   axiomDbxrefAnnotationTable: string;
+  trailingWhitespaceProblemTable: string;
+  propertyUsedWithDatatypeValuesAndObjectsTable: string;
+  nodeWithTwoLabelsProblemTable: string;
+  allProblemsTable: string;
   termsTable: string;
 }
 
@@ -297,6 +305,10 @@ function targets(spec: SemanticSqlSourceSpec): Required<SemanticSqlSourceViewTar
     creatorTable: spec.targets?.creatorTable ?? "creator",
     orcidTable: spec.targets?.orcidTable ?? "orcid",
     axiomDbxrefAnnotationTable: spec.targets?.axiomDbxrefAnnotationTable ?? "axiom_dbxref_annotation",
+    trailingWhitespaceProblemTable: spec.targets?.trailingWhitespaceProblemTable ?? "trailing_whitespace_problem",
+    propertyUsedWithDatatypeValuesAndObjectsTable: spec.targets?.propertyUsedWithDatatypeValuesAndObjectsTable ?? "property_used_with_datatype_values_and_objects",
+    nodeWithTwoLabelsProblemTable: spec.targets?.nodeWithTwoLabelsProblemTable ?? "node_with_two_labels_problem",
+    allProblemsTable: spec.targets?.allProblemsTable ?? "all_problems",
     termsTable: spec.targets?.termsTable ?? "ontology_terms",
   };
 }
@@ -643,6 +655,27 @@ WHERE subject LIKE 'orcid:%'`,
 SELECT * FROM ${qident(t.owlAxiomAnnotationTable)}
 WHERE annotation_predicate IN ('oio:hasDbXref', 'oboInOwl:hasDbXref')`,
 
+    `CREATE OR REPLACE VIEW ${qident(t.trailingWhitespaceProblemTable)} AS
+SELECT subject, predicate, value
+FROM ${qident(t.nodeToValueTable)}
+WHERE value LIKE ' %' OR value LIKE '% '`,
+
+    `CREATE OR REPLACE VIEW ${qident(t.propertyUsedWithDatatypeValuesAndObjectsTable)} AS
+SELECT DISTINCT v.predicate AS subject, v.predicate AS predicate, v.datatype AS value
+FROM ${qident(t.nodeToValueTable)} v
+JOIN ${qident(t.nodeToNodeTable)} o ON v.predicate = o.predicate`,
+
+    `CREATE OR REPLACE VIEW ${qident(t.nodeWithTwoLabelsProblemTable)} AS
+SELECT labels1.subject, labels1.predicate, labels1.value
+FROM ${qident(t.labelsTable)} labels1
+JOIN ${qident(t.labelsTable)} labels2 ON labels1.subject = labels2.subject
+WHERE labels1.value != labels2.value`,
+
+    `CREATE OR REPLACE VIEW ${qident(t.allProblemsTable)} AS
+SELECT subject, predicate, value FROM ${qident(t.nodeWithTwoLabelsProblemTable)}
+UNION
+SELECT subject, predicate, value FROM ${qident(t.trailingWhitespaceProblemTable)}`,
+
     `CREATE OR REPLACE VIEW ${qident(t.edgeTable)} AS
 SELECT subject, predicate, object
 FROM ${qident(t.owlSubclassOfSomeValuesFromTable)}
@@ -742,6 +775,10 @@ export async function materializeSemanticSqlSourceViews(conn: SqlConn, spec: Sem
     creatorTable: t.creatorTable,
     orcidTable: t.orcidTable,
     axiomDbxrefAnnotationTable: t.axiomDbxrefAnnotationTable,
+    trailingWhitespaceProblemTable: t.trailingWhitespaceProblemTable,
+    propertyUsedWithDatatypeValuesAndObjectsTable: t.propertyUsedWithDatatypeValuesAndObjectsTable,
+    nodeWithTwoLabelsProblemTable: t.nodeWithTwoLabelsProblemTable,
+    allProblemsTable: t.allProblemsTable,
     termsTable: t.termsTable,
   };
 }

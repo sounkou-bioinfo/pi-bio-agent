@@ -29,9 +29,12 @@ describe("graph projection profile: source relation -> compiled graph", () => {
     const conn = duckdbNodeConn(await (await DuckDBInstance.create(":memory:")).connect());
     await conn.run("CREATE TABLE statements(subject TEXT, predicate TEXT, object TEXT, value TEXT, datatype TEXT, language TEXT)");
     await conn.run("INSERT INTO statements VALUES ('MONDO:0004979','rdfs:label',NULL,'asthma',NULL,'en')");
+    await conn.run("INSERT INTO statements VALUES ('MONDO:0004979','rdfs:label',NULL,'asthma disorder',NULL,'en')");
     await conn.run("INSERT INTO statements VALUES ('MONDO:0004979','IAO:0000115',NULL,'A chronic respiratory disorder.',NULL,'en')");
     await conn.run("INSERT INTO statements VALUES ('MONDO:0004979','oio:hasExactSynonym',NULL,'bronchial asthma',NULL,'en')");
     await conn.run("INSERT INTO statements VALUES ('MONDO:0004979','skos:hasExactMatch','UMLS:C0004096',NULL,NULL,NULL)");
+    await conn.run("INSERT INTO statements VALUES ('MONDO:0004979','rdfs:seeAlso','PMID:1',NULL,NULL,NULL)");
+    await conn.run("INSERT INTO statements VALUES ('MONDO:0004979','rdfs:seeAlso',NULL,' note with whitespace ','xsd:string',NULL)");
     await conn.run("INSERT INTO statements VALUES ('MONDO:0004784','rdfs:label',NULL,'allergic asthma',NULL,'en')");
     await conn.run("INSERT INTO statements VALUES ('MONDO:0004784','owl:deprecated',NULL,'true',NULL,NULL)");
     await conn.run("INSERT INTO statements VALUES ('MONDO:0004766','rdf:type','owl:Class',NULL,NULL,NULL)");
@@ -62,6 +65,10 @@ describe("graph projection profile: source relation -> compiled graph", () => {
     assert.equal(views.rdfListMemberTable, "rdf_list_member_statement");
     assert.equal(views.owlSubclassOfSomeValuesFromTable, "owl_subclass_of_some_values_from");
     assert.equal(views.axiomDbxrefAnnotationTable, "axiom_dbxref_annotation");
+    assert.equal(views.trailingWhitespaceProblemTable, "trailing_whitespace_problem");
+    assert.equal(views.propertyUsedWithDatatypeValuesAndObjectsTable, "property_used_with_datatype_values_and_objects");
+    assert.equal(views.nodeWithTwoLabelsProblemTable, "node_with_two_labels_problem");
+    assert.equal(views.allProblemsTable, "all_problems");
     assert.equal(views.termsTable, "semantic_terms");
 
     assert.deepEqual(await conn.all<{ subject: string; value: string }>("SELECT subject, value FROM has_text_definition_statement"), [
@@ -102,6 +109,18 @@ describe("graph projection profile: source relation -> compiled graph", () => {
     assert.deepEqual(await conn.all<{ annotation_subject: string; annotation_predicate: string; annotation_object: string }>(
       "SELECT annotation_subject, annotation_predicate, annotation_object FROM axiom_dbxref_annotation",
     ), [{ annotation_subject: "_:axiom1", annotation_predicate: "oio:hasDbXref", annotation_object: "GO_REF:0000002" }]);
+    assert.deepEqual(await conn.all<{ subject: string; predicate: string; value: string }>(
+      "SELECT subject, predicate, value FROM trailing_whitespace_problem",
+    ), [{ subject: "MONDO:0004979", predicate: "rdfs:seeAlso", value: " note with whitespace " }]);
+    assert.deepEqual(await conn.all<{ subject: string; predicate: string; value: string }>(
+      "SELECT subject, predicate, value FROM property_used_with_datatype_values_and_objects",
+    ), [{ subject: "rdfs:seeAlso", predicate: "rdfs:seeAlso", value: "xsd:string" }]);
+    assert.deepEqual(await conn.all<{ value: string }>(
+      "SELECT value FROM node_with_two_labels_problem WHERE subject = 'MONDO:0004979' ORDER BY value",
+    ), [{ value: "asthma" }, { value: "asthma disorder" }]);
+    assert.deepEqual(await conn.all<{ predicate: string; value: string }>(
+      "SELECT predicate, value FROM all_problems WHERE subject = 'rdfs:seeAlso'",
+    ), []);
     assert.deepEqual(await conn.all<{ subject: string; predicate: string; object: string }>(
       "SELECT subject, predicate, object FROM semantic_edge WHERE subject = 'MONDO:0004979' ORDER BY predicate, object",
     ), [
