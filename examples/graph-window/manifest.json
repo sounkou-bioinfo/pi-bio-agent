@@ -1,0 +1,30 @@
+{
+  "schema": "pi-bio.manifest.v1",
+  "id": "graph-window",
+  "version": "0.1.0",
+  "title": "Graph window CLI dogfood",
+  "description": "A tiny edge-shaped graph table for demonstrating pi-bio-agent graph-window over an existing DuckDB database.",
+  "provides": {
+    "resolvers": [
+      {
+        "id": "duckdb.sql_materialize",
+        "version": "0.1.0",
+        "title": "SQL materialize",
+        "description": "Materialize a table from read-only SQL.",
+        "output": { "mode": "table" }
+      }
+    ],
+    "resources": [
+      {
+        "id": "bio_edges",
+        "title": "Tiny run graph",
+        "kind": "virtual",
+        "resolver": "duckdb.sql_materialize",
+        "params": {
+          "table": "bio_edges",
+          "sql": "SELECT * FROM (VALUES ('toolcall:readme','executes','run:readme'), ('run:readme','invoked_by','toolcall:readme'), ('run:readme','produced','artifact:readme-result'), ('run:readme','used_manifest','manifest:graph-window')) AS t(from_id, predicate, to_id)"
+        }
+      }
+    ]
+  }
+}

@@ -24,6 +24,7 @@ A KGX/SemanticSQL edge table = DuckDB data + a graph projection profile, not a n
 | Example | Proof |
 |---|---|
 | [`monarch-kg-http/`](monarch-kg-http/) | Monarch KGX disease→phenotype TSV over HTTP (`httpfs`) -> canonical `edge(subject,predicate,object,attrs,trust)` -> `bio_edges` projection — `test/monarch-kg-http-example.test.ts` |
+| [`graph-window/`](graph-window/) | Portable CLI graph window over an existing DuckDB edge table — shown live in the top-level README and covered by `test/graph-window-cli.test.ts` |
 
 ## 2. RLM — recursion / unbounded context, as SQL
 `bio_query` over DuckDB *is* RLM's REPL-over-context (context as tables, not a prompt; no context rot).

@@ -276,6 +276,21 @@ Query a recorded run ledger:
 query examples/run-ledger/manifest.json --db :memory: --sql "SELECT tool, status, count(*) n FROM run_ledger GROUP BY 1, 2 ORDER BY n DESC"
 ```
 
+Window an edge-shaped graph table without loading the whole neighborhood:
+
+```{r graph-window-dogfood-reset, include=FALSE}
+dir.create(".pi/bio-agent", recursive = TRUE, showWarnings = FALSE)
+unlink(c(".pi/bio-agent/readme-graph-window.duckdb", ".pi/bio-agent/readme-graph-window.duckdb.wal"), force = TRUE)
+```
+
+```{biocli}
+query examples/graph-window/manifest.json --db .pi/bio-agent/readme-graph-window.duckdb --sql "SELECT count(*) AS n FROM bio_edges"
+```
+
+```{biocli}
+graph-window --db .pi/bio-agent/readme-graph-window.duckdb --table bio_edges --start run:readme --direction both --limit 10
+```
+
 ## Dogfood
 
 Run the compact all-primitives dogfood:

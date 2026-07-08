@@ -410,6 +410,79 @@ pi-bio-agent query examples/run-ledger/manifest.json \
 }
 ```
 
+Window an edge-shaped graph table without loading the whole neighborhood:
+
+``` sh
+pi-bio-agent query examples/graph-window/manifest.json \
+  --db .pi/bio-agent/readme-graph-window.duckdb \
+  --sql "SELECT count(*) AS n FROM bio_edges"
+```
+
+``` json
+{
+  "ok": true,
+  "runId": "query-<run>",
+  "status": "succeeded",
+  "rowCount": 1,
+  "artifacts": {
+    "run": ".pi/bio-agent/runs/query-<run>/run.json",
+    "result": ".pi/bio-agent/runs/query-<run>/result.json",
+    "receipts": ".pi/bio-agent/runs/query-<run>/receipts.json"
+  },
+  "runDir": ".pi/bio-agent/runs/query-<run>",
+  "rows": [
+    {
+      "n": 4
+    }
+  ]
+}
+```
+
+``` sh
+pi-bio-agent graph-window \
+  --db .pi/bio-agent/readme-graph-window.duckdb \
+  --table bio_edges \
+  --start run:readme \
+  --direction both \
+  --limit 10
+```
+
+``` json
+{
+  "schema": "pi-bio.graph_query_window.v1",
+  "table": "bio_edges",
+  "startId": "run:readme",
+  "direction": "both",
+  "predicates": [],
+  "limit": 10,
+  "offset": 0,
+  "rows": [
+    {
+      "from_id": "toolcall:readme",
+      "predicate": "executes",
+      "to_id": "run:readme"
+    },
+    {
+      "from_id": "run:readme",
+      "predicate": "invoked_by",
+      "to_id": "toolcall:readme"
+    },
+    {
+      "from_id": "run:readme",
+      "predicate": "produced",
+      "to_id": "artifact:readme-result"
+    },
+    {
+      "from_id": "run:readme",
+      "predicate": "used_manifest",
+      "to_id": "manifest:graph-window"
+    }
+  ],
+  "totalCount": 4,
+  "omittedCount": 0
+}
+```
+
 ## Dogfood
 
 Run the compact all-primitives dogfood:
