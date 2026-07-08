@@ -481,11 +481,15 @@ HTTP example uses the downloadable KGX TSV association files through DuckDB `htt
 generic KGX/SemanticSQL edge path, not a special resolver.
 For sources that arrive in the canonical SemanticSQL base shape, `materializeSemanticSqlSourceViews` generates the
 stable DuckDB views from staged `statements`: RDF/RDFS typed statement views, labels, definitions, synonyms,
-mappings, deprecated nodes, ontology status, and term rows. Its generated `edge` view follows the relation-graph
-shape for direct named subclass/subproperty rows rather than treating every object triple as a graph edge. When a
-staged `prefix(prefix, base)` table is declared, the generated views canonicalize matching IRIs to CURIEs. The
-generated `edge` view then uses the same graph projection profile and closure path as KGX, memory, and observation
-graphs.
+mappings, deprecated nodes, ontology status, and term rows. It also covers the next upstream compatibility tier:
+RDF list/member views, node/identifier and summary views, OWL node/property classifications, axiom annotation and
+restriction views, and OBO synonym/mapping/contributor/orcid views. Its generated `edge` view follows the
+relation-graph shape for named subclass/subproperty rows, `subClassOf someValuesFrom` restriction rows, and selected
+`rdf:type` assertions whose object is a known class; it still does not treat every object triple as a graph edge.
+When a staged `prefix(prefix, base)` table is declared, the generated views canonicalize matching IRIs to CURIEs.
+The generated `edge` view then uses the same graph projection profile and closure path as KGX, memory, and
+observation graphs. This is compatibility with the SemanticSQL source-spec ecosystem, useful for RDF/OWL,
+Semantic-Web, FHIR-shaped, and ontology-derived data; it is not a hidden OWL reasoner.
 
 - **`bio_edges(from_id, predicate, to_id, attrs, trust)`**: the statement/edge base (`subject=from_id,
   predicate, object=to_id`). Labels, synonyms, definitions, and relations are all just rows; the predicate is

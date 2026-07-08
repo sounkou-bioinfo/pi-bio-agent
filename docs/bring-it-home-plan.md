@@ -133,13 +133,13 @@ consumer-pulled, or a non-goal.
 5. **SemanticSQL source-spec parity.** This is active consistency work, not optional polish: SemanticSQL reaches into
    RDF/OWL, Semantic Web, FHIR-shaped resources, and related graph ecosystems. The base helper now materializes
    generated SemanticSQL views from a staged `statements` table: RDF/RDFS typed statement views, relation-graph
-   `edge` over named subclass/subproperty rows, labels, definitions, synonyms, mappings, deprecated nodes, ontology
-   status, and term rollups. When a staged `prefix(prefix, base)` table is declared, the views canonicalize matching
-   IRIs to CURIEs before projection. Remaining parity is OWL restriction/axiom annotations, selected `rdf:type`
-   relation-graph semantics, relation-graph-specific equivalence/reflexivity/property-hierarchy policy, and
-   multi-ontology attachment when a real grounding/traversal consumer needs them. Declared upstream
-   `entailed_edge` artifacts now enter through the same graph projection profile when a resolver/host stages and
-   receipts them.
+   `edge`, RDF list/member views, node/identifier/count views, OWL node/property/axiom/restriction views, OBO
+   synonym/mapping/contributor/orcid views, deprecated nodes, ontology status, and term rollups. When a staged
+   `prefix(prefix, base)` table is declared, the views canonicalize matching IRIs to CURIEs before projection.
+   Remaining parity is relation-graph-specific equivalence/reflexivity/property-hierarchy policy, RO/subgraph/taxon
+   constraint/similarity/term-association views, and multi-ontology attachment when a real grounding/traversal
+   consumer needs them. Declared upstream `entailed_edge` artifacts now enter through the same graph projection
+   profile when a resolver/host stages and receipts them.
 6. **Docs hygiene.** Keep README and guides action-first: real commands, real code chunks, no fake text-block
    architecture diagrams, no speculative hostfs claims, and no stale "process transport" lane. Claims should point
    to commands, tests, or examples that currently run.
