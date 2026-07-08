@@ -794,8 +794,9 @@ JOIN, not a walker. See [`design.md`](./design.md#the-semanticsql-shape-source-s
   and, when needed, a continuation resource handle over the same projections (`bio_edges`, `bio_edges_as_of`,
   `entailed_edge`, `entailed_edge_as_of`). It applies symmetrically to foreign KGs and our own graph;
   `bio_walk_memory` is the current small in-memory affordance, while large/as-of walks should use SQL windows over
-  the compiled graph. Exposed in the Pi extension as `bio_graph_window`; still pending: CLI/operation integration
-  and continuation-resume ergonomics.
+  the compiled graph. Exposed in the Pi extension as `bio_graph_window` and in the portable CLI as
+  `pi-bio-agent graph-window --db <store.duckdb> --start <node-id> [--table bio_edges_as_of]`, including
+  schema-qualified external KG tables. Still pending: operation integration and continuation-resume ergonomics.
 - Add trust/provenance fields consistently across facts, edges, and artifacts (`bio_edges.trust` exists; keep
   it uniform with receipts/artifacts).
 - Add as-of/known-at time lenses where variant reanalysis or changing knowledge releases matter.

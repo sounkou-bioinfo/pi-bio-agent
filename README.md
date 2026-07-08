@@ -582,7 +582,11 @@ tables with `DESCRIBE` / `SUMMARIZE`, run read-only SQL through
 `pi-bio-agent query`, and promote only stable workflows to thin
 playbooks. Start with `pi-bio-agent catalog` when the host needs to
 discover packaged manifest-backed sources before choosing one to inspect
-or run.
+or run. When a ledger or external KG already exists as a DuckDB graph
+table, use
+`pi-bio-agent graph-window --db <store.duckdb> --start <node-id> [--table bio_edges_as_of]`
+to page one-hop context instead of serializing a whole neighborhood into
+the agent prompt.
 
 Install the skill directly from GitHub into any host’s skill/playbook
 directory, without cloning:

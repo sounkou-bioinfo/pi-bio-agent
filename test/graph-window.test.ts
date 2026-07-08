@@ -44,9 +44,20 @@ describe("graph query windows: bounded graph context over compiled graph tables"
     assert.equal(both.totalCount, 3);
   });
 
+  test("supports schema-qualified graph tables without relaxing SQL identifier safety", async () => {
+    const conn = duckdbNodeConn(await (await DuckDBInstance.create(":memory:")).connect());
+    await conn.run("CREATE SCHEMA kg");
+    await conn.run("CREATE TABLE kg.bio_edges (from_id TEXT, predicate TEXT, to_id TEXT)");
+    await conn.run("INSERT INTO kg.bio_edges VALUES ('MONDO:1','biolink:subclass_of','MONDO:0')");
+
+    const window = await queryGraphWindow(conn, { table: "kg.bio_edges", startId: "MONDO:1" });
+    assert.deepEqual(window.rows.map((r) => [r.from_id, r.predicate, r.to_id]), [["MONDO:1", "biolink:subclass_of", "MONDO:0"]]);
+  });
+
   test("fails closed on unsafe table names and unbounded limits", async () => {
     const conn = duckdbNodeConn(await (await DuckDBInstance.create(":memory:")).connect());
     await assert.rejects(() => queryGraphWindow(conn, { table: "bio_edges;DROP", startId: "a" }), /SQL identifier/);
+    await assert.rejects(() => queryGraphWindow(conn, { table: "kg.bio_edges;DROP", startId: "a" }), /SQL identifier/);
     await assert.rejects(() => queryGraphWindow(conn, { startId: "a", limit: 0 }), /limit/);
   });
 });

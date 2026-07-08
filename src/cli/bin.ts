@@ -3,6 +3,7 @@ import { mainMemory } from "./memory.js";
 import { mainRun } from "./run.js";
 import { installSkillUsage, mainInstallCodexSkill, mainInstallSkill } from "./install-skill.js";
 import { mainCatalog } from "./catalog.js";
+import { mainGraphWindow } from "./graph-window.js";
 
 /**
  * Thin process wrapper around the testable CLI engines. Each engine takes injected deps (out/err sinks) and
@@ -10,6 +11,7 @@ import { mainCatalog } from "./catalog.js";
  * DuckDB driver, process argv/cwd, stdout, and process.exit. Groups:
  *   catalog       — list manifest-backed sources/templates packaged with or supplied to the host
  *   query / run   — run a manifest's ad-hoc SQL or a declared operation (the substrate's value, provider-agnostic)
+ *   graph-window  — page an existing DuckDB graph table (`bio_edges_as_of`, `entailed_edge`, external KG tables)
  *   memory        — read the temporal memory store (list / show / history, as-of)
  *   install-skill — install the packaged substrate skill into any host skill/playbook root
  *   install-codex-skill — compatibility alias for install-skill --host codex
@@ -24,9 +26,10 @@ const readStdin = async (): Promise<string> => {
 };
 
 const usage = (): string => [
-  "usage: pi-bio-agent <catalog|query|run|memory|install-skill|install-codex-skill> ...",
+  "usage: pi-bio-agent <catalog|query|run|graph-window|memory|install-skill|install-codex-skill> ...",
   "  catalog [--root <dir>] [--query <text>]",
   "  query/run <manifest.json> --db <path> [--sql/--operation ...]",
+  "  graph-window --db <path|:memory:> --start <node-id> [--table bio_edges] [--direction out|in|both] [--predicates p1,p2] [--limit n] [--offset n]",
   "  memory <list|show|history> [slug] [--as-of <iso>]",
   "",
   installSkillUsage("install-skill"),
@@ -37,6 +40,7 @@ const usage = (): string => [
 const dispatch = (): Promise<number> => {
   if (group === "catalog") return mainCatalog(rest, { cwd: process.cwd(), out, err });
   if (group === "query" || group === "run") return mainRun(group, rest, { cwd: process.cwd(), out, err, env: process.env, readStdin });
+  if (group === "graph-window") return mainGraphWindow(rest, { cwd: process.cwd(), out, err });
   if (group === "memory") return mainMemory(rest, { cwd: process.cwd(), out, err });
   if (group === "install-skill") return mainInstallSkill(rest, { out, err });
   if (group === "install-codex-skill") return mainInstallCodexSkill(rest, { out, err });

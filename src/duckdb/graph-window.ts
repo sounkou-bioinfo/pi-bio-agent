@@ -1,7 +1,7 @@
 import type { ResourceHandle } from "../core/resources.js";
 import type { SqlConn } from "../core/ports.js";
 
-const IDENT_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const IDENT_PART_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 export interface GraphWindowEdge {
   from_id: string;
@@ -32,8 +32,12 @@ export interface GraphQueryWindow {
   continuation?: ResourceHandle;
 }
 
-function assertIdent(id: string, label: string): void {
-  if (!IDENT_RE.test(id)) throw new Error(`graph window: ${label} '${id}' must be a SQL identifier`);
+function renderTableRef(table: string): string {
+  const parts = table.split(".");
+  if (parts.length === 0 || parts.length > 3 || parts.some((part) => !IDENT_PART_RE.test(part))) {
+    throw new Error(`graph window: table '${table}' must be a SQL identifier`);
+  }
+  return parts.map((part) => `"${part.replace(/"/g, '""')}"`).join(".");
 }
 
 function normalizeLimit(limit: number | undefined): number {
@@ -66,7 +70,7 @@ function continuationHandle(opts: Required<Pick<GraphQueryWindowOptions, "startI
  */
 export async function queryGraphWindow(conn: SqlConn, options: GraphQueryWindowOptions): Promise<GraphQueryWindow> {
   const table = options.table ?? "bio_edges";
-  assertIdent(table, "table");
+  const tableSql = renderTableRef(table);
   if (typeof options.startId !== "string" || !options.startId.trim()) throw new Error("graph window: startId is required");
   const direction = options.direction ?? "out";
   if (!["out", "in", "both"].includes(direction)) throw new Error("graph window: direction must be out, in, or both");
@@ -91,10 +95,10 @@ export async function queryGraphWindow(conn: SqlConn, options: GraphQueryWindowO
     params.push(...predicates);
   }
 
-  const [{ n }] = await conn.all<{ n: number }>(`SELECT count(*) AS n FROM ${table} WHERE ${where}`, params);
+  const [{ n }] = await conn.all<{ n: number }>(`SELECT count(*) AS n FROM ${tableSql} WHERE ${where}`, params);
   const totalCount = Number(n ?? 0);
   const rows = await conn.all<GraphWindowEdge>(
-    `SELECT from_id, predicate, to_id FROM ${table} WHERE ${where} ORDER BY predicate, from_id, to_id LIMIT ? OFFSET ?`,
+    `SELECT from_id, predicate, to_id FROM ${tableSql} WHERE ${where} ORDER BY predicate, from_id, to_id LIMIT ? OFFSET ?`,
     [...params, limit, offset],
   );
   const omittedCount = Math.max(0, totalCount - offset - rows.length);
