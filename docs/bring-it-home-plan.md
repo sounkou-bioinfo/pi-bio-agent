@@ -117,8 +117,10 @@ consumer-pulled, or a non-goal.
    Pi/workbench/scheduler hooks for steers, interrupts, compaction, session switching, context digests, lease loss,
    and governance events that a consumer actually reads. Do not add a closed event taxonomy.
 3. **Durable workflow dogfood over the closed lifecycle.** The async lifecycle and checkpoint resume helper are
-   built. The remaining work is to dogfood them with real R/Python/bash/NNG/scheduler-backed steps and prove
-   restart/reclaim behavior through the ledger. This is not a request for another workflow engine.
+   built and the bring-it-home dogfood now runs checkpointed bash steps through `nodeComputeRunner`, reuses the
+   completed prefix, reruns the suffix, and proves queue cancellation plus post-cancel stale-write rejection
+   through the ledger. Remaining hardening is to exercise the same shape with R/Python/NNG/scheduler-backed steps
+   and real lease-reclaim paths as consumers need them. This is not a request for another workflow engine.
 4. **Substrate skill and non-Pi host dogfood.** The packaged skill should keep onboarding weaker hosts into the
    substrate: write or inspect a manifest, discover schemas with `DESCRIBE` / `SUMMARIZE`, run bounded SQL, walk the
    ledger/graph when present, and promote only repeated workflows into thin playbooks.
@@ -158,7 +160,8 @@ consumer-pulled, or a non-goal.
   receipts, subject-restriction digests, and action/replay key pinning exist. Remaining work is product conformance
   and host adapter work, not another core auth primitive.
 - **Base durable runner/resume.** `AsyncRunner` is the lifecycle; `JobRunner` and checkpoint helpers specialize it.
-  Resume means completed-prefix checkpoint reuse plus suffix rerun.
+  Resume means completed-prefix checkpoint reuse plus suffix rerun. Evidence: [job-store.ts](../src/hosts/job-store.ts),
+  [bring-it-home-dogfood.mjs](../scripts/bring-it-home-dogfood.mjs), [bring-it-home-dogfood.test.ts](../test/bring-it-home-dogfood.test.ts).
 - **`recordHostEvent` primitive.** Built as one open host event fact plus ordinary links. The pending item is concrete
   adapters, not a new host-event model.
 - **Foreign graph projection base.** A real external Monarch KGX HTTP path and internal observation-graph projection

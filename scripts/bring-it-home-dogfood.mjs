@@ -295,6 +295,31 @@ try {
 
   let extractExecutions = 0;
   let scoreExecutions = 0;
+  const workflowCwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-dogfood-workflow-"));
+  const workflowRunner = nodeComputeRunner();
+  async function runWorkflowBashStep(stepId, script, env = {}) {
+    const handle = await workflowRunner.submit({
+      command: ["bash", "-lc", script],
+      cwd: workflowCwd,
+      env,
+      timeoutMs: 5_000,
+    });
+    const submittedStatus = await workflowRunner.status(handle);
+    const result = await workflowRunner.collect(handle);
+    assert.equal(
+      result.exitCode,
+      0,
+      `${stepId} failed with exit ${result.exitCode}; stderr=${result.stderr}`,
+    );
+    assert.equal(result.timedOut, false);
+    return {
+      backend: handle.backend ?? "unknown",
+      runId: handle.runId,
+      submittedPhase: submittedStatus?.phase ?? "unknown",
+      stdout: result.stdout.trim(),
+      stderr: result.stderr.trim(),
+    };
+  }
   const firstPlan = await runJobStepsWithCheckpoints(conn, {
     runId: "dogfood-workflow",
     recordedAt: "2026-07-06T12:00:01.000Z",
@@ -304,9 +329,19 @@ try {
     steps: [
       {
         stepId: "extract/variants",
-        run: () => {
+        run: async () => {
           extractExecutions += 1;
-          return { rows: 5, artifact_uri: "cas:sha256:variants-fixture" };
+          const step = await runWorkflowBashStep(
+            "extract/variants",
+            "printf '%s\\n' '{\"rows\":5,\"artifact_uri\":\"cas:sha256:variants-fixture\"}' | tee extract-variants.json",
+          );
+          return {
+            ...JSON.parse(step.stdout),
+            process_backend: step.backend,
+            process_run_id: step.runId,
+            process_submitted_phase: step.submittedPhase,
+            stdout_digest: sha256(step.stdout),
+          };
         },
       },
     ],
@@ -320,17 +355,38 @@ try {
     steps: [
       {
         stepId: "extract/variants",
-        run: () => {
+        run: async () => {
           extractExecutions += 1;
-          return { rows: 99 };
+          const step = await runWorkflowBashStep(
+            "extract/variants",
+            "printf '%s\\n' '{\"rows\":99}' | tee extract-variants-rerun.json",
+          );
+          return {
+            ...JSON.parse(step.stdout),
+            process_backend: step.backend,
+            process_run_id: step.runId,
+            stdout_digest: sha256(step.stdout),
+          };
         },
       },
       {
         stepId: "score/high-impact",
-        run: ({ valueOf }) => {
+        run: async ({ valueOf }) => {
           scoreExecutions += 1;
           const extract = valueOf("extract/variants");
-          return { candidates: 2, upstream_rows: extract.rows, upstream_checkpoint: jobStepCheckpointKey("dogfood-workflow", "extract/variants") };
+          const step = await runWorkflowBashStep(
+            "score/high-impact",
+            "printf '{\"candidates\":2,\"upstream_rows\":%s}\\n' \"$INPUT_ROWS\" | tee score-high-impact.json",
+            { INPUT_ROWS: String(extract.rows) },
+          );
+          return {
+            ...JSON.parse(step.stdout),
+            upstream_checkpoint: jobStepCheckpointKey("dogfood-workflow", "extract/variants"),
+            process_backend: step.backend,
+            process_run_id: step.runId,
+            process_submitted_phase: step.submittedPhase,
+            stdout_digest: sha256(step.stdout),
+          };
         },
       },
     ],
@@ -343,7 +399,11 @@ try {
   assert.equal(scored?.reused, false);
   assert.equal(extractExecutions, 1);
   assert.equal(scoreExecutions, 1);
-  assert.deepEqual(resumedExtract?.value, { rows: 5, artifact_uri: "cas:sha256:variants-fixture" });
+  assert.deepEqual(
+    { rows: resumedExtract?.value.rows, artifact_uri: resumedExtract?.value.artifact_uri, backend: resumedExtract?.value.process_backend },
+    { rows: 5, artifact_uri: "cas:sha256:variants-fixture", backend: "node-process" },
+  );
+  assert.equal(scored?.value.process_backend, "node-process");
   assert.equal((await readJobStepCheckpoint(conn, "dogfood-workflow", "score/high-impact"))?.value.candidates, 2);
 
   let queueTick = 10;
@@ -673,6 +733,8 @@ try {
       resumedExecuted: resumedPlan.executed,
       resumedReused: resumedPlan.reused,
       extractReused: resumedExtract?.reused,
+      extractBackend: resumedExtract?.value.process_backend,
+      scoreBackend: scored?.value.process_backend,
     },
     queueCancel: { runId: queueRunId, staleWriteRejected: staleQueueWriteRejected, resumedPhase: resumedQueue.phase },
     checkpointKey: checkpointRow.statement_key,

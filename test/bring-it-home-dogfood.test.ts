@@ -18,7 +18,16 @@ describe("bring-it-home dogfood command", () => {
     const summary = JSON.parse(stdout.slice(jsonStart)) as {
       dogfood: string;
       hostEventLinks: number;
-      jobStepExecutions: { extract: number; score: number; firstExecuted: number; resumedExecuted: number; resumedReused: number; extractReused: boolean };
+      jobStepExecutions: {
+        extract: number;
+        score: number;
+        firstExecuted: number;
+        resumedExecuted: number;
+        resumedReused: number;
+        extractReused: boolean;
+        extractBackend: string;
+        scoreBackend: string;
+      };
       checkpointKey: string;
       ducknngProfileReceipt: { policyDigest: string; rotatedFromDigest?: string; version: string; receiptChanged: boolean; subjectRestriction: { restricted: boolean; count: number; digest?: string } };
       hostCapabilityRun: { casMetadataRefs: number };
@@ -32,7 +41,16 @@ describe("bring-it-home dogfood command", () => {
 
     assert.equal(summary.dogfood, "bring-it-home");
     assert.equal(summary.hostEventLinks, 2);
-    assert.deepEqual(summary.jobStepExecutions, { extract: 1, score: 1, firstExecuted: 1, resumedExecuted: 1, resumedReused: 1, extractReused: true });
+    assert.deepEqual(summary.jobStepExecutions, {
+      extract: 1,
+      score: 1,
+      firstExecuted: 1,
+      resumedExecuted: 1,
+      resumedReused: 1,
+      extractReused: true,
+      extractBackend: "node-process",
+      scoreBackend: "node-process",
+    });
     assert.equal(summary.checkpointKey, "job:dogfood-workflow:step:extract%2Fvariants");
     assert.equal(summary.ducknngProfileReceipt.subjectRestriction.restricted, true);
     assert.equal(summary.ducknngProfileReceipt.subjectRestriction.count, 2);
