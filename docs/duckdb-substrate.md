@@ -38,14 +38,16 @@ SQLite Semantic SQL databases are interchange artifacts; DuckDB remains the join
 agent-authored SQL and recursive closure.
 `materializeSemanticSqlSourceViews` is the current library helper for staged `statements`: it creates the generated
 RDF/RDFS statement views, relation-graph `edge`, RO `part_of` / `has_part` edge filters, subgraph inspection views,
-label, definition, synonym, mapping, deprecated-node, OBO problem, ontology-status, and term views that a manifest
-or `GraphProjectionProfile` can consume, with optional IRI-to-CURIE canonicalization through a staged
+ChEBI conjugate-acid/base and charge views, label, definition, synonym, mapping, deprecated-node, OBO problem,
+ontology-status, and term views that a manifest or `GraphProjectionProfile` can consume, with optional IRI-to-CURIE
+canonicalization through a staged
 `prefix(prefix, base)` table. A staged `textual_transformation(subject, predicate, value)` table adds the
 SemanticSQL NLP inspection layer: `processed_statement`, and with a prefix table, `subject_prefix` plus `match`.
 When a source ships a precomputed SemanticSQL/relation-graph `entailed_edge`, `materializeGraphProjectionProfile`
 can copy that declared artifact into the same closure-table shape; `materializeSemanticSqlSourceViews` can also use
 a staged `entailed_edge(subject, predicate, object)` table to expose closure-backed ancestor/descendant, subclass,
-type, cycle, and taxon-constraint views. Otherwise the local CTE closure remains the default.
+type, cycle, and taxon-constraint views, including most-specific inferred in-taxon. Otherwise the local CTE closure
+remains the default.
 
 Suggested stable views:
 

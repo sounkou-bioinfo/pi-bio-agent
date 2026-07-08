@@ -94,9 +94,13 @@ export interface SemanticSqlSourceViewTargets {
   inferredNeverInTaxon1Table?: string;
   inferredNeverInTaxon2Table?: string;
   inferredNeverInTaxonTable?: string;
+  mostSpecificInferredInTaxonTable?: string;
   subjectPrefixTable?: string;
   processedStatementTable?: string;
   matchTable?: string;
+  conjugateAcidOfEdgeTable?: string;
+  conjugateBaseOfEdgeTable?: string;
+  chargeStatementTable?: string;
   termsTable?: string;
 }
 
@@ -214,9 +218,13 @@ export interface MaterializedSemanticSqlViews {
   inferredNeverInTaxon1Table?: string;
   inferredNeverInTaxon2Table?: string;
   inferredNeverInTaxonTable?: string;
+  mostSpecificInferredInTaxonTable?: string;
   subjectPrefixTable?: string;
   processedStatementTable?: string;
   matchTable?: string;
+  conjugateAcidOfEdgeTable: string;
+  conjugateBaseOfEdgeTable: string;
+  chargeStatementTable: string;
   termsTable: string;
 }
 
@@ -379,9 +387,13 @@ function targets(spec: SemanticSqlSourceSpec): Required<SemanticSqlSourceViewTar
     inferredNeverInTaxon1Table: spec.targets?.inferredNeverInTaxon1Table ?? "inferred_never_in_taxon_1",
     inferredNeverInTaxon2Table: spec.targets?.inferredNeverInTaxon2Table ?? "inferred_never_in_taxon_2",
     inferredNeverInTaxonTable: spec.targets?.inferredNeverInTaxonTable ?? "inferred_never_in_taxon",
+    mostSpecificInferredInTaxonTable: spec.targets?.mostSpecificInferredInTaxonTable ?? "most_specific_inferred_in_taxon",
     subjectPrefixTable: spec.targets?.subjectPrefixTable ?? "subject_prefix",
     processedStatementTable: spec.targets?.processedStatementTable ?? "processed_statement",
     matchTable: spec.targets?.matchTable ?? "match",
+    conjugateAcidOfEdgeTable: spec.targets?.conjugateAcidOfEdgeTable ?? "conjugate_acid_of_edge",
+    conjugateBaseOfEdgeTable: spec.targets?.conjugateBaseOfEdgeTable ?? "conjugate_base_of_edge",
+    chargeStatementTable: spec.targets?.chargeStatementTable ?? "charge_statement",
     termsTable: spec.targets?.termsTable ?? "ontology_terms",
   };
 }
@@ -779,6 +791,19 @@ WHERE predicate = 'BFO:0000050'`,
 SELECT * FROM ${qident(t.edgeTable)}
 WHERE predicate = 'BFO:0000051'`,
 
+    `CREATE OR REPLACE VIEW ${qident(t.conjugateAcidOfEdgeTable)} AS
+SELECT * FROM ${qident(t.edgeTable)}
+WHERE predicate = 'obo:chebi#is_conjugate_acid_of'`,
+
+    `CREATE OR REPLACE VIEW ${qident(t.conjugateBaseOfEdgeTable)} AS
+SELECT * FROM ${qident(t.edgeTable)}
+WHERE predicate = 'obo:chebi#is_conjugate_base_of'`,
+
+    `CREATE OR REPLACE VIEW ${qident(t.chargeStatementTable)} AS
+SELECT subject, predicate, CAST(value AS INTEGER) AS value
+FROM ${qident(t.nodeToValueTable)}
+WHERE predicate = 'obo:chebi/charge'`,
+
     `CREATE OR REPLACE VIEW ${qident(t.subgraphEdgeByParentTable)} AS
 SELECT e.*, ee.predicate AS anchor_predicate, ee.object AS anchor_object
 FROM ${qident(t.edgeTable)} e
@@ -870,6 +895,18 @@ WHERE taxon.id != ie.taxon_with_constraint
 SELECT * FROM ${qident(t.inferredNeverInTaxon1Table)}
 UNION
 SELECT * FROM ${qident(t.inferredNeverInTaxon2Table)}`,
+
+      `CREATE OR REPLACE VIEW ${qident(t.mostSpecificInferredInTaxonTable)} AS
+SELECT ct.* FROM ${qident(t.inferredInTaxonDirectTable)} ct
+WHERE NOT EXISTS (
+  SELECT 1
+  FROM ${qident(t.inferredInTaxonDirectTable)} msct
+  JOIN ${qident(t.entailedSubclassOfEdgeTable)} sc
+    ON sc.subject = msct.taxon_with_constraint
+   AND sc.object = ct.taxon_with_constraint
+  WHERE msct.subject = ct.subject
+    AND msct.taxon_with_constraint != ct.taxon_with_constraint
+)`,
     ] : []),
 
     ...(prefixTable ? [
@@ -1009,6 +1046,9 @@ export async function materializeSemanticSqlSourceViews(conn: SqlConn, spec: Sem
     allProblemsTable: t.allProblemsTable,
     partOfEdgeTable: t.partOfEdgeTable,
     hasPartEdgeTable: t.hasPartEdgeTable,
+    conjugateAcidOfEdgeTable: t.conjugateAcidOfEdgeTable,
+    conjugateBaseOfEdgeTable: t.conjugateBaseOfEdgeTable,
+    chargeStatementTable: t.chargeStatementTable,
     subgraphEdgeByParentTable: t.subgraphEdgeByParentTable,
     subgraphEdgeByChildTable: t.subgraphEdgeByChildTable,
     subgraphEdgeBySelfTable: t.subgraphEdgeBySelfTable,
@@ -1028,6 +1068,7 @@ export async function materializeSemanticSqlSourceViews(conn: SqlConn, spec: Sem
       inferredNeverInTaxon1Table: t.inferredNeverInTaxon1Table,
       inferredNeverInTaxon2Table: t.inferredNeverInTaxon2Table,
       inferredNeverInTaxonTable: t.inferredNeverInTaxonTable,
+      mostSpecificInferredInTaxonTable: t.mostSpecificInferredInTaxonTable,
     } : {}),
     ...(spec.prefixTable ? {
       subjectPrefixTable: t.subjectPrefixTable,

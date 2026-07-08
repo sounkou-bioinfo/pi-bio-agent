@@ -54,7 +54,17 @@ describe("graph projection profile: source relation -> compiled graph", () => {
     await conn.run("INSERT INTO statements VALUES ('_:restriction_taxon','owl:onProperty','RO:0002162',NULL,NULL,NULL)");
     await conn.run("INSERT INTO statements VALUES ('_:restriction_taxon','owl:someValuesFrom','NCBITaxon:9606',NULL,NULL,NULL)");
     await conn.run("INSERT INTO statements VALUES ('MONDO:0004979','rdfs:subClassOf','_:restriction_taxon',NULL,NULL,NULL)");
+    await conn.run("INSERT INTO statements VALUES ('_:restriction_taxon_broad','owl:onProperty','RO:0002162',NULL,NULL,NULL)");
+    await conn.run("INSERT INTO statements VALUES ('_:restriction_taxon_broad','owl:someValuesFrom','NCBITaxon:1',NULL,NULL,NULL)");
+    await conn.run("INSERT INTO statements VALUES ('MONDO:0004784','rdfs:subClassOf','_:restriction_taxon_broad',NULL,NULL,NULL)");
     await conn.run("INSERT INTO statements VALUES ('MONDO:0004979','RO:0002161','NCBITaxon:7955',NULL,NULL,NULL)");
+    await conn.run("INSERT INTO statements VALUES ('_:restriction_acid','owl:onProperty','obo:chebi#is_conjugate_acid_of',NULL,NULL,NULL)");
+    await conn.run("INSERT INTO statements VALUES ('_:restriction_acid','owl:someValuesFrom','CHEBI:15378',NULL,NULL,NULL)");
+    await conn.run("INSERT INTO statements VALUES ('CHEBI:15377','rdfs:subClassOf','_:restriction_acid',NULL,NULL,NULL)");
+    await conn.run("INSERT INTO statements VALUES ('_:restriction_base','owl:onProperty','obo:chebi#is_conjugate_base_of',NULL,NULL,NULL)");
+    await conn.run("INSERT INTO statements VALUES ('_:restriction_base','owl:someValuesFrom','CHEBI:15379',NULL,NULL,NULL)");
+    await conn.run("INSERT INTO statements VALUES ('CHEBI:15378','rdfs:subClassOf','_:restriction_base',NULL,NULL,NULL)");
+    await conn.run("INSERT INTO statements VALUES ('CHEBI:15377','obo:chebi/charge',NULL,'-1','xsd:int',NULL)");
     await conn.run("INSERT INTO statements VALUES ('_:list1','rdf:first','MONDO:0004979',NULL,NULL,NULL)");
     await conn.run("INSERT INTO statements VALUES ('_:list1','rdf:rest','_:list2',NULL,NULL,NULL)");
     await conn.run("INSERT INTO statements VALUES ('_:list2','rdf:first','MONDO:0004784',NULL,NULL,NULL)");
@@ -90,6 +100,9 @@ describe("graph projection profile: source relation -> compiled graph", () => {
     assert.equal(views.allProblemsTable, "all_problems");
     assert.equal(views.partOfEdgeTable, "part_of_edge");
     assert.equal(views.hasPartEdgeTable, "has_part_edge");
+    assert.equal(views.conjugateAcidOfEdgeTable, "conjugate_acid_of_edge");
+    assert.equal(views.conjugateBaseOfEdgeTable, "conjugate_base_of_edge");
+    assert.equal(views.chargeStatementTable, "charge_statement");
     assert.equal(views.subgraphEdgeByParentTable, "subgraph_edge_by_parent");
     assert.equal(views.subgraphEdgeByChildTable, "subgraph_edge_by_child");
     assert.equal(views.subgraphEdgeBySelfTable, "subgraph_edge_by_self");
@@ -108,6 +121,7 @@ describe("graph projection profile: source relation -> compiled graph", () => {
     assert.equal(views.inferredNeverInTaxon1Table, "inferred_never_in_taxon_1");
     assert.equal(views.inferredNeverInTaxon2Table, "inferred_never_in_taxon_2");
     assert.equal(views.inferredNeverInTaxonTable, "inferred_never_in_taxon");
+    assert.equal(views.mostSpecificInferredInTaxonTable, "most_specific_inferred_in_taxon");
     assert.equal(views.termsTable, "semantic_terms");
 
     assert.deepEqual(await conn.all<{ subject: string; value: string }>("SELECT subject, value FROM has_text_definition_statement"), [
@@ -143,8 +157,11 @@ describe("graph projection profile: source relation -> compiled graph", () => {
       { subject: "_:list1", object: "MONDO:0004979" },
     ]);
     assert.deepEqual(await conn.all<{ subject: string; predicate: string; object: string }>(
-      "SELECT subject, predicate, object FROM owl_subclass_of_some_values_from",
+      "SELECT subject, predicate, object FROM owl_subclass_of_some_values_from ORDER BY subject, predicate, object",
     ), [
+      { subject: "CHEBI:15377", predicate: "obo:chebi#is_conjugate_acid_of", object: "CHEBI:15378" },
+      { subject: "CHEBI:15378", predicate: "obo:chebi#is_conjugate_base_of", object: "CHEBI:15379" },
+      { subject: "MONDO:0004784", predicate: "RO:0002162", object: "NCBITaxon:1" },
       { subject: "MONDO:0004979", predicate: "BFO:0000050", object: "GO:0000001" },
       { subject: "MONDO:0004979", predicate: "BFO:0000051", object: "UBERON:0001004" },
       { subject: "MONDO:0004979", predicate: "RO:0002162", object: "NCBITaxon:9606" },
@@ -169,6 +186,15 @@ describe("graph projection profile: source relation -> compiled graph", () => {
     ]);
     assert.deepEqual(await conn.all<{ subject: string; object: string }>("SELECT subject, object FROM has_part_edge"), [
       { subject: "MONDO:0004979", object: "UBERON:0001004" },
+    ]);
+    assert.deepEqual(await conn.all<{ subject: string; object: string }>("SELECT subject, object FROM conjugate_acid_of_edge"), [
+      { subject: "CHEBI:15377", object: "CHEBI:15378" },
+    ]);
+    assert.deepEqual(await conn.all<{ subject: string; object: string }>("SELECT subject, object FROM conjugate_base_of_edge"), [
+      { subject: "CHEBI:15378", object: "CHEBI:15379" },
+    ]);
+    assert.deepEqual(await conn.all<{ subject: string; predicate: string; value: number }>("SELECT subject, predicate, value FROM charge_statement"), [
+      { subject: "CHEBI:15377", predicate: "obo:chebi/charge", value: -1 },
     ]);
     assert.deepEqual(
       await conn.all<{ anchor_predicate: string; anchor_object: string }>(
@@ -204,14 +230,20 @@ describe("graph projection profile: source relation -> compiled graph", () => {
       { id: "NCBITaxon:9606" },
     ]);
     assert.deepEqual(await conn.all<{ subject: string; object: string }>(
-      "SELECT subject, object FROM direct_in_taxon",
-    ), [{ subject: "MONDO:0004979", object: "NCBITaxon:9606" }]);
+      "SELECT subject, object FROM direct_in_taxon ORDER BY subject, object",
+    ), [{ subject: "MONDO:0004784", object: "NCBITaxon:1" }, { subject: "MONDO:0004979", object: "NCBITaxon:9606" }]);
     assert.deepEqual(await conn.all<{ subject: string; object: string }>(
       "SELECT subject, object FROM direct_never_in_taxon",
     ), [{ subject: "MONDO:0004979", object: "NCBITaxon:7955" }]);
     assert.deepEqual(await conn.all<{ subject: string; node_with_constraint: string; taxon_with_constraint: string }>(
-      "SELECT subject, node_with_constraint, taxon_with_constraint FROM inferred_in_taxon_direct WHERE subject = 'MONDO:0004766'",
-    ), [{ subject: "MONDO:0004766", node_with_constraint: "MONDO:0004979", taxon_with_constraint: "NCBITaxon:9606" }]);
+      "SELECT subject, node_with_constraint, taxon_with_constraint FROM inferred_in_taxon_direct WHERE subject = 'MONDO:0004766' ORDER BY taxon_with_constraint",
+    ), [
+      { subject: "MONDO:0004766", node_with_constraint: "MONDO:0004784", taxon_with_constraint: "NCBITaxon:1" },
+      { subject: "MONDO:0004766", node_with_constraint: "MONDO:0004979", taxon_with_constraint: "NCBITaxon:9606" },
+    ]);
+    assert.deepEqual(await conn.all<{ taxon_with_constraint: string }>(
+      "SELECT taxon_with_constraint FROM most_specific_inferred_in_taxon WHERE subject = 'MONDO:0004766'",
+    ), [{ taxon_with_constraint: "NCBITaxon:9606" }]);
     assert.deepEqual(await conn.all<{ query_taxon: string }>(
       "SELECT DISTINCT query_taxon FROM inferred_never_in_taxon_1 WHERE subject = 'MONDO:0004766' ORDER BY query_taxon",
     ), [{ query_taxon: "NCBITaxon:7955" }, { query_taxon: "NCBITaxon:7956" }]);
@@ -225,6 +257,11 @@ describe("graph projection profile: source relation -> compiled graph", () => {
       { subject: "MONDO:0004979", predicate: "BFO:0000051", object: "UBERON:0001004" },
       { subject: "MONDO:0004979", predicate: "RO:0002162", object: "NCBITaxon:9606" },
       { subject: "MONDO:0004979", predicate: "rdf:type", object: "GO:0000001" },
+    ]);
+    assert.deepEqual(await conn.all<{ subject: string; predicate: string; object: string }>(
+      "SELECT subject, predicate, object FROM semantic_edge WHERE subject = 'MONDO:0004784' AND predicate = 'RO:0002162'",
+    ), [
+      { subject: "MONDO:0004784", predicate: "RO:0002162", object: "NCBITaxon:1" },
     ]);
 
     const terms = await conn.all<{ id: string; label: string; definition: string; deprecated: boolean; synonyms_json: string }>(
@@ -246,7 +283,7 @@ describe("graph projection profile: source relation -> compiled graph", () => {
     };
 
     const out = await materializeGraphProjectionProfile(conn, sourceSpecProfile);
-    assert.deepEqual(out, { edgesTable: "semantic_bio_edges", edgeCount: 7, closureTable: "semantic_entailed_edge", closureCount: 3 });
+    assert.deepEqual(out, { edgesTable: "semantic_bio_edges", edgeCount: 10, closureTable: "semantic_entailed_edge", closureCount: 3 });
     const ancestors = await conn.all<{ to_id: string }>(
       "SELECT to_id FROM semantic_entailed_edge WHERE from_id = 'MONDO:0004766' ORDER BY to_id",
     );

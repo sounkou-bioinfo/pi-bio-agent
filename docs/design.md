@@ -487,7 +487,8 @@ restriction views, OBO synonym/mapping/contributor/orcid views, and OBO problem 
 whitespace, and predicates used with both literal values and object nodes. Its generated `edge` view follows the
 relation-graph shape for named subclass/subproperty rows, `subClassOf someValuesFrom` restriction rows, and selected
 `rdf:type` assertions whose object is a known class; it also exposes RO `part_of` / `has_part` edge filters and
-source-spec subgraph-by-parent/child/self views over that generated `edge`. When a staged SemanticSQL
+ChEBI conjugate-acid/base edge filters and charge statements, plus source-spec subgraph-by-parent/child/self views
+over that generated `edge`. When a staged SemanticSQL
 `entailed_edge(subject, predicate, object)` table is declared, the helper adds the closure-backed relation-graph
 inspection views: subgraph-by-ancestor/descendant, entailed subclass/type filters, cycle reports, and direct/inferred
 taxon-constraint views. It still does not treat every object triple as a relation-graph edge.
