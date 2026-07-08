@@ -1,12 +1,19 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { execFile } from "node:child_process";
 import { promises as fsp } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { DuckDBInstance } from "@duckdb/node-api";
 import type { SqlConn } from "../src/core/ports.js";
 import { mainGraphWindow } from "../src/cli/graph-window.js";
 import { duckdbNodeConn } from "../src/duckdb/node-api.js";
+
+const execFileAsync = promisify(execFile);
+const testDir = dirname(fileURLToPath(import.meta.url));
+const cliBin = join(testDir, "..", "src", "cli", "bin.js");
 
 function sink() {
   const out: string[] = [];
@@ -41,11 +48,25 @@ describe("cli: graph-window over existing DuckDB graph tables", () => {
     const s = sink();
     const code = await mainGraphWindow(["--db", dbPath, "--start", "run:r1", "--limit", "1"], s.deps);
     assert.equal(code, 0, s.err.join("\n"));
-    const printed = JSON.parse(s.out.join("\n")) as { schema: string; totalCount: number; omittedCount: number; rows: Array<{ from_id: string; predicate: string; to_id: string }> };
+    const printed = JSON.parse(s.out.join("\n")) as {
+      schema: string;
+      totalCount: number;
+      omittedCount: number;
+      continuation?: { pointer?: { uri?: string } };
+      rows: Array<{ from_id: string; predicate: string; to_id: string }>;
+    };
     assert.equal(printed.schema, "pi-bio.graph_query_window.v1");
     assert.equal(printed.totalCount, 2);
     assert.equal(printed.omittedCount, 1);
     assert.deepEqual(printed.rows, [{ from_id: "run:r1", predicate: "uses", to_id: "artifact:a" }]);
+
+    assert.match(printed.continuation?.pointer?.uri ?? "", /^graph-window:/);
+    const s2 = sink();
+    const nextCode = await mainGraphWindow(["--db", dbPath, "--continuation", printed.continuation!.pointer!.uri!], s2.deps);
+    assert.equal(nextCode, 0, s2.err.join("\n"));
+    const next = JSON.parse(s2.out.join("\n")) as { omittedCount: number; rows: Array<{ from_id: string; predicate: string; to_id: string }> };
+    assert.equal(next.omittedCount, 0);
+    assert.deepEqual(next.rows, [{ from_id: "run:r1", predicate: "uses", to_id: "artifact:b" }]);
   });
 
   test("walks a schema-qualified external KG table with predicate filtering", async () => {
@@ -72,6 +93,20 @@ describe("cli: graph-window over existing DuckDB graph tables", () => {
     assert.deepEqual(printed.rows, [{ from_id: "MONDO:child", predicate: "biolink:subclass_of", to_id: "MONDO:root" }]);
   });
 
+  test("top-level CLI dispatcher routes graph-window", async () => {
+    const dbPath = await tempDb();
+    await writeDb(dbPath, async (conn) => {
+      await conn.run("CREATE TABLE bio_edges (from_id TEXT, predicate TEXT, to_id TEXT)");
+      await conn.run("INSERT INTO bio_edges VALUES ('run:r1','uses','artifact:a')");
+    });
+
+    const { stdout, stderr } = await execFileAsync(process.execPath, [cliBin, "graph-window", "--db", dbPath, "--start", "run:r1"], { cwd: process.cwd() });
+    assert.equal(stderr, "");
+    const printed = JSON.parse(stdout) as { totalCount: number; rows: Array<{ to_id: string }> };
+    assert.equal(printed.totalCount, 1);
+    assert.deepEqual(printed.rows.map((r) => r.to_id), ["artifact:a"]);
+  });
+
   test("usage and unsafe table failures are explicit", async () => {
     const s = sink();
     assert.equal(await mainGraphWindow(["--start", "x"], s.deps), 2);
@@ -80,6 +115,14 @@ describe("cli: graph-window over existing DuckDB graph tables", () => {
     const s1b = sink();
     assert.equal(await mainGraphWindow(["--db", ":memory:", "--start", "x", "--direction", "sideways"], s1b.deps), 2);
     assert.match(s1b.err.join("\n"), /direction must be/);
+
+    const s1c = sink();
+    assert.equal(await mainGraphWindow(["--db", ":memory:", "--continuation", "graph-window:startId=x", "--start", "x"], s1c.deps), 2);
+    assert.match(s1c.err.join("\n"), /cannot be combined/);
+
+    const s1d = sink();
+    assert.equal(await mainGraphWindow(["--db", ":memory:", "--continuation", "graph-window:startId=x&offset="], s1d.deps), 2);
+    assert.match(s1d.err.join("\n"), /continuation offset must be an integer/);
 
     const dbPath = await tempDb();
     await writeDb(dbPath, async (conn) => {

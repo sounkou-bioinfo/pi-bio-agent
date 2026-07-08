@@ -49,6 +49,27 @@ duckdb .pi/bio-agent/store.duckdb \
    ORDER BY recorded_at"
 ```
 
+## Inspect With `graph-window`
+
+For graph-shaped rows, prefer a bounded window over dumping a neighborhood into context:
+
+```sh
+pi-bio-agent graph-window \
+  --db .pi/bio-agent/store.duckdb \
+  --table bio_edges_as_of \
+  --start "run:<runId>" \
+  --direction both \
+  --limit 50
+```
+
+If `omittedCount` is nonzero, the result includes a continuation handle:
+
+```sh
+pi-bio-agent graph-window \
+  --db .pi/bio-agent/store.duckdb \
+  --continuation "graph-window:table=bio_edges_as_of&startId=run%3A..."
+```
+
 ## Inspect In Pi
 
 When Pi extension graph tools are available:

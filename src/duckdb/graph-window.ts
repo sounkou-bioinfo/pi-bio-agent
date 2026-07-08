@@ -32,6 +32,14 @@ export interface GraphQueryWindow {
   continuation?: ResourceHandle;
 }
 
+function parseIntegerParam(raw: string | null, label: string): number | undefined {
+  if (raw === null) return undefined;
+  if (raw.trim() === "") throw new Error(`graph window: continuation ${label} must be an integer`);
+  const n = Number(raw);
+  if (!Number.isInteger(n)) throw new Error(`graph window: continuation ${label} must be an integer`);
+  return n;
+}
+
 function renderTableRef(table: string): string {
   const parts = table.split(".");
   if (parts.length === 0 || parts.length > 3 || parts.some((part) => !IDENT_PART_RE.test(part))) {
@@ -61,6 +69,25 @@ function continuationHandle(opts: Required<Pick<GraphQueryWindowOptions, "startI
   params.set("offset", String(opts.offset));
   for (const p of opts.predicates) params.append("predicate", p);
   return { mode: "virtual", name: "graph_query_window", pointer: { uri: `graph-window:${params.toString()}`, format: "graph-window" } };
+}
+
+export function parseGraphWindowContinuation(uri: string): GraphQueryWindowOptions {
+  if (typeof uri !== "string" || !uri.startsWith("graph-window:")) {
+    throw new Error("graph window: continuation must start with graph-window:");
+  }
+  const params = new URLSearchParams(uri.slice("graph-window:".length));
+  const startId = params.get("startId");
+  if (!startId) throw new Error("graph window: continuation is missing startId");
+  const direction = params.get("direction") ?? "out";
+  if (direction !== "out" && direction !== "in" && direction !== "both") throw new Error("graph window: continuation direction must be out, in, or both");
+  return {
+    table: params.get("table") ?? undefined,
+    startId,
+    direction,
+    predicates: params.getAll("predicate"),
+    limit: parseIntegerParam(params.get("limit"), "limit"),
+    offset: parseIntegerParam(params.get("offset"), "offset"),
+  };
 }
 
 /**

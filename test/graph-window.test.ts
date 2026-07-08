@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { duckdbNodeConn } from "../src/duckdb/node-api.js";
-import { queryGraphWindow } from "../src/duckdb/graph-window.js";
+import { parseGraphWindowContinuation, queryGraphWindow } from "../src/duckdb/graph-window.js";
 
 describe("graph query windows: bounded graph context over compiled graph tables", () => {
   test("returns a bounded page, omitted count, and continuation handle for a high-degree node", async () => {
@@ -18,7 +18,7 @@ describe("graph query windows: bounded graph context over compiled graph tables"
     assert.match(window.continuation?.pointer?.uri ?? "", /^graph-window:/);
     assert.match(window.continuation?.pointer?.uri ?? "", /startId=a/);
 
-    const next = await queryGraphWindow(conn, { startId: "a", limit: 2, offset: 2 });
+    const next = await queryGraphWindow(conn, parseGraphWindowContinuation(window.continuation!.pointer!.uri));
     assert.deepEqual(next.rows.map((r) => r.to_id), ["d", "e"]);
     assert.equal(next.omittedCount, 0);
     assert.equal(next.continuation, undefined);

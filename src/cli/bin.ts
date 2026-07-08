@@ -30,6 +30,7 @@ const usage = (): string => [
   "  catalog [--root <dir>] [--query <text>]",
   "  query/run <manifest.json> --db <path> [--sql/--operation ...]",
   "  graph-window --db <path|:memory:> --start <node-id> [--table bio_edges] [--direction out|in|both] [--predicates p1,p2] [--limit n] [--offset n]",
+  "  graph-window --db <path|:memory:> --continuation <graph-window:...>",
   "  memory <list|show|history> [slug] [--as-of <iso>]",
   "",
   installSkillUsage("install-skill"),

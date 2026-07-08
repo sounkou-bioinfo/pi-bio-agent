@@ -88,6 +88,19 @@ declared inputs, receipts, and replayable evidence.
    pi-bio-agent query manifest.json --db :memory: --ledger auto --sql "<WITH/SELECT ...>"
    ```
 
+6. When a DuckDB database already contains edge-shaped graph rows, page them instead of serializing a whole
+   neighborhood:
+
+   ```sh
+   pi-bio-agent graph-window --db store.duckdb --table bio_edges_as_of --start "run:<id>" --direction both
+   ```
+
+   If the result includes a `continuation.pointer.uri`, resume with:
+
+   ```sh
+   pi-bio-agent graph-window --db store.duckdb --continuation "graph-window:..."
+   ```
+
 ## Load References As Needed
 
 - Manifest syntax and resolver semantics: [references/manifests.md](references/manifests.md)

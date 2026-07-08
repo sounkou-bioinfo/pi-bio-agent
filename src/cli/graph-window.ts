@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import { DuckDBInstance, type DuckDBConnection } from "@duckdb/node-api";
 import { duckdbNodeConn } from "../duckdb/node-api.js";
-import { queryGraphWindow, type GraphQueryWindowOptions } from "../duckdb/graph-window.js";
+import { parseGraphWindowContinuation, queryGraphWindow, type GraphQueryWindowOptions } from "../duckdb/graph-window.js";
 import { parseFlags } from "./run.js";
 
 export interface GraphWindowCliDeps {
@@ -12,6 +12,7 @@ export interface GraphWindowCliDeps {
 
 const USAGE = [
   "usage: pi-bio-agent graph-window --db <path|:memory:> --start <node-id> [--table bio_edges] [--direction out|in|both] [--predicates p1,p2] [--limit n] [--offset n]",
+  "       pi-bio-agent graph-window --db <path|:memory:> --continuation <graph-window:...>",
   "  Pages an existing DuckDB graph table with columns from_id, predicate, to_id. Use this for ledger/KG inspection without loading a whole neighborhood.",
 ].join("\n");
 
@@ -23,12 +24,17 @@ function parseIntegerFlag(raw: string | undefined, name: string): number | undef
 }
 
 function parseOptions(flags: Record<string, string>): GraphQueryWindowOptions & { dbPath: string } {
-  const known = new Set(["db", "table", "start", "start-id", "direction", "predicates", "limit", "offset"]);
+  const known = new Set(["db", "table", "start", "start-id", "direction", "predicates", "limit", "offset", "continuation"]);
   const unknown = Object.keys(flags).filter((k) => !known.has(k));
   if (unknown.length) throw new Error(`unknown flag(s) for 'graph-window': ${unknown.map((k) => `--${k}`).join(", ")}`);
   const empty = Object.entries(flags).filter(([, v]) => v === "").map(([k]) => k);
   if (empty.length) throw new Error(`flag(s) with an empty value: ${empty.map((k) => `--${k}`).join(", ")}`);
   if (!flags.db) throw new Error("graph-window requires --db <path|:memory:>");
+  if (flags.continuation !== undefined) {
+    const conflicts = ["table", "start", "start-id", "direction", "predicates", "limit", "offset"].filter((k) => flags[k] !== undefined);
+    if (conflicts.length) throw new Error(`--continuation cannot be combined with ${conflicts.map((k) => `--${k}`).join(", ")}`);
+    return { dbPath: flags.db, ...parseGraphWindowContinuation(flags.continuation) };
+  }
   if (flags.start !== undefined && flags["start-id"] !== undefined && flags.start !== flags["start-id"]) {
     throw new Error("--start and --start-id disagree");
   }
