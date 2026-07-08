@@ -90,11 +90,12 @@ Semantic SQL LinkML source spec -> SQLite/Semantic SQL artifacts -> DuckDB stagi
   -> bio_edges / entailed_edge -> manifest SQL
 ```
 
-SQLite is an interchange artifact; DuckDB is the query substrate. The currently exercised path maps Semantic SQL
-`edge(subject,predicate,object)` into `bio_edges(from_id,predicate,to_id)`, keeps label/synonym `statements` in a
-DuckDB table for grounding, and recomputes closure with our `entailed_edge` materializer. The executable profile path
-is symmetric: `materializeGraphProjectionProfile` applies a `GraphProjectionProfile` to a staged ontology edge table
-and to the internal `bio_edges_as_of` observation graph, then uses the same local closure machinery for both.
+SQLite is an interchange artifact; DuckDB is the query substrate. The exercised path maps Semantic SQL
+`edge(subject,predicate,object)` into `bio_edges(from_id,predicate,to_id)`, keeps term metadata `statements` in a
+DuckDB table for grounding, and either recomputes closure with our `entailed_edge` materializer or copies a declared
+upstream `entailed_edge` artifact into the same target shape. The executable profile path is symmetric:
+`materializeGraphProjectionProfile` applies a `GraphProjectionProfile` to staged ontology edge tables, declared
+upstream closure artifacts, and the internal `bio_edges_as_of` observation graph.
 The canonical edge-column contract for KGX and SemanticSQL-shaped tables is just `subject`, `predicate`, `object`,
 optionally `attrs` and `trust`; an ordinary `GraphProjectionProfile` maps those columns into `bio_edges`. The
 Monarch KG HTTP example proves that a real downloadable KGX TSV can enter through `duckdb.sql_materialize` plus

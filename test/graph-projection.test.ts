@@ -248,10 +248,16 @@ describe("graph projection profile: source relation -> compiled graph", () => {
     assert.deepEqual(desc.map((x) => x.from_id), ["MONDO:0004766", "MONDO:0004784", "MONDO:0005405"]);
   });
 
-  test("materializer fails closed when closure is declared as a non-local artifact", async () => {
+  test("materializes a declared upstream SemanticSQL entailed_edge artifact", async () => {
     const conn = duckdbNodeConn(await (await DuckDBInstance.create(":memory:")).connect());
     await conn.run("CREATE TABLE edge_raw (subject TEXT, predicate TEXT, object TEXT)");
     await conn.run("INSERT INTO edge_raw VALUES ('MONDO:0004766','rdfs:subClassOf','MONDO:0004784')");
+    await conn.run("INSERT INTO edge_raw VALUES ('MONDO:0004784','rdfs:subClassOf','MONDO:0004979')");
+    await conn.run("CREATE TABLE precomputed_entailed_edge (subject TEXT, predicate TEXT, object TEXT)");
+    await conn.run("INSERT INTO precomputed_entailed_edge VALUES ('MONDO:0004766','rdfs:subClassOf','MONDO:0004784')");
+    await conn.run("INSERT INTO precomputed_entailed_edge VALUES ('MONDO:0004784','rdfs:subClassOf','MONDO:0004979')");
+    await conn.run("INSERT INTO precomputed_entailed_edge VALUES ('MONDO:0004766','rdfs:subClassOf','MONDO:0004979')");
+    await conn.run("INSERT INTO precomputed_entailed_edge VALUES ('MONDO:0004766','BFO:0000050','UBERON:0001004')");
 
     const externalArtifactClosure: GraphProjectionProfile = {
       ...profile,
@@ -259,16 +265,21 @@ describe("graph projection profile: source relation -> compiled graph", () => {
       source: { kind: "external_kg", table: "edge_raw" },
       target: { edgesTable: "artifact_closure_edges", closureTable: "artifact_closure_entailed" },
       closure: {
-        source: "relation_graph_artifact",
+        source: "upstream_entailed_edge",
         transitivePredicates: ["rdfs:subClassOf"],
         artifactTable: "precomputed_entailed_edge",
       },
     };
 
-    await assert.rejects(
-      () => materializeGraphProjectionProfile(conn, externalArtifactClosure),
-      /closure source 'relation_graph_artifact' is not locally materializable/,
+    const out = await materializeGraphProjectionProfile(conn, externalArtifactClosure);
+    assert.deepEqual(out, { edgesTable: "artifact_closure_edges", edgeCount: 2, closureTable: "artifact_closure_entailed", closureCount: 3 });
+    assert.deepEqual(
+      await conn.all<{ to_id: string }>(
+        "SELECT to_id FROM artifact_closure_entailed WHERE from_id = 'MONDO:0004766' AND predicate = 'rdfs:subClassOf' ORDER BY to_id",
+      ),
+      [{ to_id: "MONDO:0004784" }, { to_id: "MONDO:0004979" }],
     );
+    assert.deepEqual(await conn.all<{ n: bigint }>("SELECT count(*) AS n FROM artifact_closure_entailed WHERE predicate = 'BFO:0000050'"), [{ n: 0n }]);
   });
 
   test("materializes the internal observation graph through the same profile path", async () => {

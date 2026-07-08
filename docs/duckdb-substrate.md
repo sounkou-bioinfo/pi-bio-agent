@@ -40,6 +40,9 @@ agent-authored SQL and recursive closure.
 RDF/RDFS statement views, relation-graph `edge`, label, definition, synonym, mapping, deprecated-node,
 ontology-status, and term views that a manifest or `GraphProjectionProfile` can consume, with optional
 IRI-to-CURIE canonicalization through a staged `prefix(prefix, base)` table.
+When a source ships a precomputed SemanticSQL/relation-graph `entailed_edge`, `materializeGraphProjectionProfile`
+can copy that declared artifact into the same closure-table shape; otherwise the local CTE closure remains the
+default.
 
 Suggested stable views:
 

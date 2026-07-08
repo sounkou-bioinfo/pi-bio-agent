@@ -548,8 +548,9 @@ runs the SQL. Receipts (`paramsDigest` + source content digest) are **memoizatio
 function of its params plus source state, so an unchanged digest is a cache hit, which means **CAS is the memo
 table**, not just storage. Derived tables are pure lazy derivations (recomputed from inputs, like a `mutate`),
 which is precisely why they carry no receipt: `scale_members` is recomputed on every force (the runner
-materializes it before the SQL), while `entailed_edge` is materialized on demand by `materializeEntailedEdges`
-when a graph query needs it. Composition
+materializes it before the SQL), while `entailed_edge` is either materialized on demand by `materializeEntailedEdges`
+or copied from a declared upstream `entailed_edge` artifact through `materializeGraphProjectionProfile` when a graph
+query needs it. Composition
 (`op → artifact → resource → op`) is a lazy DAG: [targets](https://docs.ropensci.org/targets/) /
 [Nextflow](https://www.nextflow.io)-shaped.
 

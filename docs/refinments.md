@@ -699,6 +699,10 @@ JOIN, not a walker. See [`design.md`](./design.md#the-semanticsql-shape-source-s
 
 - Done: `entailed_edge` closure (`materializeEntailedEdges`, `src/duckdb/graph-closure.ts`): per-predicate
   transitive closure over `bio_edges`, indexed both directions; cycles terminate via UNION dedup.
+- Done: declared upstream `entailed_edge` artifacts (`materializeGraphProjectionProfile`,
+  `src/duckdb/graph-projection.ts`): `relation_graph_artifact` / `upstream_entailed_edge` closure sources now copy a
+  staged artifact table through the same profile column mapping into the target closure table, with the same lookup
+  indexes and optional predicate filter. Staging, licensing, and receipts remain host/resolver responsibilities.
 - Done: ordinal scales as data (`scale_members` from a ranked `TermSet`): total order to the graph's partial
   order; `decideGrounding` membership unchanged.
 - Source-spec gap audit from `INCATools/semantic-sql`:
@@ -721,9 +725,10 @@ JOIN, not a walker. See [`design.md`](./design.md#the-semanticsql-shape-source-s
   - **`edge` semantics are partially modeled.** In SemanticSQL, `edge` is a generated relation-graph view that also
     folds existential restrictions and selected `rdf:type` assertions through class-node knowledge. The local helper
     now covers named subclass/subproperty rows but does not yet model those richer relation-graph cases.
-  - **Closure semantics are simpler.** SemanticSQL commonly consumes `relation-graph` output; our CTE closes each
-    declared predicate independently. That is good for local graphs, but not source-spec parity for equivalence,
-    reflexivity policy, property hierarchy, individuals, or imported precomputed closures.
+  - **Closure semantics are explicit.** SemanticSQL commonly consumes `relation-graph` output. The local CTE closes
+    each declared predicate independently; declared upstream closure artifacts are accepted when a resolver/host
+    stages and receipts them. We still do not reimplement relation-graph semantics for equivalence, reflexivity
+    policy, property hierarchy, or individuals inside the CTE.
   - **Axiom annotations and provenance are not carried through.** OWL reified axioms, axiom annotations, evidence
     xrefs, ontology status, and repair/problem views need a projection into receipts/trust/attrs rather than being
     flattened away.
@@ -737,9 +742,9 @@ JOIN, not a walker. See [`design.md`](./design.md#the-semanticsql-shape-source-s
   No DuckDB sqlite extension is required: ingest from a native-readable format such as OBO Graphs JSON via
   `read_json`, generated TSVs / triple parquet via `duckdb.file_scan`, or an optional one-time `sqlite3` CLI dump
   -> parquet. Compute the closure with `materializeEntailedEdges` unless a pinned upstream `entailed_edge`
-  artifact is deliberately accepted. Pin a build date as provenance, honor per-ontology CC-BY. OLS4 REST only for
-  fresh text→CURIE misses (judgment tier); cached CURIEs + FTS are the deterministic projection tier; abstain
-  below threshold.
+  artifact is deliberately accepted through the graph projection profile. Pin a build date as provenance, honor
+  per-ontology CC-BY. OLS4 REST only for fresh text→CURIE misses (judgment tier); cached CURIEs + FTS are the
+  deterministic projection tier; abstain below threshold.
 - Built at the library-helper level: **graph projection profiles**, not a convenience tool zoo. A
   profile is data that says how any source relation becomes a graph projection: foreign KGs (Monarch KGX TSV
   downloads over HTTP),
@@ -748,10 +753,11 @@ JOIN, not a walker. See [`design.md`](./design.md#the-semanticsql-shape-source-s
   tables/columns, CURIE-prefix registry, generated-view policy (`edge`, labels, synonyms, restrictions),
   transitive-predicate policy, closure source (`relation-graph` artifact vs local CTE), temporal/as-of policy,
   and provenance/license fields. `src/core/graph-projection.ts` validates this contract and emits the projection
-  SQL; `src/duckdb/graph-projection.ts` executes it and materializes local closure. Tests now prove the same executor
-  over a staged ontology edge table, the internal `bio_edges_as_of` observation graph, and a Monarch KGX HTTP
-  download consumed by a manifest operation. Further SemanticSQL view generation is adapter/product work, not a
-  substrate gap.
+  SQL; `src/duckdb/graph-projection.ts` executes it and materializes local closure or copies a declared upstream
+  closure artifact. Tests now prove the same executor over a staged ontology edge table, a declared SemanticSQL
+  `entailed_edge` artifact, the internal `bio_edges_as_of` observation graph, and a Monarch KGX HTTP download
+  consumed by a manifest operation. Further SemanticSQL view generation is adapter/product work, not a substrate
+  gap.
 - Built at the library-helper level: **bounded graph-query windows** so high-degree neighborhoods do not flood
   context. This is not a new graph runtime: `src/duckdb/graph-window.ts` returns bounded rows plus omitted counts
   and, when needed, a continuation resource handle over the same projections (`bio_edges`, `bio_edges_as_of`,
