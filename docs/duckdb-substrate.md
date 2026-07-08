@@ -49,11 +49,16 @@ shape. `targetSchema` scopes generated default views for multi-ontology staging,
 materialize side by side and be joined as ordinary DuckDB relations.
 The generated `edge_with_metadata` view adds graph-ready `attrs`/`trust` JSON to generated edges from matching OWL
 axiom annotations, evidence xrefs, and OBO problem rows.
+The generated `edge_by_superproperty` view expands direct generated `edge` rows through transitive
+`rdfs:subPropertyOf` links while retaining `source_predicate`, so consumers can opt into relation-graph-style
+property hierarchy behavior without changing base `edge` semantics.
 When a source ships a precomputed SemanticSQL/relation-graph `entailed_edge`, `materializeGraphProjectionProfile`
 can copy that declared artifact into the same closure-table shape; `materializeSemanticSqlSourceViews` can also use
 a staged `entailed_edge(subject, predicate, object)` table to expose closure-backed ancestor/descendant, subclass,
 type, cycle, node-pair overlap, and taxon-constraint views, including most-specific inferred in-taxon. Otherwise the
 local CTE closure remains the default.
+Closure tables are deliberately just reachability. Evidence, Biolink/KGX qualifiers, and source-specific weights stay
+on asserted edge/source views and can be joined or carried by a consumer-specific support/path view when needed.
 
 Suggested stable views:
 

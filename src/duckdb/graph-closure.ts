@@ -10,7 +10,20 @@ import type { SqlConn } from "../core/ports.js";
 // this generic projection. This is the bet at the graph layer: graph-as-SQL, closure-as-data.
 
 export const ENTAILED_EDGE_TABLE = "entailed_edge";
-const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const SQL_IDENT_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+function quoteIdent(id: string): string {
+  if (id.length === 0) throw new Error("empty SQL identifier");
+  return `"${id.replace(/"/g, "\"\"")}"`;
+}
+
+function quoteQualifiedIdent(id: string, label: string): string {
+  const parts = id.split(".");
+  if (parts.length > 3 || parts.some((part) => !SQL_IDENT_RE.test(part))) {
+    throw new Error(`materializeEntailedEdges: ${label} '${id}' must be a SQL identifier or qualified identifier`);
+  }
+  return parts.map(quoteIdent).join(".");
+}
 
 /** Closure source/target tables. Defaults = the compiled graph (`bio_edges` → `entailed_edge`). Phase 4's as-of
  *  layer passes `bio_edges_as_of` → `entailed_edge_as_of` so the SAME algorithm closes a point-in-time projection. */
@@ -29,28 +42,27 @@ export interface ClosureTables { sourceTable?: string; targetTable?: string; }
 export async function materializeEntailedEdges(conn: SqlConn, transitivePredicates: readonly string[], tables: ClosureTables = {}): Promise<number> {
   const source = tables.sourceTable ?? "bio_edges";
   const target = tables.targetTable ?? ENTAILED_EDGE_TABLE;
-  for (const [label, id] of [["sourceTable", source], ["targetTable", target]] as const) {
-    if (!IDENT.test(id)) throw new Error(`materializeEntailedEdges: ${label} '${id}' must be a SQL identifier`);
-  }
+  const sourceSql = quoteQualifiedIdent(source, "sourceTable");
+  const targetSql = quoteQualifiedIdent(target, "targetTable");
   if (transitivePredicates.length === 0) {
-    await conn.run(`CREATE OR REPLACE TABLE ${target} (from_id TEXT, predicate TEXT, to_id TEXT)`);
+    await conn.run(`CREATE OR REPLACE TABLE ${targetSql} (from_id TEXT, predicate TEXT, to_id TEXT)`);
     return 0;
   }
   const placeholders = transitivePredicates.map(() => "?").join(", ");
   await conn.run(
-    `CREATE OR REPLACE TABLE ${target} AS
+    `CREATE OR REPLACE TABLE ${targetSql} AS
      WITH RECURSIVE closure(from_id, predicate, to_id) AS (
-       SELECT from_id, predicate, to_id FROM ${source} WHERE predicate IN (${placeholders})
+       SELECT from_id, predicate, to_id FROM ${sourceSql} WHERE predicate IN (${placeholders})
        UNION
        SELECT c.from_id, c.predicate, e.to_id
-       FROM closure c JOIN ${source} e ON e.from_id = c.to_id AND e.predicate = c.predicate
+       FROM closure c JOIN ${sourceSql} e ON e.from_id = c.to_id AND e.predicate = c.predicate
      )
      SELECT DISTINCT from_id, predicate, to_id FROM closure`,
     [...transitivePredicates],
   );
   // Index the two lookup directions: descendants by (to_id, predicate), ancestors by (from_id, predicate).
-  await conn.run(`CREATE INDEX IF NOT EXISTS ${target}_obj ON ${target} (to_id, predicate)`);
-  await conn.run(`CREATE INDEX IF NOT EXISTS ${target}_subj ON ${target} (from_id, predicate)`);
-  const [row] = await conn.all<{ n: number }>(`SELECT count(*) AS n FROM ${target}`);
+  await conn.run(`CREATE INDEX IF NOT EXISTS ${quoteIdent(`${target}_obj`)} ON ${targetSql} (to_id, predicate)`);
+  await conn.run(`CREATE INDEX IF NOT EXISTS ${quoteIdent(`${target}_subj`)} ON ${targetSql} (from_id, predicate)`);
+  const [row] = await conn.all<{ n: number }>(`SELECT count(*) AS n FROM ${targetSql}`);
   return Number(row?.n ?? 0);
 }

@@ -723,11 +723,12 @@ JOIN, not a walker. See [`design.md`](./design.md#the-semanticsql-shape-source-s
     SemanticSQL `term_association` source table is supplied under a distinct target name, the helper exposes the
     canonical association columns and the existing graph projection profile maps them into `bio_edges`. Generated
     `edge_with_metadata` projects matching OWL axiom annotations, evidence xrefs, and OBO problem rows into
-    graph-ready `attrs`/`trust`. `targetSchema` scopes generated default views so multiple staged ontologies can
-    coexist as separate DuckDB schemas and be joined directly. This gives Semantic Web, ontology-derived, and
-    FHIR-shaped RDF data a SemanticSQL inspection surface without a source-specific adapter. We still do not parse
-    the full upstream LinkML source to generate every DDL/view; parity expands only when a concrete grounding or
-    traversal consumer needs more of the source spec.
+    graph-ready `attrs`/`trust`. Generated `edge_by_superproperty` expands direct generated edges through the
+    transitive `rdfs:subPropertyOf` hierarchy while preserving `source_predicate`. `targetSchema` scopes generated
+    default views so multiple staged ontologies can coexist as separate DuckDB schemas and be joined directly. This
+    gives Semantic Web, ontology-derived, and FHIR-shaped RDF data a SemanticSQL inspection surface without a
+    source-specific adapter. We still do not parse the full upstream LinkML source to generate every DDL/view; parity
+    expands only when a concrete grounding or traversal consumer needs more of the source spec.
   - **Prefix canonicalization is present, not a traversal primitive.** Here `prefix(prefix, base)` means namespace
     expansion/canonicalization (`HP` -> an HPO base IRI, `biolink` -> a Biolink base IRI), not run-id prefixes,
     observation-key prefixes, or graph walk policy. Remaining identifier hygiene is receipts and multi-database
@@ -736,19 +737,20 @@ JOIN, not a walker. See [`design.md`](./design.md#the-semanticsql-shape-source-s
     list/member views, node and identifier views, OWL node/property classifications, axiom annotations, existential
     restriction views, OBO synonym/mapping/contributor/orcid views, OBO problem views, relation-graph `edge`,
     RO edge filters, ChEBI charge/conjugate views, relation-graph subgraph/cycle inspection views,
-    `node_pairwise_overlap`, edge metadata views, taxon-constraint propagation views including most-specific
-    inferred in-taxon, NLP text-match views, deprecated nodes, ontology status, canonical term-association views, and
-    term rows. Remaining generated view work is consumer-pulled relation-graph policy plus source-specific
-    trust weighting/reconciliation.
+    `node_pairwise_overlap`, edge metadata and `edge_by_superproperty` views, taxon-constraint propagation views
+    including most-specific inferred in-taxon, NLP text-match views, deprecated nodes, ontology status, canonical
+    term-association views, and term rows. Remaining generated view work is consumer-pulled relation-graph policy
+    plus source-specific trust weighting/reconciliation.
   - **`edge` semantics are deliberately bounded.** In SemanticSQL, `edge` is a generated relation-graph view that
     folds direct named rows, existential restrictions, and selected `rdf:type` assertions through class-node
-    knowledge. The local helper now covers those rows, then lets the existing graph projection profile and closure
-    machinery consume the edge relation. It still does not implement relation-graph's full equivalence/reflexivity,
-    property hierarchy, or individual reasoning policy inside the view generator.
+    knowledge. The local helper now covers those rows, exposes opt-in superproperty expansion as
+    `edge_by_superproperty`, then lets the existing graph projection profile and closure machinery consume the edge
+    relation. It still does not implement relation-graph's full equivalence/reflexivity or individual reasoning
+    policy inside the view generator.
   - **Closure semantics are explicit.** SemanticSQL commonly consumes `relation-graph` output. The local CTE closes
     each declared predicate independently; declared upstream closure artifacts are accepted when a resolver/host
     stages and receipts them. We still do not reimplement relation-graph semantics for equivalence, reflexivity
-    policy, property hierarchy, or individuals inside the CTE.
+    policy, or individuals inside the CTE.
     Closure-backed generated views must not assume reflexive closure: `materializeEntailedEdges` does not emit self
     rows, so taxon-constraint propagation adds the constrained taxon explicitly where the source-spec query would
     otherwise rely on a reflexive `entailed_edge` artifact.
@@ -759,8 +761,13 @@ JOIN, not a walker. See [`design.md`](./design.md#the-semanticsql-shape-source-s
     receipts for graph edges that need evidence-aware traversal.
   - **Real foreign KG projection and multi-ontology staging are dogfooded.** The Monarch KGX download path
     (`examples/monarch-kg-http`, `test/monarch-kg-http-example.test.ts`) stages an HTTP TSV into the canonical edge
-    view and projects it into `bio_edges`. The `targetSchema` graph-projection test materializes multiple
-    SemanticSQL source artifacts into separate DuckDB schemas and joins their generated `edge` views.
+    view, preserves asserted-edge KGX qualifiers/evidence/sources in `attrs`, and projects it into `bio_edges`. The
+    `targetSchema` graph-projection test materializes multiple SemanticSQL source artifacts into separate DuckDB
+    schemas and joins their generated `edge` views.
+  - **Entity normalization is adjacent, not the same primitive.** BioBTree-style exports surface a separate product
+    shape: node category, label, equivalent identifiers, source ids, and node attributes. Keep that as a downstream
+    projection until multiple foreign-KG consumers force a shared normalized-node view; do not overload
+    `bio_edges` or `entailed_edge` with node identity policy.
 - Next: keep source-spec parity consumer-pulled but active. A thin ontology-ingest resolver can stage the
   SemanticSQL source-spec shape in DuckDB and project its generated `edge` view into our `bio_edges` shape.
   No DuckDB sqlite extension is required: ingest from a native-readable format such as OBO Graphs JSON via

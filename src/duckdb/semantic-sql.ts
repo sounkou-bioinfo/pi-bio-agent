@@ -76,6 +76,7 @@ export interface SemanticSqlSourceViewTargets {
   allProblemsTable?: string;
   partOfEdgeTable?: string;
   hasPartEdgeTable?: string;
+  edgeBySuperpropertyTable?: string;
   edgeWithMetadataTable?: string;
   subgraphEdgeByParentTable?: string;
   subgraphEdgeByChildTable?: string;
@@ -207,6 +208,7 @@ export interface MaterializedSemanticSqlViews {
   allProblemsTable: string;
   partOfEdgeTable: string;
   hasPartEdgeTable: string;
+  edgeBySuperpropertyTable: string;
   edgeWithMetadataTable: string;
   subgraphEdgeByParentTable: string;
   subgraphEdgeByChildTable: string;
@@ -339,19 +341,7 @@ SELECT
   ${canonicalIdExpr("object", spec.prefixTable, "ta")} AS object,
   CAST(ta.evidence_type AS VARCHAR) AS evidence_type,
   CAST(ta.publication AS VARCHAR) AS publication,
-  CAST(ta.source AS VARCHAR) AS source,
-  json_object(
-    'association_id', CAST(ta.id AS VARCHAR),
-    'evidence_type', CAST(ta.evidence_type AS VARCHAR),
-    'publication', CAST(ta.publication AS VARCHAR),
-    'source', CAST(ta.source AS VARCHAR)
-  ) AS attrs,
-  json_object(
-    'provenanceClass', 'evidence',
-    'producer', CAST(ta.source AS VARCHAR),
-    'evidence_type', CAST(ta.evidence_type AS VARCHAR),
-    'publication', CAST(ta.publication AS VARCHAR)
-  ) AS trust
+  CAST(ta.source AS VARCHAR) AS source
 FROM ${qident(spec.termAssociationSourceTable)} AS ${qident("ta")}`];
 }
 
@@ -430,6 +420,7 @@ function targets(spec: SemanticSqlSourceSpec): Required<SemanticSqlSourceViewTar
     allProblemsTable: spec.targets?.allProblemsTable ?? "all_problems",
     partOfEdgeTable: spec.targets?.partOfEdgeTable ?? "part_of_edge",
     hasPartEdgeTable: spec.targets?.hasPartEdgeTable ?? "has_part_edge",
+    edgeBySuperpropertyTable: spec.targets?.edgeBySuperpropertyTable ?? "edge_by_superproperty",
     edgeWithMetadataTable: spec.targets?.edgeWithMetadataTable ?? "edge_with_metadata",
     subgraphEdgeByParentTable: spec.targets?.subgraphEdgeByParentTable ?? "subgraph_edge_by_parent",
     subgraphEdgeByChildTable: spec.targets?.subgraphEdgeByChildTable ?? "subgraph_edge_by_child",
@@ -853,6 +844,26 @@ SELECT subject, predicate, object
 FROM ${qident(t.rdfTypeTable)}
 WHERE object IN (SELECT id FROM ${qident(t.classNodeTable)})`,
 
+    `CREATE OR REPLACE VIEW ${qident(t.edgeBySuperpropertyTable)} AS
+WITH RECURSIVE property_closure(sub_property, super_property) AS (
+  SELECT subject, object
+  FROM ${qident(t.rdfsSubpropertyOfTable)}
+  WHERE subject IS NOT NULL AND object IS NOT NULL
+  UNION
+  SELECT pc.sub_property, sp.object
+  FROM property_closure pc
+  JOIN ${qident(t.rdfsSubpropertyOfTable)} sp ON sp.subject = pc.super_property
+  WHERE sp.object IS NOT NULL
+)
+SELECT DISTINCT
+  e.subject,
+  pc.super_property AS predicate,
+  e.object,
+  e.predicate AS source_predicate
+FROM ${qident(t.edgeTable)} e
+JOIN property_closure pc ON pc.sub_property = e.predicate
+WHERE pc.super_property != e.predicate`,
+
     `CREATE OR REPLACE VIEW ${qident(t.edgeWithMetadataTable)} AS
 WITH axiom_annotation_rollup AS (
   SELECT
@@ -1188,6 +1199,7 @@ export async function materializeSemanticSqlSourceViews(conn: SqlConn, spec: Sem
     allProblemsTable: t.allProblemsTable,
     partOfEdgeTable: t.partOfEdgeTable,
     hasPartEdgeTable: t.hasPartEdgeTable,
+    edgeBySuperpropertyTable: t.edgeBySuperpropertyTable,
     edgeWithMetadataTable: t.edgeWithMetadataTable,
     conjugateAcidOfEdgeTable: t.conjugateAcidOfEdgeTable,
     conjugateBaseOfEdgeTable: t.conjugateBaseOfEdgeTable,

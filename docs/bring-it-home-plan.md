@@ -143,17 +143,18 @@ consumer-pulled, or a non-goal.
    declared, the views canonicalize matching IRIs to CURIEs before projection and support source-prefix inspection.
    When a staged SemanticSQL `entailed_edge(subject,predicate,object)` table is declared, closure-backed
    relation-graph, node-pair overlap, and taxon-constraint propagation views, including most-specific inferred
-   in-taxon, are generated over it. `edge_with_metadata` packages edge-level axiom annotations, evidence xrefs, and
-   source problem counts into graph-ready `attrs`/`trust` JSON; when a staged `term_association` source table is
-   declared under a distinct target name, its canonical columns can be projected into `bio_edges` through the same
-   graph profile shape. `targetSchema` now dogfoods multi-ontology staging by materializing generated views into
-   separate DuckDB schemas for cross-ontology joins. Remaining parity is relation-graph-specific
-   equivalence/reflexivity/property-hierarchy policy and source-specific trust weighting/reconciliation. Declared
-   upstream `entailed_edge` artifacts now enter through the
+   in-taxon, are generated over it. `edge_by_superproperty` now exposes relation-graph-style property hierarchy
+   expansion as a separate generated view that preserves the direct `source_predicate`. `edge_with_metadata`
+   packages edge-level axiom annotations, evidence xrefs, and source problem counts into graph-ready `attrs`/`trust`
+   JSON; when a staged `term_association` source table is declared under a distinct target name, its canonical
+   columns can be projected into `bio_edges` through the same graph profile shape. `targetSchema` now dogfoods
+   multi-ontology staging by materializing generated views into separate DuckDB schemas for cross-ontology joins.
+   Remaining parity is relation-graph-specific equivalence/reflexivity/individual reasoning policy and
+   source-specific trust weighting/reconciliation. Declared upstream `entailed_edge` artifacts now enter through the
    same graph projection profile when a resolver/host stages and receipts them.
 6. **Docs hygiene.** Keep README and guides action-first: real commands, real code chunks, no fake text-block
-   architecture diagrams, no speculative hostfs claims, and no stale "process transport" lane. Claims should point
-   to commands, tests, or examples that currently run.
+   architecture diagrams, and no speculative filesystem-extension claims. Claims should point to commands, tests, or
+   examples that currently run.
 
 ### Consumer-Pulled / Deferred
 
@@ -174,9 +175,11 @@ consumer-pulled, or a non-goal.
 6. **External tool robustness tests.** `rv`, OpenTargets, Monarch DuckDB, ChEMBL, R `targets`/`mirai`/`nanonext`,
    and similar systems should first enter through manifests, SQL, `compute.run`, and receipts. Add primitives only
    when that route fails for a concrete reason.
-7. **HostFS / ducknng-fs / DuckTinyCC research.** A filesystem-shaped or C-FFI-shaped lane is interesting only when
-   a real manifest needs it. It is not a current core primitive, and community `hostfs` notes are not product
-   evidence.
+7. **Entity identity normalization.** BioBTree-style KGX exports make this the strongest graph-adjacent candidate:
+   node category, label, equivalent identifiers, source ids, and node attributes are not edge projection. Keep it
+   downstream until Monarch/OpenTargets/BioBTree-like consumers force the same normalized node view.
+8. **ducknng-fs / DuckTinyCC research.** A filesystem-shaped or C-FFI-shaped lane is interesting only when a real
+   manifest needs it. It is not a current core primitive.
 
 ### Closed / Reclassified From Earlier Backlog
 

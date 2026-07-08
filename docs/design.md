@@ -476,9 +476,10 @@ declaration is the graph projection profile: source columns, CURIE-prefix regist
 transitive-predicate policy, temporal/as-of policy, and provenance fields.
 
 The staging SQL should produce canonical KGX/SemanticSQL edge columns (`subject`, `predicate`, `object`, optionally
-`attrs` and `trust`); an ordinary `GraphProjectionProfile` then projects that table into `bio_edges`. The Monarch KG
-HTTP example uses the downloadable KGX TSV association files through DuckDB `httpfs`; Monarch is a binding of the
-generic KGX/SemanticSQL edge path, not a special resolver.
+`attrs` and `trust`); KGX evidence, qualifiers, and knowledge-source columns belong in that asserted-edge metadata.
+An ordinary `GraphProjectionProfile` then projects the table into `bio_edges`. The Monarch KG HTTP example uses the
+downloadable KGX TSV association files through DuckDB `httpfs`; Monarch is a binding of the generic KGX/SemanticSQL
+edge path, not a special resolver.
 For sources that arrive in the canonical SemanticSQL base shape, `materializeSemanticSqlSourceViews` generates the
 stable DuckDB views from staged `statements`: RDF/RDFS typed statement views, labels, definitions, synonyms,
 mappings, deprecated nodes, ontology status, and term rows. It also covers the next upstream compatibility tier:
@@ -491,8 +492,10 @@ ChEBI conjugate-acid/base edge filters and charge statements, plus source-spec s
 over that generated `edge`. When a staged SemanticSQL
 `entailed_edge(subject, predicate, object)` table is declared, the helper adds the closure-backed relation-graph
 inspection views: subgraph-by-ancestor/descendant, entailed subclass/type filters, cycle reports,
-`node_pairwise_overlap`, and direct/inferred taxon-constraint views. It still does not treat every object triple as a
-relation-graph edge.
+`node_pairwise_overlap`, and direct/inferred taxon-constraint views. It also exposes `edge_by_superproperty`, a
+consumer-pulled expansion of generated `edge` rows through the transitive `rdfs:subPropertyOf` hierarchy; each row
+preserves the direct predicate as `source_predicate`. It still does not treat every object triple as a relation-graph
+edge.
 The generated `edge_with_metadata` view keeps the same `subject,predicate,object` edge columns and adds graph-ready
 `attrs` / `trust` JSON from matching OWL axiom annotations, evidence xrefs, and source quality problems. It is a
 mechanical metadata packaging layer, not a scoring policy.
@@ -521,6 +524,9 @@ Semantic-Web, FHIR-shaped, and ontology-derived data; it is not a hidden OWL rea
   predicates (`materializeEntailedEdges(conn, transitivePredicates[, {sourceTable, targetTable}])`, a recursive
   CTE). With it, descendants / ancestors / subsumption / graph-walk are **one indexed JOIN**, no bespoke walker:
   `SELECT from_id FROM entailed_edge WHERE to_id = ? AND predicate = 'rdfs:subClassOf'`.
+  It is intentionally unqualified reachability. Evidence, Biolink/KGX qualifiers, and source-specific weights stay
+  on asserted edge/source views (`attrs`/`trust` or source columns); qualified traversal should be a separate
+  consumer-specific support/path view, not extra base closure columns.
 - **`bio_observations(observation_id, statement_key, subject_id, predicate, object_id, value_json, recorded_at,
   valid_from, valid_to, source, digest, attrs, trust)`**: the **append-only temporal** statement log (Phase 4),
   kept *separate* from the atemporal `bio_edges` (whose `UNIQUE(from_id,to_id,predicate)` is the compiled-graph

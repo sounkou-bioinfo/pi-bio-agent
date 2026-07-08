@@ -32,16 +32,16 @@ async function materializeClosureArtifact(conn: SqlConn, profile: GraphProjectio
   const predicates = profile.closure?.transitivePredicates ?? [];
   const predicateFilter = predicates.length > 0 ? ` WHERE ${quoteIdent(profile.columns.predicate)} IN (${predicates.map(() => "?").join(", ")})` : "";
   await conn.run(
-    `CREATE OR REPLACE TABLE ${quoteIdent(targetTable)} AS
+    `CREATE OR REPLACE TABLE ${quoteQualifiedIdent(targetTable)} AS
      SELECT ${quoteIdent(profile.columns.from)} AS from_id,
             ${quoteIdent(profile.columns.predicate)} AS predicate,
             ${quoteIdent(profile.columns.to)} AS to_id
      FROM ${quoteQualifiedIdent(artifactTable)}${predicateFilter}`,
     predicates,
   );
-  await conn.run(`CREATE INDEX IF NOT EXISTS ${quoteIdent(`${targetTable}_obj`)} ON ${quoteIdent(targetTable)} (to_id, predicate)`);
-  await conn.run(`CREATE INDEX IF NOT EXISTS ${quoteIdent(`${targetTable}_subj`)} ON ${quoteIdent(targetTable)} (from_id, predicate)`);
-  const [row] = await conn.all<{ n: bigint }>(`SELECT count(*) AS n FROM ${quoteIdent(targetTable)}`);
+  await conn.run(`CREATE INDEX IF NOT EXISTS ${quoteIdent(`${targetTable}_obj`)} ON ${quoteQualifiedIdent(targetTable)} (to_id, predicate)`);
+  await conn.run(`CREATE INDEX IF NOT EXISTS ${quoteIdent(`${targetTable}_subj`)} ON ${quoteQualifiedIdent(targetTable)} (from_id, predicate)`);
+  const [row] = await conn.all<{ n: bigint }>(`SELECT count(*) AS n FROM ${quoteQualifiedIdent(targetTable)}`);
   return Number(row?.n ?? 0);
 }
 
@@ -57,7 +57,7 @@ export async function materializeGraphProjectionProfile(conn: SqlConn, profile: 
 
   const edgesTable = targetEdgesTable(profile);
   await conn.run(graphProjectionSql(profile, { allowPolicyFields: true }));
-  const [edgeRow] = await conn.all<{ n: bigint }>(`SELECT count(*) AS n FROM ${quoteIdent(edgesTable)}`);
+  const [edgeRow] = await conn.all<{ n: bigint }>(`SELECT count(*) AS n FROM ${quoteQualifiedIdent(edgesTable)}`);
   const out: MaterializedGraphProjection = { edgesTable, edgeCount: Number(edgeRow?.n ?? 0) };
 
   if (!profile.closure) return out;

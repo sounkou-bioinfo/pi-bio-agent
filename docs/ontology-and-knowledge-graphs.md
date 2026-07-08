@@ -97,9 +97,10 @@ upstream `entailed_edge` artifact into the same target shape. The executable pro
 `materializeGraphProjectionProfile` applies a `GraphProjectionProfile` to staged ontology edge tables, declared
 upstream closure artifacts, and the internal `bio_edges_as_of` observation graph.
 The canonical edge-column contract for KGX and SemanticSQL-shaped tables is just `subject`, `predicate`, `object`,
-optionally `attrs` and `trust`; an ordinary `GraphProjectionProfile` maps those columns into `bio_edges`. The
-Monarch KG HTTP example proves that a real downloadable KGX TSV can enter through `duckdb.sql_materialize` plus
-DuckDB `httpfs`, then project into `bio_edges` with no Monarch-specific resolver. A richer
+optionally `attrs` and `trust`; KGX qualifiers, evidence, and knowledge sources stay on asserted-edge metadata, not
+closure rows. An ordinary `GraphProjectionProfile` maps those columns into `bio_edges`. The Monarch KG HTTP example
+proves that a real downloadable KGX TSV can enter through `duckdb.sql_materialize` plus DuckDB `httpfs`, then project
+into `bio_edges` with no Monarch-specific resolver. A richer
 resolver can also project CURIEs, labels, definitions, synonyms, predicates, xrefs, obsolete flags, source ontology,
 and version/provenance into the stable `ontology_terms`, `ontology_edges`, and `ontology_mappings` views above. This
 keeps ontology lookup, descendant expansion, term-set materialization, GWAS phenotype joins, and agent-authored SQL in

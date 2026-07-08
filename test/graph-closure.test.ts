@@ -47,4 +47,22 @@ describe("entailed_edge: SemanticSQL closure over our own graph", () => {
     const empty = await graphConn([["a", "rdfs:subClassOf", "b"]]);
     assert.equal(await materializeEntailedEdges(empty, []), 0);
   });
+
+  test("supports qualified source/target tables and validates relation names early", async () => {
+    const conn = duckdbNodeConn(await (await DuckDBInstance.create(":memory:")).connect());
+    await conn.run("CREATE SCHEMA kg");
+    await conn.run("CREATE TABLE kg.bio_edges (from_id TEXT, to_id TEXT, predicate TEXT)");
+    await conn.run("INSERT INTO kg.bio_edges VALUES ('a', 'b', 'rdfs:subClassOf')");
+    await conn.run("INSERT INTO kg.bio_edges VALUES ('b', 'c', 'rdfs:subClassOf')");
+
+    assert.equal(await materializeEntailedEdges(conn, ["rdfs:subClassOf"], { sourceTable: "kg.bio_edges", targetTable: "kg.entailed_edge" }), 3);
+    assert.deepEqual(
+      await conn.all<{ to_id: string }>("SELECT to_id FROM kg.entailed_edge WHERE from_id = 'a' ORDER BY to_id"),
+      [{ to_id: "b" }, { to_id: "c" }],
+    );
+    await assert.rejects(
+      () => materializeEntailedEdges(conn, ["rdfs:subClassOf"], { sourceTable: "kg.bio_edges;DROP", targetTable: "kg.entailed_edge" }),
+      /sourceTable 'kg\.bio_edges;DROP' must be a SQL identifier or qualified identifier/,
+    );
+  });
 });

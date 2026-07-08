@@ -29,5 +29,5 @@ Tests copy the manifest and replace the source URL in both the SQL and `declared
 fixture does not depend on Monarch uptime and the resolver receipt still reports the effective source.
 
 The manifest assumes the KGX edge-file columns used by this release (`subject`, `predicate`, `object`, `negated`,
-labels, sources, publications, and evidence). A future Monarch schema change should fail at materialization time
-rather than silently projecting different semantics.
+labels, sources, qualifiers, publications, and evidence). A future Monarch schema change should fail at
+materialization time rather than silently projecting different semantics.

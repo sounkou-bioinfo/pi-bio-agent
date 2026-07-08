@@ -157,8 +157,8 @@ export function validateGraphProjectionProfile(profile: GraphProjectionProfile):
 
   if (profile.target !== undefined) {
     rejectUnknownKeys(profile.target, ["edgesTable", "closureTable", "temporal"], "profile.target", errors);
-    if (profile.target.edgesTable !== undefined) validateIdent(profile.target.edgesTable, "profile.target.edgesTable", errors);
-    if (profile.target.closureTable !== undefined) validateIdent(profile.target.closureTable, "profile.target.closureTable", errors);
+    if (profile.target.edgesTable !== undefined) validateQualifiedIdent(profile.target.edgesTable, "profile.target.edgesTable", errors);
+    if (profile.target.closureTable !== undefined) validateQualifiedIdent(profile.target.closureTable, "profile.target.closureTable", errors);
     if (profile.target.temporal !== undefined) {
       rejectUnknownKeys(profile.target.temporal, ["kind", "asOf"], "profile.target.temporal", errors);
       if (!["atemporal", "as_of"].includes(profile.target.temporal.kind)) errors.push("profile.target.temporal.kind is invalid");

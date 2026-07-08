@@ -16,7 +16,7 @@ const PROVISION = ["LOAD httpfs"];
 
 const TSV = [
   "subject\tsubject_label\tsubject_category\tsubject_taxon\tsubject_taxon_label\tnegated\tpredicate\tobject\tobject_label\tobject_category\tqualifiers\tpublications\thas_evidence\tprimary_knowledge_source\taggregator_knowledge_source",
-  "MONDO:0007947\tMarfan syndrome\tbiolink:Disease\t\t\tfalse\tbiolink:has_phenotype\tHP:0001083\tEctopia lentis\tbiolink:PhenotypicFeature\t\tPMID:28050285\tECO:0006017\tinfores:omim\t['infores:monarchinitiative','infores:hpo-annotations']",
+  "MONDO:0007947\tMarfan syndrome\tbiolink:Disease\t\t\tfalse\tbiolink:has_phenotype\tHP:0001083\tEctopia lentis\tbiolink:PhenotypicFeature\tfrequency_qualifier=biolink:Frequent\tPMID:28050285\tECO:0006017\tinfores:omim\t['infores:monarchinitiative','infores:hpo-annotations']",
   "MONDO:0007947\tMarfan syndrome\tbiolink:Disease\t\t\tfalse\tbiolink:has_phenotype\tHP:0002616\tAortic root aneurysm\tbiolink:PhenotypicFeature\t\tPMID:33436942\tECO:0006017\tinfores:omim\t['infores:monarchinitiative','infores:hpo-annotations']",
   "MONDO:0007947\tMarfan syndrome\tbiolink:Disease\t\t\ttrue\tbiolink:has_phenotype\tHP:9999999\tNegated fixture phenotype\tbiolink:PhenotypicFeature\t\t\t\tinfores:test\t['infores:test']",
   "MONDO:0000001\tdisease\tbiolink:Disease\t\t\tfalse\tbiolink:has_phenotype\tHP:0000118\tPhenotypic abnormality\tbiolink:PhenotypicFeature\t\t\t\tinfores:mondo\t['infores:monarchinitiative']",
@@ -100,12 +100,12 @@ describe("example: Monarch KG downloads over HTTP -> SemanticSQL edge projection
       };
       const projected = await materializeGraphProjectionProfile(conn, profile);
       assert.equal(projected.edgeCount, 2, "the negated edge and other disease are filtered before projection");
-      const rows = await conn.all<{ from_id: string; predicate: string; to_id: string; source: string }>(
-        "SELECT from_id, predicate, to_id, json_extract_string(attrs, '$.primary_knowledge_source') AS source FROM bio_edges ORDER BY to_id",
+      const rows = await conn.all<{ from_id: string; predicate: string; to_id: string; source: string; qualifiers: string | null }>(
+        "SELECT from_id, predicate, to_id, json_extract_string(attrs, '$.primary_knowledge_source') AS source, json_extract_string(attrs, '$.qualifiers') AS qualifiers FROM bio_edges ORDER BY to_id",
       );
       assert.deepEqual(rows, [
-        { from_id: "MONDO:0007947", predicate: "biolink:has_phenotype", to_id: "HP:0001083", source: "infores:omim" },
-        { from_id: "MONDO:0007947", predicate: "biolink:has_phenotype", to_id: "HP:0002616", source: "infores:omim" },
+        { from_id: "MONDO:0007947", predicate: "biolink:has_phenotype", to_id: "HP:0001083", source: "infores:omim", qualifiers: "frequency_qualifier=biolink:Frequent" },
+        { from_id: "MONDO:0007947", predicate: "biolink:has_phenotype", to_id: "HP:0002616", source: "infores:omim", qualifiers: null },
       ]);
     } finally {
       await fixture.close();

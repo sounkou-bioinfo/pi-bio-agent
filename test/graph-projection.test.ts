@@ -41,6 +41,7 @@ describe("graph projection profile: source relation -> compiled graph", () => {
     await conn.run("INSERT INTO statements VALUES ('GO:0000001','rdf:type','owl:Class',NULL,NULL,NULL)");
     await conn.run("INSERT INTO statements VALUES ('MONDO:0004979','rdf:type','GO:0000001',NULL,NULL,NULL)");
     await conn.run("INSERT INTO statements VALUES ('RO:0002202','rdfs:subPropertyOf','RO:0000052',NULL,NULL,NULL)");
+    await conn.run("INSERT INTO statements VALUES ('RO:0000052','rdfs:subPropertyOf','RO:0000000',NULL,NULL,NULL)");
     await conn.run("INSERT INTO statements VALUES ('RO:0002202','rdfs:domain','MONDO:0000001',NULL,NULL,NULL)");
     await conn.run("INSERT INTO statements VALUES ('RO:0002202','rdfs:range','MONDO:0000002',NULL,NULL,NULL)");
     await conn.run("INSERT INTO statements VALUES ('MONDO:0004766','rdfs:subClassOf','MONDO:0004784',NULL,NULL,NULL)");
@@ -51,6 +52,9 @@ describe("graph projection profile: source relation -> compiled graph", () => {
     await conn.run("INSERT INTO statements VALUES ('_:restriction2','owl:onProperty','BFO:0000051',NULL,NULL,NULL)");
     await conn.run("INSERT INTO statements VALUES ('_:restriction2','owl:someValuesFrom','UBERON:0001004',NULL,NULL,NULL)");
     await conn.run("INSERT INTO statements VALUES ('MONDO:0004979','rdfs:subClassOf','_:restriction2',NULL,NULL,NULL)");
+    await conn.run("INSERT INTO statements VALUES ('_:restriction_subprop','owl:onProperty','RO:0002202',NULL,NULL,NULL)");
+    await conn.run("INSERT INTO statements VALUES ('_:restriction_subprop','owl:someValuesFrom','GO:0000001',NULL,NULL,NULL)");
+    await conn.run("INSERT INTO statements VALUES ('MONDO:0004979','rdfs:subClassOf','_:restriction_subprop',NULL,NULL,NULL)");
     await conn.run("INSERT INTO statements VALUES ('_:restriction_taxon','owl:onProperty','RO:0002162',NULL,NULL,NULL)");
     await conn.run("INSERT INTO statements VALUES ('_:restriction_taxon','owl:someValuesFrom','NCBITaxon:9606',NULL,NULL,NULL)");
     await conn.run("INSERT INTO statements VALUES ('MONDO:0004979','rdfs:subClassOf','_:restriction_taxon',NULL,NULL,NULL)");
@@ -108,6 +112,7 @@ describe("graph projection profile: source relation -> compiled graph", () => {
     assert.equal(views.allProblemsTable, "all_problems");
     assert.equal(views.partOfEdgeTable, "part_of_edge");
     assert.equal(views.hasPartEdgeTable, "has_part_edge");
+    assert.equal(views.edgeBySuperpropertyTable, "edge_by_superproperty");
     assert.equal(views.edgeWithMetadataTable, "edge_with_metadata");
     assert.equal(views.conjugateAcidOfEdgeTable, "conjugate_acid_of_edge");
     assert.equal(views.conjugateBaseOfEdgeTable, "conjugate_base_of_edge");
@@ -148,7 +153,8 @@ describe("graph projection profile: source relation -> compiled graph", () => {
     ), [
       { subject: "MONDO:0004766", object: "owl:Class" },
     ]);
-    assert.deepEqual(await conn.all<{ subject: string; object: string }>("SELECT subject, object FROM rdfs_subproperty_of_statement"), [
+    assert.deepEqual(await conn.all<{ subject: string; object: string }>("SELECT subject, object FROM rdfs_subproperty_of_statement ORDER BY subject, object"), [
+      { subject: "RO:0000052", object: "RO:0000000" },
       { subject: "RO:0002202", object: "RO:0000052" },
     ]);
     assert.deepEqual(await conn.all<{ subject: string; object: string }>("SELECT subject, object FROM rdfs_domain_statement"), [
@@ -176,6 +182,7 @@ describe("graph projection profile: source relation -> compiled graph", () => {
       { subject: "MONDO:0004979", predicate: "BFO:0000050", object: "GO:0000001" },
       { subject: "MONDO:0004979", predicate: "BFO:0000051", object: "UBERON:0001004" },
       { subject: "MONDO:0004979", predicate: "RO:0002162", object: "NCBITaxon:9606" },
+      { subject: "MONDO:0004979", predicate: "RO:0002202", object: "GO:0000001" },
     ]);
     assert.deepEqual(await conn.all<{ annotation_subject: string; annotation_predicate: string; annotation_object: string }>(
       "SELECT annotation_subject, annotation_predicate, annotation_object FROM axiom_dbxref_annotation ORDER BY annotation_subject",
@@ -211,6 +218,12 @@ describe("graph projection profile: source relation -> compiled graph", () => {
     ]);
     assert.deepEqual(await conn.all<{ subject: string; object: string }>("SELECT subject, object FROM has_part_edge"), [
       { subject: "MONDO:0004979", object: "UBERON:0001004" },
+    ]);
+    assert.deepEqual(await conn.all<{ subject: string; predicate: string; object: string; source_predicate: string }>(
+      "SELECT subject, predicate, object, source_predicate FROM edge_by_superproperty WHERE subject = 'MONDO:0004979' ORDER BY predicate, object, source_predicate",
+    ), [
+      { subject: "MONDO:0004979", predicate: "RO:0000000", object: "GO:0000001", source_predicate: "RO:0002202" },
+      { subject: "MONDO:0004979", predicate: "RO:0000052", object: "GO:0000001", source_predicate: "RO:0002202" },
     ]);
     assert.deepEqual(await conn.all<{ subject: string; object: string }>("SELECT subject, object FROM conjugate_acid_of_edge"), [
       { subject: "CHEBI:15377", object: "CHEBI:15378" },
@@ -294,6 +307,16 @@ describe("graph projection profile: source relation -> compiled graph", () => {
       publication: "PMID:1",
       source: "fixture",
     }]);
+    const termAssociationColumns = await conn.all<{ column_name: string }>("DESCRIBE term_association");
+    assert.deepEqual(termAssociationColumns.map((c) => c.column_name), [
+      "id",
+      "subject",
+      "predicate",
+      "object",
+      "evidence_type",
+      "publication",
+      "source",
+    ]);
     assert.deepEqual(await conn.all<{ query_taxon: string }>(
       "SELECT DISTINCT query_taxon FROM inferred_never_in_taxon_1 WHERE subject = 'MONDO:0004766' ORDER BY query_taxon",
     ), [{ query_taxon: "NCBITaxon:7955" }, { query_taxon: "NCBITaxon:7956" }]);
@@ -306,6 +329,7 @@ describe("graph projection profile: source relation -> compiled graph", () => {
       { subject: "MONDO:0004979", predicate: "BFO:0000050", object: "GO:0000001" },
       { subject: "MONDO:0004979", predicate: "BFO:0000051", object: "UBERON:0001004" },
       { subject: "MONDO:0004979", predicate: "RO:0002162", object: "NCBITaxon:9606" },
+      { subject: "MONDO:0004979", predicate: "RO:0002202", object: "GO:0000001" },
       { subject: "MONDO:0004979", predicate: "rdf:type", object: "GO:0000001" },
     ]);
     assert.deepEqual(await conn.all<{ subject: string; predicate: string; object: string }>(
@@ -333,7 +357,7 @@ describe("graph projection profile: source relation -> compiled graph", () => {
     };
 
     const out = await materializeGraphProjectionProfile(conn, sourceSpecProfile);
-    assert.deepEqual(out, { edgesTable: "semantic_bio_edges", edgeCount: 10, closureTable: "semantic_entailed_edge", closureCount: 3 });
+    assert.deepEqual(out, { edgesTable: "semantic_bio_edges", edgeCount: 12, closureTable: "semantic_entailed_edge", closureCount: 3 });
     const ancestors = await conn.all<{ to_id: string }>(
       "SELECT to_id FROM semantic_entailed_edge WHERE from_id = 'MONDO:0004766' ORDER BY to_id",
     );
@@ -348,12 +372,29 @@ describe("graph projection profile: source relation -> compiled graph", () => {
       target: { edgesTable: "semantic_bio_edges_with_metadata" },
     };
     const metadataOut = await materializeGraphProjectionProfile(conn, metadataProfile);
-    assert.deepEqual(metadataOut, { edgesTable: "semantic_bio_edges_with_metadata", edgeCount: 10 });
+    assert.deepEqual(metadataOut, { edgesTable: "semantic_bio_edges_with_metadata", edgeCount: 12 });
     const [projectedMetadata] = await conn.all<{ attrs: string; trust: string }>(
       "SELECT attrs::VARCHAR AS attrs, trust::VARCHAR AS trust FROM semantic_bio_edges_with_metadata WHERE from_id = 'MONDO:0004979' AND predicate = 'BFO:0000050' AND to_id = 'GO:0000001'",
     );
     assert.ok(projectedMetadata);
     assert.equal(JSON.parse(projectedMetadata!.trust).source_problem_count, 3);
+
+    const superpropertyProfile: GraphProjectionProfile = {
+      schema: "pi-bio.graph_projection_profile.v1",
+      id: "semantic-sql-edge-by-superproperty",
+      title: "SemanticSQL superproperty edge projection",
+      source: { kind: "semantic_sql", table: "edge_by_superproperty" },
+      columns: { from: "subject", predicate: "predicate", to: "object" },
+      target: { edgesTable: "semantic_bio_edges_by_superproperty" },
+    };
+    const superpropertyOut = await materializeGraphProjectionProfile(conn, superpropertyProfile);
+    assert.deepEqual(superpropertyOut, { edgesTable: "semantic_bio_edges_by_superproperty", edgeCount: 2 });
+    assert.deepEqual(await conn.all<{ from_id: string; predicate: string; to_id: string }>(
+      "SELECT from_id, predicate, to_id FROM semantic_bio_edges_by_superproperty ORDER BY predicate",
+    ), [
+      { from_id: "MONDO:0004979", predicate: "RO:0000000", to_id: "GO:0000001" },
+      { from_id: "MONDO:0004979", predicate: "RO:0000052", to_id: "GO:0000001" },
+    ]);
 
     const associationProfile: GraphProjectionProfile = {
       schema: "pi-bio.graph_projection_profile.v1",
@@ -373,7 +414,13 @@ describe("graph projection profile: source relation -> compiled graph", () => {
       trust: string | null;
     }>(
       "SELECT from_id, predicate, to_id, attrs, trust FROM association_edges",
-    ), [{ from_id: "case:1", predicate: "RO:0002200", to_id: "HP:0001250", attrs: null, trust: null }]);
+    ), [{
+      from_id: "case:1",
+      predicate: "RO:0002200",
+      to_id: "HP:0001250",
+      attrs: null,
+      trust: null,
+    }]);
   });
 
   test("canonicalizes SemanticSQL IRI statements through a prefix table before graph projection", async () => {
@@ -500,11 +547,30 @@ describe("graph projection profile: source relation -> compiled graph", () => {
     assert.equal(mondo.edgeTable, "shared.mondo_edge");
     assert.equal(mondo.labelsTable, "mondo.rdfs_label_statement");
     assert.equal(hp.edgeTable, "hp.edge");
+    assert.equal(hp.edgeBySuperpropertyTable, "hp.edge_by_superproperty");
     assert.deepEqual(await conn.all<{ disease_id: string; phenotype_parent: string }>(
       `SELECT m.subject AS disease_id, h.object AS phenotype_parent
        FROM shared.mondo_edge m
        JOIN hp.edge h ON h.subject = m.object`,
     ), [{ disease_id: "MONDO:0001", phenotype_parent: "HP:0000" }]);
+    assert.deepEqual(
+      await materializeGraphProjectionProfile(conn, {
+        schema: "pi-bio.graph_projection_profile.v1",
+        id: "multi-schema-semantic-sql-edge",
+        title: "Multi-schema SemanticSQL edge projection",
+        source: { kind: "semantic_sql", table: mondo.edgeTable },
+        columns: { from: "subject", predicate: "predicate", to: "object" },
+        closure: { source: "local_cte", transitivePredicates: ["rdfs:subClassOf"] },
+        target: { edgesTable: "shared.mondo_bio_edges", closureTable: "shared.mondo_entailed_edge" },
+      }),
+      { edgesTable: "shared.mondo_bio_edges", edgeCount: 1, closureTable: "shared.mondo_entailed_edge", closureCount: 1 },
+    );
+    assert.deepEqual(await conn.all<{ from_id: string; predicate: string; to_id: string }>(
+      "SELECT from_id, predicate, to_id FROM shared.mondo_bio_edges",
+    ), [{ from_id: "MONDO:0001", predicate: "rdfs:subClassOf", to_id: "HP:0001" }]);
+    assert.deepEqual(await conn.all<{ from_id: string; predicate: string; to_id: string }>(
+      "SELECT from_id, predicate, to_id FROM shared.mondo_entailed_edge",
+    ), [{ from_id: "MONDO:0001", predicate: "rdfs:subClassOf", to_id: "HP:0001" }]);
   });
 
   test("SemanticSQL source-spec view generation fails closed on invalid predicate lists", () => {
@@ -624,36 +690,37 @@ describe("graph projection profile: source relation -> compiled graph", () => {
 
   test("materializes a declared upstream SemanticSQL entailed_edge artifact", async () => {
     const conn = duckdbNodeConn(await (await DuckDBInstance.create(":memory:")).connect());
-    await conn.run("CREATE TABLE edge_raw (subject TEXT, predicate TEXT, object TEXT)");
-    await conn.run("INSERT INTO edge_raw VALUES ('MONDO:0004766','rdfs:subClassOf','MONDO:0004784')");
-    await conn.run("INSERT INTO edge_raw VALUES ('MONDO:0004784','rdfs:subClassOf','MONDO:0004979')");
-    await conn.run("CREATE TABLE precomputed_entailed_edge (subject TEXT, predicate TEXT, object TEXT)");
-    await conn.run("INSERT INTO precomputed_entailed_edge VALUES ('MONDO:0004766','rdfs:subClassOf','MONDO:0004784')");
-    await conn.run("INSERT INTO precomputed_entailed_edge VALUES ('MONDO:0004784','rdfs:subClassOf','MONDO:0004979')");
-    await conn.run("INSERT INTO precomputed_entailed_edge VALUES ('MONDO:0004766','rdfs:subClassOf','MONDO:0004979')");
-    await conn.run("INSERT INTO precomputed_entailed_edge VALUES ('MONDO:0004766','BFO:0000050','UBERON:0001004')");
+    await conn.run("CREATE SCHEMA artifact");
+    await conn.run("CREATE TABLE artifact.edge_raw (subject TEXT, predicate TEXT, object TEXT)");
+    await conn.run("INSERT INTO artifact.edge_raw VALUES ('MONDO:0004766','rdfs:subClassOf','MONDO:0004784')");
+    await conn.run("INSERT INTO artifact.edge_raw VALUES ('MONDO:0004784','rdfs:subClassOf','MONDO:0004979')");
+    await conn.run("CREATE TABLE artifact.precomputed_entailed_edge (subject TEXT, predicate TEXT, object TEXT)");
+    await conn.run("INSERT INTO artifact.precomputed_entailed_edge VALUES ('MONDO:0004766','rdfs:subClassOf','MONDO:0004784')");
+    await conn.run("INSERT INTO artifact.precomputed_entailed_edge VALUES ('MONDO:0004784','rdfs:subClassOf','MONDO:0004979')");
+    await conn.run("INSERT INTO artifact.precomputed_entailed_edge VALUES ('MONDO:0004766','rdfs:subClassOf','MONDO:0004979')");
+    await conn.run("INSERT INTO artifact.precomputed_entailed_edge VALUES ('MONDO:0004766','BFO:0000050','UBERON:0001004')");
 
     const externalArtifactClosure: GraphProjectionProfile = {
       ...profile,
       id: "external-artifact-closure",
-      source: { kind: "external_kg", table: "edge_raw" },
-      target: { edgesTable: "artifact_closure_edges", closureTable: "artifact_closure_entailed" },
+      source: { kind: "external_kg", table: "artifact.edge_raw" },
+      target: { edgesTable: "artifact.artifact_closure_edges", closureTable: "artifact.artifact_closure_entailed" },
       closure: {
         source: "upstream_entailed_edge",
         transitivePredicates: ["rdfs:subClassOf"],
-        artifactTable: "precomputed_entailed_edge",
+        artifactTable: "artifact.precomputed_entailed_edge",
       },
     };
 
     const out = await materializeGraphProjectionProfile(conn, externalArtifactClosure);
-    assert.deepEqual(out, { edgesTable: "artifact_closure_edges", edgeCount: 2, closureTable: "artifact_closure_entailed", closureCount: 3 });
+    assert.deepEqual(out, { edgesTable: "artifact.artifact_closure_edges", edgeCount: 2, closureTable: "artifact.artifact_closure_entailed", closureCount: 3 });
     assert.deepEqual(
       await conn.all<{ to_id: string }>(
-        "SELECT to_id FROM artifact_closure_entailed WHERE from_id = 'MONDO:0004766' AND predicate = 'rdfs:subClassOf' ORDER BY to_id",
+        "SELECT to_id FROM artifact.artifact_closure_entailed WHERE from_id = 'MONDO:0004766' AND predicate = 'rdfs:subClassOf' ORDER BY to_id",
       ),
       [{ to_id: "MONDO:0004784" }, { to_id: "MONDO:0004979" }],
     );
-    assert.deepEqual(await conn.all<{ n: bigint }>("SELECT count(*) AS n FROM artifact_closure_entailed WHERE predicate = 'BFO:0000050'"), [{ n: 0n }]);
+    assert.deepEqual(await conn.all<{ n: bigint }>("SELECT count(*) AS n FROM artifact.artifact_closure_entailed WHERE predicate = 'BFO:0000050'"), [{ n: 0n }]);
   });
 
   test("materializes the internal observation graph through the same profile path", async () => {
