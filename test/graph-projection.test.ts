@@ -51,6 +51,10 @@ describe("graph projection profile: source relation -> compiled graph", () => {
     await conn.run("INSERT INTO statements VALUES ('_:restriction2','owl:onProperty','BFO:0000051',NULL,NULL,NULL)");
     await conn.run("INSERT INTO statements VALUES ('_:restriction2','owl:someValuesFrom','UBERON:0001004',NULL,NULL,NULL)");
     await conn.run("INSERT INTO statements VALUES ('MONDO:0004979','rdfs:subClassOf','_:restriction2',NULL,NULL,NULL)");
+    await conn.run("INSERT INTO statements VALUES ('_:restriction_taxon','owl:onProperty','RO:0002162',NULL,NULL,NULL)");
+    await conn.run("INSERT INTO statements VALUES ('_:restriction_taxon','owl:someValuesFrom','NCBITaxon:9606',NULL,NULL,NULL)");
+    await conn.run("INSERT INTO statements VALUES ('MONDO:0004979','rdfs:subClassOf','_:restriction_taxon',NULL,NULL,NULL)");
+    await conn.run("INSERT INTO statements VALUES ('MONDO:0004979','RO:0002161','NCBITaxon:7955',NULL,NULL,NULL)");
     await conn.run("INSERT INTO statements VALUES ('_:list1','rdf:first','MONDO:0004979',NULL,NULL,NULL)");
     await conn.run("INSERT INTO statements VALUES ('_:list1','rdf:rest','_:list2',NULL,NULL,NULL)");
     await conn.run("INSERT INTO statements VALUES ('_:list2','rdf:first','MONDO:0004784',NULL,NULL,NULL)");
@@ -64,6 +68,10 @@ describe("graph projection profile: source relation -> compiled graph", () => {
     await conn.run("INSERT INTO semantic_entailed_input VALUES ('MONDO:0004784','rdfs:subClassOf','MONDO:0004979')");
     await conn.run("INSERT INTO semantic_entailed_input VALUES ('MONDO:0004766','rdfs:subClassOf','MONDO:0004979')");
     await conn.run("INSERT INTO semantic_entailed_input VALUES ('MONDO:0004979','rdf:type','GO:0000001')");
+    await conn.run("INSERT INTO semantic_entailed_input VALUES ('NCBITaxon:9606','rdfs:subClassOf','NCBITaxon:1')");
+    await conn.run("INSERT INTO semantic_entailed_input VALUES ('NCBITaxon:7955','rdfs:subClassOf','NCBITaxon:1')");
+    await conn.run("INSERT INTO semantic_entailed_input VALUES ('NCBITaxon:7956','rdfs:subClassOf','NCBITaxon:7955')");
+    await conn.run("INSERT INTO semantic_entailed_input VALUES ('NCBITaxon:7956','rdfs:subClassOf','NCBITaxon:1')");
     await conn.run("INSERT INTO semantic_entailed_input VALUES ('MONDO:cycleA','rdfs:subClassOf','MONDO:cycleB')");
     await conn.run("INSERT INTO semantic_entailed_input VALUES ('MONDO:cycleB','rdfs:subClassOf','MONDO:cycleA')");
 
@@ -92,6 +100,14 @@ describe("graph projection profile: source relation -> compiled graph", () => {
     assert.equal(views.entailedTypeEdgeTable, "entailed_type_edge");
     assert.equal(views.entailedEdgeCycleTable, "entailed_edge_cycle");
     assert.equal(views.entailedEdgeSamePredicateCycleTable, "entailed_edge_same_predicate_cycle");
+    assert.equal(views.taxonTable, "taxon");
+    assert.equal(views.directNeverInTaxonTable, "direct_never_in_taxon");
+    assert.equal(views.directInTaxonTable, "direct_in_taxon");
+    assert.equal(views.inferredNeverInTaxonDirectTable, "inferred_never_in_taxon_direct");
+    assert.equal(views.inferredInTaxonDirectTable, "inferred_in_taxon_direct");
+    assert.equal(views.inferredNeverInTaxon1Table, "inferred_never_in_taxon_1");
+    assert.equal(views.inferredNeverInTaxon2Table, "inferred_never_in_taxon_2");
+    assert.equal(views.inferredNeverInTaxonTable, "inferred_never_in_taxon");
     assert.equal(views.termsTable, "semantic_terms");
 
     assert.deepEqual(await conn.all<{ subject: string; value: string }>("SELECT subject, value FROM has_text_definition_statement"), [
@@ -131,6 +147,7 @@ describe("graph projection profile: source relation -> compiled graph", () => {
     ), [
       { subject: "MONDO:0004979", predicate: "BFO:0000050", object: "GO:0000001" },
       { subject: "MONDO:0004979", predicate: "BFO:0000051", object: "UBERON:0001004" },
+      { subject: "MONDO:0004979", predicate: "RO:0002162", object: "NCBITaxon:9606" },
     ]);
     assert.deepEqual(await conn.all<{ annotation_subject: string; annotation_predicate: string; annotation_object: string }>(
       "SELECT annotation_subject, annotation_predicate, annotation_object FROM axiom_dbxref_annotation",
@@ -181,11 +198,32 @@ describe("graph projection profile: source relation -> compiled graph", () => {
       ),
       [{ object: "MONDO:cycleB", secondary_predicate: "rdfs:subClassOf" }],
     );
+    assert.deepEqual(await conn.all<{ id: string }>("SELECT id FROM taxon ORDER BY id"), [
+      { id: "NCBITaxon:7955" },
+      { id: "NCBITaxon:7956" },
+      { id: "NCBITaxon:9606" },
+    ]);
+    assert.deepEqual(await conn.all<{ subject: string; object: string }>(
+      "SELECT subject, object FROM direct_in_taxon",
+    ), [{ subject: "MONDO:0004979", object: "NCBITaxon:9606" }]);
+    assert.deepEqual(await conn.all<{ subject: string; object: string }>(
+      "SELECT subject, object FROM direct_never_in_taxon",
+    ), [{ subject: "MONDO:0004979", object: "NCBITaxon:7955" }]);
+    assert.deepEqual(await conn.all<{ subject: string; node_with_constraint: string; taxon_with_constraint: string }>(
+      "SELECT subject, node_with_constraint, taxon_with_constraint FROM inferred_in_taxon_direct WHERE subject = 'MONDO:0004766'",
+    ), [{ subject: "MONDO:0004766", node_with_constraint: "MONDO:0004979", taxon_with_constraint: "NCBITaxon:9606" }]);
+    assert.deepEqual(await conn.all<{ query_taxon: string }>(
+      "SELECT DISTINCT query_taxon FROM inferred_never_in_taxon_1 WHERE subject = 'MONDO:0004766' ORDER BY query_taxon",
+    ), [{ query_taxon: "NCBITaxon:7955" }, { query_taxon: "NCBITaxon:7956" }]);
+    assert.deepEqual(await conn.all<{ query_taxon: string }>(
+      "SELECT DISTINCT query_taxon FROM inferred_never_in_taxon_2 WHERE subject = 'MONDO:0004766' ORDER BY query_taxon",
+    ), [{ query_taxon: "NCBITaxon:7955" }, { query_taxon: "NCBITaxon:7956" }]);
     assert.deepEqual(await conn.all<{ subject: string; predicate: string; object: string }>(
       "SELECT subject, predicate, object FROM semantic_edge WHERE subject = 'MONDO:0004979' ORDER BY predicate, object",
     ), [
       { subject: "MONDO:0004979", predicate: "BFO:0000050", object: "GO:0000001" },
       { subject: "MONDO:0004979", predicate: "BFO:0000051", object: "UBERON:0001004" },
+      { subject: "MONDO:0004979", predicate: "RO:0002162", object: "NCBITaxon:9606" },
       { subject: "MONDO:0004979", predicate: "rdf:type", object: "GO:0000001" },
     ]);
 
@@ -208,7 +246,7 @@ describe("graph projection profile: source relation -> compiled graph", () => {
     };
 
     const out = await materializeGraphProjectionProfile(conn, sourceSpecProfile);
-    assert.deepEqual(out, { edgesTable: "semantic_bio_edges", edgeCount: 6, closureTable: "semantic_entailed_edge", closureCount: 3 });
+    assert.deepEqual(out, { edgesTable: "semantic_bio_edges", edgeCount: 7, closureTable: "semantic_entailed_edge", closureCount: 3 });
     const ancestors = await conn.all<{ to_id: string }>(
       "SELECT to_id FROM semantic_entailed_edge WHERE from_id = 'MONDO:0004766' ORDER BY to_id",
     );
@@ -221,6 +259,7 @@ describe("graph projection profile: source relation -> compiled graph", () => {
     await conn.run("CREATE TABLE prefix(prefix TEXT, base TEXT)");
     await conn.run("INSERT INTO prefix VALUES ('OBO','http://purl.obolibrary.org/obo/')");
     await conn.run("INSERT INTO prefix VALUES ('MONDO','http://purl.obolibrary.org/obo/MONDO_')");
+    await conn.run("INSERT INTO prefix VALUES ('HP','http://purl.obolibrary.org/obo/HP_')");
     await conn.run("INSERT INTO prefix VALUES ('IAO','http://purl.obolibrary.org/obo/IAO_')");
     await conn.run("INSERT INTO prefix VALUES ('owl','http://www.w3.org/2002/07/owl#')");
     await conn.run("INSERT INTO prefix VALUES ('rdfs','http://www.w3.org/2000/01/rdf-schema#')");
@@ -232,18 +271,25 @@ describe("graph projection profile: source relation -> compiled graph", () => {
     await conn.run("INSERT INTO statements VALUES ('http://purl.obolibrary.org/obo/MONDO_0004979','http://purl.obolibrary.org/obo/IAO_0000115',NULL,'A chronic respiratory disorder.',NULL,'en')");
     await conn.run("INSERT INTO statements VALUES ('http://purl.obolibrary.org/obo/MONDO_0004979','http://www.geneontology.org/formats/oboInOwl#hasExactSynonym',NULL,'bronchial asthma',NULL,'en')");
     await conn.run("INSERT INTO statements VALUES ('http://purl.obolibrary.org/obo/MONDO_0004979','http://www.w3.org/2002/07/owl#deprecated',NULL,'true',NULL,NULL)");
+    await conn.run("INSERT INTO statements VALUES ('http://purl.obolibrary.org/obo/HP_0002099','http://www.w3.org/2000/01/rdf-schema#label',NULL,'asthma',NULL,'en')");
     await conn.run("INSERT INTO statements VALUES ('http://purl.obolibrary.org/obo/MONDO_0004784','http://www.w3.org/2000/01/rdf-schema#subClassOf','http://purl.obolibrary.org/obo/MONDO_0004979',NULL,NULL,NULL)");
     await conn.run("INSERT INTO statements VALUES ('http://purl.obolibrary.org/obo/MONDO_0004766','http://www.w3.org/2000/01/rdf-schema#subClassOf','http://purl.obolibrary.org/obo/MONDO_0004784',NULL,NULL,NULL)");
     await conn.run("CREATE TABLE raw_entailed_edge(subject TEXT, predicate TEXT, object TEXT)");
     await conn.run("INSERT INTO raw_entailed_edge VALUES ('http://purl.obolibrary.org/obo/MONDO_0004784','http://www.w3.org/2000/01/rdf-schema#subClassOf','http://purl.obolibrary.org/obo/MONDO_0004979')");
+    await conn.run("CREATE TABLE textual_transformation(subject TEXT, predicate TEXT, value TEXT)");
+    await conn.run("INSERT INTO textual_transformation VALUES ('asthma','lowercase','asthma')");
 
     const views = await materializeSemanticSqlSourceViews(conn, {
       schema: SEMANTIC_SQL_SOURCE_SPEC_SCHEMA,
       prefixTable: "prefix",
       entailedEdgeTable: "raw_entailed_edge",
+      textualTransformationTable: "textual_transformation",
       targets: { edgeTable: "iri_edge", labelsTable: "iri_label", definitionsTable: "iri_definition", synonymsTable: "iri_synonym", termsTable: "iri_terms" },
     });
     assert.equal(views.entailedSubclassOfEdgeTable, "entailed_subclass_of_edge");
+    assert.equal(views.subjectPrefixTable, "subject_prefix");
+    assert.equal(views.processedStatementTable, "processed_statement");
+    assert.equal(views.matchTable, "match");
 
     assert.deepEqual(await conn.all<{ subject: string; predicate: string; object: string }>(
       "SELECT subject, predicate, object FROM iri_edge ORDER BY subject",
@@ -251,7 +297,8 @@ describe("graph projection profile: source relation -> compiled graph", () => {
       { subject: "MONDO:0004766", predicate: "rdfs:subClassOf", object: "MONDO:0004784" },
       { subject: "MONDO:0004784", predicate: "rdfs:subClassOf", object: "MONDO:0004979" },
     ]);
-    assert.deepEqual(await conn.all<{ subject: string; value: string }>("SELECT subject, value FROM iri_label"), [
+    assert.deepEqual(await conn.all<{ subject: string; value: string }>("SELECT subject, value FROM iri_label ORDER BY subject"), [
+      { subject: "HP:0002099", value: "asthma" },
       { subject: "MONDO:0004979", value: "asthma" },
     ]);
     assert.deepEqual(await conn.all<{ subject: string; value: string }>("SELECT subject, value FROM iri_definition"), [
@@ -266,6 +313,18 @@ describe("graph projection profile: source relation -> compiled graph", () => {
     assert.deepEqual(await conn.all<{ anchor_object: string }>(
       "SELECT DISTINCT anchor_object FROM subgraph_edge_by_ancestor WHERE subject = 'MONDO:0004784'",
     ), [{ anchor_object: "MONDO:0004979" }]);
+    assert.deepEqual(await conn.all<{ subject: string; value: string }>(
+      "SELECT subject, value FROM subject_prefix WHERE subject IN ('HP:0002099', 'MONDO:0004979') ORDER BY subject",
+    ), [{ subject: "HP:0002099", value: "HP" }, { subject: "MONDO:0004979", value: "MONDO" }]);
+    assert.deepEqual(await conn.all<{ subject: string; predicate: string; transformed_value: string }>(
+      "SELECT subject, predicate, transformed_value FROM processed_statement WHERE predicate = 'rdfs:label' ORDER BY subject",
+    ), [
+      { subject: "HP:0002099", predicate: "rdfs:label", transformed_value: "asthma" },
+      { subject: "MONDO:0004979", predicate: "rdfs:label", transformed_value: "asthma" },
+    ]);
+    assert.deepEqual(await conn.all<{ object_id: string; match_field: string; subject_source: string; object_source: string }>(
+      "SELECT object_id, match_field, subject_source, object_source FROM match WHERE subject_id = 'MONDO:0004979'",
+    ), [{ object_id: "HP:0002099", match_field: "asthma", subject_source: "MONDO", object_source: "HP" }]);
     assert.deepEqual(
       await conn.all<{ id: string; definition: string; deprecated: boolean }>(
         "SELECT id, definition, deprecated FROM iri_terms WHERE id = 'MONDO:0004979'",

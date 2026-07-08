@@ -86,6 +86,17 @@ export interface SemanticSqlSourceViewTargets {
   entailedTypeEdgeTable?: string;
   entailedEdgeCycleTable?: string;
   entailedEdgeSamePredicateCycleTable?: string;
+  taxonTable?: string;
+  directNeverInTaxonTable?: string;
+  directInTaxonTable?: string;
+  inferredNeverInTaxonDirectTable?: string;
+  inferredInTaxonDirectTable?: string;
+  inferredNeverInTaxon1Table?: string;
+  inferredNeverInTaxon2Table?: string;
+  inferredNeverInTaxonTable?: string;
+  subjectPrefixTable?: string;
+  processedStatementTable?: string;
+  matchTable?: string;
   termsTable?: string;
 }
 
@@ -105,6 +116,8 @@ export interface SemanticSqlSourceSpec {
   prefixTable?: string;
   /** Optional SemanticSQL/relation-graph `entailed_edge(subject, predicate, object)` table. Enables closure-backed views. */
   entailedEdgeTable?: string;
+  /** Optional SemanticSQL NLP `textual_transformation(subject, predicate, value)` table. Enables processed text views. */
+  textualTransformationTable?: string;
   targets?: SemanticSqlSourceViewTargets;
   predicates?: SemanticSqlSourcePredicates;
 }
@@ -193,6 +206,17 @@ export interface MaterializedSemanticSqlViews {
   entailedTypeEdgeTable?: string;
   entailedEdgeCycleTable?: string;
   entailedEdgeSamePredicateCycleTable?: string;
+  taxonTable?: string;
+  directNeverInTaxonTable?: string;
+  directInTaxonTable?: string;
+  inferredNeverInTaxonDirectTable?: string;
+  inferredInTaxonDirectTable?: string;
+  inferredNeverInTaxon1Table?: string;
+  inferredNeverInTaxon2Table?: string;
+  inferredNeverInTaxonTable?: string;
+  subjectPrefixTable?: string;
+  processedStatementTable?: string;
+  matchTable?: string;
   termsTable: string;
 }
 
@@ -347,6 +371,17 @@ function targets(spec: SemanticSqlSourceSpec): Required<SemanticSqlSourceViewTar
     entailedTypeEdgeTable: spec.targets?.entailedTypeEdgeTable ?? "entailed_type_edge",
     entailedEdgeCycleTable: spec.targets?.entailedEdgeCycleTable ?? "entailed_edge_cycle",
     entailedEdgeSamePredicateCycleTable: spec.targets?.entailedEdgeSamePredicateCycleTable ?? "entailed_edge_same_predicate_cycle",
+    taxonTable: spec.targets?.taxonTable ?? "taxon",
+    directNeverInTaxonTable: spec.targets?.directNeverInTaxonTable ?? "direct_never_in_taxon",
+    directInTaxonTable: spec.targets?.directInTaxonTable ?? "direct_in_taxon",
+    inferredNeverInTaxonDirectTable: spec.targets?.inferredNeverInTaxonDirectTable ?? "inferred_never_in_taxon_direct",
+    inferredInTaxonDirectTable: spec.targets?.inferredInTaxonDirectTable ?? "inferred_in_taxon_direct",
+    inferredNeverInTaxon1Table: spec.targets?.inferredNeverInTaxon1Table ?? "inferred_never_in_taxon_1",
+    inferredNeverInTaxon2Table: spec.targets?.inferredNeverInTaxon2Table ?? "inferred_never_in_taxon_2",
+    inferredNeverInTaxonTable: spec.targets?.inferredNeverInTaxonTable ?? "inferred_never_in_taxon",
+    subjectPrefixTable: spec.targets?.subjectPrefixTable ?? "subject_prefix",
+    processedStatementTable: spec.targets?.processedStatementTable ?? "processed_statement",
+    matchTable: spec.targets?.matchTable ?? "match",
     termsTable: spec.targets?.termsTable ?? "ontology_terms",
   };
 }
@@ -373,6 +408,7 @@ SELECT
   ${canonicalIdExpr("object", prefixTable, "ee_src")} AS object
 FROM ${qident(spec.entailedEdgeTable)} AS ${qident("ee_src")}
 )` : undefined;
+  const textualTransformation = spec.textualTransformationTable ? qident(spec.textualTransformationTable) : undefined;
   const subject = canonicalIdExpr("subject", prefixTable);
   const predicate = canonicalIdExpr("predicate", prefixTable);
   const object = canonicalIdExpr("object", prefixTable);
@@ -789,6 +825,97 @@ JOIN ${entailedEdge} e2 ON e.object = e2.subject AND e2.object = e.subject`,
       `CREATE OR REPLACE VIEW ${qident(t.entailedEdgeSamePredicateCycleTable)} AS
 SELECT * FROM ${qident(t.entailedEdgeCycleTable)}
 WHERE predicate = secondary_predicate`,
+
+      `CREATE OR REPLACE VIEW ${qident(t.taxonTable)} AS
+SELECT DISTINCT subject AS id FROM ${entailedEdge}
+WHERE predicate = 'rdfs:subClassOf' AND object = 'NCBITaxon:1'`,
+
+      `CREATE OR REPLACE VIEW ${qident(t.directNeverInTaxonTable)} AS
+${statementColumns}
+WHERE ${predicate} = 'RO:0002161' AND object IS NOT NULL`,
+
+      `CREATE OR REPLACE VIEW ${qident(t.directInTaxonTable)} AS
+SELECT subject, predicate, object FROM ${qident(t.edgeTable)}
+WHERE predicate IN ('RO:0002162', 'RO:0002160') AND subject != 'owl:Nothing'`,
+
+      `CREATE OR REPLACE VIEW ${qident(t.inferredNeverInTaxonDirectTable)} AS
+SELECT e.subject, e.predicate, e.object AS node_with_constraint, te.object AS taxon_with_constraint
+FROM ${qident(t.directNeverInTaxonTable)} te
+JOIN ${entailedEdge} e ON e.object = te.subject`,
+
+      `CREATE OR REPLACE VIEW ${qident(t.inferredInTaxonDirectTable)} AS
+SELECT e.subject, e.predicate, e.object AS node_with_constraint, te.object AS taxon_with_constraint
+FROM ${qident(t.directInTaxonTable)} te
+JOIN ${entailedEdge} e ON e.object = te.subject`,
+
+      `CREATE OR REPLACE VIEW ${qident(t.inferredNeverInTaxon1Table)} AS
+SELECT ie.*, ie.taxon_with_constraint AS query_taxon
+FROM ${qident(t.inferredNeverInTaxonDirectTable)} ie
+UNION
+SELECT ie.*, sc.subject AS query_taxon
+FROM ${qident(t.inferredNeverInTaxonDirectTable)} ie
+JOIN ${entailedEdge} sc ON ie.taxon_with_constraint = sc.object
+WHERE sc.predicate = 'rdfs:subClassOf'`,
+
+      `CREATE OR REPLACE VIEW ${qident(t.inferredNeverInTaxon2Table)} AS
+SELECT ie.*, taxon.id AS query_taxon
+FROM ${qident(t.inferredInTaxonDirectTable)} ie, ${qident(t.taxonTable)} taxon
+WHERE taxon.id != ie.taxon_with_constraint
+  AND NOT EXISTS (
+  SELECT sc.subject FROM ${qident(t.entailedSubclassOfEdgeTable)} sc
+  WHERE sc.object = ie.taxon_with_constraint AND sc.subject = taxon.id
+)`,
+
+      `CREATE OR REPLACE VIEW ${qident(t.inferredNeverInTaxonTable)} AS
+SELECT * FROM ${qident(t.inferredNeverInTaxon1Table)}
+UNION
+SELECT * FROM ${qident(t.inferredNeverInTaxon2Table)}`,
+    ] : []),
+
+    ...(prefixTable ? [
+      `CREATE OR REPLACE VIEW ${qident(t.subjectPrefixTable)} AS
+WITH subjects AS (
+  SELECT DISTINCT ${subject} AS subject
+  FROM ${statements}
+  WHERE subject IS NOT NULL
+)
+SELECT DISTINCT subjects.subject, CAST(prefix.prefix AS VARCHAR) AS value
+FROM subjects
+JOIN ${qident(prefixTable)} prefix
+  ON prefix.prefix IS NOT NULL
+ AND length(CAST(prefix.prefix AS VARCHAR)) > 0
+ AND starts_with(subjects.subject, CAST(prefix.prefix AS VARCHAR) || ':')`,
+    ] : []),
+
+    ...(textualTransformation ? [
+      `CREATE OR REPLACE VIEW ${qident(t.processedStatementTable)} AS
+SELECT s.*, t.predicate AS transformation_predicate, t.value AS transformed_value
+FROM ${qident(t.nodeToValueTable)} s
+JOIN ${textualTransformation} t ON s.value = t.subject
+WHERE coalesce(s.datatype, '') != 'xsd:boolean'`,
+    ] : []),
+
+    ...(prefixTable && textualTransformation ? [
+      `CREATE OR REPLACE VIEW ${qident(t.matchTable)} AS
+SELECT
+  s1.subject AS subject_id,
+  s1l.value AS subject_label,
+  s1.predicate AS subject_match_field,
+  s1p.value AS subject_source,
+  s1.transformation_predicate AS subject_preprocessing,
+  s2.subject AS object_id,
+  s2l.value AS object_label,
+  s2.predicate AS object_match_field,
+  s2p.value AS object_source,
+  s2.transformation_predicate AS object_preprocessing,
+  s1.transformed_value AS match_field
+FROM ${qident(t.processedStatementTable)} s1
+JOIN ${qident(t.processedStatementTable)} s2 ON s1.transformed_value = s2.transformed_value
+JOIN ${qident(t.labelsTable)} s1l ON s1.subject = s1l.subject
+JOIN ${qident(t.labelsTable)} s2l ON s2.subject = s2l.subject
+JOIN ${qident(t.subjectPrefixTable)} s1p ON s1.subject = s1p.subject
+JOIN ${qident(t.subjectPrefixTable)} s2p ON s2.subject = s2p.subject
+WHERE s1.subject != s2.subject`,
     ] : []),
 
     `CREATE OR REPLACE VIEW ${qident(t.termsTable)} AS
@@ -893,6 +1020,23 @@ export async function materializeSemanticSqlSourceViews(conn: SqlConn, spec: Sem
       entailedTypeEdgeTable: t.entailedTypeEdgeTable,
       entailedEdgeCycleTable: t.entailedEdgeCycleTable,
       entailedEdgeSamePredicateCycleTable: t.entailedEdgeSamePredicateCycleTable,
+      taxonTable: t.taxonTable,
+      directNeverInTaxonTable: t.directNeverInTaxonTable,
+      directInTaxonTable: t.directInTaxonTable,
+      inferredNeverInTaxonDirectTable: t.inferredNeverInTaxonDirectTable,
+      inferredInTaxonDirectTable: t.inferredInTaxonDirectTable,
+      inferredNeverInTaxon1Table: t.inferredNeverInTaxon1Table,
+      inferredNeverInTaxon2Table: t.inferredNeverInTaxon2Table,
+      inferredNeverInTaxonTable: t.inferredNeverInTaxonTable,
+    } : {}),
+    ...(spec.prefixTable ? {
+      subjectPrefixTable: t.subjectPrefixTable,
+    } : {}),
+    ...(spec.textualTransformationTable ? {
+      processedStatementTable: t.processedStatementTable,
+    } : {}),
+    ...(spec.prefixTable && spec.textualTransformationTable ? {
+      matchTable: t.matchTable,
     } : {}),
     termsTable: t.termsTable,
   };

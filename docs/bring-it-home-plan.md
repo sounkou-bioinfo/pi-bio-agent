@@ -138,14 +138,15 @@ consumer-pulled, or a non-goal.
    generated SemanticSQL views from a staged `statements` table: RDF/RDFS typed statement views, relation-graph
    `edge`, RDF list/member views, node/identifier/count views, OWL node/property/axiom/restriction views, OBO
    synonym/mapping/contributor/orcid views, OBO problem views, RO edge filters, relation-graph subgraph/cycle
-   inspection views, deprecated nodes, ontology status, and term rollups. When a staged `prefix(prefix, base)` table
-   is declared, the views canonicalize matching IRIs to CURIEs before projection. When a staged SemanticSQL
-   `entailed_edge(subject,predicate,object)` table is declared, closure-backed relation-graph views are generated
-   over it. Remaining parity is relation-graph-specific equivalence/reflexivity/property-hierarchy policy,
-   taxon-constraint/similarity/term-association/NLP/ChEBI-specific views, multi-ontology attachment, and
-   evidence/problem projection into edge `attrs`/`trust` when a real grounding/traversal consumer needs it. Declared
-   upstream `entailed_edge` artifacts now enter through the same graph projection profile when a resolver/host stages
-   and receipts them.
+   inspection views, SemanticSQL NLP `subject_prefix` / `processed_statement` / `match` views, deprecated nodes,
+   ontology status, and term rollups. When a staged `prefix(prefix, base)` table is declared, the views canonicalize
+   matching IRIs to CURIEs before projection and support source-prefix inspection. When a staged SemanticSQL
+   `entailed_edge(subject,predicate,object)` table is declared, closure-backed relation-graph and taxon-constraint
+   propagation views are generated over it. Remaining parity is relation-graph-specific
+   equivalence/reflexivity/property-hierarchy policy, similarity/term-association/ChEBI-specific views,
+   multi-ontology attachment, and evidence/problem projection into edge `attrs`/`trust` when a real
+   grounding/traversal consumer needs it. Declared upstream `entailed_edge` artifacts now enter through the same
+   graph projection profile when a resolver/host stages and receipts them.
 6. **Docs hygiene.** Keep README and guides action-first: real commands, real code chunks, no fake text-block
    architecture diagrams, no speculative hostfs claims, and no stale "process transport" lane. Claims should point
    to commands, tests, or examples that currently run.

@@ -713,12 +713,15 @@ JOIN, not a walker. See [`design.md`](./design.md#the-semanticsql-shape-source-s
     `bio_edges`. For base `statements`, `materializeSemanticSqlSourceViews` now creates the generated `edge`,
     RDF/RDFS typed statement, RDF list/member, node/identifier/count, OWL node/property/axiom/restriction, OBO
     synonym/mapping/contributor/orcid, deprecated-node, ontology-status, OBO problem, RO edge-filter, relation-graph
-    subgraph, and term views that manifests and graph projection profiles consume. When a staged `prefix(prefix,
-    base)` table is supplied, those views canonicalize matching IRIs to CURIEs before projection. When a staged
-    SemanticSQL `entailed_edge(subject,predicate,object)` table is supplied, the closure-backed relation-graph views
-    are generated too. This gives Semantic Web, ontology-derived, and FHIR-shaped RDF data a SemanticSQL inspection
-    surface without a source-specific adapter. We still do not parse the full upstream LinkML source to generate
-    every DDL/view; parity expands only when a concrete grounding or traversal consumer needs more of the source spec.
+    subgraph, SemanticSQL NLP, and term views that manifests and graph projection profiles consume. When a staged
+    `prefix(prefix, base)` table is supplied, those views canonicalize matching IRIs to CURIEs before projection and
+    expose `subject_prefix`. When a staged `textual_transformation(subject,predicate,value)` table is supplied, the
+    helper exposes `processed_statement`; with both prefix and transformation tables present it also exposes `match`.
+    When a staged SemanticSQL `entailed_edge(subject,predicate,object)` table is supplied, the closure-backed
+    relation-graph and taxon-constraint propagation views are generated too. This gives Semantic Web,
+    ontology-derived, and FHIR-shaped RDF data a SemanticSQL inspection surface without a source-specific adapter. We
+    still do not parse the full upstream LinkML source to generate every DDL/view; parity expands only when a concrete
+    grounding or traversal consumer needs more of the source spec.
   - **Prefix canonicalization is present, not a traversal primitive.** Here `prefix(prefix, base)` means namespace
     expansion/canonicalization (`HP` -> an HPO base IRI, `biolink` -> a Biolink base IRI), not run-id prefixes,
     observation-key prefixes, or graph walk policy. Remaining identifier hygiene is receipts and multi-database
@@ -726,9 +729,10 @@ JOIN, not a walker. See [`design.md`](./design.md#the-semanticsql-shape-source-s
   - **Generated views have a richer conformance path.** The helper covers common RDF/RDFS statement views, RDF
     list/member views, node and identifier views, OWL node/property classifications, axiom annotations, existential
     restriction views, OBO synonym/mapping/contributor/orcid views, OBO problem views, relation-graph `edge`,
-    RO edge filters, relation-graph subgraph/cycle inspection views, deprecated nodes, ontology status, and term
-    rows. Taxon-constraint, similarity, term-association, NLP, and ChEBI-specific views remain source-spec
-    conformance work for consumers that need them.
+    RO edge filters, relation-graph subgraph/cycle inspection views, taxon-constraint propagation views, NLP
+    text-match views, deprecated nodes, ontology status, and term rows. Similarity, term-association,
+    ChEBI-specific views, and the most-specific taxon refinement remain source-spec conformance work for consumers
+    that need them.
   - **`edge` semantics are deliberately bounded.** In SemanticSQL, `edge` is a generated relation-graph view that
     folds direct named rows, existential restrictions, and selected `rdf:type` assertions through class-node
     knowledge. The local helper now covers those rows, then lets the existing graph projection profile and closure
@@ -738,6 +742,9 @@ JOIN, not a walker. See [`design.md`](./design.md#the-semanticsql-shape-source-s
     each declared predicate independently; declared upstream closure artifacts are accepted when a resolver/host
     stages and receipts them. We still do not reimplement relation-graph semantics for equivalence, reflexivity
     policy, property hierarchy, or individuals inside the CTE.
+    Closure-backed generated views must not assume reflexive closure: `materializeEntailedEdges` does not emit self
+    rows, so taxon-constraint propagation adds the constrained taxon explicitly where the source-spec query would
+    otherwise rely on a reflexive `entailed_edge` artifact.
   - **Axiom annotations and quality/provenance are exposed but not yet projected into edge trust.** OWL reified
     axioms, axiom annotations, evidence xrefs, ontology status, and OBO problem views are queryable generated views.
     The remaining work is a consumer-pulled projection into `attrs`/`trust` or receipts for graph edges that need
