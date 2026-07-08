@@ -480,6 +480,22 @@ try {
   });
   assert.equal(firstReclaimClaim?.runId, reclaimRunId);
   assert.equal(firstReclaimClaim?.attempt, 1);
+  const schedulerClaimEvent = await recordHostEvent(conn, {
+    subjectId: `job:${reclaimRunId}`,
+    kind: "dogfood.scheduler.claim",
+    recordedAt: "2026-07-06T12:01:21.500Z",
+    source: "bring-it-home-dogfood",
+    digest: firstReclaimClaim.replayDigest,
+    value: {
+      worker_id: "worker:dogfood-a",
+      attempt: firstReclaimClaim.attempt,
+      lease_expires_at: firstReclaimClaim.claimExpiresAt,
+    },
+    links: [
+      { predicate: "claimed_by", objectId: "worker:dogfood-a", attrs: { attempt: firstReclaimClaim.attempt } },
+      { predicate: "has_attempt", objectId: `job:${reclaimRunId}:attempt:${firstReclaimClaim.attempt}` },
+    ],
+  });
   await recordJobClaimStatus(conn, {
     runId: reclaimRunId,
     workerId: "worker:dogfood-a",
@@ -496,6 +512,26 @@ try {
   });
   assert.equal(reclaimedClaim?.runId, reclaimRunId);
   assert.equal(reclaimedClaim?.attempt, 2);
+  const schedulerReclaimEvent = await recordHostEvent(conn, {
+    subjectId: `job:${reclaimRunId}`,
+    kind: "dogfood.scheduler.lease_reclaimed",
+    recordedAt: "2026-07-06T12:01:24.500Z",
+    source: "bring-it-home-dogfood",
+    digest: reclaimedClaim.replayDigest,
+    value: {
+      old_worker_id: "worker:dogfood-a",
+      old_attempt: firstReclaimClaim.attempt,
+      old_lease_expires_at: firstReclaimClaim.claimExpiresAt,
+      new_worker_id: "worker:dogfood-b",
+      new_attempt: reclaimedClaim.attempt,
+      new_lease_expires_at: reclaimedClaim.claimExpiresAt,
+    },
+    links: [
+      { predicate: "claimed_by", objectId: "worker:dogfood-b", attrs: { attempt: reclaimedClaim.attempt } },
+      { predicate: "replaces_attempt", objectId: `job:${reclaimRunId}:attempt:${firstReclaimClaim.attempt}` },
+      { predicate: "has_attempt", objectId: `job:${reclaimRunId}:attempt:${reclaimedClaim.attempt}` },
+    ],
+  });
   let staleLeaseWriteRejected = false;
   try {
     await recordJobClaimStatus(conn, {
@@ -524,6 +560,24 @@ try {
     staleLeaseResultRejected = true;
   }
   assert.equal(staleLeaseResultRejected, true);
+  const schedulerStaleAttemptEvent = await recordHostEvent(conn, {
+    subjectId: `job:${reclaimRunId}`,
+    kind: "dogfood.scheduler.stale_attempt_rejected",
+    recordedAt: "2026-07-06T12:01:25.750Z",
+    source: "bring-it-home-dogfood",
+    digest: reclaimedClaim.replayDigest,
+    value: {
+      rejected_worker_id: "worker:dogfood-a",
+      rejected_attempt: firstReclaimClaim.attempt,
+      live_worker_id: "worker:dogfood-b",
+      live_attempt: reclaimedClaim.attempt,
+      rejected_writes: ["status", "result"],
+    },
+    links: [
+      { predicate: "rejects_attempt", objectId: `job:${reclaimRunId}:attempt:${firstReclaimClaim.attempt}` },
+      { predicate: "protects_attempt", objectId: `job:${reclaimRunId}:attempt:${reclaimedClaim.attempt}` },
+    ],
+  });
   await recordJobClaimResult(conn, {
     runId: reclaimRunId,
     workerId: "worker:dogfood-b",
@@ -551,6 +605,18 @@ try {
   const reclaimedResult = await queueRunner.collect(reclaimRunId);
   assert.equal(reclaimedStatus?.phase, "succeeded");
   assert.deepEqual(reclaimedResult?.result, { rows: [{ answer: 2 }], reclaimedFromAttempt: 1 });
+  const schedulerEvents = [schedulerClaimEvent, schedulerReclaimEvent, schedulerStaleAttemptEvent];
+  const schedulerEventKinds = await conn.all(`
+    SELECT json_extract_string(value_json, '$.kind') AS kind
+    FROM bio_observations
+    WHERE predicate = 'host_event' AND subject_id = ?
+    ORDER BY recorded_at::TIMESTAMPTZ, observation_id
+  `, [`job:${reclaimRunId}`]);
+  assert.deepEqual(schedulerEventKinds.map((row) => row.kind), [
+    "dogfood.scheduler.claim",
+    "dogfood.scheduler.lease_reclaimed",
+    "dogfood.scheduler.stale_attempt_rejected",
+  ]);
 
   const profileConn = new FakeDucknngProfileConn();
   const firstProfile = await refreshDucknngHttpProfile(profileConn, {
@@ -789,7 +855,7 @@ try {
   assert.equal(corpus.tables.toolCalls.rows, 1);
   assert.equal(corpus.tables.runs.rows, 2);
   assert.equal(corpus.tables.artifacts.rows, 1);
-  assert.equal(corpus.tables.hostEvents.rows, 1);
+  assert.equal(corpus.tables.hostEvents.rows, 4);
   assert.match(corpus.tables.units.parquetDigest, /^sha256:[0-9a-f]{64}$/);
   const corpusUnitsReadback = await conn.all(
     `SELECT count(*) AS n, max(artifacts) AS artifacts FROM read_parquet(${sqlString(corpus.tables.units.parquetPath)})`,
@@ -839,6 +905,11 @@ try {
       staleLeaseResultRejected,
       finalPhase: reclaimedStatus?.phase,
       resultAnswer: reclaimedResult?.result?.rows?.[0]?.answer,
+    },
+    schedulerHostEvents: {
+      count: schedulerEventKinds.length,
+      linkCount: schedulerEvents.reduce((n, event) => n + event.linkObservationIds.length, 0),
+      kinds: schedulerEventKinds.map((row) => row.kind),
     },
     checkpointKey: checkpointRow.statement_key,
     ducknngProfileReceipt: {

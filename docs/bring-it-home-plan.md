@@ -114,8 +114,10 @@ consumer-pulled, or a non-goal.
    resolver handles. `remoteCacheScope` consistency is required wherever shared remote freshness or shared CAS reuse
    is exposed.
 2. **Concrete host adapters over `recordHostEvent`.** The primitive exists; the open work is the adapter layer:
-   Pi/workbench/scheduler hooks for steers, interrupts, compaction, session switching, context digests, lease loss,
-   and governance events that a consumer actually reads. Do not add a closed event taxonomy.
+   the bring-it-home dogfood now records scheduler-style queue claim, lease-reclaim, and stale-attempt rejection
+   events as open host facts that the training corpus exports. Remaining work is concrete Pi/workbench hooks for
+   steers, interrupts, compaction, session switching, context digests, and governance events that a consumer actually
+   reads. Do not add a closed event taxonomy.
 3. **Durable workflow dogfood over the closed lifecycle.** The async lifecycle and checkpoint resume helper are
    built and the bring-it-home dogfood now runs checkpointed bash steps through `nodeComputeRunner`, reuses the
    completed prefix, reruns the suffix, and proves queue cancellation, expired-lease reclaim, and stale-attempt
@@ -162,8 +164,9 @@ consumer-pulled, or a non-goal.
 - **Base durable runner/resume.** `AsyncRunner` is the lifecycle; `JobRunner` and checkpoint helpers specialize it.
   Resume means completed-prefix checkpoint reuse plus suffix rerun. Evidence: [job-store.ts](../src/hosts/job-store.ts),
   [bring-it-home-dogfood.mjs](../scripts/bring-it-home-dogfood.mjs), [bring-it-home-dogfood.test.ts](../test/bring-it-home-dogfood.test.ts).
-- **`recordHostEvent` primitive.** Built as one open host event fact plus ordinary links. The pending item is concrete
-  adapters, not a new host-event model.
+- **`recordHostEvent` primitive.** Built as one open host event fact plus ordinary links. The bring-it-home dogfood
+  records both workbench-style input events and scheduler-style queue events without a closed event model. The
+  pending item is concrete Pi/workbench runtime wiring, not a new host-event model.
 - **Foreign graph projection base.** A real external Monarch KGX HTTP path and internal observation-graph projection
   exist. SemanticSQL parity is deferred adapter work.
 - **Base training-corpus export.** Digest-only ledger/session/tool/run/artifact/event exports exist. Labels and
