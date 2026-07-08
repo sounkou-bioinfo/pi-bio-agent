@@ -493,14 +493,18 @@ over that generated `edge`. When a staged SemanticSQL
 inspection views: subgraph-by-ancestor/descendant, entailed subclass/type filters, cycle reports,
 `node_pairwise_overlap`, and direct/inferred taxon-constraint views. It still does not treat every object triple as a
 relation-graph edge.
+The generated `edge_with_metadata` view keeps the same `subject,predicate,object` edge columns and adds graph-ready
+`attrs` / `trust` JSON from matching OWL axiom annotations, evidence xrefs, and source quality problems. It is a
+mechanical metadata packaging layer, not a scoring policy.
 When a staged `prefix(prefix, base)` table is declared, the generated views canonicalize matching IRIs to CURIEs.
 The same prefix table also enables the SemanticSQL `subject_prefix` view. When a staged
 `textual_transformation(subject, predicate, value)` table is declared, the helper exposes `processed_statement`; with
 both prefix and transformation tables present it also exposes the source-spec `match` view for SQL-native text
 matching across labeled ontology/FHIR/RDF resources.
 When a staged SemanticSQL `term_association` table is declared, the helper exposes the canonical association columns
-with the same optional prefix canonicalization; an ordinary graph projection profile can then project those
-associations into `bio_edges`.
+with the same optional prefix canonicalization. An ordinary graph projection profile can then project those
+associations into `bio_edges`; evidence stays available on the canonical association columns unless a consumer
+defines a separate graph-ready metadata view.
 The generated `edge` view then uses the same graph projection profile and closure path as KGX, memory, and
 observation graphs. This is compatibility with the SemanticSQL source-spec ecosystem, useful for RDF/OWL,
 Semantic-Web, FHIR-shaped, and ontology-derived data; it is not a hidden OWL reasoner.

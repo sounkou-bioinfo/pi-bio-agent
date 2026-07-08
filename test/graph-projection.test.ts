@@ -73,6 +73,11 @@ describe("graph projection profile: source relation -> compiled graph", () => {
     await conn.run("INSERT INTO statements VALUES ('_:axiom1','owl:annotatedProperty','rdfs:subClassOf',NULL,NULL,NULL)");
     await conn.run("INSERT INTO statements VALUES ('_:axiom1','owl:annotatedTarget','MONDO:0000001',NULL,NULL,NULL)");
     await conn.run("INSERT INTO statements VALUES ('_:axiom1','oio:hasDbXref','GO_REF:0000002',NULL,NULL,NULL)");
+    await conn.run("INSERT INTO statements VALUES ('_:axiom_edge','owl:annotatedSource','MONDO:0004979',NULL,NULL,NULL)");
+    await conn.run("INSERT INTO statements VALUES ('_:axiom_edge','owl:annotatedProperty','BFO:0000050',NULL,NULL,NULL)");
+    await conn.run("INSERT INTO statements VALUES ('_:axiom_edge','owl:annotatedTarget','GO:0000001',NULL,NULL,NULL)");
+    await conn.run("INSERT INTO statements VALUES ('_:axiom_edge','oio:hasDbXref','PMID:EDGE1',NULL,NULL,NULL)");
+    await conn.run("INSERT INTO statements VALUES ('_:axiom_edge','rdfs:comment',NULL,'curated edge evidence',NULL,'en')");
     await conn.run("CREATE TABLE semantic_entailed_input(subject TEXT, predicate TEXT, object TEXT)");
     await conn.run("INSERT INTO semantic_entailed_input VALUES ('MONDO:0004766','rdfs:subClassOf','MONDO:0004784')");
     await conn.run("INSERT INTO semantic_entailed_input VALUES ('MONDO:0004784','rdfs:subClassOf','MONDO:0004979')");
@@ -103,6 +108,7 @@ describe("graph projection profile: source relation -> compiled graph", () => {
     assert.equal(views.allProblemsTable, "all_problems");
     assert.equal(views.partOfEdgeTable, "part_of_edge");
     assert.equal(views.hasPartEdgeTable, "has_part_edge");
+    assert.equal(views.edgeWithMetadataTable, "edge_with_metadata");
     assert.equal(views.conjugateAcidOfEdgeTable, "conjugate_acid_of_edge");
     assert.equal(views.conjugateBaseOfEdgeTable, "conjugate_base_of_edge");
     assert.equal(views.chargeStatementTable, "charge_statement");
@@ -172,8 +178,11 @@ describe("graph projection profile: source relation -> compiled graph", () => {
       { subject: "MONDO:0004979", predicate: "RO:0002162", object: "NCBITaxon:9606" },
     ]);
     assert.deepEqual(await conn.all<{ annotation_subject: string; annotation_predicate: string; annotation_object: string }>(
-      "SELECT annotation_subject, annotation_predicate, annotation_object FROM axiom_dbxref_annotation",
-    ), [{ annotation_subject: "_:axiom1", annotation_predicate: "oio:hasDbXref", annotation_object: "GO_REF:0000002" }]);
+      "SELECT annotation_subject, annotation_predicate, annotation_object FROM axiom_dbxref_annotation ORDER BY annotation_subject",
+    ), [
+      { annotation_subject: "_:axiom1", annotation_predicate: "oio:hasDbXref", annotation_object: "GO_REF:0000002" },
+      { annotation_subject: "_:axiom_edge", annotation_predicate: "oio:hasDbXref", annotation_object: "PMID:EDGE1" },
+    ]);
     assert.deepEqual(await conn.all<{ subject: string; predicate: string; value: string }>(
       "SELECT subject, predicate, value FROM trailing_whitespace_problem",
     ), [{ subject: "MONDO:0004979", predicate: "rdfs:seeAlso", value: " note with whitespace " }]);
@@ -186,6 +195,17 @@ describe("graph projection profile: source relation -> compiled graph", () => {
     assert.deepEqual(await conn.all<{ predicate: string; value: string }>(
       "SELECT predicate, value FROM all_problems WHERE subject = 'rdfs:seeAlso'",
     ), []);
+    const [edgeMetadata] = await conn.all<{ attrs: string; trust: string }>(
+      "SELECT attrs::VARCHAR AS attrs, trust::VARCHAR AS trust FROM edge_with_metadata WHERE subject = 'MONDO:0004979' AND predicate = 'BFO:0000050' AND object = 'GO:0000001'",
+    );
+    assert.ok(edgeMetadata);
+    const edgeAttrs = JSON.parse(edgeMetadata!.attrs) as { axiom_annotations: Array<Record<string, unknown>>; source_problems: Array<Record<string, unknown>> };
+    const edgeTrust = JSON.parse(edgeMetadata!.trust) as { evidence_xrefs: string[]; source_problem_count: number };
+    assert.ok(edgeAttrs.axiom_annotations.some((x) => x.annotation_object === "PMID:EDGE1"));
+    assert.ok(edgeAttrs.axiom_annotations.some((x) => x.annotation_value === "curated edge evidence"));
+    assert.equal(edgeAttrs.source_problems.filter((x) => x.problem_subject === "MONDO:0004979").length, 3);
+    assert.deepEqual(edgeTrust.evidence_xrefs, ["PMID:EDGE1"]);
+    assert.equal(edgeTrust.source_problem_count, 3);
     assert.deepEqual(await conn.all<{ subject: string; object: string }>("SELECT subject, object FROM part_of_edge"), [
       { subject: "MONDO:0004979", object: "GO:0000001" },
     ]);
@@ -255,9 +275,25 @@ describe("graph projection profile: source relation -> compiled graph", () => {
     assert.deepEqual(await conn.all<{ num_ancestors: number }>(
       "SELECT CAST(num_ancestors AS INTEGER) AS num_ancestors FROM node_pairwise_overlap WHERE node1 = 'MONDO:0004766' AND node2 = 'MONDO:0004766' AND predicate1 = 'rdfs:subClassOf' AND predicate2 = 'rdfs:subClassOf'",
     ), [{ num_ancestors: 2 }]);
-    assert.deepEqual(await conn.all<{ id: string; subject: string; predicate: string; object: string; evidence_type: string; publication: string; source: string }>(
+    assert.deepEqual(await conn.all<{
+      id: string;
+      subject: string;
+      predicate: string;
+      object: string;
+      evidence_type: string;
+      publication: string;
+      source: string;
+    }>(
       "SELECT id, subject, predicate, object, evidence_type, publication, source FROM term_association",
-    ), [{ id: "assoc:1", subject: "case:1", predicate: "RO:0002200", object: "HP:0001250", evidence_type: "ECO:0000269", publication: "PMID:1", source: "fixture" }]);
+    ), [{
+      id: "assoc:1",
+      subject: "case:1",
+      predicate: "RO:0002200",
+      object: "HP:0001250",
+      evidence_type: "ECO:0000269",
+      publication: "PMID:1",
+      source: "fixture",
+    }]);
     assert.deepEqual(await conn.all<{ query_taxon: string }>(
       "SELECT DISTINCT query_taxon FROM inferred_never_in_taxon_1 WHERE subject = 'MONDO:0004766' ORDER BY query_taxon",
     ), [{ query_taxon: "NCBITaxon:7955" }, { query_taxon: "NCBITaxon:7956" }]);
@@ -303,6 +339,22 @@ describe("graph projection profile: source relation -> compiled graph", () => {
     );
     assert.deepEqual(ancestors.map((x) => x.to_id), ["MONDO:0004784", "MONDO:0004979"]);
 
+    const metadataProfile: GraphProjectionProfile = {
+      schema: "pi-bio.graph_projection_profile.v1",
+      id: "semantic-sql-edge-with-metadata",
+      title: "SemanticSQL edge metadata projection",
+      source: { kind: "semantic_sql", table: "edge_with_metadata" },
+      columns: { from: "subject", predicate: "predicate", to: "object", attrs: "attrs", trust: "trust" },
+      target: { edgesTable: "semantic_bio_edges_with_metadata" },
+    };
+    const metadataOut = await materializeGraphProjectionProfile(conn, metadataProfile);
+    assert.deepEqual(metadataOut, { edgesTable: "semantic_bio_edges_with_metadata", edgeCount: 10 });
+    const [projectedMetadata] = await conn.all<{ attrs: string; trust: string }>(
+      "SELECT attrs::VARCHAR AS attrs, trust::VARCHAR AS trust FROM semantic_bio_edges_with_metadata WHERE from_id = 'MONDO:0004979' AND predicate = 'BFO:0000050' AND to_id = 'GO:0000001'",
+    );
+    assert.ok(projectedMetadata);
+    assert.equal(JSON.parse(projectedMetadata!.trust).source_problem_count, 3);
+
     const associationProfile: GraphProjectionProfile = {
       schema: "pi-bio.graph_projection_profile.v1",
       id: "semantic-sql-term-association",
@@ -313,9 +365,15 @@ describe("graph projection profile: source relation -> compiled graph", () => {
     };
     const associationOut = await materializeGraphProjectionProfile(conn, associationProfile);
     assert.deepEqual(associationOut, { edgesTable: "association_edges", edgeCount: 1 });
-    assert.deepEqual(await conn.all<{ from_id: string; predicate: string; to_id: string }>(
-      "SELECT from_id, predicate, to_id FROM association_edges",
-    ), [{ from_id: "case:1", predicate: "RO:0002200", to_id: "HP:0001250" }]);
+    assert.deepEqual(await conn.all<{
+      from_id: string;
+      predicate: string;
+      to_id: string;
+      attrs: string | null;
+      trust: string | null;
+    }>(
+      "SELECT from_id, predicate, to_id, attrs, trust FROM association_edges",
+    ), [{ from_id: "case:1", predicate: "RO:0002200", to_id: "HP:0001250", attrs: null, trust: null }]);
   });
 
   test("canonicalizes SemanticSQL IRI statements through a prefix table before graph projection", async () => {

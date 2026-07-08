@@ -45,6 +45,8 @@ canonicalization through a staged
 SemanticSQL NLP inspection layer: `processed_statement`, and with a prefix table, `subject_prefix` plus `match`.
 An optional staged `term_association(id, subject, predicate, object, evidence_type, publication, source)` table is
 exposed as the canonical association view and can be projected into `bio_edges` with the same graph profile shape.
+The generated `edge_with_metadata` view adds graph-ready `attrs`/`trust` JSON to generated edges from matching OWL
+axiom annotations, evidence xrefs, and OBO problem rows.
 When a source ships a precomputed SemanticSQL/relation-graph `entailed_edge`, `materializeGraphProjectionProfile`
 can copy that declared artifact into the same closure-table shape; `materializeSemanticSqlSourceViews` can also use
 a staged `entailed_edge(subject, predicate, object)` table to expose closure-backed ancestor/descendant, subclass,

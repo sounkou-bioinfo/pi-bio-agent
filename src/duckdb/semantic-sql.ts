@@ -76,6 +76,7 @@ export interface SemanticSqlSourceViewTargets {
   allProblemsTable?: string;
   partOfEdgeTable?: string;
   hasPartEdgeTable?: string;
+  edgeWithMetadataTable?: string;
   subgraphEdgeByParentTable?: string;
   subgraphEdgeByChildTable?: string;
   subgraphEdgeBySelfTable?: string;
@@ -204,6 +205,7 @@ export interface MaterializedSemanticSqlViews {
   allProblemsTable: string;
   partOfEdgeTable: string;
   hasPartEdgeTable: string;
+  edgeWithMetadataTable: string;
   subgraphEdgeByParentTable: string;
   subgraphEdgeByChildTable: string;
   subgraphEdgeBySelfTable: string;
@@ -310,7 +312,19 @@ SELECT
   ${canonicalIdExpr("object", spec.prefixTable, "ta")} AS object,
   CAST(ta.evidence_type AS VARCHAR) AS evidence_type,
   CAST(ta.publication AS VARCHAR) AS publication,
-  CAST(ta.source AS VARCHAR) AS source
+  CAST(ta.source AS VARCHAR) AS source,
+  json_object(
+    'association_id', CAST(ta.id AS VARCHAR),
+    'evidence_type', CAST(ta.evidence_type AS VARCHAR),
+    'publication', CAST(ta.publication AS VARCHAR),
+    'source', CAST(ta.source AS VARCHAR)
+  ) AS attrs,
+  json_object(
+    'provenanceClass', 'evidence',
+    'producer', CAST(ta.source AS VARCHAR),
+    'evidence_type', CAST(ta.evidence_type AS VARCHAR),
+    'publication', CAST(ta.publication AS VARCHAR)
+  ) AS trust
 FROM ${qident(spec.termAssociationSourceTable)} AS ${qident("ta")}`];
 }
 
@@ -389,6 +403,7 @@ function targets(spec: SemanticSqlSourceSpec): Required<SemanticSqlSourceViewTar
     allProblemsTable: spec.targets?.allProblemsTable ?? "all_problems",
     partOfEdgeTable: spec.targets?.partOfEdgeTable ?? "part_of_edge",
     hasPartEdgeTable: spec.targets?.hasPartEdgeTable ?? "has_part_edge",
+    edgeWithMetadataTable: spec.targets?.edgeWithMetadataTable ?? "edge_with_metadata",
     subgraphEdgeByParentTable: spec.targets?.subgraphEdgeByParentTable ?? "subgraph_edge_by_parent",
     subgraphEdgeByChildTable: spec.targets?.subgraphEdgeByChildTable ?? "subgraph_edge_by_child",
     subgraphEdgeBySelfTable: spec.targets?.subgraphEdgeBySelfTable ?? "subgraph_edge_by_self",
@@ -805,6 +820,65 @@ SELECT subject, predicate, object
 FROM ${qident(t.rdfTypeTable)}
 WHERE object IN (SELECT id FROM ${qident(t.classNodeTable)})`,
 
+    `CREATE OR REPLACE VIEW ${qident(t.edgeWithMetadataTable)} AS
+WITH axiom_annotation_rollup AS (
+  SELECT
+    subject,
+    predicate,
+    coalesce(object, value) AS object,
+    to_json(list(DISTINCT struct_pack(
+      annotation_predicate := annotation_predicate,
+      annotation_object := annotation_object,
+      annotation_value := annotation_value,
+      annotation_datatype := annotation_datatype,
+      annotation_language := annotation_language
+    )))::VARCHAR AS axiom_annotations,
+    CASE WHEN count(*) FILTER (WHERE annotation_predicate IN ('oio:hasDbXref', 'oboInOwl:hasDbXref')) = 0 THEN NULL ELSE
+      to_json(list(DISTINCT coalesce(annotation_object, annotation_value))
+        FILTER (WHERE annotation_predicate IN ('oio:hasDbXref', 'oboInOwl:hasDbXref')))::VARCHAR
+    END AS evidence_xrefs
+  FROM ${qident(t.owlAxiomAnnotationTable)}
+  WHERE coalesce(object, value) IS NOT NULL
+  GROUP BY subject, predicate, coalesce(object, value)
+),
+problem_rollup AS (
+  SELECT
+    e.subject,
+    e.predicate,
+    e.object,
+    to_json(list(DISTINCT struct_pack(
+      problem_subject := p.subject,
+      problem_predicate := p.predicate,
+      problem_value := p.value
+    )))::VARCHAR AS source_problems,
+    CAST(count(*) AS INTEGER) AS source_problem_count
+  FROM ${qident(t.edgeTable)} e
+  JOIN ${qident(t.allProblemsTable)} p
+    ON p.subject = e.subject OR p.subject = e.predicate OR p.subject = e.object
+  GROUP BY e.subject, e.predicate, e.object
+)
+SELECT
+  e.subject,
+  e.predicate,
+  e.object,
+  CASE WHEN aa.axiom_annotations IS NULL AND pr.source_problems IS NULL THEN NULL ELSE
+    json_object(
+      'axiom_annotations', json(aa.axiom_annotations),
+      'source_problems', json(pr.source_problems)
+    )
+  END AS attrs,
+  CASE WHEN aa.evidence_xrefs IS NULL AND pr.source_problem_count IS NULL THEN NULL ELSE
+    json_object(
+      'evidence_xrefs', json(aa.evidence_xrefs),
+      'source_problem_count', coalesce(pr.source_problem_count, 0)
+    )
+  END AS trust
+FROM ${qident(t.edgeTable)} e
+LEFT JOIN axiom_annotation_rollup aa
+  ON aa.subject = e.subject AND aa.predicate = e.predicate AND aa.object = e.object
+LEFT JOIN problem_rollup pr
+  ON pr.subject = e.subject AND pr.predicate = e.predicate AND pr.object = e.object`,
+
     `CREATE OR REPLACE VIEW ${qident(t.partOfEdgeTable)} AS
 SELECT * FROM ${qident(t.edgeTable)}
 WHERE predicate = 'BFO:0000050'`,
@@ -1081,6 +1155,7 @@ export async function materializeSemanticSqlSourceViews(conn: SqlConn, spec: Sem
     allProblemsTable: t.allProblemsTable,
     partOfEdgeTable: t.partOfEdgeTable,
     hasPartEdgeTable: t.hasPartEdgeTable,
+    edgeWithMetadataTable: t.edgeWithMetadataTable,
     conjugateAcidOfEdgeTable: t.conjugateAcidOfEdgeTable,
     conjugateBaseOfEdgeTable: t.conjugateBaseOfEdgeTable,
     chargeStatementTable: t.chargeStatementTable,

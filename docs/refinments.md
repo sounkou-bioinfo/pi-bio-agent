@@ -720,11 +720,12 @@ JOIN, not a walker. See [`design.md`](./design.md#the-semanticsql-shape-source-s
     with both prefix and transformation tables present it also exposes `match`.
     When a staged SemanticSQL `entailed_edge(subject,predicate,object)` table is supplied, the closure-backed
     relation-graph, node-pair overlap, and taxon-constraint propagation views are generated too. When a staged
-    SemanticSQL `term_association` table is supplied, the helper exposes the canonical association columns and the
-    existing graph projection profile maps them into `bio_edges`. This gives Semantic Web, ontology-derived, and
-    FHIR-shaped RDF data a SemanticSQL inspection surface without a source-specific adapter. We still do not parse
-    the full upstream LinkML source to generate every DDL/view; parity expands only when a concrete grounding or
-    traversal consumer needs more of the source spec.
+    SemanticSQL `term_association` table is supplied, the helper exposes the canonical association columns, and the
+    existing graph projection profile maps them into `bio_edges`. Generated `edge_with_metadata` projects matching
+    OWL axiom annotations, evidence xrefs, and OBO problem rows into graph-ready `attrs`/`trust`. This gives
+    Semantic Web, ontology-derived, and FHIR-shaped RDF data a SemanticSQL inspection surface without a
+    source-specific adapter. We still do not parse the full upstream LinkML source to generate every DDL/view;
+    parity expands only when a concrete grounding or traversal consumer needs more of the source spec.
   - **Prefix canonicalization is present, not a traversal primitive.** Here `prefix(prefix, base)` means namespace
     expansion/canonicalization (`HP` -> an HPO base IRI, `biolink` -> a Biolink base IRI), not run-id prefixes,
     observation-key prefixes, or graph walk policy. Remaining identifier hygiene is receipts and multi-database
@@ -733,9 +734,10 @@ JOIN, not a walker. See [`design.md`](./design.md#the-semanticsql-shape-source-s
     list/member views, node and identifier views, OWL node/property classifications, axiom annotations, existential
     restriction views, OBO synonym/mapping/contributor/orcid views, OBO problem views, relation-graph `edge`,
     RO edge filters, ChEBI charge/conjugate views, relation-graph subgraph/cycle inspection views,
-    `node_pairwise_overlap`, taxon-constraint propagation views including most-specific inferred in-taxon, NLP
-    text-match views, deprecated nodes, ontology status, term-association views, and term rows. Remaining generated
-    view work is consumer-pulled relation-graph policy and source-specific evidence/trust projection.
+    `node_pairwise_overlap`, edge metadata views, taxon-constraint propagation views including most-specific
+    inferred in-taxon, NLP text-match views, deprecated nodes, ontology status, canonical term-association views, and
+    term rows. Remaining generated view work is consumer-pulled relation-graph policy plus source-specific
+    trust weighting/reconciliation.
   - **`edge` semantics are deliberately bounded.** In SemanticSQL, `edge` is a generated relation-graph view that
     folds direct named rows, existential restrictions, and selected `rdf:type` assertions through class-node
     knowledge. The local helper now covers those rows, then lets the existing graph projection profile and closure
@@ -748,10 +750,11 @@ JOIN, not a walker. See [`design.md`](./design.md#the-semanticsql-shape-source-s
     Closure-backed generated views must not assume reflexive closure: `materializeEntailedEdges` does not emit self
     rows, so taxon-constraint propagation adds the constrained taxon explicitly where the source-spec query would
     otherwise rely on a reflexive `entailed_edge` artifact.
-  - **Axiom annotations and quality/provenance are exposed but not yet projected into edge trust.** OWL reified
-    axioms, axiom annotations, evidence xrefs, ontology status, and OBO problem views are queryable generated views.
-    The remaining work is a consumer-pulled projection into `attrs`/`trust` or receipts for graph edges that need
-    evidence-aware traversal.
+  - **Axiom annotations and quality/provenance are projected mechanically, not scored.** OWL reified axioms, axiom
+    annotations, evidence xrefs, ontology status, and OBO problem views are queryable generated views; generated
+    `edge_with_metadata` packages matching axiom annotations, evidence xrefs, and source problems into `attrs` and
+    `trust` so graph profiles can preserve them. The remaining work is consumer-pulled weighting/reconciliation or
+    receipts for graph edges that need evidence-aware traversal.
   - **Real foreign KG projection is dogfooded; multi-ontology attachment is not.** The Monarch KGX download path
     (`examples/monarch-kg-http`, `test/monarch-kg-http-example.test.ts`) stages an HTTP TSV into the canonical edge
     view and projects it into `bio_edges`. SemanticSQL's SQLite pattern also supports attached databases and
