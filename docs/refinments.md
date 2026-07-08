@@ -705,20 +705,22 @@ JOIN, not a walker. See [`design.md`](./design.md#the-semanticsql-shape-source-s
   - **SemanticSQL-shaped sources are absorbable as DuckDB data.** Edge-shaped relations use
     `subject,predicate,object` plus optional `attrs,trust`; an ordinary `GraphProjectionProfile` maps them into
     `bio_edges`. For base `statements`, `materializeSemanticSqlSourceViews` now creates the generated `edge`,
-    label, synonym, mapping, and term views that manifests and graph projection profiles consume. When a staged
-    `prefix(prefix, base)` table is supplied, those views canonicalize matching IRIs to CURIEs before projection.
-    We still do not parse the full upstream LinkML source to generate every DDL/view; parity expands only when a
-    concrete grounding or traversal consumer needs more of the source spec.
+    RDF/RDFS typed statement, label, definition, synonym, mapping, deprecated-node, ontology-status, and term views
+    that manifests and graph projection profiles consume. When a staged `prefix(prefix, base)` table is supplied,
+    those views canonicalize matching IRIs to CURIEs before projection. We still do not parse the full upstream
+    LinkML source to generate every DDL/view; parity expands only when a concrete grounding or traversal consumer
+    needs more of the source spec.
   - **Prefix canonicalization is present, not a traversal primitive.** Here `prefix(prefix, base)` means namespace
     expansion/canonicalization (`HP` -> an HPO base IRI, `biolink` -> a Biolink base IRI), not run-id prefixes,
     observation-key prefixes, or graph walk policy. Remaining identifier hygiene is receipts and multi-database
     conflict policy, not basic IRI-to-CURIE projection.
-  - **Generated views have a base conformance path.** The helper covers the common `edge`, labels, synonyms,
-    mappings, and term rows. OWL restriction/axiom, RO edge, subgraph, taxon-constraint, similarity, and
-    term-association views remain source-spec conformance work for consumers that need them.
-  - **`edge` semantics are under-modeled.** In SemanticSQL, `edge` is a generated relation-graph view that folds
-    named subclasses, existential restrictions, subproperties, and selected type assertions. Our current import
-    test treats `edge` as already materialized rows.
+  - **Generated views have a base conformance path.** The helper covers common RDF/RDFS statement views,
+    relation-graph `edge` for named subclass/subproperty rows, labels, definitions, synonyms, mappings, deprecated
+    nodes, ontology status, and term rows. OWL restriction/axiom, RO edge, subgraph, taxon-constraint, similarity,
+    and term-association views remain source-spec conformance work for consumers that need them.
+  - **`edge` semantics are partially modeled.** In SemanticSQL, `edge` is a generated relation-graph view that also
+    folds existential restrictions and selected `rdf:type` assertions through class-node knowledge. The local helper
+    now covers named subclass/subproperty rows but does not yet model those richer relation-graph cases.
   - **Closure semantics are simpler.** SemanticSQL commonly consumes `relation-graph` output; our CTE closes each
     declared predicate independently. That is good for local graphs, but not source-spec parity for equivalence,
     reflexivity policy, property hierarchy, individuals, or imported precomputed closures.

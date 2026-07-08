@@ -29,8 +29,15 @@ describe("graph projection profile: source relation -> compiled graph", () => {
     const conn = duckdbNodeConn(await (await DuckDBInstance.create(":memory:")).connect());
     await conn.run("CREATE TABLE statements(subject TEXT, predicate TEXT, object TEXT, value TEXT, datatype TEXT, language TEXT)");
     await conn.run("INSERT INTO statements VALUES ('MONDO:0004979','rdfs:label',NULL,'asthma',NULL,'en')");
+    await conn.run("INSERT INTO statements VALUES ('MONDO:0004979','IAO:0000115',NULL,'A chronic respiratory disorder.',NULL,'en')");
     await conn.run("INSERT INTO statements VALUES ('MONDO:0004979','oio:hasExactSynonym',NULL,'bronchial asthma',NULL,'en')");
+    await conn.run("INSERT INTO statements VALUES ('MONDO:0004979','skos:hasExactMatch','UMLS:C0004096',NULL,NULL,NULL)");
     await conn.run("INSERT INTO statements VALUES ('MONDO:0004784','rdfs:label',NULL,'allergic asthma',NULL,'en')");
+    await conn.run("INSERT INTO statements VALUES ('MONDO:0004784','owl:deprecated',NULL,'true',NULL,NULL)");
+    await conn.run("INSERT INTO statements VALUES ('MONDO:0004766','rdf:type','owl:Class',NULL,NULL,NULL)");
+    await conn.run("INSERT INTO statements VALUES ('RO:0002202','rdfs:subPropertyOf','RO:0000052',NULL,NULL,NULL)");
+    await conn.run("INSERT INTO statements VALUES ('RO:0002202','rdfs:domain','MONDO:0000001',NULL,NULL,NULL)");
+    await conn.run("INSERT INTO statements VALUES ('RO:0002202','rdfs:range','MONDO:0000002',NULL,NULL,NULL)");
     await conn.run("INSERT INTO statements VALUES ('MONDO:0004766','rdfs:subClassOf','MONDO:0004784',NULL,NULL,NULL)");
     await conn.run("INSERT INTO statements VALUES ('MONDO:0004784','rdfs:subClassOf','MONDO:0004979',NULL,NULL,NULL)");
 
@@ -40,16 +47,49 @@ describe("graph projection profile: source relation -> compiled graph", () => {
     });
     assert.deepEqual(views, {
       edgeTable: "semantic_edge",
+      nodeToNodeTable: "node_to_node_statement",
+      nodeToValueTable: "node_to_value_statement",
+      rdfTypeTable: "rdf_type_statement",
+      rdfsSubclassOfTable: "rdfs_subclass_of_statement",
+      rdfsSubclassOfNamedTable: "rdfs_subclass_of_named_statement",
+      rdfsSubpropertyOfTable: "rdfs_subproperty_of_statement",
+      rdfsDomainTable: "rdfs_domain_statement",
+      rdfsRangeTable: "rdfs_range_statement",
       labelsTable: "rdfs_label_statement",
+      definitionsTable: "has_text_definition_statement",
       synonymsTable: "synonym_statement",
       mappingsTable: "mapping_statement",
+      deprecatedNodesTable: "deprecated_node",
+      ontologyStatusTable: "ontology_status_statement",
       termsTable: "semantic_terms",
     });
 
-    const terms = await conn.all<{ id: string; label: string; synonyms_json: string }>(
-      "SELECT id, label, to_json(synonyms)::VARCHAR AS synonyms_json FROM semantic_terms WHERE id = 'MONDO:0004979'",
+    assert.deepEqual(await conn.all<{ subject: string; value: string }>("SELECT subject, value FROM has_text_definition_statement"), [
+      { subject: "MONDO:0004979", value: "A chronic respiratory disorder." },
+    ]);
+    assert.deepEqual(await conn.all<{ subject: string; object: string }>("SELECT subject, object FROM mapping_statement"), [
+      { subject: "MONDO:0004979", object: "UMLS:C0004096" },
+    ]);
+    assert.deepEqual(await conn.all<{ subject: string; object: string }>("SELECT subject, object FROM rdf_type_statement"), [
+      { subject: "MONDO:0004766", object: "owl:Class" },
+    ]);
+    assert.deepEqual(await conn.all<{ subject: string; object: string }>("SELECT subject, object FROM rdfs_subproperty_of_statement"), [
+      { subject: "RO:0002202", object: "RO:0000052" },
+    ]);
+    assert.deepEqual(await conn.all<{ subject: string; object: string }>("SELECT subject, object FROM rdfs_domain_statement"), [
+      { subject: "RO:0002202", object: "MONDO:0000001" },
+    ]);
+    assert.deepEqual(await conn.all<{ subject: string; object: string }>("SELECT subject, object FROM rdfs_range_statement"), [
+      { subject: "RO:0002202", object: "MONDO:0000002" },
+    ]);
+    assert.deepEqual(await conn.all<{ id: string }>("SELECT id FROM deprecated_node"), [{ id: "MONDO:0004784" }]);
+
+    const terms = await conn.all<{ id: string; label: string; definition: string; deprecated: boolean; synonyms_json: string }>(
+      "SELECT id, label, definition, deprecated, to_json(synonyms)::VARCHAR AS synonyms_json FROM semantic_terms WHERE id = 'MONDO:0004979'",
     );
     assert.equal(terms[0]!.label, "asthma");
+    assert.equal(terms[0]!.definition, "A chronic respiratory disorder.");
+    assert.equal(terms[0]!.deprecated, false);
     assert.deepEqual(JSON.parse(terms[0]!.synonyms_json), ["bronchial asthma"]);
 
     const sourceSpecProfile: GraphProjectionProfile = {
@@ -63,7 +103,7 @@ describe("graph projection profile: source relation -> compiled graph", () => {
     };
 
     const out = await materializeGraphProjectionProfile(conn, sourceSpecProfile);
-    assert.deepEqual(out, { edgesTable: "semantic_bio_edges", edgeCount: 2, closureTable: "semantic_entailed_edge", closureCount: 3 });
+    assert.deepEqual(out, { edgesTable: "semantic_bio_edges", edgeCount: 3, closureTable: "semantic_entailed_edge", closureCount: 3 });
     const ancestors = await conn.all<{ to_id: string }>(
       "SELECT to_id FROM semantic_entailed_edge WHERE from_id = 'MONDO:0004766' ORDER BY to_id",
     );
@@ -76,20 +116,24 @@ describe("graph projection profile: source relation -> compiled graph", () => {
     await conn.run("CREATE TABLE prefix(prefix TEXT, base TEXT)");
     await conn.run("INSERT INTO prefix VALUES ('OBO','http://purl.obolibrary.org/obo/')");
     await conn.run("INSERT INTO prefix VALUES ('MONDO','http://purl.obolibrary.org/obo/MONDO_')");
+    await conn.run("INSERT INTO prefix VALUES ('IAO','http://purl.obolibrary.org/obo/IAO_')");
+    await conn.run("INSERT INTO prefix VALUES ('owl','http://www.w3.org/2002/07/owl#')");
     await conn.run("INSERT INTO prefix VALUES ('rdfs','http://www.w3.org/2000/01/rdf-schema#')");
     await conn.run("INSERT INTO prefix VALUES ('oio','http://www.geneontology.org/formats/oboInOwl#')");
     await conn.run("INSERT INTO prefix VALUES ('EMPTY','')");
     await conn.run("INSERT INTO prefix VALUES (NULL,'http://purl.obolibrary.org/obo/HP_')");
     await conn.run("INSERT INTO prefix VALUES ('BAD',NULL)");
     await conn.run("INSERT INTO statements VALUES ('http://purl.obolibrary.org/obo/MONDO_0004979','http://www.w3.org/2000/01/rdf-schema#label',NULL,'asthma',NULL,'en')");
+    await conn.run("INSERT INTO statements VALUES ('http://purl.obolibrary.org/obo/MONDO_0004979','http://purl.obolibrary.org/obo/IAO_0000115',NULL,'A chronic respiratory disorder.',NULL,'en')");
     await conn.run("INSERT INTO statements VALUES ('http://purl.obolibrary.org/obo/MONDO_0004979','http://www.geneontology.org/formats/oboInOwl#hasExactSynonym',NULL,'bronchial asthma',NULL,'en')");
+    await conn.run("INSERT INTO statements VALUES ('http://purl.obolibrary.org/obo/MONDO_0004979','http://www.w3.org/2002/07/owl#deprecated',NULL,'true',NULL,NULL)");
     await conn.run("INSERT INTO statements VALUES ('http://purl.obolibrary.org/obo/MONDO_0004784','http://www.w3.org/2000/01/rdf-schema#subClassOf','http://purl.obolibrary.org/obo/MONDO_0004979',NULL,NULL,NULL)");
     await conn.run("INSERT INTO statements VALUES ('http://purl.obolibrary.org/obo/MONDO_0004766','http://www.w3.org/2000/01/rdf-schema#subClassOf','http://purl.obolibrary.org/obo/MONDO_0004784',NULL,NULL,NULL)");
 
     await materializeSemanticSqlSourceViews(conn, {
       schema: SEMANTIC_SQL_SOURCE_SPEC_SCHEMA,
       prefixTable: "prefix",
-      targets: { edgeTable: "iri_edge", labelsTable: "iri_label", synonymsTable: "iri_synonym", termsTable: "iri_terms" },
+      targets: { edgeTable: "iri_edge", labelsTable: "iri_label", definitionsTable: "iri_definition", synonymsTable: "iri_synonym", termsTable: "iri_terms" },
     });
 
     assert.deepEqual(await conn.all<{ subject: string; predicate: string; object: string }>(
@@ -101,9 +145,18 @@ describe("graph projection profile: source relation -> compiled graph", () => {
     assert.deepEqual(await conn.all<{ subject: string; value: string }>("SELECT subject, value FROM iri_label"), [
       { subject: "MONDO:0004979", value: "asthma" },
     ]);
+    assert.deepEqual(await conn.all<{ subject: string; value: string }>("SELECT subject, value FROM iri_definition"), [
+      { subject: "MONDO:0004979", value: "A chronic respiratory disorder." },
+    ]);
     assert.deepEqual(await conn.all<{ subject: string; value: string }>("SELECT subject, value FROM iri_synonym"), [
       { subject: "MONDO:0004979", value: "bronchial asthma" },
     ]);
+    assert.deepEqual(
+      await conn.all<{ id: string; definition: string; deprecated: boolean }>(
+        "SELECT id, definition, deprecated FROM iri_terms WHERE id = 'MONDO:0004979'",
+      ),
+      [{ id: "MONDO:0004979", definition: "A chronic respiratory disorder.", deprecated: true }],
+    );
 
     const out = await materializeGraphProjectionProfile(conn, {
       schema: "pi-bio.graph_projection_profile.v1",

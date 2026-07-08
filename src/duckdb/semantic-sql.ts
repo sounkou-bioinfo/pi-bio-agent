@@ -4,14 +4,26 @@ export const SEMANTIC_SQL_SOURCE_SPEC_SCHEMA = "pi-bio.semantic_sql_source_spec.
 
 export interface SemanticSqlSourceViewTargets {
   edgeTable?: string;
+  nodeToNodeTable?: string;
+  nodeToValueTable?: string;
+  rdfTypeTable?: string;
+  rdfsSubclassOfTable?: string;
+  rdfsSubclassOfNamedTable?: string;
+  rdfsSubpropertyOfTable?: string;
+  rdfsDomainTable?: string;
+  rdfsRangeTable?: string;
   labelsTable?: string;
+  definitionsTable?: string;
   synonymsTable?: string;
   mappingsTable?: string;
+  deprecatedNodesTable?: string;
+  ontologyStatusTable?: string;
   termsTable?: string;
 }
 
 export interface SemanticSqlSourcePredicates {
   labels?: string[];
+  definitions?: string[];
   synonyms?: string[];
   mappings?: string[];
 }
@@ -27,13 +39,25 @@ export interface SemanticSqlSourceSpec {
 
 export interface MaterializedSemanticSqlViews {
   edgeTable: string;
+  nodeToNodeTable: string;
+  nodeToValueTable: string;
+  rdfTypeTable: string;
+  rdfsSubclassOfTable: string;
+  rdfsSubclassOfNamedTable: string;
+  rdfsSubpropertyOfTable: string;
+  rdfsDomainTable: string;
+  rdfsRangeTable: string;
   labelsTable: string;
+  definitionsTable: string;
   synonymsTable: string;
   mappingsTable: string;
+  deprecatedNodesTable: string;
+  ontologyStatusTable: string;
   termsTable: string;
 }
 
 const DEFAULT_LABEL_PREDICATES = ["rdfs:label"];
+const DEFAULT_DEFINITION_PREDICATES = ["IAO:0000115"];
 const DEFAULT_SYNONYM_PREDICATES = [
   "oio:hasExactSynonym",
   "oio:hasRelatedSynonym",
@@ -41,10 +65,16 @@ const DEFAULT_SYNONYM_PREDICATES = [
   "oio:hasNarrowSynonym",
 ];
 const DEFAULT_MAPPING_PREDICATES = [
+  "skos:hasExactMatch",
+  "skos:hasBroadMatch",
+  "skos:hasNarrowMatch",
+  "skos:hasRelatedMatch",
   "skos:exactMatch",
   "skos:closeMatch",
+  "oio:hasDbXref",
   "oboInOwl:hasDbXref",
 ];
+const ONTOLOGY_STATUS_PREDICATES = ["<http://obofoundry.github.io/vocabulary/activity_status>", "pav:status"];
 
 function qident(id: string): string {
   const parts = id.split(".");
@@ -91,9 +121,20 @@ function valueExpr(prefixTable: string | undefined): string {
 function targets(spec: SemanticSqlSourceSpec): Required<SemanticSqlSourceViewTargets> {
   return {
     edgeTable: spec.targets?.edgeTable ?? "edge",
+    nodeToNodeTable: spec.targets?.nodeToNodeTable ?? "node_to_node_statement",
+    nodeToValueTable: spec.targets?.nodeToValueTable ?? "node_to_value_statement",
+    rdfTypeTable: spec.targets?.rdfTypeTable ?? "rdf_type_statement",
+    rdfsSubclassOfTable: spec.targets?.rdfsSubclassOfTable ?? "rdfs_subclass_of_statement",
+    rdfsSubclassOfNamedTable: spec.targets?.rdfsSubclassOfNamedTable ?? "rdfs_subclass_of_named_statement",
+    rdfsSubpropertyOfTable: spec.targets?.rdfsSubpropertyOfTable ?? "rdfs_subproperty_of_statement",
+    rdfsDomainTable: spec.targets?.rdfsDomainTable ?? "rdfs_domain_statement",
+    rdfsRangeTable: spec.targets?.rdfsRangeTable ?? "rdfs_range_statement",
     labelsTable: spec.targets?.labelsTable ?? "rdfs_label_statement",
+    definitionsTable: spec.targets?.definitionsTable ?? "has_text_definition_statement",
     synonymsTable: spec.targets?.synonymsTable ?? "synonym_statement",
     mappingsTable: spec.targets?.mappingsTable ?? "mapping_statement",
+    deprecatedNodesTable: spec.targets?.deprecatedNodesTable ?? "deprecated_node",
+    ontologyStatusTable: spec.targets?.ontologyStatusTable ?? "ontology_status_statement",
     termsTable: spec.targets?.termsTable ?? "ontology_terms",
   };
 }
@@ -104,32 +145,74 @@ export function semanticSqlSourceViewSql(spec: SemanticSqlSourceSpec): string[] 
   const prefixTable = spec.prefixTable;
   const t = targets(spec);
   const labels = stringList(spec.predicates?.labels, DEFAULT_LABEL_PREDICATES);
+  const definitions = stringList(spec.predicates?.definitions, DEFAULT_DEFINITION_PREDICATES);
   const synonyms = stringList(spec.predicates?.synonyms, DEFAULT_SYNONYM_PREDICATES);
   const mappings = stringList(spec.predicates?.mappings, DEFAULT_MAPPING_PREDICATES);
   const labelPredicateSql = inList(labels);
+  const definitionPredicateSql = inList(definitions);
   const synonymPredicateSql = inList(synonyms);
   const mappingPredicateSql = inList(mappings);
+  const ontologyStatusPredicateSql = inList(ONTOLOGY_STATUS_PREDICATES);
   const subject = canonicalIdExpr("subject", prefixTable);
   const predicate = canonicalIdExpr("predicate", prefixTable);
   const object = canonicalIdExpr("object", prefixTable);
   const value = valueExpr(prefixTable);
+  const statementColumns = `SELECT ${subject} AS subject, ${predicate} AS predicate, ${object} AS object, CAST(${qident("value")} AS VARCHAR) AS value,
+       CAST(${qident("datatype")} AS VARCHAR) AS datatype, CAST(${qident("language")} AS VARCHAR) AS language
+FROM ${statements}`;
+  const valueStatementColumns = `SELECT ${subject} AS subject, ${predicate} AS predicate, ${object} AS object, ${value} AS value,
+       CAST(${qident("datatype")} AS VARCHAR) AS datatype, CAST(${qident("language")} AS VARCHAR) AS language
+FROM ${statements}`;
 
   return [
     `CREATE OR REPLACE VIEW ${qident(t.edgeTable)} AS
 SELECT ${subject} AS subject, ${predicate} AS predicate, ${object} AS object
 FROM ${statements}
-WHERE subject IS NOT NULL AND predicate IS NOT NULL AND object IS NOT NULL`,
+WHERE subject IS NOT NULL AND predicate IS NOT NULL AND object IS NOT NULL
+  AND ((${predicate} = 'rdfs:subClassOf' AND ${object} NOT LIKE '_:%') OR ${predicate} = 'rdfs:subPropertyOf')`,
+
+    `CREATE OR REPLACE VIEW ${qident(t.nodeToNodeTable)} AS
+${statementColumns}
+WHERE object IS NOT NULL`,
+
+    `CREATE OR REPLACE VIEW ${qident(t.nodeToValueTable)} AS
+${statementColumns}
+WHERE value IS NOT NULL`,
+
+    `CREATE OR REPLACE VIEW ${qident(t.rdfTypeTable)} AS
+${statementColumns}
+WHERE ${predicate} = 'rdf:type'`,
+
+    `CREATE OR REPLACE VIEW ${qident(t.rdfsSubclassOfTable)} AS
+${statementColumns}
+WHERE ${predicate} = 'rdfs:subClassOf'`,
+
+    `CREATE OR REPLACE VIEW ${qident(t.rdfsSubclassOfNamedTable)} AS
+SELECT * FROM ${qident(t.rdfsSubclassOfTable)}
+WHERE object NOT LIKE '_:%'`,
+
+    `CREATE OR REPLACE VIEW ${qident(t.rdfsSubpropertyOfTable)} AS
+${statementColumns}
+WHERE ${predicate} = 'rdfs:subPropertyOf'`,
+
+    `CREATE OR REPLACE VIEW ${qident(t.rdfsDomainTable)} AS
+${statementColumns}
+WHERE ${predicate} = 'rdfs:domain'`,
+
+    `CREATE OR REPLACE VIEW ${qident(t.rdfsRangeTable)} AS
+${statementColumns}
+WHERE ${predicate} = 'rdfs:range'`,
 
     `CREATE OR REPLACE VIEW ${qident(t.labelsTable)} AS
-SELECT ${subject} AS subject, ${predicate} AS predicate, ${value} AS value,
-       CAST(${qident("datatype")} AS VARCHAR) AS datatype, CAST(${qident("language")} AS VARCHAR) AS language
-FROM ${statements}
+${valueStatementColumns}
 WHERE subject IS NOT NULL AND ${predicate} IN (${labelPredicateSql}) AND coalesce(value, object) IS NOT NULL`,
 
+    `CREATE OR REPLACE VIEW ${qident(t.definitionsTable)} AS
+${valueStatementColumns}
+WHERE subject IS NOT NULL AND ${predicate} IN (${definitionPredicateSql}) AND coalesce(value, object) IS NOT NULL`,
+
     `CREATE OR REPLACE VIEW ${qident(t.synonymsTable)} AS
-SELECT ${subject} AS subject, ${predicate} AS predicate, ${value} AS value,
-       CAST(${qident("datatype")} AS VARCHAR) AS datatype, CAST(${qident("language")} AS VARCHAR) AS language
-FROM ${statements}
+${valueStatementColumns}
 WHERE subject IS NOT NULL AND ${predicate} IN (${synonymPredicateSql}) AND coalesce(value, object) IS NOT NULL`,
 
     `CREATE OR REPLACE VIEW ${qident(t.mappingsTable)} AS
@@ -137,12 +220,23 @@ SELECT ${subject} AS subject, ${predicate} AS predicate, ${object} AS object
 FROM ${statements}
 WHERE subject IS NOT NULL AND ${predicate} IN (${mappingPredicateSql}) AND object IS NOT NULL`,
 
+    `CREATE OR REPLACE VIEW ${qident(t.deprecatedNodesTable)} AS
+SELECT DISTINCT ${subject} AS id
+FROM ${statements}
+WHERE subject IS NOT NULL AND ${predicate} = 'owl:deprecated' AND lower(${value}) = 'true'`,
+
+    `CREATE OR REPLACE VIEW ${qident(t.ontologyStatusTable)} AS
+${valueStatementColumns}
+WHERE subject IS NOT NULL AND ${predicate} IN (${ontologyStatusPredicateSql}) AND coalesce(value, object) IS NOT NULL`,
+
     `CREATE OR REPLACE VIEW ${qident(t.termsTable)} AS
 SELECT
   ${subject} AS id,
   min(CASE WHEN ${predicate} IN (${labelPredicateSql}) THEN ${value} ELSE NULL END) AS label,
+  min(CASE WHEN ${predicate} IN (${definitionPredicateSql}) THEN ${value} ELSE NULL END) AS definition,
   list(DISTINCT CASE WHEN ${predicate} IN (${synonymPredicateSql}) THEN ${value} ELSE NULL END)
-    FILTER (WHERE ${predicate} IN (${synonymPredicateSql}) AND coalesce(value, object) IS NOT NULL) AS synonyms
+    FILTER (WHERE ${predicate} IN (${synonymPredicateSql}) AND coalesce(value, object) IS NOT NULL) AS synonyms,
+  max(CASE WHEN ${predicate} = 'owl:deprecated' AND lower(${value}) = 'true' THEN 1 ELSE 0 END) > 0 AS deprecated
 FROM ${statements}
 WHERE subject IS NOT NULL
 GROUP BY ${subject}`,
@@ -154,9 +248,20 @@ export async function materializeSemanticSqlSourceViews(conn: SqlConn, spec: Sem
   const t = targets(spec);
   return {
     edgeTable: t.edgeTable,
+    nodeToNodeTable: t.nodeToNodeTable,
+    nodeToValueTable: t.nodeToValueTable,
+    rdfTypeTable: t.rdfTypeTable,
+    rdfsSubclassOfTable: t.rdfsSubclassOfTable,
+    rdfsSubclassOfNamedTable: t.rdfsSubclassOfNamedTable,
+    rdfsSubpropertyOfTable: t.rdfsSubpropertyOfTable,
+    rdfsDomainTable: t.rdfsDomainTable,
+    rdfsRangeTable: t.rdfsRangeTable,
     labelsTable: t.labelsTable,
+    definitionsTable: t.definitionsTable,
     synonymsTable: t.synonymsTable,
     mappingsTable: t.mappingsTable,
+    deprecatedNodesTable: t.deprecatedNodesTable,
+    ontologyStatusTable: t.ontologyStatusTable,
     termsTable: t.termsTable,
   };
 }
