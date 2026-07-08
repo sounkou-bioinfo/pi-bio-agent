@@ -507,6 +507,9 @@ projection profile can then project those associations into `bio_edges`; source-
 `evidence_type`, `publication`, and `source` stay on the association view and do not become generic graph trust
 policy. If the caller points at an already-canonical `term_association` table as both source and target, the helper
 leaves it untouched; prefix canonicalization in that aliasing shape fails closed.
+For multi-ontology staging, `targetSchema` prefixes every generated default target view that the caller did not name
+explicitly. This lets separate SemanticSQL source artifacts materialize into schemas such as `mondo.edge` and
+`hp.edge`, then join across them with ordinary DuckDB SQL.
 The generated `edge` view then uses the same graph projection profile and closure path as KGX, memory, and
 observation graphs. This is compatibility with the SemanticSQL source-spec ecosystem, useful for RDF/OWL,
 Semantic-Web, FHIR-shaped, and ontology-derived data; it is not a hidden OWL reasoner.

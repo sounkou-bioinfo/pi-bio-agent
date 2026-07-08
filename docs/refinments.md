@@ -723,10 +723,11 @@ JOIN, not a walker. See [`design.md`](./design.md#the-semanticsql-shape-source-s
     SemanticSQL `term_association` source table is supplied under a distinct target name, the helper exposes the
     canonical association columns and the existing graph projection profile maps them into `bio_edges`. Generated
     `edge_with_metadata` projects matching OWL axiom annotations, evidence xrefs, and OBO problem rows into
-    graph-ready `attrs`/`trust`. This gives Semantic Web, ontology-derived, and FHIR-shaped RDF data a SemanticSQL
-    inspection surface without a source-specific adapter. We still do not parse the full upstream LinkML source to
-    generate every DDL/view; parity expands only when a concrete grounding or traversal consumer needs more of the
-    source spec.
+    graph-ready `attrs`/`trust`. `targetSchema` scopes generated default views so multiple staged ontologies can
+    coexist as separate DuckDB schemas and be joined directly. This gives Semantic Web, ontology-derived, and
+    FHIR-shaped RDF data a SemanticSQL inspection surface without a source-specific adapter. We still do not parse
+    the full upstream LinkML source to generate every DDL/view; parity expands only when a concrete grounding or
+    traversal consumer needs more of the source spec.
   - **Prefix canonicalization is present, not a traversal primitive.** Here `prefix(prefix, base)` means namespace
     expansion/canonicalization (`HP` -> an HPO base IRI, `biolink` -> a Biolink base IRI), not run-id prefixes,
     observation-key prefixes, or graph walk policy. Remaining identifier hygiene is receipts and multi-database
@@ -756,11 +757,10 @@ JOIN, not a walker. See [`design.md`](./design.md#the-semanticsql-shape-source-s
     `edge_with_metadata` packages matching axiom annotations, evidence xrefs, and source problems into `attrs` and
     `trust` so graph profiles can preserve them. The remaining work is consumer-pulled weighting/reconciliation or
     receipts for graph edges that need evidence-aware traversal.
-  - **Real foreign KG projection is dogfooded; multi-ontology attachment is not.** The Monarch KGX download path
+  - **Real foreign KG projection and multi-ontology staging are dogfooded.** The Monarch KGX download path
     (`examples/monarch-kg-http`, `test/monarch-kg-http-example.test.ts`) stages an HTTP TSV into the canonical edge
-    view and projects it into `bio_edges`. SemanticSQL's SQLite pattern also supports attached databases and
-    cross-ontology joins; the DuckDB equivalent over multiple attached/staged ontology artifacts remains source-spec
-    parity work.
+    view and projects it into `bio_edges`. The `targetSchema` graph-projection test materializes multiple
+    SemanticSQL source artifacts into separate DuckDB schemas and joins their generated `edge` views.
 - Next: keep source-spec parity consumer-pulled but active. A thin ontology-ingest resolver can stage the
   SemanticSQL source-spec shape in DuckDB and project its generated `edge` view into our `bio_edges` shape.
   No DuckDB sqlite extension is required: ingest from a native-readable format such as OBO Graphs JSON via

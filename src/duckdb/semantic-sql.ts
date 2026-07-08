@@ -127,6 +127,8 @@ export interface SemanticSqlSourceSpec {
   termAssociationSourceTable?: string;
   /** Optional SemanticSQL NLP `textual_transformation(subject, predicate, value)` table. Enables processed text views. */
   textualTransformationTable?: string;
+  /** Optional DuckDB schema for generated target views not explicitly named in `targets`. Useful for multi-ontology staging. */
+  targetSchema?: string;
   targets?: SemanticSqlSourceViewTargets;
   predicates?: SemanticSqlSourcePredicates;
 }
@@ -317,6 +319,16 @@ function sameDefaultSchemaRelation(a: string, b: string): boolean {
   return defaultSchemaRelationKey(a) === defaultSchemaRelationKey(b);
 }
 
+function applyTargetSchema(spec: SemanticSqlSourceSpec, out: Required<SemanticSqlSourceViewTargets>): Required<SemanticSqlSourceViewTargets> {
+  if (!spec.targetSchema) return out;
+  const explicitTargets = spec.targets as Record<string, string | undefined> | undefined;
+  const scoped = { ...out } as Record<string, string>;
+  for (const key of Object.keys(scoped)) {
+    if (explicitTargets?.[key] === undefined) scoped[key] = `${spec.targetSchema}.${scoped[key]}`;
+  }
+  return scoped as unknown as Required<SemanticSqlSourceViewTargets>;
+}
+
 function termAssociationSql(spec: SemanticSqlSourceSpec, target: string): string[] {
   if (!spec.termAssociationSourceTable || sameDefaultSchemaRelation(spec.termAssociationSourceTable, target)) return [];
   return [`CREATE OR REPLACE VIEW ${qident(target)} AS
@@ -344,7 +356,7 @@ FROM ${qident(spec.termAssociationSourceTable)} AS ${qident("ta")}`];
 }
 
 function targets(spec: SemanticSqlSourceSpec): Required<SemanticSqlSourceViewTargets> {
-  return {
+  const out: Required<SemanticSqlSourceViewTargets> = {
     edgeTable: spec.targets?.edgeTable ?? "edge",
     nodeToNodeTable: spec.targets?.nodeToNodeTable ?? "node_to_node_statement",
     nodeToValueTable: spec.targets?.nodeToValueTable ?? "node_to_value_statement",
@@ -448,6 +460,7 @@ function targets(spec: SemanticSqlSourceSpec): Required<SemanticSqlSourceViewTar
     chargeStatementTable: spec.targets?.chargeStatementTable ?? "charge_statement",
     termsTable: spec.targets?.termsTable ?? "ontology_terms",
   };
+  return applyTargetSchema(spec, out);
 }
 
 export function semanticSqlSourceViewSql(spec: SemanticSqlSourceSpec): string[] {

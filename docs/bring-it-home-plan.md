@@ -146,9 +146,10 @@ consumer-pulled, or a non-goal.
    in-taxon, are generated over it. `edge_with_metadata` packages edge-level axiom annotations, evidence xrefs, and
    source problem counts into graph-ready `attrs`/`trust` JSON; when a staged `term_association` source table is
    declared under a distinct target name, its canonical columns can be projected into `bio_edges` through the same
-   graph profile shape. Remaining parity is
-   relation-graph-specific equivalence/reflexivity/property-hierarchy policy, multi-ontology attachment, and
-   source-specific trust weighting/reconciliation. Declared upstream `entailed_edge` artifacts now enter through the
+   graph profile shape. `targetSchema` now dogfoods multi-ontology staging by materializing generated views into
+   separate DuckDB schemas for cross-ontology joins. Remaining parity is relation-graph-specific
+   equivalence/reflexivity/property-hierarchy policy and source-specific trust weighting/reconciliation. Declared
+   upstream `entailed_edge` artifacts now enter through the
    same graph projection profile when a resolver/host stages and receipts them.
 6. **Docs hygiene.** Keep README and guides action-first: real commands, real code chunks, no fake text-block
    architecture diagrams, no speculative hostfs claims, and no stale "process transport" lane. Claims should point

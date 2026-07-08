@@ -475,6 +475,38 @@ describe("graph projection profile: source relation -> compiled graph", () => {
     assert.deepEqual(out, { edgesTable: "iri_bio_edges", edgeCount: 2, closureTable: "iri_entailed_edge", closureCount: 3 });
   });
 
+  test("materializes multiple SemanticSQL sources into separate DuckDB schemas for cross-ontology joins", async () => {
+    const conn = duckdbNodeConn(await (await DuckDBInstance.create(":memory:")).connect());
+    await conn.run("CREATE SCHEMA mondo");
+    await conn.run("CREATE SCHEMA hp");
+    await conn.run("CREATE SCHEMA shared");
+    await conn.run("CREATE TABLE mondo.statements(subject TEXT, predicate TEXT, object TEXT, value TEXT, datatype TEXT, language TEXT)");
+    await conn.run("CREATE TABLE hp.statements(subject TEXT, predicate TEXT, object TEXT, value TEXT, datatype TEXT, language TEXT)");
+    await conn.run("INSERT INTO mondo.statements VALUES ('MONDO:0001','rdfs:subClassOf','HP:0001',NULL,NULL,NULL)");
+    await conn.run("INSERT INTO hp.statements VALUES ('HP:0001','rdfs:subClassOf','HP:0000',NULL,NULL,NULL)");
+
+    const mondo = await materializeSemanticSqlSourceViews(conn, {
+      schema: SEMANTIC_SQL_SOURCE_SPEC_SCHEMA,
+      statementsTable: "mondo.statements",
+      targetSchema: "mondo",
+      targets: { edgeTable: "shared.mondo_edge" },
+    });
+    const hp = await materializeSemanticSqlSourceViews(conn, {
+      schema: SEMANTIC_SQL_SOURCE_SPEC_SCHEMA,
+      statementsTable: "hp.statements",
+      targetSchema: "hp",
+    });
+
+    assert.equal(mondo.edgeTable, "shared.mondo_edge");
+    assert.equal(mondo.labelsTable, "mondo.rdfs_label_statement");
+    assert.equal(hp.edgeTable, "hp.edge");
+    assert.deepEqual(await conn.all<{ disease_id: string; phenotype_parent: string }>(
+      `SELECT m.subject AS disease_id, h.object AS phenotype_parent
+       FROM shared.mondo_edge m
+       JOIN hp.edge h ON h.subject = m.object`,
+    ), [{ disease_id: "MONDO:0001", phenotype_parent: "HP:0000" }]);
+  });
+
   test("SemanticSQL source-spec view generation fails closed on invalid predicate lists", () => {
     assert.throws(
       () => semanticSqlSourceViewSql({ schema: SEMANTIC_SQL_SOURCE_SPEC_SCHEMA, predicates: { labels: [] } }),
@@ -505,6 +537,15 @@ describe("graph projection profile: source relation -> compiled graph", () => {
         schema: SEMANTIC_SQL_SOURCE_SPEC_SCHEMA,
         prefixTable: "prefix",
         termAssociationSourceTable: "\"term_association\"",
+      }),
+      /termAssociationSourceTable matches the termAssociationTable target/,
+    );
+    assert.throws(
+      () => semanticSqlSourceViewSql({
+        schema: SEMANTIC_SQL_SOURCE_SPEC_SCHEMA,
+        prefixTable: "mondo.prefix",
+        targetSchema: "mondo",
+        termAssociationSourceTable: "mondo.term_association",
       }),
       /termAssociationSourceTable matches the termAssociationTable target/,
     );

@@ -45,7 +45,8 @@ canonicalization through a staged
 SemanticSQL NLP inspection layer: `processed_statement`, and with a prefix table, `subject_prefix` plus `match`.
 An optional staged `term_association(id, subject, predicate, object, evidence_type, publication, source)` source
 table can be exposed as a canonical association view, then projected into `bio_edges` with the same graph profile
-shape.
+shape. `targetSchema` scopes generated default views for multi-ontology staging, so separate source artifacts can
+materialize side by side and be joined as ordinary DuckDB relations.
 The generated `edge_with_metadata` view adds graph-ready `attrs`/`trust` JSON to generated edges from matching OWL
 axiom annotations, evidence xrefs, and OBO problem rows.
 When a source ships a precomputed SemanticSQL/relation-graph `entailed_edge`, `materializeGraphProjectionProfile`
