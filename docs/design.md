@@ -657,13 +657,14 @@ matters: it is not ready for the read/round-trip contract because the current No
 expressions but does not materialize raw `VARIANT` values into JavaScript cleanly. The export/corpus lane is different:
 `VARIANT` Parquet works now and can shred regular payload fields into typed columns. The built corpus path is
 therefore a derived, digest-first export: `materializeTrainingCorpus` projects sessions, turns, tool trajectories,
-runs, artifacts, host events, and approval/judgment facts into fixed temporary tables, and
+runs, artifacts, host events, host-event links, and approval/judgment facts into fixed temporary tables, and
 `exportTrainingCorpusParquet` writes those tables as Parquet with row/file-digest receipts. It does not inline private
-message text, tool payloads, or raw host-event payloads; it exports content digests, CAS URIs, replay/receipt/result
-digests, event/payload digests, and graph links. A future consumer can choose a
-partitioned `VARIANT`-shredded Parquet layout for nested payload columns, but the live ledger should stay JSON until
-client bindings, redaction helpers, as-of projections, and CAS-root scans can handle typed payloads without casts or
-hidden text assumptions.
+message text, tool payloads, raw host-event payloads, or raw host-event link attrs; it exports content digests, CAS
+URIs, replay/receipt/result digests, event/payload digests, event-link targets, and graph links. Exact
+`host_event_links` rows require links stamped by `recordHostEvent` with the host-event statement/observation id; older
+unstamped links remain ordinary graph edges. A future consumer can choose a partitioned `VARIANT`-shredded Parquet
+layout for nested payload columns, but the live ledger should stay JSON until client bindings, redaction helpers,
+as-of projections, and CAS-root scans can handle typed payloads without casts or hidden text assumptions.
 
 A session line, message, tool call, compaction, image, plot, report, or review label is an observation under a stable
 namespace such as `session:`, `turn:`, `msg:`, `toolcall:`, `cas:`, and `run:`. Edges such as `has_message`,

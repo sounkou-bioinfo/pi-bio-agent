@@ -47,8 +47,10 @@ These items are no longer open substrate work in `pi-bio-agent`.
   [python-workflow-dogfood.test.ts](../test/python-workflow-dogfood.test.ts),
   [absurd-queue-push-dogfood.test.ts](../test/absurd-queue-push-dogfood.test.ts).
 - **Host-event receipts are open host facts.** `recordHostEvent` records one `host_event` fact plus optional ordinary
-  links. `kind` is host-owned data, not a core enum. Evidence: [host-events.ts](../src/hosts/host-events.ts),
-  [host-events.test.ts](../test/host-events.test.ts), [training-corpus.ts](../src/hosts/training-corpus.ts).
+  links stamped with the host-event statement/observation id. `kind` is host-owned data, not a core enum. The
+  training corpus exports both digest-only event rows and redacted event-link rows. Evidence:
+  [host-events.ts](../src/hosts/host-events.ts), [host-events.test.ts](../test/host-events.test.ts),
+  [training-corpus.ts](../src/hosts/training-corpus.ts).
 - **Compute environments are declared and observed as receipts.** `compute.run` can record declared-vs-observed
   `EnvDescriptor` evidence; `withObservedEnvironment` attaches host-known runtime/package state to any runner.
   Evidence: [compute-run.ts](../src/duckdb/resolvers/compute-run.ts),
@@ -79,7 +81,9 @@ These items are no longer open substrate work in `pi-bio-agent`.
   taxon-constraint views. Evidence: [semantic-sql.ts](../src/duckdb/semantic-sql.ts),
   [graph-projection.test.ts](../test/graph-projection.test.ts), [design.md](design.md#the-semanticsql-shape-source-spec---local-graph-tables).
 - **Training corpus export is a derived projection.** The core exports digest-only session/tool/run/artifact/event
-  tables and Parquet receipts from the ledger. Redaction policy and labels are application-owned. Evidence:
+  tables, host-event link rows, and Parquet receipts from the ledger under the `pi-bio.training_corpus.v2` receipt
+  contract. Redaction policy and labels are
+  application-owned. Evidence:
   [training-corpus.ts](../src/hosts/training-corpus.ts), [training-corpus.test.ts](../test/training-corpus.test.ts).
 - **SDK surface is externally checked.** Root, `/core`, `/duckdb`, and `/hosts` exports cover the host-facing types
   and helpers used by a packed downstream consumer; a runnable host-embedding dogfood imports from `pi-bio-agent`
@@ -137,8 +141,11 @@ consumer-pulled, or a non-goal.
    ingested; the payload includes the raw-session digest and small lifecycle fields (`event_type`, `reason`, and
    `parent_session_id`) so corpus consumers can distinguish runtime lifecycle/fork intent from transcript content.
    The bring-it-home dogfood also records scheduler-style queue claim, lease-reclaim, and stale-attempt rejection
-   events as open host facts that the training corpus exports. The Pi extension also records `before_agent_start`
-   context receipts as digests/counts only. Remaining work is concrete Pi/workbench hooks for steers, interrupts, and
+   events as open host facts that the training corpus exports. Newly stamped host-event links are now
+   corpus-readable as redacted rows, so a recorded steer/interrupt/governance event can point at the affected
+   turn/run/workflow without exposing private link attrs. Older unstamped links remain ordinary graph edges rather
+   than being guessed into this exact event-link table. The Pi extension also records `before_agent_start` context
+   receipts as digests/counts only. Remaining work is concrete Pi/workbench hooks for steers, interrupts, and
    governance events that a consumer actually reads. Do not add a closed event taxonomy.
 2. **Durable workflow dogfood over the closed lifecycle.** The async lifecycle and checkpoint resume helper are
    built and the bring-it-home dogfood now runs checkpointed bash steps through `nodeComputeRunner`, reuses the
@@ -204,9 +211,9 @@ consumer-pulled, or a non-goal.
 - **`recordHostEvent` primitive.** Built as one open host event fact plus ordinary links. The bring-it-home dogfood
   records both workbench-style input events and scheduler-style queue events without a closed event model. The Pi
   extension records session lifecycle receipts and `before_agent_start` context receipts as digests/counts only, and
-  the corpus projection exposes lifecycle type/reason/parentage without raw payloads. Remaining concrete hooks are
-  consumer-read driven: steers, interrupts, and governance events only when an app or corpus export actually queries
-  them.
+  the corpus projection exposes lifecycle type/reason/parentage plus event-link targets without raw payloads or raw
+  link attrs. Remaining concrete hooks are consumer-read driven: steers, interrupts, and governance events only when
+  an app or corpus export actually queries them.
 - **Foreign graph projection base.** A real external Monarch KGX HTTP path, internal observation-graph projection,
   and generated SemanticSQL `statements` -> `edge` view path exist. Remaining foreign-graph work is consumer
   conformance and adapter pressure, not a new graph primitive.
@@ -216,8 +223,8 @@ consumer-pulled, or a non-goal.
   consumer-pulled.
 - **Base graphics/report artifact evidence.** Figures, reports, and session images are CAS artifacts linked through
   `bio_observations`/`bio_edges_as_of`; renderer-specific report models remain downstream.
-- **Base training-corpus export.** Digest-only ledger/session/tool/run/artifact/event exports exist. Labels and
-  redaction remain consumer-pulled.
+- **Base training-corpus export.** Digest-only ledger/session/tool/run/artifact/event exports and redacted
+  host-event-link exports exist. Labels and redaction remain consumer-pulled.
 - **Base SDK packaging.** Root, `/core`, `/duckdb`, and `/hosts` exports are checked by a packed downstream
   embedding dogfood. Expansion remains consumer-driven.
 - **Substrate skill and non-Pi host dogfood.** The skill is a host-neutral onboarding/playbook surface for agents

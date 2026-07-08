@@ -104,7 +104,15 @@ async function seedCorpusLedger(c: SqlConn, root: string): Promise<{ sessionId: 
     source: "test-host",
     value: { payload_digest: `sha256:${"5".repeat(64)}`, delivery: "mid_turn", private_note: "secret host text" },
     attrs: { channel: "private-ui" },
-    links: [{ predicate: "affects", objectId: `turn:${sessionId}:a1` }],
+    links: [{ predicate: "affects", objectId: `turn:${sessionId}:a1`, attrs: { private_link_note: "secret link text" } }],
+  });
+  await recordObservationLink(c, {
+    subjectId: `session:${sessionId}`,
+    predicate: "legacy_affects",
+    objectId: `turn:${sessionId}:legacy`,
+    recordedAt: T4,
+    source: "legacy-host",
+    attrs: { host_event_kind: "legacy.input.steer", private_link_note: "legacy secret link text" },
   });
   await recordHostEvent(c, {
     subjectId: `session:${sessionId}`,
@@ -141,7 +149,7 @@ describe("training corpus export", () => {
     await c.run(`CREATE TABLE ${TRAINING_CORPUS_TABLES.messages} AS SELECT 'persistent-main-table' AS marker`);
 
     const receipt = await materializeTrainingCorpus(c, { asOf: "2026-07-06T10:00:06.000Z" });
-    assert.equal(receipt.schema, "pi-bio.training_corpus.v1");
+    assert.equal(receipt.schema, "pi-bio.training_corpus.v2");
     assert.equal(receipt.redaction, "digest_only");
     assert.match(receipt.digest, /^sha256:[0-9a-f]{64}$/);
     assert.equal(receipt.tables.sessions.rows, 1);
@@ -152,6 +160,7 @@ describe("training corpus export", () => {
     assert.equal(receipt.tables.artifacts.rows, 3, "the corpus preserves session image refs plus a run-produced artifact");
     assert.ok(receipt.tables.judgments.rows >= 4);
     assert.equal(receipt.tables.hostEvents.rows, 2);
+    assert.equal(receipt.tables.hostEventLinks.rows, 1);
     assert.equal(receipt.tables.units.rows, 1);
 
     const unit = (await c.all<{ session_node: string; tool_calls: number; linked_runs: number; artifacts: number }>(
@@ -217,6 +226,26 @@ describe("training corpus export", () => {
     assert.equal(byKind.get("pi_coding_agent.session_lifecycle")!.reason, "fork");
     assert.equal(byKind.get("pi_coding_agent.session_lifecycle")!.parent_session_id, "parent-corpus");
     assert.equal(byKind.get("pi_coding_agent.session_lifecycle")!.payload_digest, `sha256:${"9".repeat(64)}`);
+
+    const hostEventLinkColumns = await c.all<{ column_name: string }>(`DESCRIBE ${TRAINING_CORPUS_TABLES.hostEventLinks}`);
+    assert.equal(hostEventLinkColumns.some((col) => col.column_name === "attrs"), false, "host-event link attrs are not exported raw");
+    const hostEventLinks = await c.all<Record<string, unknown>>(`SELECT * FROM ${TRAINING_CORPUS_TABLES.hostEventLinks}`);
+    assert.doesNotMatch(JSON.stringify(hostEventLinks), /secret link text|legacy secret link text|legacy.input.steer/);
+    assert.deepEqual(hostEventLinks.map((row) => ({
+      kind: row.kind,
+      subject_id: row.subject_id,
+      predicate: row.predicate,
+      object_id: row.object_id,
+      host_event_statement_key: row.host_event_statement_key,
+    })), [{
+      kind: "workbench.input.steer",
+      subject_id: `session:${sessionId}`,
+      predicate: "affects",
+      object_id: `turn:${sessionId}:a1`,
+      host_event_statement_key: byKind.get("workbench.input.steer")!.statement_key,
+    }]);
+    assert.equal(hostEventLinks[0]!.host_event_digest, byKind.get("workbench.input.steer")!.event_digest);
+    assert.match(String(hostEventLinks[0]!.link_digest), /^sha256:/);
   });
 
   test("exports the derived corpus tables as readable Parquet files", async () => {

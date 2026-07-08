@@ -93,7 +93,12 @@ export async function recordHostEvent(conn: SqlConn, event: HostEventInput): Pro
       recordedAt: event.recordedAt,
       source: event.source,
       digest: link.digest ?? event.digest,
-      attrs: { ...(link.attrs ?? {}), host_event_kind: kind },
+      attrs: {
+        ...(link.attrs ?? {}),
+        host_event_kind: kind,
+        host_event_statement_key: statementKey,
+        host_event_observation_id: observationId,
+      },
       trust: link.trust ?? event.trust,
       statementKey: link.statementKey,
       observationId: link.observationId,

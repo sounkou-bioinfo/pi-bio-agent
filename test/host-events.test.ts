@@ -51,7 +51,10 @@ describe("recordHostEvent", () => {
       ["session:s1", "affects", "turn:s1:a1"],
       ["session:s1", "context_sent_to", "model_call:s1:a1"],
     ]);
-    assert.equal(JSON.parse(edges[0]!.attrs!).host_event_kind, "workbench.input.steer");
+    const attrs = JSON.parse(edges[0]!.attrs!);
+    assert.equal(attrs.host_event_kind, "workbench.input.steer");
+    assert.equal(attrs.host_event_statement_key, out.statementKey);
+    assert.equal(attrs.host_event_observation_id, out.observationId);
   });
 
   test("does not require or recognize a core event taxonomy", async () => {

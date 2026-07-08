@@ -15,6 +15,7 @@ export const TRAINING_CORPUS_TABLES = {
   artifacts: "training_corpus_artifacts",
   judgments: "training_corpus_judgments",
   hostEvents: "training_corpus_host_events",
+  hostEventLinks: "training_corpus_host_event_links",
   units: "training_corpus_units",
 } as const;
 
@@ -33,7 +34,7 @@ export interface TrainingCorpusTableReceipt {
 }
 
 export interface TrainingCorpusReceipt {
-  schema: "pi-bio.training_corpus.v1";
+  schema: "pi-bio.training_corpus.v2";
   asOf: string;
   redaction: "digest_only";
   tables: Record<TrainingCorpusTableName, TrainingCorpusTableReceipt>;
@@ -59,7 +60,7 @@ async function tableCounts(conn: SqlConn, asOf: string, files: Partial<Record<Tr
     tables[name] = { table, rows: Number(rows[0]?.n ?? 0), ...files[name] };
   }
   const stable = {
-    schema: "pi-bio.training_corpus.v1",
+    schema: "pi-bio.training_corpus.v2",
     asOf,
     redaction: "digest_only",
     tables: Object.fromEntries(Object.entries(tables).map(([name, t]) => [name, { table: t.table, rows: t.rows, parquetDigest: t.parquetDigest }])),
@@ -277,6 +278,27 @@ export async function materializeTrainingCorpus(conn: SqlConn, opts: TrainingCor
      FROM training_corpus_latest_observations e
      WHERE e.predicate = 'host_event'
      ORDER BY e.recorded_at::TIMESTAMPTZ, e.subject_id`,
+  );
+
+  await conn.run(
+    // Exact event-link export requires the link attrs stamped by recordHostEvent. Older links that only carried
+    // host_event_kind remain ordinary graph edges; guessing their event row would create ambiguous joins.
+    `CREATE OR REPLACE TEMP TABLE ${TRAINING_CORPUS_TABLES.hostEventLinks} AS
+     SELECT
+       json_extract_string(l.attrs, '$.host_event_statement_key') AS host_event_statement_key,
+       json_extract_string(l.attrs, '$.host_event_observation_id') AS host_event_digest,
+       json_extract_string(l.attrs, '$.host_event_kind') AS kind,
+       l.subject_id,
+       l.predicate,
+       l.object_id,
+       l.observation_id AS link_digest,
+       l.recorded_at,
+       l.source,
+       l.digest
+     FROM training_corpus_latest_observations l
+     WHERE l.predicate != 'host_event'
+       AND json_extract_string(l.attrs, '$.host_event_statement_key') IS NOT NULL
+     ORDER BY l.recorded_at::TIMESTAMPTZ, l.subject_id, l.predicate, l.object_id`,
   );
 
   await conn.run(
