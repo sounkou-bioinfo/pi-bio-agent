@@ -108,11 +108,12 @@ consumer-pulled, or a non-goal.
 
 ### Active / Not Deferred
 
-1. **ducknng/quack sibling upload and shared-data path.** Use the sibling transport that fits the operation:
-   ducknng RPC is the proven mutable-state path; append/share or upload-shaped paths may use quack where that fits.
-   Keep this in the sibling transport/host layer and surface it to core through receipts, `SqlConn`, CAS, and
-   resolver handles. `remoteCacheScope` consistency is required wherever shared remote freshness or shared CAS reuse
-   is exposed.
+1. **ducknng/quack sibling upload and shared-data path.** The direction is now narrower and evidenced, but not closed
+   in the default gate: mutable shared state is the server-backed `SqlConn` path; upload-shaped movement is the
+   sibling ducknng/quack transport path. `test/ducknng-upload-shared-data.test.ts` proves an upload-capable sibling
+   build can stream local SQL rows into a remote table and that a host can record the committed upload through
+   `recordHostEvent` and graph links. It remains active until this conformance runs in a non-skipped sibling/product
+   gate or a downstream host consumes it. Core should not grow a transport-specific upload primitive.
 2. **Concrete host adapters over `recordHostEvent`.** The primitive exists; the open work is the adapter layer:
    the bring-it-home dogfood now records scheduler-style queue claim, lease-reclaim, and stale-attempt rejection
    events as open host facts that the training corpus exports. Remaining work is concrete Pi/workbench hooks for
