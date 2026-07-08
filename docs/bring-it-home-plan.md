@@ -128,7 +128,8 @@ consumer-pulled, or a non-goal.
    substrate: `pi-bio-agent catalog` / `bio_list_sources` now list validated manifest-backed sources/templates before
    a host chooses one to describe or query; the rest of the loop is write or inspect a manifest, discover schemas
    with `DESCRIBE` / `SUMMARIZE`, run bounded SQL, walk the ledger/graph when present, and promote only repeated
-   workflows into thin playbooks.
+   workflows into thin playbooks. The shipped skill now has `check:skills` as a package gate so it remains
+   procedural guidance rather than a hidden API client, secret store, or per-question computation pack.
 5. **SemanticSQL source-spec parity.** This is active consistency work, not optional polish: SemanticSQL reaches into
    RDF/OWL, Semantic Web, FHIR-shaped resources, and related graph ecosystems. The base helper now materializes
    generated SemanticSQL views from a staged `statements` table: RDF/RDFS typed statement views, relation-graph

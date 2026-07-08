@@ -679,7 +679,9 @@ The restricted-runtime contract (build before exposing powerful execution):
 ## Skills and study notes
 
 - Keep skills procedural, not executable or schema-bearing.
-- Add a skill validation check: frontmatter present, description clear, no secrets, no patient-specific facts, no API client implementation pasted into the body.
+- Done: shipped skills have an executable validation gate (`npm run check:skills`,
+  `scripts/validate-skills.mjs`). It checks frontmatter, clear descriptions, reference links, secrets,
+  patient-specific identifiers, executable API-client snippets, and transport-script leakage.
 - Add a promotion flow:
   - source snapshot
   - study note / OKF concept

@@ -65,7 +65,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "rm -rf dist-test && tsc -p tsconfig.test.json && node --test dist-test/test/*.test.js",
-    "check": "npm run typecheck && npm test && npm run check:docs && npm run check:examples && npm run check:readme-tools",
+    "check": "npm run typecheck && npm test && npm run check:docs && npm run check:examples && npm run check:readme-tools && npm run check:skills",
     "docs:index": "node scripts/generate-docs-index.mjs",
     "check:docs": "node scripts/generate-docs-index.mjs --check",
     "readme:rmd": "npm run build && Rscript -e 'rmarkdown::render(\"README.Rmd\", quiet=TRUE)' && rm -f README.html",
@@ -90,7 +90,8 @@
     "build": "rm -rf dist && node ./node_modules/typescript/bin/tsc -p tsconfig.build.json && chmod +x dist/cli/bin.js",
     "prepare": "node scripts/build-if-available.mjs",
     "readme:tools": "node scripts/generate-readme-tools.mjs",
-    "check:readme-tools": "node scripts/generate-readme-tools.mjs --check"
+    "check:readme-tools": "node scripts/generate-readme-tools.mjs --check",
+    "check:skills": "node scripts/validate-skills.mjs"
   },
   "pi": {
     "extensions": [

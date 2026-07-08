@@ -692,6 +692,9 @@ Bad skills:
 - PHI authorization logic
 
 If it is executable, security-sensitive, schema-bearing, or provenance-bearing, it belongs in specs/code/tests. If it is stable procedural guidance for the agent, it can be a skill.
+The package gate enforces that distinction for shipped skills with `npm run check:skills`: frontmatter and
+description must be clear, reference links must resolve, and obvious secrets, patient identifiers, executable API
+clients, and transport scripts are rejected before a skill ships.
 
 Promotion path:
 
