@@ -43,7 +43,8 @@ These items are no longer open substrate work in `pi-bio-agent`.
   `JobRunner` specialize that shape; `in-memory-job-runner`, `ledger-job-runner`, and `queue-job-runner` are
   implementations. Resume is checkpoint-based, not a workflow engine. Evidence: [jobs.ts](../src/core/jobs.ts),
   [job-store.ts](../src/hosts/job-store.ts), [job-runner.test.ts](../test/job-runner.test.ts),
-  [job-step-plan.test.ts](../test/job-step-plan.test.ts), [absurd-queue-push-dogfood.test.ts](../test/absurd-queue-push-dogfood.test.ts).
+  [job-step-plan.test.ts](../test/job-step-plan.test.ts), [ledger-job-runner.test.ts](../test/ledger-job-runner.test.ts),
+  [absurd-queue-push-dogfood.test.ts](../test/absurd-queue-push-dogfood.test.ts).
 - **Host-event receipts are open host facts.** `recordHostEvent` records one `host_event` fact plus optional ordinary
   links. `kind` is host-owned data, not a core enum. Evidence: [host-events.ts](../src/hosts/host-events.ts),
   [host-events.test.ts](../test/host-events.test.ts), [training-corpus.ts](../src/hosts/training-corpus.ts).
@@ -128,14 +129,20 @@ consumer-pulled, or a non-goal.
    `pi_coding_agent.session_lifecycle` host event on the `session:<id>` node after the persisted JSONL snapshot is
    ingested; the payload includes the raw-session digest so corpus consumers can distinguish runtime lifecycle intent
    from transcript content. The bring-it-home dogfood also records scheduler-style queue claim, lease-reclaim, and
-   stale-attempt rejection events as open host facts that the training corpus exports. Remaining work is concrete
-   Pi/workbench hooks for steers, interrupts, before-provider context digests, session switching, and governance
-   events that a consumer actually reads. Do not add a closed event taxonomy.
+   stale-attempt rejection events as open host facts that the training corpus exports. The Pi extension also records
+   `before_agent_start` context receipts as digests/counts only. Remaining work is concrete Pi/workbench hooks for
+   steers, interrupts, session switching, and governance events that a consumer actually reads. Do not add a closed
+   event taxonomy.
 2. **Durable workflow dogfood over the closed lifecycle.** The async lifecycle and checkpoint resume helper are
    built and the bring-it-home dogfood now runs checkpointed bash steps through `nodeComputeRunner`, reuses the
    completed prefix, reruns the suffix, and proves queue cancellation, expired-lease reclaim, and stale-attempt
-   write rejection through the ledger. Remaining hardening is to exercise the same shape with R/Python/NNG/scheduler
-   backends as real consumers need them. This is not a request for another workflow engine.
+   write rejection through the ledger. A focused test also exercises a real ducknng RPC worker: a separate DuckDB
+   client reports status/result into the shared `job:<runId>` observation slots, and `ledgerJobRunner` /
+   `submitBioJob` / `pollBioJob` read the same data path unchanged. That test is skipped when ducknng is unavailable.
+   In a ducknng-provisioned environment, `npm run dogfood:nng-job-runner` gives explicit non-skipped transport
+   evidence: a separate process writes status over ducknng RPC and the coordinator asserts status/digest history.
+   Remaining hardening is to exercise the same shape with R/Python/scheduler backends as real consumers need them.
+   This is not a request for another workflow engine.
 3. **Substrate skill and non-Pi host dogfood.** The packaged skill should keep onboarding weaker hosts into the
    substrate: `pi-bio-agent catalog` / `bio_list_sources` now list validated manifest-backed sources/templates before
    a host chooses one to describe or query; the rest of the loop is write or inspect a manifest, discover schemas
@@ -183,6 +190,7 @@ consumer-pulled, or a non-goal.
   and host adapter work, not another core auth primitive.
 - **Base durable runner/resume.** `AsyncRunner` is the lifecycle; `JobRunner` and checkpoint helpers specialize it.
   Resume means completed-prefix checkpoint reuse plus suffix rerun. Evidence: [job-store.ts](../src/hosts/job-store.ts),
+  [ledger-job-runner.test.ts](../test/ledger-job-runner.test.ts),
   [bring-it-home-dogfood.mjs](../scripts/bring-it-home-dogfood.mjs), [bring-it-home-dogfood.test.ts](../test/bring-it-home-dogfood.test.ts).
 - **ducknng/quack sibling upload and shared-data path.** Upload-shaped movement stays in the sibling transport, not
   in core. The non-skipped dogfood command loads an upload-capable sibling `ducknng.duckdb_extension`, streams local

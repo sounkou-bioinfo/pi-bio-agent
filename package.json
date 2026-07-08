@@ -87,6 +87,7 @@
     "dogfood:substrate-skill": "npm run build && node scripts/substrate-skill-dogfood.mjs",
     "dogfood:bring-it-home": "npm run build && node scripts/bring-it-home-dogfood.mjs",
     "dogfood:ducknng-upload": "node scripts/ducknng-upload-dogfood.mjs",
+    "dogfood:nng-job-runner": "npm run build && node scripts/nng-job-runner.mjs",
     "dogfood:sdk-host-embedding": "npm run build && node scripts/sdk-host-embedding.mjs",
     "build": "rm -rf dist && node ./node_modules/typescript/bin/tsc -p tsconfig.build.json && chmod +x dist/cli/bin.js",
     "prepare": "node scripts/build-if-available.mjs",
