@@ -56,7 +56,7 @@ function ducknngConn(local, url) {              // `local` = a throwaway :memory
 **Parameters**: ducknng RPC sends a SQL *string*, so the params are inlined into it (escape values, or use
 server-side prepared statements). The example inlines with escaping as a dogfood; a production `openStore` over
 ducknng does robust param handling: host code, not a library default. **Security is opt-in**: the server only accepts writes after `ducknng_register_exec_method(...)`,
-with mTLS / peer-allowlists ([[honest-boundary]]); reads need no extra grant.
+with mTLS / peer-allowlists (see [`resources-and-tool-specs.md`](./resources-and-tool-specs.md#multi-agent-by-attribution-authorization-stays-the-hosts-job)); reads need no extra grant.
 
 Because every row carries its **author** (`source`, part of observation identity) and an **as-of** time, a shared
 store stays attributed: two agents writing the same memory slug become two attributed revisions, not a silent

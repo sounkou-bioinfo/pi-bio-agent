@@ -26,4 +26,4 @@
 
 ## Worklog
 
-- [Refinements](refinments.md) — Open design issues and cleanup targets still to sharpen before abstractions harden. _(refinements, open-issues, worklog)_
+- [Refinements](refinments.md) — Live cleanup targets that still need concrete consumer pressure before they become core work. _(refinements, open-issues, worklog)_

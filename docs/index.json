@@ -197,7 +197,7 @@
       "path": "docs/refinments.md",
       "type": "Worklog",
       "title": "Refinements",
-      "description": "Open design issues and cleanup targets still to sharpen before abstractions harden.",
+      "description": "Live cleanup targets that still need concrete consumer pressure before they become core work.",
       "tags": [
         "refinements",
         "open-issues",

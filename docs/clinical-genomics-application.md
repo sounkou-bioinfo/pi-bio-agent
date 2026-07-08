@@ -27,8 +27,8 @@ manifest-as-program design applied to a reusable application architecture.
 
 Each stage names the `pi-bio-agent` primitive it uses and whether it is an **app manifest**, an **app producer**
 (host code the app owns), or the substrate's existing **record + gate**. There is no "library build" column:
-on re-examination every stage composes existing primitives (see
-[`refinments.md`](./refinments.md#generic-clinical-genomics-application-does-the-library-need-anything-new)).
+on re-examination every stage composes existing primitives (see the closure ledger in
+[`bring-it-home-plan.md`](./bring-it-home-plan.md)).
 
 | # | Stage | Primitive | Where it lives |
 |---|---|---|---|
