@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { readFileSync, readdirSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join } from "node:path";
 
 // DOCS-CONFORMANCE GATE. The README claims "each row maps to shipped code with tests, and a docs-conformance
 // check keeps these docs matching the code." This IS that check: a mechanical guard that removed/renamed symbols
@@ -31,6 +31,8 @@ const FORBIDDEN: Array<{ re: RegExp; why: string }> = [
   { re: /every NNG topology/, why: "overclaim: the tested topology primitives are push/pull, pub/sub, survey/debate; the rest are ducknng transport" },
   { re: /\bdomain_pack\b|\bdomainPack\b/, why: "the domain-pack concept was removed; a manifest is the program" },
   { re: /\bsha512\b|\bblake3\b/, why: "CAS is sha256-only; ContentAddressAlgorithm no longer names sha512/blake3" },
+  { re: /\bhostfs\b|community_extensions\/extensions\/hostfs/i, why: "DuckDB HostFS was removed from the public positioning; ducknng-fs is research only" },
+  { re: /ClinVar From A Raw URL|More, live/, why: "stale README headline/prose from the pre-action ClinVar section" },
 ];
 
 describe("docs-conformance: the public docs name only facilities the code actually has", () => {
@@ -44,4 +46,35 @@ describe("docs-conformance: the public docs name only facilities the code actual
       }
     });
   }
+});
+
+describe("README hygiene: action-first generated README, no fake illustration blocks", () => {
+  test("README.md is still marked as generated from README.Rmd", () => {
+    const text = readFileSync(join(ROOT, "README.md"), "utf8");
+    assert.ok(
+      text.trimStart().startsWith("<!-- README.md is generated from README.Rmd"),
+      "README.md must stay a rendered artifact; edit README.Rmd and render instead",
+    );
+  });
+
+  test("README sources avoid text-only architecture fences", () => {
+    for (const rel of ["README.Rmd", "README.md"]) {
+      const lines = readFileSync(join(ROOT, rel), "utf8").split("\n");
+      lines.forEach((line, i) => {
+        assert.ok(!/^```\s*\{?text\b/i.test(line), `${rel}:${i + 1} uses a text-only fence; use a runnable chunk or prose`);
+      });
+    }
+  });
+
+  test("README.Rmd examples are runnable chunks or typed code fences", () => {
+    const allowed = new Set(["r", "pi", "biocli", "dogfood", "sh", "ts", "json"]);
+    const lines = readFileSync(join(ROOT, "README.Rmd"), "utf8").split("\n");
+    lines.forEach((line, i) => {
+      const match = line.match(/^```\s*(?:\{?([A-Za-z0-9_-]+))?/);
+      if (!match) return;
+      const lang = match[1];
+      if (!lang) return;
+      assert.ok(allowed.has(lang), `README.Rmd:${i + 1} uses unsupported fence '${lang}'`);
+    });
+  });
 });
