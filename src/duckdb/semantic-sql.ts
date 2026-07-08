@@ -19,6 +19,8 @@ export interface SemanticSqlSourcePredicates {
 export interface SemanticSqlSourceSpec {
   schema: typeof SEMANTIC_SQL_SOURCE_SPEC_SCHEMA;
   statementsTable?: string;
+  /** Optional SemanticSQL `prefix(prefix, base)` table. When supplied, generated views canonicalize IRIs to CURIEs. */
+  prefixTable?: string;
   targets?: SemanticSqlSourceViewTargets;
   predicates?: SemanticSqlSourcePredicates;
 }
@@ -66,8 +68,24 @@ function inList(values: string[]): string {
   return values.map(sqlString).join(", ");
 }
 
-function valueExpr(): string {
-  return "CAST(coalesce(value, object) AS VARCHAR)";
+function canonicalIdExpr(column: "subject" | "predicate" | "object", prefixTable: string | undefined): string {
+  const quoted = qident(column);
+  const raw = `CAST(${quoted} AS VARCHAR)`;
+  if (!prefixTable) return raw;
+  const prefixes = qident(prefixTable);
+  return [
+    `CASE WHEN ${quoted} IS NULL THEN NULL ELSE coalesce((SELECT p.prefix || ':' || substr(${raw}, length(p.base) + 1)`,
+    `FROM ${prefixes} p`,
+    `WHERE p.prefix IS NOT NULL AND p.base IS NOT NULL AND length(p.prefix) > 0 AND length(p.base) > 0 AND starts_with(${raw}, p.base)`,
+    "ORDER BY length(p.base) DESC, p.prefix ASC LIMIT 1),",
+    `${raw}) END`,
+  ].join(" ");
+}
+
+function valueExpr(prefixTable: string | undefined): string {
+  const rawValue = `CAST(${qident("value")} AS VARCHAR)`;
+  const objectValue = canonicalIdExpr("object", prefixTable);
+  return `CAST(coalesce(${rawValue}, ${objectValue}) AS VARCHAR)`;
 }
 
 function targets(spec: SemanticSqlSourceSpec): Required<SemanticSqlSourceViewTargets> {
@@ -83,6 +101,7 @@ function targets(spec: SemanticSqlSourceSpec): Required<SemanticSqlSourceViewTar
 export function semanticSqlSourceViewSql(spec: SemanticSqlSourceSpec): string[] {
   if (spec.schema !== SEMANTIC_SQL_SOURCE_SPEC_SCHEMA) throw new Error(`schema must be ${SEMANTIC_SQL_SOURCE_SPEC_SCHEMA}`);
   const statements = qident(spec.statementsTable ?? "statements");
+  const prefixTable = spec.prefixTable;
   const t = targets(spec);
   const labels = stringList(spec.predicates?.labels, DEFAULT_LABEL_PREDICATES);
   const synonyms = stringList(spec.predicates?.synonyms, DEFAULT_SYNONYM_PREDICATES);
@@ -90,39 +109,43 @@ export function semanticSqlSourceViewSql(spec: SemanticSqlSourceSpec): string[] 
   const labelPredicateSql = inList(labels);
   const synonymPredicateSql = inList(synonyms);
   const mappingPredicateSql = inList(mappings);
+  const subject = canonicalIdExpr("subject", prefixTable);
+  const predicate = canonicalIdExpr("predicate", prefixTable);
+  const object = canonicalIdExpr("object", prefixTable);
+  const value = valueExpr(prefixTable);
 
   return [
     `CREATE OR REPLACE VIEW ${qident(t.edgeTable)} AS
-SELECT CAST(subject AS VARCHAR) AS subject, CAST(predicate AS VARCHAR) AS predicate, CAST(object AS VARCHAR) AS object
+SELECT ${subject} AS subject, ${predicate} AS predicate, ${object} AS object
 FROM ${statements}
 WHERE subject IS NOT NULL AND predicate IS NOT NULL AND object IS NOT NULL`,
 
     `CREATE OR REPLACE VIEW ${qident(t.labelsTable)} AS
-SELECT CAST(subject AS VARCHAR) AS subject, CAST(predicate AS VARCHAR) AS predicate, ${valueExpr()} AS value,
-       CAST(datatype AS VARCHAR) AS datatype, CAST(language AS VARCHAR) AS language
+SELECT ${subject} AS subject, ${predicate} AS predicate, ${value} AS value,
+       CAST(${qident("datatype")} AS VARCHAR) AS datatype, CAST(${qident("language")} AS VARCHAR) AS language
 FROM ${statements}
-WHERE subject IS NOT NULL AND predicate IN (${labelPredicateSql}) AND coalesce(value, object) IS NOT NULL`,
+WHERE subject IS NOT NULL AND ${predicate} IN (${labelPredicateSql}) AND coalesce(value, object) IS NOT NULL`,
 
     `CREATE OR REPLACE VIEW ${qident(t.synonymsTable)} AS
-SELECT CAST(subject AS VARCHAR) AS subject, CAST(predicate AS VARCHAR) AS predicate, ${valueExpr()} AS value,
-       CAST(datatype AS VARCHAR) AS datatype, CAST(language AS VARCHAR) AS language
+SELECT ${subject} AS subject, ${predicate} AS predicate, ${value} AS value,
+       CAST(${qident("datatype")} AS VARCHAR) AS datatype, CAST(${qident("language")} AS VARCHAR) AS language
 FROM ${statements}
-WHERE subject IS NOT NULL AND predicate IN (${synonymPredicateSql}) AND coalesce(value, object) IS NOT NULL`,
+WHERE subject IS NOT NULL AND ${predicate} IN (${synonymPredicateSql}) AND coalesce(value, object) IS NOT NULL`,
 
     `CREATE OR REPLACE VIEW ${qident(t.mappingsTable)} AS
-SELECT CAST(subject AS VARCHAR) AS subject, CAST(predicate AS VARCHAR) AS predicate, CAST(object AS VARCHAR) AS object
+SELECT ${subject} AS subject, ${predicate} AS predicate, ${object} AS object
 FROM ${statements}
-WHERE subject IS NOT NULL AND predicate IN (${mappingPredicateSql}) AND object IS NOT NULL`,
+WHERE subject IS NOT NULL AND ${predicate} IN (${mappingPredicateSql}) AND object IS NOT NULL`,
 
     `CREATE OR REPLACE VIEW ${qident(t.termsTable)} AS
 SELECT
-  CAST(subject AS VARCHAR) AS id,
-  min(CASE WHEN predicate IN (${labelPredicateSql}) THEN ${valueExpr()} ELSE NULL END) AS label,
-  list(DISTINCT CASE WHEN predicate IN (${synonymPredicateSql}) THEN ${valueExpr()} ELSE NULL END)
-    FILTER (WHERE predicate IN (${synonymPredicateSql}) AND coalesce(value, object) IS NOT NULL) AS synonyms
+  ${subject} AS id,
+  min(CASE WHEN ${predicate} IN (${labelPredicateSql}) THEN ${value} ELSE NULL END) AS label,
+  list(DISTINCT CASE WHEN ${predicate} IN (${synonymPredicateSql}) THEN ${value} ELSE NULL END)
+    FILTER (WHERE ${predicate} IN (${synonymPredicateSql}) AND coalesce(value, object) IS NOT NULL) AS synonyms
 FROM ${statements}
 WHERE subject IS NOT NULL
-GROUP BY subject`,
+GROUP BY ${subject}`,
   ];
 }
 

@@ -131,10 +131,11 @@ consumer-pulled, or a non-goal.
    workflows into thin playbooks.
 5. **SemanticSQL source-spec parity.** This is active consistency work, not optional polish: SemanticSQL reaches into
    RDF/OWL, Semantic Web, FHIR-shaped resources, and related graph ecosystems. The base helper now materializes
-   generated SemanticSQL views (`edge`, labels, synonyms, mappings, terms) from a staged `statements` table and
-   projects the generated `edge` through the same `GraphProjectionProfile` path as KGX and internal observations.
-   Remaining parity is prefix/IRI canonicalization, axiom annotations, richer relation-graph semantics, and
-   multi-ontology attachment when a real grounding/traversal consumer needs them.
+   generated SemanticSQL views (`edge`, labels, synonyms, mappings, terms) from a staged `statements` table,
+   optionally canonicalizes IRIs through a staged `prefix(prefix, base)` table, and projects the generated `edge`
+   through the same `GraphProjectionProfile` path as KGX and internal observations. Remaining parity is axiom
+   annotations, richer relation-graph semantics, and multi-ontology attachment when a real grounding/traversal
+   consumer needs them.
 6. **Docs hygiene.** Keep README and guides action-first: real commands, real code chunks, no fake text-block
    architecture diagrams, no speculative hostfs claims, and no stale "process transport" lane. Claims should point
    to commands, tests, or examples that currently run.

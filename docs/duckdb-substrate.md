@@ -37,7 +37,8 @@ application-specific wrapper: `statements`, `prefix`, `entailed_edge`, plus gene
 SQLite Semantic SQL databases are interchange artifacts; DuckDB remains the joined/queryable substrate for
 agent-authored SQL and recursive closure.
 `materializeSemanticSqlSourceViews` is the current library helper for staged `statements`: it creates the generated
-`edge`, label, synonym, mapping, and term views that a manifest or `GraphProjectionProfile` can consume.
+`edge`, label, synonym, mapping, and term views that a manifest or `GraphProjectionProfile` can consume, with
+optional IRI-to-CURIE canonicalization through a staged `prefix(prefix, base)` table.
 
 Suggested stable views:
 

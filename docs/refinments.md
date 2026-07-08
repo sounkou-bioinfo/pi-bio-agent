@@ -705,14 +705,14 @@ JOIN, not a walker. See [`design.md`](./design.md#the-semanticsql-shape-source-s
   - **SemanticSQL-shaped sources are absorbable as DuckDB data.** Edge-shaped relations use
     `subject,predicate,object` plus optional `attrs,trust`; an ordinary `GraphProjectionProfile` maps them into
     `bio_edges`. For base `statements`, `materializeSemanticSqlSourceViews` now creates the generated `edge`,
-    label, synonym, mapping, and term views that manifests and graph projection profiles consume. We still do not
-    parse the full upstream LinkML source to generate every DDL/view; parity expands only when a concrete grounding
-    or traversal consumer needs more of the source spec.
-  - **No SemanticSQL-style CURIE-prefix registry yet.** Here `prefix(prefix, base)` means namespace expansion
-    (`HP` -> an HPO base IRI, `biolink` -> a Biolink base IRI), not run-id prefixes, observation-key prefixes, or
-    a traversal primitive. The graph currently stores CURIE strings as node/predicate ids and works without
-    expansion; first-class prefixes would improve CURIE/IRI validation, canonicalization, receipts, and
-    cross-database identifier hygiene.
+    label, synonym, mapping, and term views that manifests and graph projection profiles consume. When a staged
+    `prefix(prefix, base)` table is supplied, those views canonicalize matching IRIs to CURIEs before projection.
+    We still do not parse the full upstream LinkML source to generate every DDL/view; parity expands only when a
+    concrete grounding or traversal consumer needs more of the source spec.
+  - **Prefix canonicalization is present, not a traversal primitive.** Here `prefix(prefix, base)` means namespace
+    expansion/canonicalization (`HP` -> an HPO base IRI, `biolink` -> a Biolink base IRI), not run-id prefixes,
+    observation-key prefixes, or graph walk policy. Remaining identifier hygiene is receipts and multi-database
+    conflict policy, not basic IRI-to-CURIE projection.
   - **Generated views have a base conformance path.** The helper covers the common `edge`, labels, synonyms,
     mappings, and term rows. OWL restriction/axiom, RO edge, subgraph, taxon-constraint, similarity, and
     term-association views remain source-spec conformance work for consumers that need them.

@@ -481,8 +481,9 @@ HTTP example uses the downloadable KGX TSV association files through DuckDB `htt
 generic KGX/SemanticSQL edge path, not a special resolver.
 For sources that arrive in the canonical SemanticSQL base shape, `materializeSemanticSqlSourceViews` generates the
 stable DuckDB views (`edge`, label statements, synonym statements, mapping statements, and term rows) from staged
-`statements`; that generated `edge` view then uses the same graph projection profile and closure path as KGX,
-memory, and observation graphs.
+`statements`; when a staged `prefix(prefix, base)` table is declared, those views canonicalize matching IRIs to
+CURIEs. The generated `edge` view then uses the same graph projection profile and closure path as KGX, memory, and
+observation graphs.
 
 - **`bio_edges(from_id, predicate, to_id, attrs, trust)`**: the statement/edge base (`subject=from_id,
   predicate, object=to_id`). Labels, synonyms, definitions, and relations are all just rows; the predicate is

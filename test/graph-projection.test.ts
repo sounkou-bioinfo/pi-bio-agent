@@ -70,6 +70,53 @@ describe("graph projection profile: source relation -> compiled graph", () => {
     assert.deepEqual(ancestors.map((x) => x.to_id), ["MONDO:0004784", "MONDO:0004979"]);
   });
 
+  test("canonicalizes SemanticSQL IRI statements through a prefix table before graph projection", async () => {
+    const conn = duckdbNodeConn(await (await DuckDBInstance.create(":memory:")).connect());
+    await conn.run("CREATE TABLE statements(subject TEXT, predicate TEXT, object TEXT, value TEXT, datatype TEXT, language TEXT)");
+    await conn.run("CREATE TABLE prefix(prefix TEXT, base TEXT)");
+    await conn.run("INSERT INTO prefix VALUES ('OBO','http://purl.obolibrary.org/obo/')");
+    await conn.run("INSERT INTO prefix VALUES ('MONDO','http://purl.obolibrary.org/obo/MONDO_')");
+    await conn.run("INSERT INTO prefix VALUES ('rdfs','http://www.w3.org/2000/01/rdf-schema#')");
+    await conn.run("INSERT INTO prefix VALUES ('oio','http://www.geneontology.org/formats/oboInOwl#')");
+    await conn.run("INSERT INTO prefix VALUES ('EMPTY','')");
+    await conn.run("INSERT INTO prefix VALUES (NULL,'http://purl.obolibrary.org/obo/HP_')");
+    await conn.run("INSERT INTO prefix VALUES ('BAD',NULL)");
+    await conn.run("INSERT INTO statements VALUES ('http://purl.obolibrary.org/obo/MONDO_0004979','http://www.w3.org/2000/01/rdf-schema#label',NULL,'asthma',NULL,'en')");
+    await conn.run("INSERT INTO statements VALUES ('http://purl.obolibrary.org/obo/MONDO_0004979','http://www.geneontology.org/formats/oboInOwl#hasExactSynonym',NULL,'bronchial asthma',NULL,'en')");
+    await conn.run("INSERT INTO statements VALUES ('http://purl.obolibrary.org/obo/MONDO_0004784','http://www.w3.org/2000/01/rdf-schema#subClassOf','http://purl.obolibrary.org/obo/MONDO_0004979',NULL,NULL,NULL)");
+    await conn.run("INSERT INTO statements VALUES ('http://purl.obolibrary.org/obo/MONDO_0004766','http://www.w3.org/2000/01/rdf-schema#subClassOf','http://purl.obolibrary.org/obo/MONDO_0004784',NULL,NULL,NULL)");
+
+    await materializeSemanticSqlSourceViews(conn, {
+      schema: SEMANTIC_SQL_SOURCE_SPEC_SCHEMA,
+      prefixTable: "prefix",
+      targets: { edgeTable: "iri_edge", labelsTable: "iri_label", synonymsTable: "iri_synonym", termsTable: "iri_terms" },
+    });
+
+    assert.deepEqual(await conn.all<{ subject: string; predicate: string; object: string }>(
+      "SELECT subject, predicate, object FROM iri_edge ORDER BY subject",
+    ), [
+      { subject: "MONDO:0004766", predicate: "rdfs:subClassOf", object: "MONDO:0004784" },
+      { subject: "MONDO:0004784", predicate: "rdfs:subClassOf", object: "MONDO:0004979" },
+    ]);
+    assert.deepEqual(await conn.all<{ subject: string; value: string }>("SELECT subject, value FROM iri_label"), [
+      { subject: "MONDO:0004979", value: "asthma" },
+    ]);
+    assert.deepEqual(await conn.all<{ subject: string; value: string }>("SELECT subject, value FROM iri_synonym"), [
+      { subject: "MONDO:0004979", value: "bronchial asthma" },
+    ]);
+
+    const out = await materializeGraphProjectionProfile(conn, {
+      schema: "pi-bio.graph_projection_profile.v1",
+      id: "semantic-sql-iri-source-spec-generated-edge",
+      title: "SemanticSQL IRI source-spec generated edge projection",
+      source: { kind: "semantic_sql", table: "iri_edge" },
+      columns: { from: "subject", predicate: "predicate", to: "object" },
+      closure: { source: "local_cte", transitivePredicates: ["rdfs:subClassOf"] },
+      target: { edgesTable: "iri_bio_edges", closureTable: "iri_entailed_edge" },
+    });
+    assert.deepEqual(out, { edgesTable: "iri_bio_edges", edgeCount: 2, closureTable: "iri_entailed_edge", closureCount: 3 });
+  });
+
   test("SemanticSQL source-spec view generation fails closed on invalid predicate lists", () => {
     assert.throws(
       () => semanticSqlSourceViewSql({ schema: SEMANTIC_SQL_SOURCE_SPEC_SCHEMA, predicates: { labels: [] } }),
