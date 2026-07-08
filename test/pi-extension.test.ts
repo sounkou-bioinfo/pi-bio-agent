@@ -8,6 +8,7 @@ import { openBioStore } from "../src/hosts/bio-store.js";
 import { fsCasStore } from "../src/hosts/fs-cas.js";
 import { sessionArtifacts, sessionTimeline, sessionToolTrajectory } from "../src/hosts/session-ingest.js";
 import { recallSkill } from "../src/hosts/skill-store.js";
+import { canonicalDigest } from "../src/core/reproducibility.js";
 
 interface RegisteredTool {
   name: string;
@@ -54,6 +55,147 @@ describe("Pi coding-agent extension", () => {
       "bio_validate_select",
       "bio_walk_memory",
     ]);
+  });
+
+  test("before_agent_start records context digests without storing prompt text", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "pi-bio-ext-prompt-"));
+    const { handlers } = loadExtension(createBioExtension({ author: "agent:test" }));
+    const beforeAgentStart = handlers.get("before_agent_start")?.[0];
+    assert.ok(beforeAgentStart, "before_agent_start handler registered");
+
+    const event = {
+      systemPrompt: "base prompt with private text",
+      systemPromptOptions: { cwd },
+    };
+    const ctx = {
+      cwd,
+      sessionManager: { getSessionId: () => "prompt-session" },
+    };
+    const out = await beforeAgentStart!(event, ctx);
+    assert.match(out.systemPrompt, /pi-bio-agent extension/);
+    assert.match(out.systemPrompt, /MANIFESTS ARE PROGRAMS/);
+
+    const store = await openBioStore(cwd);
+    try {
+      const rows = await store.conn.all<{
+        kind: string;
+        event_type: string;
+        base_prompt_digest: string;
+        orientation_digest: string;
+        memory_index_digest: string;
+        augmented_prompt_digest: string;
+        base_prompt_chars: number;
+        memory_index_chars: number;
+        augmented_prompt_chars: number;
+        digest: string | null;
+        value_json: string;
+      }>(
+        `SELECT
+           json_extract_string(value_json, '$.kind') AS kind,
+           json_extract_string(value_json, '$.value.event_type') AS event_type,
+           json_extract_string(value_json, '$.value.base_prompt_digest') AS base_prompt_digest,
+           json_extract_string(value_json, '$.value.orientation_digest') AS orientation_digest,
+           json_extract_string(value_json, '$.value.memory_index_digest') AS memory_index_digest,
+           json_extract_string(value_json, '$.value.augmented_prompt_digest') AS augmented_prompt_digest,
+           CAST(json_extract(value_json, '$.value.base_prompt_chars') AS INTEGER) AS base_prompt_chars,
+           CAST(json_extract(value_json, '$.value.memory_index_chars') AS INTEGER) AS memory_index_chars,
+           CAST(json_extract(value_json, '$.value.augmented_prompt_chars') AS INTEGER) AS augmented_prompt_chars,
+           digest,
+           value_json
+         FROM bio_observations
+         WHERE subject_id = 'session:prompt-session' AND predicate = 'host_event'`,
+      );
+      assert.equal(rows.length, 1);
+      const row = rows[0]!;
+      const augmentedPrompt = out.systemPrompt as string;
+      const orientationPrompt = augmentedPrompt.slice(event.systemPrompt.length + "\n\n".length);
+      assert.equal(row.kind, "pi_coding_agent.before_agent_start");
+      assert.equal(row.event_type, "before_agent_start");
+      assert.equal(row.base_prompt_digest, canonicalDigest(event.systemPrompt));
+      assert.equal(row.orientation_digest, canonicalDigest(orientationPrompt));
+      assert.equal(row.memory_index_digest, canonicalDigest(""));
+      assert.equal(row.augmented_prompt_digest, canonicalDigest(augmentedPrompt));
+      assert.equal(row.digest, canonicalDigest(augmentedPrompt));
+      assert.equal(row.base_prompt_chars, event.systemPrompt.length);
+      assert.equal(row.memory_index_chars, 0);
+      assert.equal(row.augmented_prompt_chars, augmentedPrompt.length);
+      assert.doesNotMatch(row.value_json, /base prompt with private text/);
+      assert.doesNotMatch(row.value_json, /MANIFESTS ARE PROGRAMS/);
+      assert.doesNotMatch(row.value_json, /pi-bio-agent extension/);
+    } finally {
+      store.close();
+    }
+  });
+
+  test("before_agent_start warns and continues when context receipt open fails", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "pi-bio-ext-prompt-open-fail-"));
+    const { handlers } = loadExtension(createBioExtension({
+      author: "agent:test",
+      openStore: async () => {
+        throw new Error("store boom");
+      },
+    }));
+    const beforeAgentStart = handlers.get("before_agent_start")?.[0];
+    assert.ok(beforeAgentStart, "before_agent_start handler registered");
+    const warnings: string[] = [];
+    const originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => { warnings.push(args.map(String).join(" ")); };
+    try {
+      const out = await beforeAgentStart!({
+        systemPrompt: "base prompt",
+        systemPromptOptions: { cwd },
+      }, {
+        cwd,
+        sessionManager: { getSessionId: () => "prompt-session" },
+      });
+      assert.match(out.systemPrompt, /MANIFESTS ARE PROGRAMS/);
+    } finally {
+      console.warn = originalWarn;
+    }
+    assert.match(warnings.join("\n"), /before_agent_start receipt skipped.*store boom/);
+  });
+
+  test("before_agent_start warns and continues when context receipt write fails", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "pi-bio-ext-prompt-write-fail-"));
+    let opened = 0;
+    let closed = 0;
+    const { handlers } = loadExtension(createBioExtension({
+      author: "agent:test",
+      openStore: async () => {
+        opened += 1;
+        return {
+          conn: {
+            run: async () => {
+              throw new Error("write boom");
+            },
+            all: async () => [],
+          },
+          close: () => {
+            closed += 1;
+          },
+        } as any;
+      },
+    }));
+    const beforeAgentStart = handlers.get("before_agent_start")?.[0];
+    assert.ok(beforeAgentStart, "before_agent_start handler registered");
+    const warnings: string[] = [];
+    const originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => { warnings.push(args.map(String).join(" ")); };
+    try {
+      const out = await beforeAgentStart!({
+        systemPrompt: "base prompt",
+        systemPromptOptions: { cwd },
+      }, {
+        cwd,
+        sessionManager: { getSessionId: () => "prompt-session" },
+      });
+      assert.match(out.systemPrompt, /MANIFESTS ARE PROGRAMS/);
+    } finally {
+      console.warn = originalWarn;
+    }
+    assert.ok(opened > 0);
+    assert.equal(closed, opened);
+    assert.match(warnings.join("\n"), /before_agent_start receipt failed.*write boom/);
   });
 
   test("Pi session hooks sync the active session JSONL into the project ledger and CAS", async () => {

@@ -23,6 +23,7 @@ import { recordHostEvent } from "../../src/hosts/host-events.js";
 import { systemClock } from "../../src/core/clock.js";
 import type { SqlConn, ComputeRunner } from "../../src/core/ports.js";
 import type { FetchLike } from "../../src/duckdb/resolvers/http-table-scan.js";
+import { canonicalDigest } from "../../src/core/reproducibility.js";
 
 function text(payload: unknown) {
   const body = typeof payload === "string" ? payload : JSON.stringify(payload, null, 2);
@@ -98,14 +99,21 @@ async function defaultManifestCatalogRoot(cwd: string): Promise<string> {
 // index is a convenience, never a hard dependency).
 async function memoryIndexBlock(open: OpenStore, cwd: string): Promise<string> {
   // tryOpen → undefined when a concurrent agent holds the store (degrade to no index, never break the turn).
-  const store = await tryOpen(open, cwd).catch(() => undefined);
+  let store: BioStore | undefined;
+  try {
+    store = await tryOpen(open, cwd);
+  } catch (e) {
+    console.warn(`bio-agent: memory index skipped (${e instanceof Error ? e.message : String(e)}); continuing`);
+    return "";
+  }
   if (!store) return "";
   try {
     const mems = await listMemory(store.conn, MEMORY_NOW);
     if (mems.length === 0) return "";
     const lines = mems.slice(0, 30).map((m) => `- ${m.slug} — ${m.hook}${m.author ? ` (${m.author})` : ""}`);
     return `\n\n[memory index] Your current memory (recall with bio_recall / bio_walk_memory before re-deriving):\n${lines.join("\n")}`;
-  } catch {
+  } catch (e) {
+    console.warn(`bio-agent: memory index skipped (${e instanceof Error ? e.message : String(e)}); continuing`);
     return "";
   } finally {
     store.close();
@@ -403,6 +411,47 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
     }
   }
 
+  async function recordBeforeAgentStartContext(ctx: ExtensionContext, event: { systemPrompt: string; systemPromptOptions?: { cwd?: string } }, memoryIndex: string, augmentedPrompt: string): Promise<void> {
+    const sessionId = ctx.sessionManager?.getSessionId?.();
+    if (typeof sessionId !== "string" || sessionId.length === 0) return;
+    const cwd = event.systemPromptOptions?.cwd ?? ctx.cwd ?? process.cwd();
+    let store: BioStore | undefined;
+    try {
+      store = await tryOpen(openStore, cwd);
+    } catch (e) {
+      console.warn(`bio-agent: before_agent_start receipt skipped (${e instanceof Error ? e.message : String(e)}); continuing`);
+      return;
+    }
+    if (!store) return;
+    try {
+      const basePromptDigest = canonicalDigest(event.systemPrompt);
+      const orientationDigest = canonicalDigest(BIO_ORIENTATION);
+      const memoryIndexDigest = canonicalDigest(memoryIndex);
+      const augmentedPromptDigest = canonicalDigest(augmentedPrompt);
+      await recordHostEvent(store.conn, {
+        subjectId: `session:${sessionId}`,
+        kind: "pi_coding_agent.before_agent_start",
+        recordedAt: systemClock(),
+        source: author,
+        digest: augmentedPromptDigest,
+        value: {
+          event_type: "before_agent_start",
+          base_prompt_digest: basePromptDigest,
+          orientation_digest: orientationDigest,
+          memory_index_digest: memoryIndexDigest,
+          augmented_prompt_digest: augmentedPromptDigest,
+          base_prompt_chars: event.systemPrompt.length,
+          memory_index_chars: memoryIndex.length,
+          augmented_prompt_chars: augmentedPrompt.length,
+        },
+      });
+    } catch (e) {
+      console.warn(`bio-agent: before_agent_start receipt failed (${e instanceof Error ? e.message : String(e)}); continuing`);
+    } finally {
+      store.close();
+    }
+  }
+
   function toolcallNodeFromContext(ctx: ExtensionContext, toolCallId: unknown): { sessionId: string; node: string } | undefined {
     const sessionId = ctx.sessionManager?.getSessionId?.();
     if (typeof sessionId !== "string" || sessionId.length === 0 || typeof toolCallId !== "string" || toolCallId.length === 0) return undefined;
@@ -460,9 +509,13 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
   // Give the agent a persistent, drift-resistant orientation to pi-bio-agent on every turn (the pi-coding-agent
   // way: append to the chained system prompt in before_agent_start). It points at DISCOVERY tools + the examples
   // dir rather than enumerating volatile specifics, so it can never lie as the corpus changes.
-  pi.on("before_agent_start", async (event) => ({
-    systemPrompt: `${event.systemPrompt}\n\n${BIO_ORIENTATION}${await memoryIndexBlock(openStore, event.systemPromptOptions?.cwd ?? process.cwd())}`,
-  }));
+  pi.on("before_agent_start", async (event, ctx) => {
+    const cwd = event.systemPromptOptions?.cwd ?? ctx.cwd ?? process.cwd();
+    const memoryIndex = await memoryIndexBlock(openStore, cwd);
+    const systemPrompt = `${event.systemPrompt}\n\n${BIO_ORIENTATION}${memoryIndex}`;
+    await recordBeforeAgentStartContext(ctx, event, memoryIndex, systemPrompt);
+    return { systemPrompt };
+  });
 
   pi.registerTool({
     name: "bio_list_sources",

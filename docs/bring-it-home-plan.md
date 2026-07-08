@@ -192,8 +192,11 @@ consumer-pulled, or a non-goal.
   [ducknng-upload-dogfood.mjs](../scripts/ducknng-upload-dogfood.mjs). Run with
   `npm run dogfood:ducknng-upload` after building sibling `ducknng`, or set `DUCKNNG_EXTENSION_PATH`.
 - **`recordHostEvent` primitive.** Built as one open host event fact plus ordinary links. The bring-it-home dogfood
-  records both workbench-style input events and scheduler-style queue events without a closed event model. The
-  pending item is concrete Pi/workbench runtime wiring, not a new host-event model.
+  records both workbench-style input events and scheduler-style queue events without a closed event model. The Pi
+  extension records session lifecycle receipts and `before_agent_start` context receipts as digests/counts only, so
+  the ledger can explain prompt/context boundaries without storing prompt text. Remaining concrete hooks are
+  consumer-read driven: steers, interrupts, session switching, and governance events only when an app or corpus
+  export actually queries them.
 - **Foreign graph projection base.** A real external Monarch KGX HTTP path, internal observation-graph projection,
   and generated SemanticSQL `statements` -> `edge` view path exist. Remaining foreign-graph work is consumer
   conformance and adapter pressure, not a new graph primitive.
