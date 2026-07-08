@@ -103,11 +103,16 @@ export async function materializeTrainingCorpus(conn: SqlConn, opts: TrainingCor
        try_cast(json_extract_string(s.value_json, '$.turns') AS INTEGER) AS turns,
        try_cast(json_extract_string(s.value_json, '$.tool_calls') AS INTEGER) AS tool_calls,
        try_cast(json_extract_string(s.value_json, '$.artifacts') AS INTEGER) AS artifacts,
-       json_extract_string(s.value_json, '$.parent_session_id') AS parent_session_id,
+       coalesce(
+         json_extract_string(s.value_json, '$.parent_session_id'),
+         CASE WHEN starts_with(parent.object_id, 'session:') THEN substr(parent.object_id, length('session:') + 1) ELSE parent.object_id END
+       ) AS parent_session_id,
        s.recorded_at,
        s.source,
        s.digest
      FROM training_corpus_latest_observations s
+     LEFT JOIN training_corpus_latest_observations parent
+       ON parent.subject_id = s.subject_id AND parent.predicate = 'parent_session' AND parent.object_id IS NOT NULL
      WHERE s.predicate = 'session' AND starts_with(s.subject_id, 'session:')
      ORDER BY s.recorded_at::TIMESTAMPTZ, s.subject_id`,
   );
@@ -261,6 +266,9 @@ export async function materializeTrainingCorpus(conn: SqlConn, opts: TrainingCor
        e.subject_id,
        e.statement_key,
        json_extract_string(e.value_json, '$.kind') AS kind,
+       json_extract_string(e.value_json, '$.value.event_type') AS event_type,
+       json_extract_string(e.value_json, '$.value.reason') AS reason,
+       json_extract_string(e.value_json, '$.value.parent_session_id') AS parent_session_id,
        json_extract_string(e.value_json, '$.value.payload_digest') AS payload_digest,
        e.observation_id AS event_digest,
        e.recorded_at,

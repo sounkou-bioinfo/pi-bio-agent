@@ -9,6 +9,7 @@ import { fsCasStore } from "../src/hosts/fs-cas.js";
 import { sessionArtifacts, sessionTimeline, sessionToolTrajectory } from "../src/hosts/session-ingest.js";
 import { recallSkill } from "../src/hosts/skill-store.js";
 import { canonicalDigest } from "../src/core/reproducibility.js";
+import { materializeTrainingCorpus, TRAINING_CORPUS_TABLES } from "../src/hosts/training-corpus.js";
 
 interface RegisteredTool {
   name: string;
@@ -407,6 +408,22 @@ describe("Pi coding-agent extension", () => {
         "SELECT object_id FROM bio_observations WHERE subject_id = 'session:child-session' AND predicate = 'parent_session'",
       );
       assert.ok(edges.some((edge) => edge.object_id === "session:parent-session"));
+      await materializeTrainingCorpus(store.conn);
+      const sessions = await store.conn.all<{ session_id: string; parent_session_id: string | null }>(
+        `SELECT session_id, parent_session_id FROM ${TRAINING_CORPUS_TABLES.sessions} WHERE session_node = 'session:child-session'`,
+      );
+      assert.deepEqual(sessions, [{ session_id: "child-session", parent_session_id: "parent-session" }]);
+      const events = await store.conn.all<{ kind: string; event_type: string | null; reason: string | null; parent_session_id: string | null }>(
+        `SELECT kind, event_type, reason, parent_session_id FROM ${TRAINING_CORPUS_TABLES.hostEvents}
+         WHERE subject_id = 'session:child-session'
+         ORDER BY recorded_at::TIMESTAMPTZ`,
+      );
+      assert.ok(events.some((event) =>
+        event.kind === "pi_coding_agent.session_lifecycle" &&
+        event.event_type === "session_start" &&
+        event.reason === "fork" &&
+        event.parent_session_id === "parent-session",
+      ), "training corpus exposes fork/session-switch intent without raw payload parsing");
     } finally {
       store.close();
     }

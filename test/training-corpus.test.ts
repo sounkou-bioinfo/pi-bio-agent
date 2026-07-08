@@ -106,6 +106,19 @@ async function seedCorpusLedger(c: SqlConn, root: string): Promise<{ sessionId: 
     attrs: { channel: "private-ui" },
     links: [{ predicate: "affects", objectId: `turn:${sessionId}:a1` }],
   });
+  await recordHostEvent(c, {
+    subjectId: `session:${sessionId}`,
+    kind: "pi_coding_agent.session_lifecycle",
+    recordedAt: T4,
+    source: "pi-extension",
+    digest: `sha256:${"8".repeat(64)}`,
+    value: {
+      event_type: "session_start",
+      reason: "fork",
+      parent_session_id: "parent-corpus",
+      payload_digest: `sha256:${"9".repeat(64)}`,
+    },
+  });
 
   const candidate: OperationCandidate = {
     id: "double.report",
@@ -138,7 +151,7 @@ describe("training corpus export", () => {
     assert.equal(receipt.tables.runs.rows, 1);
     assert.equal(receipt.tables.artifacts.rows, 3, "the corpus preserves session image refs plus a run-produced artifact");
     assert.ok(receipt.tables.judgments.rows >= 4);
-    assert.equal(receipt.tables.hostEvents.rows, 1);
+    assert.equal(receipt.tables.hostEvents.rows, 2);
     assert.equal(receipt.tables.units.rows, 1);
 
     const unit = (await c.all<{ session_node: string; tool_calls: number; linked_runs: number; artifacts: number }>(
@@ -197,7 +210,13 @@ describe("training corpus export", () => {
     assert.equal(hostEventColumns.some((c) => c.column_name === "attrs"), false, "host-event attrs are not exported raw");
     const hostEventRows = await c.all<Record<string, unknown>>(`SELECT * FROM ${TRAINING_CORPUS_TABLES.hostEvents}`);
     assert.doesNotMatch(JSON.stringify(hostEventRows), /secret host text|private-ui/);
-    assert.equal(hostEventRows[0]!.payload_digest, `sha256:${"5".repeat(64)}`);
+    const byKind = new Map(hostEventRows.map((row) => [String(row.kind), row]));
+    assert.equal(byKind.get("workbench.input.steer")!.payload_digest, `sha256:${"5".repeat(64)}`);
+    assert.equal(byKind.get("workbench.input.steer")!.event_type, null);
+    assert.equal(byKind.get("pi_coding_agent.session_lifecycle")!.event_type, "session_start");
+    assert.equal(byKind.get("pi_coding_agent.session_lifecycle")!.reason, "fork");
+    assert.equal(byKind.get("pi_coding_agent.session_lifecycle")!.parent_session_id, "parent-corpus");
+    assert.equal(byKind.get("pi_coding_agent.session_lifecycle")!.payload_digest, `sha256:${"9".repeat(64)}`);
   });
 
   test("exports the derived corpus tables as readable Parquet files", async () => {

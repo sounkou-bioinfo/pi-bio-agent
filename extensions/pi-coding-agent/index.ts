@@ -253,10 +253,15 @@ async function parentSessionIdFromLifecycle(event: SessionLifecycleEvent): Promi
   return event.type === "session_start" && event.reason === "fork" ? readSessionHeaderId(event.previousSessionFile) : undefined;
 }
 
-function lifecycleHostEventValue(event: SessionLifecycleEvent, result: { rawDigest: string; entries: number; messages: number; turns: number; toolCalls: number; artifacts: number; observations: number }): Record<string, unknown> {
+function lifecycleHostEventValue(
+  event: SessionLifecycleEvent,
+  result: { rawDigest: string; entries: number; messages: number; turns: number; toolCalls: number; artifacts: number; observations: number },
+  parentSessionId?: string,
+): Record<string, unknown> {
   return {
     event_type: event.type,
     reason: "reason" in event ? event.reason : event.type,
+    parent_session_id: parentSessionId ?? null,
     payload_digest: result.rawDigest,
     entries: result.entries,
     messages: result.messages,
@@ -347,12 +352,13 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
     if (!store) return { ok: false, reason: "observation store is locked; session sync will retry on a later hook", sessionFile, sessionId };
 
     try {
+      const parentSessionId = await parentSessionIdFromLifecycle(event);
       const result = await ingestSessionJsonl({
         conn: store.conn,
         cas: sessionCas,
         sessionPath: sessionFile,
         sessionId,
-        parentSessionId: await parentSessionIdFromLifecycle(event),
+        parentSessionId,
         source: author,
         now: systemClock(),
       });
@@ -367,7 +373,7 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
         recordedAt: systemClock(),
         source: author,
         digest: result.rawDigest,
-        value: lifecycleHostEventValue(event, result),
+        value: lifecycleHostEventValue(event, result, parentSessionId),
       });
       return {
         ok: true,

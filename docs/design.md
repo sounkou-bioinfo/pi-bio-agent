@@ -679,7 +679,9 @@ Interruptions are represented when Pi persists them as assistant/tool stop reaso
 persisted event is a host-event gap, not something to infer from transcript text.
 The Pi extension also records its own session lifecycle hooks (`session_start`, `session_compact`,
 `session_shutdown`) as open `host_event` receipts on `session:<id>` after syncing the persisted JSONL, with the raw
-session snapshot digest in the payload. That is runtime control evidence, not another transcript representation.
+session snapshot digest and small lifecycle fields in the payload. The training corpus projection exposes
+`event_type`, `reason`, and `parent_session_id` from those receipts without exporting raw host payloads. That is
+runtime control evidence, not another transcript representation.
 
 Pi JSONL ingestion is an adapter, not the workflow model. The local extension default writes to the project-local
 store and CAS for single-machine use. Distributed resume, fork trees, fugu-style swarms, and service-mediated agents

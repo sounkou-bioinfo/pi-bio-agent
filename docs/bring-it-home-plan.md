@@ -134,12 +134,12 @@ consumer-pulled, or a non-goal.
 1. **Concrete host adapters over `recordHostEvent`.** The primitive exists; the open work is the adapter layer:
    the Pi extension now records `session_start` / `session_compact` / `session_shutdown` lifecycle hooks as an open
    `pi_coding_agent.session_lifecycle` host event on the `session:<id>` node after the persisted JSONL snapshot is
-   ingested; the payload includes the raw-session digest so corpus consumers can distinguish runtime lifecycle intent
-   from transcript content. The bring-it-home dogfood also records scheduler-style queue claim, lease-reclaim, and
-   stale-attempt rejection events as open host facts that the training corpus exports. The Pi extension also records
-   `before_agent_start` context receipts as digests/counts only. Remaining work is concrete Pi/workbench hooks for
-   steers, interrupts, session switching, and governance events that a consumer actually reads. Do not add a closed
-   event taxonomy.
+   ingested; the payload includes the raw-session digest and small lifecycle fields (`event_type`, `reason`, and
+   `parent_session_id`) so corpus consumers can distinguish runtime lifecycle/fork intent from transcript content.
+   The bring-it-home dogfood also records scheduler-style queue claim, lease-reclaim, and stale-attempt rejection
+   events as open host facts that the training corpus exports. The Pi extension also records `before_agent_start`
+   context receipts as digests/counts only. Remaining work is concrete Pi/workbench hooks for steers, interrupts, and
+   governance events that a consumer actually reads. Do not add a closed event taxonomy.
 2. **Durable workflow dogfood over the closed lifecycle.** The async lifecycle and checkpoint resume helper are
    built and the bring-it-home dogfood now runs checkpointed bash steps through `nodeComputeRunner`, reuses the
    completed prefix, reruns the suffix, and proves queue cancellation, expired-lease reclaim, and stale-attempt
@@ -203,10 +203,10 @@ consumer-pulled, or a non-goal.
   `npm run dogfood:ducknng-upload` after building sibling `ducknng`, or set `DUCKNNG_EXTENSION_PATH`.
 - **`recordHostEvent` primitive.** Built as one open host event fact plus ordinary links. The bring-it-home dogfood
   records both workbench-style input events and scheduler-style queue events without a closed event model. The Pi
-  extension records session lifecycle receipts and `before_agent_start` context receipts as digests/counts only, so
-  the ledger can explain prompt/context boundaries without storing prompt text. Remaining concrete hooks are
-  consumer-read driven: steers, interrupts, session switching, and governance events only when an app or corpus
-  export actually queries them.
+  extension records session lifecycle receipts and `before_agent_start` context receipts as digests/counts only, and
+  the corpus projection exposes lifecycle type/reason/parentage without raw payloads. Remaining concrete hooks are
+  consumer-read driven: steers, interrupts, and governance events only when an app or corpus export actually queries
+  them.
 - **Foreign graph projection base.** A real external Monarch KGX HTTP path, internal observation-graph projection,
   and generated SemanticSQL `statements` -> `edge` view path exist. Remaining foreign-graph work is consumer
   conformance and adapter pressure, not a new graph primitive.
