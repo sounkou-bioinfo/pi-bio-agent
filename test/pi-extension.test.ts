@@ -98,6 +98,22 @@ describe("Pi coding-agent extension", () => {
       const sessionRows = await store.conn.all<{ value_json: string }>("SELECT value_json FROM bio_observations WHERE subject_id = 'session:pi-dogfood' AND predicate = 'session'");
       assert.equal(sessionRows.length, 1);
       rawDigest = (JSON.parse(sessionRows[0]!.value_json) as { raw_digest: string }).raw_digest;
+      const lifecycleEvents = await store.conn.all<{ event_type: string; reason: string; payload_digest: string; kind: string }>(
+        `SELECT
+           json_extract_string(value_json, '$.value.event_type') AS event_type,
+           json_extract_string(value_json, '$.value.reason') AS reason,
+           json_extract_string(value_json, '$.value.payload_digest') AS payload_digest,
+           json_extract_string(value_json, '$.kind') AS kind
+         FROM bio_observations
+         WHERE subject_id = 'session:pi-dogfood' AND predicate = 'host_event'
+         ORDER BY recorded_at::TIMESTAMPTZ, observation_id`,
+      );
+      assert.deepEqual(lifecycleEvents.map((event) => [event.kind, event.event_type, event.reason]), [
+        ["pi_coding_agent.session_lifecycle", "session_start", "startup"],
+        ["pi_coding_agent.session_lifecycle", "session_compact", "manual"],
+        ["pi_coding_agent.session_lifecycle", "session_shutdown", "quit"],
+      ]);
+      assert.ok(lifecycleEvents.every((event) => event.payload_digest === rawDigest), "runtime lifecycle receipts point at the ingested session snapshot");
     } finally {
       store.close();
     }

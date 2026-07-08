@@ -486,7 +486,11 @@ RDF list/member views, node/identifier and summary views, OWL node/property clas
 restriction views, OBO synonym/mapping/contributor/orcid views, and OBO problem views for duplicate labels, trailing
 whitespace, and predicates used with both literal values and object nodes. Its generated `edge` view follows the
 relation-graph shape for named subclass/subproperty rows, `subClassOf someValuesFrom` restriction rows, and selected
-`rdf:type` assertions whose object is a known class; it still does not treat every object triple as a graph edge.
+`rdf:type` assertions whose object is a known class; it also exposes RO `part_of` / `has_part` edge filters and
+source-spec subgraph-by-parent/child/self views over that generated `edge`. When a staged SemanticSQL
+`entailed_edge(subject, predicate, object)` table is declared, the helper adds the closure-backed relation-graph
+inspection views: subgraph-by-ancestor/descendant, entailed subclass/type filters, and cycle reports. It still does
+not treat every object triple as a relation-graph edge.
 When a staged `prefix(prefix, base)` table is declared, the generated views canonicalize matching IRIs to CURIEs.
 The generated `edge` view then uses the same graph projection profile and closure path as KGX, memory, and
 observation graphs. This is compatibility with the SemanticSQL source-spec ecosystem, useful for RDF/OWL,
@@ -645,6 +649,9 @@ observations over the same `entry:<session>:<id>` nodes. `customType` is treated
 and the payload stays opaque except for a digest; the substrate does not know another extension's contract.
 Interruptions are represented when Pi persists them as assistant/tool stop reasons or errors; an interrupt with no
 persisted event is a host-event gap, not something to infer from transcript text.
+The Pi extension also records its own session lifecycle hooks (`session_start`, `session_compact`,
+`session_shutdown`) as open `host_event` receipts on `session:<id>` after syncing the persisted JSONL, with the raw
+session snapshot digest in the payload. That is runtime control evidence, not another transcript representation.
 
 Pi JSONL ingestion is an adapter, not the workflow model. The local extension default writes to the project-local
 store and CAS for single-machine use. Distributed resume, fork trees, fugu-style swarms, and service-mediated agents

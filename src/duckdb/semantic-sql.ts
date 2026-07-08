@@ -74,6 +74,18 @@ export interface SemanticSqlSourceViewTargets {
   propertyUsedWithDatatypeValuesAndObjectsTable?: string;
   nodeWithTwoLabelsProblemTable?: string;
   allProblemsTable?: string;
+  partOfEdgeTable?: string;
+  hasPartEdgeTable?: string;
+  subgraphEdgeByParentTable?: string;
+  subgraphEdgeByChildTable?: string;
+  subgraphEdgeBySelfTable?: string;
+  subgraphEdgeByAncestorTable?: string;
+  subgraphEdgeByDescendantTable?: string;
+  subgraphEdgeByAncestorOrDescendantTable?: string;
+  entailedSubclassOfEdgeTable?: string;
+  entailedTypeEdgeTable?: string;
+  entailedEdgeCycleTable?: string;
+  entailedEdgeSamePredicateCycleTable?: string;
   termsTable?: string;
 }
 
@@ -91,6 +103,8 @@ export interface SemanticSqlSourceSpec {
   stanzaColumn?: string;
   /** Optional SemanticSQL `prefix(prefix, base)` table. When supplied, generated views canonicalize IRIs to CURIEs. */
   prefixTable?: string;
+  /** Optional SemanticSQL/relation-graph `entailed_edge(subject, predicate, object)` table. Enables closure-backed views. */
+  entailedEdgeTable?: string;
   targets?: SemanticSqlSourceViewTargets;
   predicates?: SemanticSqlSourcePredicates;
 }
@@ -167,6 +181,18 @@ export interface MaterializedSemanticSqlViews {
   propertyUsedWithDatatypeValuesAndObjectsTable: string;
   nodeWithTwoLabelsProblemTable: string;
   allProblemsTable: string;
+  partOfEdgeTable: string;
+  hasPartEdgeTable: string;
+  subgraphEdgeByParentTable: string;
+  subgraphEdgeByChildTable: string;
+  subgraphEdgeBySelfTable: string;
+  subgraphEdgeByAncestorTable?: string;
+  subgraphEdgeByDescendantTable?: string;
+  subgraphEdgeByAncestorOrDescendantTable?: string;
+  entailedSubclassOfEdgeTable?: string;
+  entailedTypeEdgeTable?: string;
+  entailedEdgeCycleTable?: string;
+  entailedEdgeSamePredicateCycleTable?: string;
   termsTable: string;
 }
 
@@ -309,6 +335,18 @@ function targets(spec: SemanticSqlSourceSpec): Required<SemanticSqlSourceViewTar
     propertyUsedWithDatatypeValuesAndObjectsTable: spec.targets?.propertyUsedWithDatatypeValuesAndObjectsTable ?? "property_used_with_datatype_values_and_objects",
     nodeWithTwoLabelsProblemTable: spec.targets?.nodeWithTwoLabelsProblemTable ?? "node_with_two_labels_problem",
     allProblemsTable: spec.targets?.allProblemsTable ?? "all_problems",
+    partOfEdgeTable: spec.targets?.partOfEdgeTable ?? "part_of_edge",
+    hasPartEdgeTable: spec.targets?.hasPartEdgeTable ?? "has_part_edge",
+    subgraphEdgeByParentTable: spec.targets?.subgraphEdgeByParentTable ?? "subgraph_edge_by_parent",
+    subgraphEdgeByChildTable: spec.targets?.subgraphEdgeByChildTable ?? "subgraph_edge_by_child",
+    subgraphEdgeBySelfTable: spec.targets?.subgraphEdgeBySelfTable ?? "subgraph_edge_by_self",
+    subgraphEdgeByAncestorTable: spec.targets?.subgraphEdgeByAncestorTable ?? "subgraph_edge_by_ancestor",
+    subgraphEdgeByDescendantTable: spec.targets?.subgraphEdgeByDescendantTable ?? "subgraph_edge_by_descendant",
+    subgraphEdgeByAncestorOrDescendantTable: spec.targets?.subgraphEdgeByAncestorOrDescendantTable ?? "subgraph_edge_by_ancestor_or_descendant",
+    entailedSubclassOfEdgeTable: spec.targets?.entailedSubclassOfEdgeTable ?? "entailed_subclass_of_edge",
+    entailedTypeEdgeTable: spec.targets?.entailedTypeEdgeTable ?? "entailed_type_edge",
+    entailedEdgeCycleTable: spec.targets?.entailedEdgeCycleTable ?? "entailed_edge_cycle",
+    entailedEdgeSamePredicateCycleTable: spec.targets?.entailedEdgeSamePredicateCycleTable ?? "entailed_edge_same_predicate_cycle",
     termsTable: spec.targets?.termsTable ?? "ontology_terms",
   };
 }
@@ -328,6 +366,13 @@ export function semanticSqlSourceViewSql(spec: SemanticSqlSourceSpec): string[] 
   const mappingPredicateSql = inList(mappings);
   const ontologyStatusPredicateSql = inList(ONTOLOGY_STATUS_PREDICATES);
   const stanza = stanzaExpr(spec.stanzaColumn);
+  const entailedEdge = spec.entailedEdgeTable ? `(
+SELECT
+  ${canonicalIdExpr("subject", prefixTable, "ee_src")} AS subject,
+  ${canonicalIdExpr("predicate", prefixTable, "ee_src")} AS predicate,
+  ${canonicalIdExpr("object", prefixTable, "ee_src")} AS object
+FROM ${qident(spec.entailedEdgeTable)} AS ${qident("ee_src")}
+)` : undefined;
   const subject = canonicalIdExpr("subject", prefixTable);
   const predicate = canonicalIdExpr("predicate", prefixTable);
   const object = canonicalIdExpr("object", prefixTable);
@@ -690,6 +735,62 @@ SELECT subject, predicate, object
 FROM ${qident(t.rdfTypeTable)}
 WHERE object IN (SELECT id FROM ${qident(t.classNodeTable)})`,
 
+    `CREATE OR REPLACE VIEW ${qident(t.partOfEdgeTable)} AS
+SELECT * FROM ${qident(t.edgeTable)}
+WHERE predicate = 'BFO:0000050'`,
+
+    `CREATE OR REPLACE VIEW ${qident(t.hasPartEdgeTable)} AS
+SELECT * FROM ${qident(t.edgeTable)}
+WHERE predicate = 'BFO:0000051'`,
+
+    `CREATE OR REPLACE VIEW ${qident(t.subgraphEdgeByParentTable)} AS
+SELECT e.*, ee.predicate AS anchor_predicate, ee.object AS anchor_object
+FROM ${qident(t.edgeTable)} e
+JOIN ${qident(t.edgeTable)} ee ON e.subject = ee.subject`,
+
+    `CREATE OR REPLACE VIEW ${qident(t.subgraphEdgeByChildTable)} AS
+SELECT e.*, ee.predicate AS anchor_predicate, ee.subject AS anchor_object
+FROM ${qident(t.edgeTable)} e
+JOIN ${qident(t.edgeTable)} ee ON e.subject = ee.object`,
+
+    `CREATE OR REPLACE VIEW ${qident(t.subgraphEdgeBySelfTable)} AS
+SELECT e.*, e.predicate AS anchor_predicate, e.subject AS anchor_object
+FROM ${qident(t.edgeTable)} e`,
+
+    ...(entailedEdge ? [
+      `CREATE OR REPLACE VIEW ${qident(t.subgraphEdgeByAncestorTable)} AS
+SELECT e.*, ee.predicate AS anchor_predicate, ee.object AS anchor_object
+FROM ${qident(t.edgeTable)} e
+JOIN ${entailedEdge} ee ON e.subject = ee.subject`,
+
+      `CREATE OR REPLACE VIEW ${qident(t.subgraphEdgeByDescendantTable)} AS
+SELECT e.*, ee.predicate AS anchor_predicate, ee.subject AS anchor_object
+FROM ${qident(t.edgeTable)} e
+JOIN ${entailedEdge} ee ON e.subject = ee.object`,
+
+      `CREATE OR REPLACE VIEW ${qident(t.subgraphEdgeByAncestorOrDescendantTable)} AS
+SELECT * FROM ${qident(t.subgraphEdgeByAncestorTable)}
+UNION
+SELECT * FROM ${qident(t.subgraphEdgeByDescendantTable)}`,
+
+      `CREATE OR REPLACE VIEW ${qident(t.entailedSubclassOfEdgeTable)} AS
+SELECT * FROM ${entailedEdge}
+WHERE predicate = 'rdfs:subClassOf'`,
+
+      `CREATE OR REPLACE VIEW ${qident(t.entailedTypeEdgeTable)} AS
+SELECT * FROM ${entailedEdge}
+WHERE predicate = 'rdf:type'`,
+
+      `CREATE OR REPLACE VIEW ${qident(t.entailedEdgeCycleTable)} AS
+SELECT e.*, e2.predicate AS secondary_predicate
+FROM ${entailedEdge} e
+JOIN ${entailedEdge} e2 ON e.object = e2.subject AND e2.object = e.subject`,
+
+      `CREATE OR REPLACE VIEW ${qident(t.entailedEdgeSamePredicateCycleTable)} AS
+SELECT * FROM ${qident(t.entailedEdgeCycleTable)}
+WHERE predicate = secondary_predicate`,
+    ] : []),
+
     `CREATE OR REPLACE VIEW ${qident(t.termsTable)} AS
 SELECT
   ${subject} AS id,
@@ -779,6 +880,20 @@ export async function materializeSemanticSqlSourceViews(conn: SqlConn, spec: Sem
     propertyUsedWithDatatypeValuesAndObjectsTable: t.propertyUsedWithDatatypeValuesAndObjectsTable,
     nodeWithTwoLabelsProblemTable: t.nodeWithTwoLabelsProblemTable,
     allProblemsTable: t.allProblemsTable,
+    partOfEdgeTable: t.partOfEdgeTable,
+    hasPartEdgeTable: t.hasPartEdgeTable,
+    subgraphEdgeByParentTable: t.subgraphEdgeByParentTable,
+    subgraphEdgeByChildTable: t.subgraphEdgeByChildTable,
+    subgraphEdgeBySelfTable: t.subgraphEdgeBySelfTable,
+    ...(spec.entailedEdgeTable ? {
+      subgraphEdgeByAncestorTable: t.subgraphEdgeByAncestorTable,
+      subgraphEdgeByDescendantTable: t.subgraphEdgeByDescendantTable,
+      subgraphEdgeByAncestorOrDescendantTable: t.subgraphEdgeByAncestorOrDescendantTable,
+      entailedSubclassOfEdgeTable: t.entailedSubclassOfEdgeTable,
+      entailedTypeEdgeTable: t.entailedTypeEdgeTable,
+      entailedEdgeCycleTable: t.entailedEdgeCycleTable,
+      entailedEdgeSamePredicateCycleTable: t.entailedEdgeSamePredicateCycleTable,
+    } : {}),
     termsTable: t.termsTable,
   };
 }

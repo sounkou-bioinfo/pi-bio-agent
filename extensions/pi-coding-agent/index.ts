@@ -19,6 +19,7 @@ import { forget, listMemory, recall, remember, memorySubjectId, normalizeAsOf, M
 import { recordSkill, skillSubjectId } from "../../src/hosts/skill-store.js";
 import { fsCasStore } from "../../src/hosts/fs-cas.js";
 import { ingestSessionJsonl, sessionArtifacts, sessionTimeline, sessionToolTrajectory } from "../../src/hosts/session-ingest.js";
+import { recordHostEvent } from "../../src/hosts/host-events.js";
 import { systemClock } from "../../src/core/clock.js";
 import type { SqlConn, ComputeRunner } from "../../src/core/ports.js";
 import type { FetchLike } from "../../src/duckdb/resolvers/http-table-scan.js";
@@ -244,6 +245,20 @@ async function parentSessionIdFromLifecycle(event: SessionLifecycleEvent): Promi
   return event.type === "session_start" && event.reason === "fork" ? readSessionHeaderId(event.previousSessionFile) : undefined;
 }
 
+function lifecycleHostEventValue(event: SessionLifecycleEvent, result: { rawDigest: string; entries: number; messages: number; turns: number; toolCalls: number; artifacts: number; observations: number }): Record<string, unknown> {
+  return {
+    event_type: event.type,
+    reason: "reason" in event ? event.reason : event.type,
+    payload_digest: result.rawDigest,
+    entries: result.entries,
+    messages: result.messages,
+    turns: result.turns,
+    tool_calls: result.toolCalls,
+    artifacts: result.artifacts,
+    observations: result.observations,
+  };
+}
+
 export interface BioExtensionOptions {
   network?: { fetch: FetchLike };
   /** COMPUTE grant: the host injects a ComputeRunner so a manifest's `compute.run` resources can execute.
@@ -338,6 +353,14 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
         sessionToolTrajectory(store.conn, result.sessionId),
         sessionArtifacts(store.conn, result.sessionId),
       ]);
+      await recordHostEvent(store.conn, {
+        subjectId: `session:${result.sessionId}`,
+        kind: "pi_coding_agent.session_lifecycle",
+        recordedAt: systemClock(),
+        source: author,
+        digest: result.rawDigest,
+        value: lifecycleHostEventValue(event, result),
+      });
       return {
         ok: true,
         reason,

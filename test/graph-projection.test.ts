@@ -48,6 +48,9 @@ describe("graph projection profile: source relation -> compiled graph", () => {
     await conn.run("INSERT INTO statements VALUES ('_:restriction1','owl:onProperty','BFO:0000050',NULL,NULL,NULL)");
     await conn.run("INSERT INTO statements VALUES ('_:restriction1','owl:someValuesFrom','GO:0000001',NULL,NULL,NULL)");
     await conn.run("INSERT INTO statements VALUES ('MONDO:0004979','rdfs:subClassOf','_:restriction1',NULL,NULL,NULL)");
+    await conn.run("INSERT INTO statements VALUES ('_:restriction2','owl:onProperty','BFO:0000051',NULL,NULL,NULL)");
+    await conn.run("INSERT INTO statements VALUES ('_:restriction2','owl:someValuesFrom','UBERON:0001004',NULL,NULL,NULL)");
+    await conn.run("INSERT INTO statements VALUES ('MONDO:0004979','rdfs:subClassOf','_:restriction2',NULL,NULL,NULL)");
     await conn.run("INSERT INTO statements VALUES ('_:list1','rdf:first','MONDO:0004979',NULL,NULL,NULL)");
     await conn.run("INSERT INTO statements VALUES ('_:list1','rdf:rest','_:list2',NULL,NULL,NULL)");
     await conn.run("INSERT INTO statements VALUES ('_:list2','rdf:first','MONDO:0004784',NULL,NULL,NULL)");
@@ -56,9 +59,17 @@ describe("graph projection profile: source relation -> compiled graph", () => {
     await conn.run("INSERT INTO statements VALUES ('_:axiom1','owl:annotatedProperty','rdfs:subClassOf',NULL,NULL,NULL)");
     await conn.run("INSERT INTO statements VALUES ('_:axiom1','owl:annotatedTarget','MONDO:0000001',NULL,NULL,NULL)");
     await conn.run("INSERT INTO statements VALUES ('_:axiom1','oio:hasDbXref','GO_REF:0000002',NULL,NULL,NULL)");
+    await conn.run("CREATE TABLE semantic_entailed_input(subject TEXT, predicate TEXT, object TEXT)");
+    await conn.run("INSERT INTO semantic_entailed_input VALUES ('MONDO:0004766','rdfs:subClassOf','MONDO:0004784')");
+    await conn.run("INSERT INTO semantic_entailed_input VALUES ('MONDO:0004784','rdfs:subClassOf','MONDO:0004979')");
+    await conn.run("INSERT INTO semantic_entailed_input VALUES ('MONDO:0004766','rdfs:subClassOf','MONDO:0004979')");
+    await conn.run("INSERT INTO semantic_entailed_input VALUES ('MONDO:0004979','rdf:type','GO:0000001')");
+    await conn.run("INSERT INTO semantic_entailed_input VALUES ('MONDO:cycleA','rdfs:subClassOf','MONDO:cycleB')");
+    await conn.run("INSERT INTO semantic_entailed_input VALUES ('MONDO:cycleB','rdfs:subClassOf','MONDO:cycleA')");
 
     const views = await materializeSemanticSqlSourceViews(conn, {
       schema: SEMANTIC_SQL_SOURCE_SPEC_SCHEMA,
+      entailedEdgeTable: "semantic_entailed_input",
       targets: { edgeTable: "semantic_edge", termsTable: "semantic_terms" },
     });
     assert.equal(views.edgeTable, "semantic_edge");
@@ -69,6 +80,18 @@ describe("graph projection profile: source relation -> compiled graph", () => {
     assert.equal(views.propertyUsedWithDatatypeValuesAndObjectsTable, "property_used_with_datatype_values_and_objects");
     assert.equal(views.nodeWithTwoLabelsProblemTable, "node_with_two_labels_problem");
     assert.equal(views.allProblemsTable, "all_problems");
+    assert.equal(views.partOfEdgeTable, "part_of_edge");
+    assert.equal(views.hasPartEdgeTable, "has_part_edge");
+    assert.equal(views.subgraphEdgeByParentTable, "subgraph_edge_by_parent");
+    assert.equal(views.subgraphEdgeByChildTable, "subgraph_edge_by_child");
+    assert.equal(views.subgraphEdgeBySelfTable, "subgraph_edge_by_self");
+    assert.equal(views.subgraphEdgeByAncestorTable, "subgraph_edge_by_ancestor");
+    assert.equal(views.subgraphEdgeByDescendantTable, "subgraph_edge_by_descendant");
+    assert.equal(views.subgraphEdgeByAncestorOrDescendantTable, "subgraph_edge_by_ancestor_or_descendant");
+    assert.equal(views.entailedSubclassOfEdgeTable, "entailed_subclass_of_edge");
+    assert.equal(views.entailedTypeEdgeTable, "entailed_type_edge");
+    assert.equal(views.entailedEdgeCycleTable, "entailed_edge_cycle");
+    assert.equal(views.entailedEdgeSamePredicateCycleTable, "entailed_edge_same_predicate_cycle");
     assert.equal(views.termsTable, "semantic_terms");
 
     assert.deepEqual(await conn.all<{ subject: string; value: string }>("SELECT subject, value FROM has_text_definition_statement"), [
@@ -105,7 +128,10 @@ describe("graph projection profile: source relation -> compiled graph", () => {
     ]);
     assert.deepEqual(await conn.all<{ subject: string; predicate: string; object: string }>(
       "SELECT subject, predicate, object FROM owl_subclass_of_some_values_from",
-    ), [{ subject: "MONDO:0004979", predicate: "BFO:0000050", object: "GO:0000001" }]);
+    ), [
+      { subject: "MONDO:0004979", predicate: "BFO:0000050", object: "GO:0000001" },
+      { subject: "MONDO:0004979", predicate: "BFO:0000051", object: "UBERON:0001004" },
+    ]);
     assert.deepEqual(await conn.all<{ annotation_subject: string; annotation_predicate: string; annotation_object: string }>(
       "SELECT annotation_subject, annotation_predicate, annotation_object FROM axiom_dbxref_annotation",
     ), [{ annotation_subject: "_:axiom1", annotation_predicate: "oio:hasDbXref", annotation_object: "GO_REF:0000002" }]);
@@ -121,10 +147,45 @@ describe("graph projection profile: source relation -> compiled graph", () => {
     assert.deepEqual(await conn.all<{ predicate: string; value: string }>(
       "SELECT predicate, value FROM all_problems WHERE subject = 'rdfs:seeAlso'",
     ), []);
+    assert.deepEqual(await conn.all<{ subject: string; object: string }>("SELECT subject, object FROM part_of_edge"), [
+      { subject: "MONDO:0004979", object: "GO:0000001" },
+    ]);
+    assert.deepEqual(await conn.all<{ subject: string; object: string }>("SELECT subject, object FROM has_part_edge"), [
+      { subject: "MONDO:0004979", object: "UBERON:0001004" },
+    ]);
+    assert.deepEqual(
+      await conn.all<{ anchor_predicate: string; anchor_object: string }>(
+        "SELECT anchor_predicate, anchor_object FROM subgraph_edge_by_self WHERE subject = 'MONDO:0004979' AND predicate = 'BFO:0000051'",
+      ),
+      [{ anchor_predicate: "BFO:0000051", anchor_object: "MONDO:0004979" }],
+    );
+    assert.deepEqual(await conn.all<{ object: string }>(
+      "SELECT object FROM entailed_subclass_of_edge WHERE subject = 'MONDO:0004766' ORDER BY object",
+    ), [{ object: "MONDO:0004784" }, { object: "MONDO:0004979" }]);
+    assert.deepEqual(await conn.all<{ object: string }>("SELECT object FROM entailed_type_edge WHERE subject = 'MONDO:0004979'"), [{ object: "GO:0000001" }]);
+    assert.deepEqual(
+      await conn.all<{ anchor_object: string }>(
+        "SELECT DISTINCT anchor_object FROM subgraph_edge_by_ancestor WHERE subject = 'MONDO:0004766' AND predicate = 'rdfs:subClassOf' ORDER BY anchor_object",
+      ),
+      [{ anchor_object: "MONDO:0004784" }, { anchor_object: "MONDO:0004979" }],
+    );
+    assert.deepEqual(
+      await conn.all<{ anchor_object: string }>(
+        "SELECT DISTINCT anchor_object FROM subgraph_edge_by_descendant WHERE subject = 'MONDO:0004784' AND predicate = 'rdfs:subClassOf'",
+      ),
+      [{ anchor_object: "MONDO:0004766" }],
+    );
+    assert.deepEqual(
+      await conn.all<{ object: string; secondary_predicate: string }>(
+        "SELECT object, secondary_predicate FROM entailed_edge_same_predicate_cycle WHERE subject = 'MONDO:cycleA'",
+      ),
+      [{ object: "MONDO:cycleB", secondary_predicate: "rdfs:subClassOf" }],
+    );
     assert.deepEqual(await conn.all<{ subject: string; predicate: string; object: string }>(
       "SELECT subject, predicate, object FROM semantic_edge WHERE subject = 'MONDO:0004979' ORDER BY predicate, object",
     ), [
       { subject: "MONDO:0004979", predicate: "BFO:0000050", object: "GO:0000001" },
+      { subject: "MONDO:0004979", predicate: "BFO:0000051", object: "UBERON:0001004" },
       { subject: "MONDO:0004979", predicate: "rdf:type", object: "GO:0000001" },
     ]);
 
@@ -147,7 +208,7 @@ describe("graph projection profile: source relation -> compiled graph", () => {
     };
 
     const out = await materializeGraphProjectionProfile(conn, sourceSpecProfile);
-    assert.deepEqual(out, { edgesTable: "semantic_bio_edges", edgeCount: 5, closureTable: "semantic_entailed_edge", closureCount: 3 });
+    assert.deepEqual(out, { edgesTable: "semantic_bio_edges", edgeCount: 6, closureTable: "semantic_entailed_edge", closureCount: 3 });
     const ancestors = await conn.all<{ to_id: string }>(
       "SELECT to_id FROM semantic_entailed_edge WHERE from_id = 'MONDO:0004766' ORDER BY to_id",
     );
@@ -173,12 +234,16 @@ describe("graph projection profile: source relation -> compiled graph", () => {
     await conn.run("INSERT INTO statements VALUES ('http://purl.obolibrary.org/obo/MONDO_0004979','http://www.w3.org/2002/07/owl#deprecated',NULL,'true',NULL,NULL)");
     await conn.run("INSERT INTO statements VALUES ('http://purl.obolibrary.org/obo/MONDO_0004784','http://www.w3.org/2000/01/rdf-schema#subClassOf','http://purl.obolibrary.org/obo/MONDO_0004979',NULL,NULL,NULL)");
     await conn.run("INSERT INTO statements VALUES ('http://purl.obolibrary.org/obo/MONDO_0004766','http://www.w3.org/2000/01/rdf-schema#subClassOf','http://purl.obolibrary.org/obo/MONDO_0004784',NULL,NULL,NULL)");
+    await conn.run("CREATE TABLE raw_entailed_edge(subject TEXT, predicate TEXT, object TEXT)");
+    await conn.run("INSERT INTO raw_entailed_edge VALUES ('http://purl.obolibrary.org/obo/MONDO_0004784','http://www.w3.org/2000/01/rdf-schema#subClassOf','http://purl.obolibrary.org/obo/MONDO_0004979')");
 
-    await materializeSemanticSqlSourceViews(conn, {
+    const views = await materializeSemanticSqlSourceViews(conn, {
       schema: SEMANTIC_SQL_SOURCE_SPEC_SCHEMA,
       prefixTable: "prefix",
+      entailedEdgeTable: "raw_entailed_edge",
       targets: { edgeTable: "iri_edge", labelsTable: "iri_label", definitionsTable: "iri_definition", synonymsTable: "iri_synonym", termsTable: "iri_terms" },
     });
+    assert.equal(views.entailedSubclassOfEdgeTable, "entailed_subclass_of_edge");
 
     assert.deepEqual(await conn.all<{ subject: string; predicate: string; object: string }>(
       "SELECT subject, predicate, object FROM iri_edge ORDER BY subject",
@@ -195,6 +260,12 @@ describe("graph projection profile: source relation -> compiled graph", () => {
     assert.deepEqual(await conn.all<{ subject: string; value: string }>("SELECT subject, value FROM iri_synonym"), [
       { subject: "MONDO:0004979", value: "bronchial asthma" },
     ]);
+    assert.deepEqual(await conn.all<{ subject: string; predicate: string; object: string }>(
+      "SELECT subject, predicate, object FROM entailed_subclass_of_edge",
+    ), [{ subject: "MONDO:0004784", predicate: "rdfs:subClassOf", object: "MONDO:0004979" }]);
+    assert.deepEqual(await conn.all<{ anchor_object: string }>(
+      "SELECT DISTINCT anchor_object FROM subgraph_edge_by_ancestor WHERE subject = 'MONDO:0004784'",
+    ), [{ anchor_object: "MONDO:0004979" }]);
     assert.deepEqual(
       await conn.all<{ id: string; definition: string; deprecated: boolean }>(
         "SELECT id, definition, deprecated FROM iri_terms WHERE id = 'MONDO:0004979'",

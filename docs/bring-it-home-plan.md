@@ -115,10 +115,13 @@ consumer-pulled, or a non-goal.
    `recordHostEvent` and graph links. It remains active until this conformance runs in a non-skipped sibling/product
    gate or a downstream host consumes it. Core should not grow a transport-specific upload primitive.
 2. **Concrete host adapters over `recordHostEvent`.** The primitive exists; the open work is the adapter layer:
-   the bring-it-home dogfood now records scheduler-style queue claim, lease-reclaim, and stale-attempt rejection
-   events as open host facts that the training corpus exports. Remaining work is concrete Pi/workbench hooks for
-   steers, interrupts, compaction, session switching, context digests, and governance events that a consumer actually
-   reads. Do not add a closed event taxonomy.
+   the Pi extension now records `session_start` / `session_compact` / `session_shutdown` lifecycle hooks as an open
+   `pi_coding_agent.session_lifecycle` host event on the `session:<id>` node after the persisted JSONL snapshot is
+   ingested; the payload includes the raw-session digest so corpus consumers can distinguish runtime lifecycle intent
+   from transcript content. The bring-it-home dogfood also records scheduler-style queue claim, lease-reclaim, and
+   stale-attempt rejection events as open host facts that the training corpus exports. Remaining work is concrete
+   Pi/workbench hooks for steers, interrupts, before-provider context digests, session switching, and governance
+   events that a consumer actually reads. Do not add a closed event taxonomy.
 3. **Durable workflow dogfood over the closed lifecycle.** The async lifecycle and checkpoint resume helper are
    built and the bring-it-home dogfood now runs checkpointed bash steps through `nodeComputeRunner`, reuses the
    completed prefix, reruns the suffix, and proves queue cancellation, expired-lease reclaim, and stale-attempt
@@ -134,13 +137,15 @@ consumer-pulled, or a non-goal.
    RDF/OWL, Semantic Web, FHIR-shaped resources, and related graph ecosystems. The base helper now materializes
    generated SemanticSQL views from a staged `statements` table: RDF/RDFS typed statement views, relation-graph
    `edge`, RDF list/member views, node/identifier/count views, OWL node/property/axiom/restriction views, OBO
-   synonym/mapping/contributor/orcid views, OBO problem views, deprecated nodes, ontology status, and term rollups.
-   When a staged `prefix(prefix, base)` table is declared, the views canonicalize matching IRIs to CURIEs before
-   projection. Remaining parity is relation-graph-specific equivalence/reflexivity/property-hierarchy policy,
-   RO/subgraph/taxon constraint/similarity/term-association views, multi-ontology attachment, and evidence/problem
-   projection into edge `attrs`/`trust` when a real grounding/traversal consumer needs it. Declared upstream
-   `entailed_edge` artifacts now enter through the same graph projection profile when a resolver/host stages and
-   receipts them.
+   synonym/mapping/contributor/orcid views, OBO problem views, RO edge filters, relation-graph subgraph/cycle
+   inspection views, deprecated nodes, ontology status, and term rollups. When a staged `prefix(prefix, base)` table
+   is declared, the views canonicalize matching IRIs to CURIEs before projection. When a staged SemanticSQL
+   `entailed_edge(subject,predicate,object)` table is declared, closure-backed relation-graph views are generated
+   over it. Remaining parity is relation-graph-specific equivalence/reflexivity/property-hierarchy policy,
+   taxon-constraint/similarity/term-association/NLP/ChEBI-specific views, multi-ontology attachment, and
+   evidence/problem projection into edge `attrs`/`trust` when a real grounding/traversal consumer needs it. Declared
+   upstream `entailed_edge` artifacts now enter through the same graph projection profile when a resolver/host stages
+   and receipts them.
 6. **Docs hygiene.** Keep README and guides action-first: real commands, real code chunks, no fake text-block
    architecture diagrams, no speculative hostfs claims, and no stale "process transport" lane. Claims should point
    to commands, tests, or examples that currently run.
