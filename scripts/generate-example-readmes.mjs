@@ -131,7 +131,7 @@ const EXAMPLES = [
           { key: "status", label: "status" },
         ]),
         "",
-        `The VALUE came back as a table (n=${Number(r.n)}); the declared FILE outputs (\`rows.csv\`, \`report.txt\`) were captured into CAS — verified content-addressed in \`test/compute-artifacts-example.test.ts\`.`,
+        `The VALUE came back as a table (n=${Number(r.n)}); the declared FILE outputs (\`rows.csv\`, \`report.txt\`, \`plot.svg\`) were captured into CAS — verified content-addressed in \`test/compute-artifacts-example.test.ts\`.`,
       ].join("\n");
     },
   },

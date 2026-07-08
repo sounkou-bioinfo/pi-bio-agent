@@ -19,7 +19,8 @@
           "command": ["Rscript", "./summarize.R"],
           "outputs": [
             { "name": "rows_csv", "path": "rows.csv", "kind": "table" },
-            { "name": "report", "path": "report.txt", "kind": "file" }
+            { "name": "report", "path": "report.txt", "kind": "file" },
+            { "name": "plot_svg", "path": "plot.svg", "kind": "file" }
           ],
           "timeoutMs": 120000
         }

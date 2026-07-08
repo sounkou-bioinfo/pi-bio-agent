@@ -768,7 +768,7 @@ JOIN, not a walker. See [`design.md`](./design.md#the-semanticsql-shape-source-s
     shape: node category, label, equivalent identifiers, source ids, and node attributes. Keep that as a downstream
     projection until multiple foreign-KG consumers force a shared normalized-node view; do not overload
     `bio_edges` or `entailed_edge` with node identity policy.
-- Next: keep source-spec parity consumer-pulled but active. A thin ontology-ingest resolver can stage the
+- Next consumer-pulled work: a thin ontology-ingest resolver can stage the
   SemanticSQL source-spec shape in DuckDB and project its generated `edge` view into our `bio_edges` shape.
   No DuckDB sqlite extension is required: ingest from a native-readable format such as OBO Graphs JSON via
   `read_json`, generated TSVs / triple parquet via `duckdb.file_scan`, or an optional one-time `sqlite3` CLI dump

@@ -38,10 +38,14 @@ describe("example: compute.run with FILE outputs captured into CAS (the #3 artif
     // the FILE outputs are in the receipt as content-addressed artifacts
     const receipts = JSON.parse(await fs.readFile(join(out.runDir, "receipts.json"), "utf8")) as Array<{ resourceId: string; provenance: Array<{ source: string; digest?: string; notes?: string[] }> }>;
     const summary = receipts.find((r) => r.resourceId === "summary")!;
+    assert.ok(
+      summary.provenance.some((p) => p.source === "compute.run" && p.notes?.some((note) => /^cmd:Rscript .*summarize\.R$/.test(note))),
+      "receipt records the R renderer command",
+    );
     const artifacts = summary.provenance.filter((p) => p.source.startsWith("artifact:"));
-    assert.equal(artifacts.length, 2, "two declared file outputs captured");
+    assert.equal(artifacts.length, 3, "three declared file outputs captured");
     const byName = Object.fromEntries(artifacts.map((a) => [a.source, a]));
-    for (const name of ["artifact:rows_csv", "artifact:report"]) {
+    for (const name of ["artifact:rows_csv", "artifact:report", "artifact:plot_svg"]) {
       const a = byName[name]!;
       assert.match(a.digest ?? "", /^sha256:[0-9a-f]{64}$/, `${name} has a sha256 digest`);
       // the bytes are actually in CAS at that address
@@ -53,6 +57,11 @@ describe("example: compute.run with FILE outputs captured into CAS (the #3 artif
     const reportDigest = byName["artifact:report"]!.digest!.replace("sha256:", "");
     const reportBytes = await fs.readFile(cas.pathFor({ algorithm: "sha256", digest: reportDigest }), "utf8");
     assert.match(reportBytes, /rows: 5/, "the captured report.txt has the real content");
+
+    const plotDigest = byName["artifact:plot_svg"]!.digest!.replace("sha256:", "");
+    const plotBytes = await fs.readFile(cas.pathFor({ algorithm: "sha256", digest: plotDigest }), "utf8");
+    assert.match(plotBytes, /<svg[^>]*>/, "the captured plot.svg is a real SVG");
+    assert.match(plotBytes, /<\/svg>/, "the captured plot.svg is complete");
   });
 
   test("fails closed when outputs are declared but no CAS is bound", async () => {

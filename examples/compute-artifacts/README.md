@@ -32,10 +32,11 @@ n  mean_x  status
 5     3.0  ok
 ```
 
-The VALUE came back as a table (n=5); the declared FILE outputs (`rows.csv`, `report.txt`) were captured into CAS — verified content-addressed in `test/compute-artifacts-example.test.ts`.
+The VALUE came back as a table (n=5); the declared FILE outputs (`rows.csv`, `report.txt`, `plot.svg`) were captured into CAS — verified content-addressed in `test/compute-artifacts-example.test.ts`.
 <!-- END GENERATED:artifacts-run -->
 
-`test/compute-artifacts-example.test.ts` verifies the two declared outputs (`rows.csv` as `kind: table`,
-`report.txt` as `kind: file`) are captured **content-addressed in CAS** (the receipt's `sha256:` digests resolve
-to the real bytes), and that declaring `outputs` **without** a CAS fails closed. A `table`-kind artifact is
-re-readable downstream via `read_csv` over its CAS path; a `file`-kind one is referenced by handle.
+`test/compute-artifacts-example.test.ts` verifies the three declared outputs (`rows.csv` as `kind: table`,
+`report.txt` and the base-R-rendered `plot.svg` as `kind: file`) are captured **content-addressed in CAS** (the
+receipt's `sha256:` digests resolve to the real bytes), and that declaring `outputs` **without** a CAS fails closed.
+A `table`-kind artifact is re-readable downstream via `read_csv` over its CAS path; a `file`-kind one is referenced
+by handle.
