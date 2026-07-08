@@ -43,11 +43,13 @@ ontology-status, and term views that a manifest or `GraphProjectionProfile` can 
 canonicalization through a staged
 `prefix(prefix, base)` table. A staged `textual_transformation(subject, predicate, value)` table adds the
 SemanticSQL NLP inspection layer: `processed_statement`, and with a prefix table, `subject_prefix` plus `match`.
+An optional staged `term_association(id, subject, predicate, object, evidence_type, publication, source)` table is
+exposed as the canonical association view and can be projected into `bio_edges` with the same graph profile shape.
 When a source ships a precomputed SemanticSQL/relation-graph `entailed_edge`, `materializeGraphProjectionProfile`
 can copy that declared artifact into the same closure-table shape; `materializeSemanticSqlSourceViews` can also use
 a staged `entailed_edge(subject, predicate, object)` table to expose closure-backed ancestor/descendant, subclass,
-type, cycle, and taxon-constraint views, including most-specific inferred in-taxon. Otherwise the local CTE closure
-remains the default.
+type, cycle, node-pair overlap, and taxon-constraint views, including most-specific inferred in-taxon. Otherwise the
+local CTE closure remains the default.
 
 Suggested stable views:
 

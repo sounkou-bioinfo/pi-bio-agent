@@ -95,6 +95,8 @@ export interface SemanticSqlSourceViewTargets {
   inferredNeverInTaxon2Table?: string;
   inferredNeverInTaxonTable?: string;
   mostSpecificInferredInTaxonTable?: string;
+  nodePairwiseOverlapTable?: string;
+  termAssociationTable?: string;
   subjectPrefixTable?: string;
   processedStatementTable?: string;
   matchTable?: string;
@@ -120,6 +122,8 @@ export interface SemanticSqlSourceSpec {
   prefixTable?: string;
   /** Optional SemanticSQL/relation-graph `entailed_edge(subject, predicate, object)` table. Enables closure-backed views. */
   entailedEdgeTable?: string;
+  /** Optional SemanticSQL `term_association` table. Enables a canonical association view. */
+  termAssociationSourceTable?: string;
   /** Optional SemanticSQL NLP `textual_transformation(subject, predicate, value)` table. Enables processed text views. */
   textualTransformationTable?: string;
   targets?: SemanticSqlSourceViewTargets;
@@ -219,6 +223,8 @@ export interface MaterializedSemanticSqlViews {
   inferredNeverInTaxon2Table?: string;
   inferredNeverInTaxonTable?: string;
   mostSpecificInferredInTaxonTable?: string;
+  nodePairwiseOverlapTable?: string;
+  termAssociationTable?: string;
   subjectPrefixTable?: string;
   processedStatementTable?: string;
   matchTable?: string;
@@ -292,6 +298,20 @@ function valueExpr(prefixTable: string | undefined): string {
 
 function stanzaExpr(column: string | undefined): string {
   return column ? `CAST(${qident(column)} AS VARCHAR)` : "CAST(NULL AS VARCHAR)";
+}
+
+function termAssociationSql(spec: SemanticSqlSourceSpec, target: string): string[] {
+  if (!spec.termAssociationSourceTable || spec.termAssociationSourceTable === target) return [];
+  return [`CREATE OR REPLACE VIEW ${qident(target)} AS
+SELECT
+  CAST(ta.id AS VARCHAR) AS id,
+  ${canonicalIdExpr("subject", spec.prefixTable, "ta")} AS subject,
+  ${canonicalIdExpr("predicate", spec.prefixTable, "ta")} AS predicate,
+  ${canonicalIdExpr("object", spec.prefixTable, "ta")} AS object,
+  CAST(ta.evidence_type AS VARCHAR) AS evidence_type,
+  CAST(ta.publication AS VARCHAR) AS publication,
+  CAST(ta.source AS VARCHAR) AS source
+FROM ${qident(spec.termAssociationSourceTable)} AS ${qident("ta")}`];
 }
 
 function targets(spec: SemanticSqlSourceSpec): Required<SemanticSqlSourceViewTargets> {
@@ -388,6 +408,8 @@ function targets(spec: SemanticSqlSourceSpec): Required<SemanticSqlSourceViewTar
     inferredNeverInTaxon2Table: spec.targets?.inferredNeverInTaxon2Table ?? "inferred_never_in_taxon_2",
     inferredNeverInTaxonTable: spec.targets?.inferredNeverInTaxonTable ?? "inferred_never_in_taxon",
     mostSpecificInferredInTaxonTable: spec.targets?.mostSpecificInferredInTaxonTable ?? "most_specific_inferred_in_taxon",
+    nodePairwiseOverlapTable: spec.targets?.nodePairwiseOverlapTable ?? "node_pairwise_overlap",
+    termAssociationTable: spec.targets?.termAssociationTable ?? "term_association",
     subjectPrefixTable: spec.targets?.subjectPrefixTable ?? "subject_prefix",
     processedStatementTable: spec.targets?.processedStatementTable ?? "processed_statement",
     matchTable: spec.targets?.matchTable ?? "match",
@@ -907,6 +929,17 @@ WHERE NOT EXISTS (
   WHERE msct.subject = ct.subject
     AND msct.taxon_with_constraint != ct.taxon_with_constraint
 )`,
+
+      `CREATE OR REPLACE VIEW ${qident(t.nodePairwiseOverlapTable)} AS
+SELECT
+  e1.subject AS node1,
+  e2.subject AS node2,
+  e1.predicate AS predicate1,
+  e2.predicate AS predicate2,
+  CAST(count(DISTINCT e1.object) AS INTEGER) AS num_ancestors
+FROM ${entailedEdge} e1
+JOIN ${entailedEdge} e2 ON e1.object = e2.object
+GROUP BY e1.subject, e2.subject, e1.predicate, e2.predicate`,
     ] : []),
 
     ...(prefixTable ? [
@@ -954,6 +987,8 @@ JOIN ${qident(t.subjectPrefixTable)} s1p ON s1.subject = s1p.subject
 JOIN ${qident(t.subjectPrefixTable)} s2p ON s2.subject = s2p.subject
 WHERE s1.subject != s2.subject`,
     ] : []),
+
+    ...termAssociationSql(spec, t.termAssociationTable),
 
     `CREATE OR REPLACE VIEW ${qident(t.termsTable)} AS
 SELECT
@@ -1069,6 +1104,7 @@ export async function materializeSemanticSqlSourceViews(conn: SqlConn, spec: Sem
       inferredNeverInTaxon2Table: t.inferredNeverInTaxon2Table,
       inferredNeverInTaxonTable: t.inferredNeverInTaxonTable,
       mostSpecificInferredInTaxonTable: t.mostSpecificInferredInTaxonTable,
+      nodePairwiseOverlapTable: t.nodePairwiseOverlapTable,
     } : {}),
     ...(spec.prefixTable ? {
       subjectPrefixTable: t.subjectPrefixTable,
@@ -1078,6 +1114,9 @@ export async function materializeSemanticSqlSourceViews(conn: SqlConn, spec: Sem
     } : {}),
     ...(spec.prefixTable && spec.textualTransformationTable ? {
       matchTable: t.matchTable,
+    } : {}),
+    ...(spec.termAssociationSourceTable ? {
+      termAssociationTable: t.termAssociationTable,
     } : {}),
     termsTable: t.termsTable,
   };

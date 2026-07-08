@@ -490,13 +490,17 @@ relation-graph shape for named subclass/subproperty rows, `subClassOf someValues
 ChEBI conjugate-acid/base edge filters and charge statements, plus source-spec subgraph-by-parent/child/self views
 over that generated `edge`. When a staged SemanticSQL
 `entailed_edge(subject, predicate, object)` table is declared, the helper adds the closure-backed relation-graph
-inspection views: subgraph-by-ancestor/descendant, entailed subclass/type filters, cycle reports, and direct/inferred
-taxon-constraint views. It still does not treat every object triple as a relation-graph edge.
+inspection views: subgraph-by-ancestor/descendant, entailed subclass/type filters, cycle reports,
+`node_pairwise_overlap`, and direct/inferred taxon-constraint views. It still does not treat every object triple as a
+relation-graph edge.
 When a staged `prefix(prefix, base)` table is declared, the generated views canonicalize matching IRIs to CURIEs.
 The same prefix table also enables the SemanticSQL `subject_prefix` view. When a staged
 `textual_transformation(subject, predicate, value)` table is declared, the helper exposes `processed_statement`; with
 both prefix and transformation tables present it also exposes the source-spec `match` view for SQL-native text
 matching across labeled ontology/FHIR/RDF resources.
+When a staged SemanticSQL `term_association` table is declared, the helper exposes the canonical association columns
+with the same optional prefix canonicalization; an ordinary graph projection profile can then project those
+associations into `bio_edges`.
 The generated `edge` view then uses the same graph projection profile and closure path as KGX, memory, and
 observation graphs. This is compatibility with the SemanticSQL source-spec ecosystem, useful for RDF/OWL,
 Semantic-Web, FHIR-shaped, and ontology-derived data; it is not a hidden OWL reasoner.

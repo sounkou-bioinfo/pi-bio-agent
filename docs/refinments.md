@@ -719,10 +719,12 @@ JOIN, not a walker. See [`design.md`](./design.md#the-semanticsql-shape-source-s
     `textual_transformation(subject,predicate,value)` table is supplied, the helper exposes `processed_statement`;
     with both prefix and transformation tables present it also exposes `match`.
     When a staged SemanticSQL `entailed_edge(subject,predicate,object)` table is supplied, the closure-backed
-    relation-graph and taxon-constraint propagation views are generated too. This gives Semantic Web,
-    ontology-derived, and FHIR-shaped RDF data a SemanticSQL inspection surface without a source-specific adapter. We
-    still do not parse the full upstream LinkML source to generate every DDL/view; parity expands only when a concrete
-    grounding or traversal consumer needs more of the source spec.
+    relation-graph, node-pair overlap, and taxon-constraint propagation views are generated too. When a staged
+    SemanticSQL `term_association` table is supplied, the helper exposes the canonical association columns and the
+    existing graph projection profile maps them into `bio_edges`. This gives Semantic Web, ontology-derived, and
+    FHIR-shaped RDF data a SemanticSQL inspection surface without a source-specific adapter. We still do not parse
+    the full upstream LinkML source to generate every DDL/view; parity expands only when a concrete grounding or
+    traversal consumer needs more of the source spec.
   - **Prefix canonicalization is present, not a traversal primitive.** Here `prefix(prefix, base)` means namespace
     expansion/canonicalization (`HP` -> an HPO base IRI, `biolink` -> a Biolink base IRI), not run-id prefixes,
     observation-key prefixes, or graph walk policy. Remaining identifier hygiene is receipts and multi-database
@@ -731,9 +733,9 @@ JOIN, not a walker. See [`design.md`](./design.md#the-semanticsql-shape-source-s
     list/member views, node and identifier views, OWL node/property classifications, axiom annotations, existential
     restriction views, OBO synonym/mapping/contributor/orcid views, OBO problem views, relation-graph `edge`,
     RO edge filters, ChEBI charge/conjugate views, relation-graph subgraph/cycle inspection views,
-    taxon-constraint propagation views including most-specific inferred in-taxon, NLP text-match views, deprecated
-    nodes, ontology status, and term rows. Similarity and term-association views remain source-spec conformance work
-    for consumers that need them.
+    `node_pairwise_overlap`, taxon-constraint propagation views including most-specific inferred in-taxon, NLP
+    text-match views, deprecated nodes, ontology status, term-association views, and term rows. Remaining generated
+    view work is consumer-pulled relation-graph policy and source-specific evidence/trust projection.
   - **`edge` semantics are deliberately bounded.** In SemanticSQL, `edge` is a generated relation-graph view that
     folds direct named rows, existential restrictions, and selected `rdf:type` assertions through class-node
     knowledge. The local helper now covers those rows, then lets the existing graph projection profile and closure
