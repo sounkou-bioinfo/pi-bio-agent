@@ -25,7 +25,7 @@ import { recordHostEvent } from "../dist/hosts/host-events.js";
 import { ingestSessionJsonl } from "../dist/hosts/session-ingest.js";
 import { exportTrainingCorpusParquet } from "../dist/hosts/training-corpus.js";
 import { nodeComputeRunner, withObservedEnvironment } from "../dist/hosts/index.js";
-import { claimJob, createJobQueueSchema, recordJobClaimStatus } from "../dist/hosts/job-queue.js";
+import { claimJob, createJobQueueSchema, finishJobClaim, recordJobClaimResult, recordJobClaimStatus } from "../dist/hosts/job-queue.js";
 import {
   cancelBioJob,
   jobStepCheckpointKey,
@@ -458,6 +458,100 @@ try {
   const resumedQueue = await resumeBioJob(conn, { cwd: queueCwd, runId: queueRunId });
   assert.equal(resumedQueue.phase, "cancelled");
 
+  const reclaimRunId = "dogfood-queue-reclaim";
+  const reclaimCwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-dogfood-reclaim-"));
+  const reclaimReplay = {
+    schema: "pi-bio.run_replay_spec.v1",
+    runId: reclaimRunId,
+    kind: "query",
+    sql: "SELECT 2 AS answer",
+  };
+  await submitBioJob(conn, queueRunner, {
+    cwd: reclaimCwd,
+    runId: reclaimRunId,
+    replay: reclaimReplay,
+    now: "2026-07-06T12:01:20.000Z",
+    source: "bring-it-home-dogfood",
+  });
+  const firstReclaimClaim = await claimJob(conn, {
+    workerId: "worker:dogfood-a",
+    now: "2026-07-06T12:01:21.000Z",
+    leaseSeconds: 2,
+  });
+  assert.equal(firstReclaimClaim?.runId, reclaimRunId);
+  assert.equal(firstReclaimClaim?.attempt, 1);
+  await recordJobClaimStatus(conn, {
+    runId: reclaimRunId,
+    workerId: "worker:dogfood-a",
+    attempt: firstReclaimClaim.attempt,
+    replayDigest: firstReclaimClaim.replayDigest,
+    phase: "running",
+    recordedAt: "2026-07-06T12:01:22.000Z",
+    message: "first worker claimed before lease loss",
+  });
+  const reclaimedClaim = await claimJob(conn, {
+    workerId: "worker:dogfood-b",
+    now: "2026-07-06T12:01:24.000Z",
+    leaseSeconds: 60,
+  });
+  assert.equal(reclaimedClaim?.runId, reclaimRunId);
+  assert.equal(reclaimedClaim?.attempt, 2);
+  let staleLeaseWriteRejected = false;
+  try {
+    await recordJobClaimStatus(conn, {
+      runId: reclaimRunId,
+      workerId: "worker:dogfood-a",
+      attempt: firstReclaimClaim.attempt,
+      replayDigest: firstReclaimClaim.replayDigest,
+      phase: "succeeded",
+      recordedAt: "2026-07-06T12:01:25.000Z",
+    });
+  } catch {
+    staleLeaseWriteRejected = true;
+  }
+  assert.equal(staleLeaseWriteRejected, true);
+  let staleLeaseResultRejected = false;
+  try {
+    await recordJobClaimResult(conn, {
+      runId: reclaimRunId,
+      workerId: "worker:dogfood-a",
+      attempt: firstReclaimClaim.attempt,
+      replayDigest: firstReclaimClaim.replayDigest,
+      result: { rows: [{ answer: 999 }], stale: true },
+      recordedAt: "2026-07-06T12:01:25.500Z",
+    });
+  } catch {
+    staleLeaseResultRejected = true;
+  }
+  assert.equal(staleLeaseResultRejected, true);
+  await recordJobClaimResult(conn, {
+    runId: reclaimRunId,
+    workerId: "worker:dogfood-b",
+    attempt: reclaimedClaim.attempt,
+    replayDigest: reclaimedClaim.replayDigest,
+    result: { rows: [{ answer: 2 }], reclaimedFromAttempt: firstReclaimClaim.attempt },
+    recordedAt: "2026-07-06T12:01:26.000Z",
+  });
+  await recordJobClaimStatus(conn, {
+    runId: reclaimRunId,
+    workerId: "worker:dogfood-b",
+    attempt: reclaimedClaim.attempt,
+    replayDigest: reclaimedClaim.replayDigest,
+    phase: "succeeded",
+    recordedAt: "2026-07-06T12:01:27.000Z",
+    message: "reclaimed worker completed",
+  });
+  await finishJobClaim(conn, {
+    runId: reclaimRunId,
+    workerId: "worker:dogfood-b",
+    now: "2026-07-06T12:01:28.000Z",
+    phase: "succeeded",
+  });
+  const reclaimedStatus = await queueRunner.status(reclaimRunId);
+  const reclaimedResult = await queueRunner.collect(reclaimRunId);
+  assert.equal(reclaimedStatus?.phase, "succeeded");
+  assert.deepEqual(reclaimedResult?.result, { rows: [{ answer: 2 }], reclaimedFromAttempt: 1 });
+
   const profileConn = new FakeDucknngProfileConn();
   const firstProfile = await refreshDucknngHttpProfile(profileConn, {
     profileId: "clinvar-read-dogfood",
@@ -737,6 +831,15 @@ try {
       scoreBackend: scored?.value.process_backend,
     },
     queueCancel: { runId: queueRunId, staleWriteRejected: staleQueueWriteRejected, resumedPhase: resumedQueue.phase },
+    queueReclaim: {
+      runId: reclaimRunId,
+      firstAttempt: firstReclaimClaim.attempt,
+      reclaimedAttempt: reclaimedClaim.attempt,
+      staleLeaseWriteRejected,
+      staleLeaseResultRejected,
+      finalPhase: reclaimedStatus?.phase,
+      resultAnswer: reclaimedResult?.result?.rows?.[0]?.answer,
+    },
     checkpointKey: checkpointRow.statement_key,
     ducknngProfileReceipt: {
       profileId: profileReceipt.profileId,

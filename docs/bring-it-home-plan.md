@@ -118,9 +118,9 @@ consumer-pulled, or a non-goal.
    and governance events that a consumer actually reads. Do not add a closed event taxonomy.
 3. **Durable workflow dogfood over the closed lifecycle.** The async lifecycle and checkpoint resume helper are
    built and the bring-it-home dogfood now runs checkpointed bash steps through `nodeComputeRunner`, reuses the
-   completed prefix, reruns the suffix, and proves queue cancellation plus post-cancel stale-write rejection
-   through the ledger. Remaining hardening is to exercise the same shape with R/Python/NNG/scheduler-backed steps
-   and real lease-reclaim paths as consumers need them. This is not a request for another workflow engine.
+   completed prefix, reruns the suffix, and proves queue cancellation, expired-lease reclaim, and stale-attempt
+   write rejection through the ledger. Remaining hardening is to exercise the same shape with R/Python/NNG/scheduler
+   backends as real consumers need them. This is not a request for another workflow engine.
 4. **Substrate skill and non-Pi host dogfood.** The packaged skill should keep onboarding weaker hosts into the
    substrate: write or inspect a manifest, discover schemas with `DESCRIBE` / `SUMMARIZE`, run bounded SQL, walk the
    ledger/graph when present, and promote only repeated workflows into thin playbooks.

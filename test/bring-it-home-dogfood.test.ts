@@ -29,6 +29,15 @@ describe("bring-it-home dogfood command", () => {
         scoreBackend: string;
       };
       checkpointKey: string;
+      queueReclaim: {
+        runId: string;
+        firstAttempt: number;
+        reclaimedAttempt: number;
+        staleLeaseWriteRejected: boolean;
+        staleLeaseResultRejected: boolean;
+        finalPhase: string;
+        resultAnswer: number;
+      };
       ducknngProfileReceipt: { policyDigest: string; rotatedFromDigest?: string; version: string; receiptChanged: boolean; subjectRestriction: { restricted: boolean; count: number; digest?: string } };
       hostCapabilityRun: { casMetadataRefs: number };
       renvEnvironment: { digest: string; packages: number; rVersion: string | null; bioconductor: string | null; envStatus: string; artifactRows: number };
@@ -52,6 +61,15 @@ describe("bring-it-home dogfood command", () => {
       scoreBackend: "node-process",
     });
     assert.equal(summary.checkpointKey, "job:dogfood-workflow:step:extract%2Fvariants");
+    assert.deepEqual(summary.queueReclaim, {
+      runId: "dogfood-queue-reclaim",
+      firstAttempt: 1,
+      reclaimedAttempt: 2,
+      staleLeaseWriteRejected: true,
+      staleLeaseResultRejected: true,
+      finalPhase: "succeeded",
+      resultAnswer: 2,
+    });
     assert.equal(summary.ducknngProfileReceipt.subjectRestriction.restricted, true);
     assert.equal(summary.ducknngProfileReceipt.subjectRestriction.count, 2);
     assert.match(summary.ducknngProfileReceipt.subjectRestriction.digest ?? "", /^sha256:[0-9a-f]{64}$/);
