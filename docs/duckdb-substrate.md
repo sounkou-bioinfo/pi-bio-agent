@@ -36,6 +36,8 @@ For ontology sources, this means port the canonical INCAtools/Semantic SQL LinkM
 application-specific wrapper: `statements`, `prefix`, `entailed_edge`, plus generated views such as `edge`.
 SQLite Semantic SQL databases are interchange artifacts; DuckDB remains the joined/queryable substrate for
 agent-authored SQL and recursive closure.
+`materializeSemanticSqlSourceViews` is the current library helper for staged `statements`: it creates the generated
+`edge`, label, synonym, mapping, and term views that a manifest or `GraphProjectionProfile` can consume.
 
 Suggested stable views:
 

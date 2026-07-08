@@ -5,6 +5,7 @@ import { graphProjectionSql, validateGraphProjectionProfile, type GraphProjectio
 import { duckdbNodeConn } from "../src/duckdb/node-api.js";
 import { materializeEntailedEdges } from "../src/duckdb/graph-closure.js";
 import { materializeGraphProjectionProfile } from "../src/duckdb/graph-projection.js";
+import { materializeSemanticSqlSourceViews, semanticSqlSourceViewSql, SEMANTIC_SQL_SOURCE_SPEC_SCHEMA } from "../src/duckdb/semantic-sql.js";
 import { createBioObservationSchema, materializeBioEdgesAsOf, recordObservationLink } from "../src/duckdb/observations.js";
 
 const profile: GraphProjectionProfile = {
@@ -24,6 +25,58 @@ const profile: GraphProjectionProfile = {
 };
 
 describe("graph projection profile: source relation -> compiled graph", () => {
+  test("materializes SemanticSQL source-spec views from statements, then projects generated edge into bio_edges", async () => {
+    const conn = duckdbNodeConn(await (await DuckDBInstance.create(":memory:")).connect());
+    await conn.run("CREATE TABLE statements(subject TEXT, predicate TEXT, object TEXT, value TEXT, datatype TEXT, language TEXT)");
+    await conn.run("INSERT INTO statements VALUES ('MONDO:0004979','rdfs:label',NULL,'asthma',NULL,'en')");
+    await conn.run("INSERT INTO statements VALUES ('MONDO:0004979','oio:hasExactSynonym',NULL,'bronchial asthma',NULL,'en')");
+    await conn.run("INSERT INTO statements VALUES ('MONDO:0004784','rdfs:label',NULL,'allergic asthma',NULL,'en')");
+    await conn.run("INSERT INTO statements VALUES ('MONDO:0004766','rdfs:subClassOf','MONDO:0004784',NULL,NULL,NULL)");
+    await conn.run("INSERT INTO statements VALUES ('MONDO:0004784','rdfs:subClassOf','MONDO:0004979',NULL,NULL,NULL)");
+
+    const views = await materializeSemanticSqlSourceViews(conn, {
+      schema: SEMANTIC_SQL_SOURCE_SPEC_SCHEMA,
+      targets: { edgeTable: "semantic_edge", termsTable: "semantic_terms" },
+    });
+    assert.deepEqual(views, {
+      edgeTable: "semantic_edge",
+      labelsTable: "rdfs_label_statement",
+      synonymsTable: "synonym_statement",
+      mappingsTable: "mapping_statement",
+      termsTable: "semantic_terms",
+    });
+
+    const terms = await conn.all<{ id: string; label: string; synonyms_json: string }>(
+      "SELECT id, label, to_json(synonyms)::VARCHAR AS synonyms_json FROM semantic_terms WHERE id = 'MONDO:0004979'",
+    );
+    assert.equal(terms[0]!.label, "asthma");
+    assert.deepEqual(JSON.parse(terms[0]!.synonyms_json), ["bronchial asthma"]);
+
+    const sourceSpecProfile: GraphProjectionProfile = {
+      schema: "pi-bio.graph_projection_profile.v1",
+      id: "semantic-sql-source-spec-generated-edge",
+      title: "SemanticSQL source-spec generated edge projection",
+      source: { kind: "semantic_sql", table: "semantic_edge" },
+      columns: { from: "subject", predicate: "predicate", to: "object" },
+      closure: { source: "local_cte", transitivePredicates: ["rdfs:subClassOf"] },
+      target: { edgesTable: "semantic_bio_edges", closureTable: "semantic_entailed_edge" },
+    };
+
+    const out = await materializeGraphProjectionProfile(conn, sourceSpecProfile);
+    assert.deepEqual(out, { edgesTable: "semantic_bio_edges", edgeCount: 2, closureTable: "semantic_entailed_edge", closureCount: 3 });
+    const ancestors = await conn.all<{ to_id: string }>(
+      "SELECT to_id FROM semantic_entailed_edge WHERE from_id = 'MONDO:0004766' ORDER BY to_id",
+    );
+    assert.deepEqual(ancestors.map((x) => x.to_id), ["MONDO:0004784", "MONDO:0004979"]);
+  });
+
+  test("SemanticSQL source-spec view generation fails closed on invalid predicate lists", () => {
+    assert.throws(
+      () => semanticSqlSourceViewSql({ schema: SEMANTIC_SQL_SOURCE_SPEC_SCHEMA, predicates: { labels: [] } }),
+      /at least one non-empty string/,
+    );
+  });
+
   test("validates a SemanticSQL-shaped projection profile and projects with one generated SQL statement", async () => {
     assert.deepEqual(validateGraphProjectionProfile(profile), []);
     const conn = duckdbNodeConn(await (await DuckDBInstance.create(":memory:")).connect());

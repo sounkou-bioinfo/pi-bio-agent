@@ -129,7 +129,13 @@ consumer-pulled, or a non-goal.
    a host chooses one to describe or query; the rest of the loop is write or inspect a manifest, discover schemas
    with `DESCRIBE` / `SUMMARIZE`, run bounded SQL, walk the ledger/graph when present, and promote only repeated
    workflows into thin playbooks.
-5. **Docs hygiene.** Keep README and guides action-first: real commands, real code chunks, no fake text-block
+5. **SemanticSQL source-spec parity.** This is active consistency work, not optional polish: SemanticSQL reaches into
+   RDF/OWL, Semantic Web, FHIR-shaped resources, and related graph ecosystems. The base helper now materializes
+   generated SemanticSQL views (`edge`, labels, synonyms, mappings, terms) from a staged `statements` table and
+   projects the generated `edge` through the same `GraphProjectionProfile` path as KGX and internal observations.
+   Remaining parity is prefix/IRI canonicalization, axiom annotations, richer relation-graph semantics, and
+   multi-ontology attachment when a real grounding/traversal consumer needs them.
+6. **Docs hygiene.** Keep README and guides action-first: real commands, real code chunks, no fake text-block
    architecture diagrams, no speculative hostfs claims, and no stale "process transport" lane. Claims should point
    to commands, tests, or examples that currently run.
 
@@ -149,13 +155,10 @@ consumer-pulled, or a non-goal.
 5. **Workbench package abstractions.** `pi-bio-workbench` should remain a downstream app. Core closes over primitives
    only after that app proves repeated shape; clinical genomics is the first binding, not a reason to prebuild a
    framework.
-6. **SemanticSQL source-spec parity.** Edge-shaped sources are already absorbable through graph projection profiles.
-   Full generated views, prefix registries, axiom annotations, source-spec DDL, multi-ontology attachment, and richer
-   closure policy are adapter/product work until a grounding or traversal consumer needs them.
-7. **External tool robustness tests.** `rv`, OpenTargets, Monarch DuckDB, ChEMBL, R `targets`/`mirai`/`nanonext`,
+6. **External tool robustness tests.** `rv`, OpenTargets, Monarch DuckDB, ChEMBL, R `targets`/`mirai`/`nanonext`,
    and similar systems should first enter through manifests, SQL, `compute.run`, and receipts. Add primitives only
    when that route fails for a concrete reason.
-8. **HostFS / ducknng-fs / DuckTinyCC research.** A filesystem-shaped or C-FFI-shaped lane is interesting only when
+7. **HostFS / ducknng-fs / DuckTinyCC research.** A filesystem-shaped or C-FFI-shaped lane is interesting only when
    a real manifest needs it. It is not a current core primitive, and community `hostfs` notes are not product
    evidence.
 
@@ -170,8 +173,9 @@ consumer-pulled, or a non-goal.
 - **`recordHostEvent` primitive.** Built as one open host event fact plus ordinary links. The bring-it-home dogfood
   records both workbench-style input events and scheduler-style queue events without a closed event model. The
   pending item is concrete Pi/workbench runtime wiring, not a new host-event model.
-- **Foreign graph projection base.** A real external Monarch KGX HTTP path and internal observation-graph projection
-  exist. SemanticSQL parity is deferred adapter work.
+- **Foreign graph projection base.** A real external Monarch KGX HTTP path, internal observation-graph projection,
+  and generated SemanticSQL `statements` -> `edge` view path exist. Remaining SemanticSQL parity is active
+  conformance work, not a new graph primitive.
 - **Base training-corpus export.** Digest-only ledger/session/tool/run/artifact/event exports exist. Labels and
   redaction remain consumer-pulled.
 - **Base SDK packaging.** Root, `/core`, `/duckdb`, and `/hosts` exports are checked by a packed downstream

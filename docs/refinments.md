@@ -702,22 +702,20 @@ JOIN, not a walker. See [`design.md`](./design.md#the-semanticsql-shape-source-s
 - Done: ordinal scales as data (`scale_members` from a ranked `TermSet`): total order to the graph's partial
   order; `decideGrounding` membership unchanged.
 - Source-spec gap audit from `INCATools/semantic-sql`:
-  - **SemanticSQL-shaped sources are already absorbable as DuckDB data.** Edge-shaped relations use
+  - **SemanticSQL-shaped sources are absorbable as DuckDB data.** Edge-shaped relations use
     `subject,predicate,object` plus optional `attrs,trust`; an ordinary `GraphProjectionProfile` maps them into
-    `bio_edges`. Non-edge tables (`statements`, `prefix`, labels, synonyms, mappings, node/entity tables) stay
-    queryable as ordinary materialized relations until a consumer needs them projected. We do not parse the
-    SemanticSQL LinkML source to generate the full DuckDB DDL/view set; that is optional source-spec tooling parity,
-    not a core primitive or a blocker for foreign KG projection.
+    `bio_edges`. For base `statements`, `materializeSemanticSqlSourceViews` now creates the generated `edge`,
+    label, synonym, mapping, and term views that manifests and graph projection profiles consume. We still do not
+    parse the full upstream LinkML source to generate every DDL/view; parity expands only when a concrete grounding
+    or traversal consumer needs more of the source spec.
   - **No SemanticSQL-style CURIE-prefix registry yet.** Here `prefix(prefix, base)` means namespace expansion
     (`HP` -> an HPO base IRI, `biolink` -> a Biolink base IRI), not run-id prefixes, observation-key prefixes, or
     a traversal primitive. The graph currently stores CURIE strings as node/predicate ids and works without
     expansion; first-class prefixes would improve CURIE/IRI validation, canonicalization, receipts, and
     cross-database identifier hygiene.
-  - **Generated views are optional source-adapter work.** We exercise canonical edge rows and label/synonym
-    statements, not the full
-    generated `rdfs_*`, OMO synonym/mapping, OWL restriction/axiom, RO edge, subgraph, taxon-constraint,
-    similarity, or term-association views. Add those views in manifests/resolvers when a concrete app asks for them;
-    do not pre-close over the full SemanticSQL source spec in core.
+  - **Generated views have a base conformance path.** The helper covers the common `edge`, labels, synonyms,
+    mappings, and term rows. OWL restriction/axiom, RO edge, subgraph, taxon-constraint, similarity, and
+    term-association views remain source-spec conformance work for consumers that need them.
   - **`edge` semantics are under-modeled.** In SemanticSQL, `edge` is a generated relation-graph view that folds
     named subclasses, existential restrictions, subproperties, and selected type assertions. Our current import
     test treats `edge` as already materialized rows.
@@ -732,8 +730,8 @@ JOIN, not a walker. See [`design.md`](./design.md#the-semanticsql-shape-source-s
     view and projects it into `bio_edges`. SemanticSQL's SQLite pattern also supports attached databases and
     cross-ontology joins; the DuckDB equivalent over multiple attached/staged ontology artifacts remains source-spec
     parity work.
-- Next (deferred until a real grounding/traversal consumer): a thin ontology-ingest resolver that stages the
-  SemanticSQL source-spec shape in DuckDB and projects its `edge` view into our `bio_edges` shape.
+- Next: keep source-spec parity consumer-pulled but active. A thin ontology-ingest resolver can stage the
+  SemanticSQL source-spec shape in DuckDB and project its generated `edge` view into our `bio_edges` shape.
   No DuckDB sqlite extension is required: ingest from a native-readable format such as OBO Graphs JSON via
   `read_json`, generated TSVs / triple parquet via `duckdb.file_scan`, or an optional one-time `sqlite3` CLI dump
   -> parquet. Compute the closure with `materializeEntailedEdges` unless a pinned upstream `entailed_edge`

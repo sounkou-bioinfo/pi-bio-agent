@@ -479,6 +479,10 @@ The staging SQL should produce canonical KGX/SemanticSQL edge columns (`subject`
 `attrs` and `trust`); an ordinary `GraphProjectionProfile` then projects that table into `bio_edges`. The Monarch KG
 HTTP example uses the downloadable KGX TSV association files through DuckDB `httpfs`; Monarch is a binding of the
 generic KGX/SemanticSQL edge path, not a special resolver.
+For sources that arrive in the canonical SemanticSQL base shape, `materializeSemanticSqlSourceViews` generates the
+stable DuckDB views (`edge`, label statements, synonym statements, mapping statements, and term rows) from staged
+`statements`; that generated `edge` view then uses the same graph projection profile and closure path as KGX,
+memory, and observation graphs.
 
 - **`bio_edges(from_id, predicate, to_id, attrs, trust)`**: the statement/edge base (`subject=from_id,
   predicate, object=to_id`). Labels, synonyms, definitions, and relations are all just rows; the predicate is
