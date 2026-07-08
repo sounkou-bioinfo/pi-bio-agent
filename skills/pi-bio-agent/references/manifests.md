@@ -93,6 +93,16 @@ provisioning. If the extension is unavailable, the resolver fails clearly.
 
 ## Useful Examples
 
+List packaged examples/templates first:
+
+```sh
+pi-bio-agent catalog
+pi-bio-agent catalog --query graphql
+```
+
+The catalog returns manifest paths, resources/tables, runnable operations, resolvers, and host capability hints. It
+is discovery only; run `pi-bio-agent query` or `pi-bio-agent run` against one returned `manifestPath`.
+
 - `examples/variant-counts/manifest.json`
 - `examples/connectors/clinvar-region.json`
 - `examples/connectors/opentargets-graphql.json`

@@ -547,6 +547,7 @@ calls (`npm run readme:tools`); `npm run check` fails if it drifts.
 
 <!-- BEGIN GENERATED:tools (scripts/generate-readme-tools.mjs — do not edit by hand) -->
 
+- `bio_list_sources` — List manifest-backed sources
 - `bio_describe_model` — Describe Pi Bio model
 - `bio_run_operation` — Run a bio operation
 - `bio_query` — Run an ad-hoc bio query
@@ -574,7 +575,9 @@ is not a Pi extension and not a per-question biomedical skill. It is a
 procedural guide for any agent host: write a manifest, inspect DuckDB
 tables with `DESCRIBE` / `SUMMARIZE`, run read-only SQL through
 `pi-bio-agent query`, and promote only stable workflows to thin
-playbooks.
+playbooks. Start with `pi-bio-agent catalog` when the host needs to
+discover packaged manifest-backed sources before choosing one to inspect
+or run.
 
 Install the skill directly from GitHub into any host’s skill/playbook
 directory, without cloning:

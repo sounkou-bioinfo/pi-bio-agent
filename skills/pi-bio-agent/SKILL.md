@@ -57,7 +57,15 @@ declared inputs, receipts, and replayable evidence.
    npx --yes github:sounkou-bioinfo/pi-bio-agent --help
    ```
 
-2. Run one real packaged query before inventing a task-specific manifest:
+2. Discover existing manifest-backed sources/templates before inventing a task-specific manifest:
+
+   ```sh
+   pi-bio-agent catalog --query clinvar
+   ```
+
+   Pick one returned `manifestPath`, then inspect it or query it. In Pi, use `bio_list_sources` for the same step.
+
+3. Run one real packaged query before inventing a task-specific manifest:
 
    ```sh
    pi-bio-agent query examples/variant-counts/manifest.json \
@@ -65,7 +73,7 @@ declared inputs, receipts, and replayable evidence.
      --sql "SELECT consequence, count(*) AS n FROM variants GROUP BY consequence ORDER BY consequence"
    ```
 
-3. For the user's task: write or reuse a manifest, inspect tables, then answer with ad-hoc SQL.
+4. For the user's task: write or reuse a manifest, inspect tables, then answer with ad-hoc SQL.
 
    ```sh
    pi-bio-agent query manifest.json --db :memory: --sql "DESCRIBE table_name"
@@ -74,7 +82,7 @@ declared inputs, receipts, and replayable evidence.
    pi-bio-agent query manifest.json --db :memory: --sql "<WITH/SELECT over declared tables>"
    ```
 
-4. When provenance matters, add `--ledger auto` and inspect the run/graph afterward.
+5. When provenance matters, add `--ledger auto` and inspect the run/graph afterward.
 
    ```sh
    pi-bio-agent query manifest.json --db :memory: --ledger auto --sql "<WITH/SELECT ...>"
@@ -100,3 +108,6 @@ abstention unless declared data supports a stronger claim.
 
 A workflow may become a skill only after it has stabilized as manifest + SQL/operation with fixtures and an output
 contract. A skill is a thin playbook over the substrate, not the biomedical computation.
+
+For ClawBio-like systems, keep the host's intent/routing layer and replace per-question scripts with manifests,
+ad-hoc SQL, declared operations, and `pi-bio-agent query/run` as the compute surface.

@@ -20,4 +20,5 @@ export * from "./session-ingest.js";
 export * from "./host-events.js";
 export * from "./training-corpus.js";
 export * from "./artifacts.js";
+export * from "./manifest-catalog.js";
 export * from "../process/node-compute-runner.js"; // the ComputeRunner host adapter the guide/SDK reference

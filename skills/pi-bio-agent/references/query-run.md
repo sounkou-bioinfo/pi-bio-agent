@@ -7,6 +7,12 @@ The CLI wraps the same runner used by the Pi extension.
 Use `query` when the agent is composing SQL for a user question. This is the normal path for new questions: manifests
 declare tables; ad-hoc SQL asks the question.
 
+Find candidate manifests first when you do not already know the path:
+
+```sh
+pi-bio-agent catalog --query uniprot
+```
+
 ```sh
 pi-bio-agent query <manifest.json> \
   --db <path|:memory:> \

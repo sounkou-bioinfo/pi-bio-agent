@@ -125,8 +125,10 @@ consumer-pulled, or a non-goal.
    write rejection through the ledger. Remaining hardening is to exercise the same shape with R/Python/NNG/scheduler
    backends as real consumers need them. This is not a request for another workflow engine.
 4. **Substrate skill and non-Pi host dogfood.** The packaged skill should keep onboarding weaker hosts into the
-   substrate: write or inspect a manifest, discover schemas with `DESCRIBE` / `SUMMARIZE`, run bounded SQL, walk the
-   ledger/graph when present, and promote only repeated workflows into thin playbooks.
+   substrate: `pi-bio-agent catalog` / `bio_list_sources` now list validated manifest-backed sources/templates before
+   a host chooses one to describe or query; the rest of the loop is write or inspect a manifest, discover schemas
+   with `DESCRIBE` / `SUMMARIZE`, run bounded SQL, walk the ledger/graph when present, and promote only repeated
+   workflows into thin playbooks.
 5. **Docs hygiene.** Keep README and guides action-first: real commands, real code chunks, no fake text-block
    architecture diagrams, no speculative hostfs claims, and no stale "process transport" lane. Claims should point
    to commands, tests, or examples that currently run.

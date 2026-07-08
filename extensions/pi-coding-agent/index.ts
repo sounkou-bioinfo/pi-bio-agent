@@ -9,9 +9,11 @@ import { defaultDuckDbExtensionCatalog, findDuckDbExtensions } from "../../src/d
 import { queryGraphWindow } from "../../src/duckdb/graph-window.js";
 import { entailedEdgesAsOf, materializeBioEdgesAsOf, recordObservationLink } from "../../src/duckdb/observations.js";
 import { describeBioManifestFromPath, isRunDbOpenError, runBioOperationFromManifest, runBioQueryFromManifest } from "../../src/hosts/run-store.js";
+import { listManifestCatalog } from "../../src/hosts/manifest-catalog.js";
 import type { CasStore } from "../../src/core/cas.js";
 import { bioStorePath, isBioStoreLocked, openBioStore, type BioStore } from "../../src/hosts/bio-store.js";
-import { isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { access, readFile, stat } from "node:fs/promises";
 import { forget, listMemory, recall, remember, memorySubjectId, normalizeAsOf, MEMORY_NOW, type MemoryContent } from "../../src/hosts/memory-store.js";
 import { recordSkill, skillSubjectId } from "../../src/hosts/skill-store.js";
@@ -33,8 +35,9 @@ function text(payload: unknown) {
 // fails closed. The operator grants network by loading the explicit networked entrypoint (index-networked.ts),
 // which composes a fetch in — a visible, auditable choice the agent can never make for itself.
 // A concise, TRUE, drift-resistant primer injected into the system prompt each turn. It names the model and the
-// author→describe→run loop, and points at DISCOVERY tools (bio_describe_model, bio_list_duckdb_extensions) and the
-// examples/ dir instead of enumerating specifics that would rot — the substrate's anti-hardcoded-self-description rule.
+// author→describe→run loop, and points at DISCOVERY tools (bio_list_sources, bio_describe_model,
+// bio_list_duckdb_extensions) instead of enumerating specifics that would rot — the substrate's
+// anti-hardcoded-self-description rule.
 const BIO_ORIENTATION = [
   "[pi-bio-agent] You are running with the pi-bio-agent extension: a SQL-first, provider-agnostic bioinformatics",
   "substrate where MANIFESTS ARE PROGRAMS — a manifest (JSON) declares `provides.resolvers`, `provides.resources`",
@@ -43,10 +46,10 @@ const BIO_ORIENTATION = [
   "",
   "How to work:",
   "- DISCOVER cheaply: your MEMORY is the index — check `bio_list_memory` / `bio_walk_memory` FIRST. For",
-  "  manifests, list `examples/` for names, then call `bio_describe_model` with ONE `manifestPath` (a local path OR",
-  "  an http(s) URL) to learn its resources, resolvers, and RUNNABLE operation ids. Never read every example, and",
-  "  never parse raw manifest JSON. With no argument `bio_describe_model` describes the global model;",
-  "  `bio_list_duckdb_extensions` shows the readable-format surface.",
+  "  manifest-backed sources/templates, call `bio_list_sources`, then call `bio_describe_model` with ONE",
+  "  `manifestPath` (a local path OR an http(s) URL) to learn its resources, resolvers, and RUNNABLE operation ids.",
+  "  Never read every example, and never parse raw manifest JSON. With no argument `bio_describe_model` describes",
+  "  the global model; `bio_list_duckdb_extensions` shows the readable-format surface.",
   "- RUN: `bio_run_operation(dbPath, manifestPath, operationId)` runs a declared operation and receipts it under",
   "  `.pi/bio-agent/runs/` (with `replay.json` recording the exact SQL). `bio_query` runs an ad-hoc read-only SQL",
   "  result statement (`SELECT`/`WITH`, plus DuckDB `DESCRIBE`/`SUMMARIZE`) over a manifest's resolved resources.",
@@ -68,6 +71,25 @@ const BIO_ORIENTATION = [
   "- GRAPH: validate graph projection profiles with `bio_validate_graph_projection`; inspect bounded graph context",
   "  with `bio_graph_window` instead of dumping high-degree neighborhoods into the prompt.",
 ].join("\n");
+
+const extensionDir = dirname(fileURLToPath(import.meta.url));
+
+async function defaultManifestCatalogRoot(cwd: string): Promise<string> {
+  const candidates = [
+    resolve(cwd, "examples"),
+    resolve(extensionDir, "..", "..", "examples"),
+    resolve(extensionDir, "..", "..", "..", "examples"),
+  ];
+  for (const candidate of candidates) {
+    try {
+      await access(candidate);
+      return candidate;
+    } catch {
+      /* try the next package/test layout */
+    }
+  }
+  return candidates[0]!;
+}
 
 // The always-on RECALL INDEX: a compact, current list of memory notes (slug — hook) injected into the system
 // prompt each turn, so recall is cheap and the agent reaches for existing memory before re-deriving — the trick
@@ -418,6 +440,25 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
   pi.on("before_agent_start", async (event) => ({
     systemPrompt: `${event.systemPrompt}\n\n${BIO_ORIENTATION}${await memoryIndexBlock(openStore, event.systemPromptOptions?.cwd ?? process.cwd())}`,
   }));
+
+  pi.registerTool({
+    name: "bio_list_sources",
+    label: "List manifest-backed sources",
+    description: "List validated manifest-backed sources/templates the agent can inspect and run. This is the source-catalog answer to connector/skill sprawl: it returns manifest paths, declared tables, operations, resolvers, and host capability hints; then call bio_describe_model on one manifestPath before querying. The default root is the project examples/ directory when present, otherwise the packaged examples/ directory.",
+    parameters: Type.Object({
+      query: Type.Optional(Type.String({ description: "Optional text search over manifest path, id, title, description, resources, operations, resolvers, and capability hints." })),
+      root: Type.Optional(Type.String({ description: "Optional catalog root to scan for pi-bio manifest JSON files. Relative paths resolve against cwd." })),
+      includeInvalid: Type.Optional(Type.Boolean({ description: "When true, include invalid pi-bio manifest files and their validation errors." })),
+    }),
+    async execute(_id, params: { query?: string; root?: string; includeInvalid?: boolean }, _signal, _onUpdate, ctx) {
+      return text(await listManifestCatalog({
+        cwd: ctx.cwd,
+        root: params.root ?? await defaultManifestCatalogRoot(ctx.cwd),
+        query: params.query,
+        includeInvalid: params.includeInvalid === true,
+      }));
+    },
+  });
 
   pi.registerTool({
     name: "bio_describe_model",

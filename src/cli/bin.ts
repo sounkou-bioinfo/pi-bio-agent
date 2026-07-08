@@ -2,11 +2,13 @@
 import { mainMemory } from "./memory.js";
 import { mainRun } from "./run.js";
 import { installSkillUsage, mainInstallCodexSkill, mainInstallSkill } from "./install-skill.js";
+import { mainCatalog } from "./catalog.js";
 
 /**
  * Thin process wrapper around the testable CLI engines. Each engine takes injected deps (out/err sinks) and
  * returns an exit code; this file is the only place that touches the real
  * DuckDB driver, process argv/cwd, stdout, and process.exit. Groups:
+ *   catalog       — list manifest-backed sources/templates packaged with or supplied to the host
  *   query / run   — run a manifest's ad-hoc SQL or a declared operation (the substrate's value, provider-agnostic)
  *   memory        — read the temporal memory store (list / show / history, as-of)
  *   install-skill — install the packaged substrate skill into any host skill/playbook root
@@ -22,7 +24,8 @@ const readStdin = async (): Promise<string> => {
 };
 
 const usage = (): string => [
-  "usage: pi-bio-agent <query|run|memory|install-skill|install-codex-skill> ...",
+  "usage: pi-bio-agent <catalog|query|run|memory|install-skill|install-codex-skill> ...",
+  "  catalog [--root <dir>] [--query <text>]",
   "  query/run <manifest.json> --db <path> [--sql/--operation ...]",
   "  memory <list|show|history> [slug] [--as-of <iso>]",
   "",
@@ -32,6 +35,7 @@ const usage = (): string => [
 ].join("\n");
 
 const dispatch = (): Promise<number> => {
+  if (group === "catalog") return mainCatalog(rest, { cwd: process.cwd(), out, err });
   if (group === "query" || group === "run") return mainRun(group, rest, { cwd: process.cwd(), out, err, env: process.env, readStdin });
   if (group === "memory") return mainMemory(rest, { cwd: process.cwd(), out, err });
   if (group === "install-skill") return mainInstallSkill(rest, { out, err });

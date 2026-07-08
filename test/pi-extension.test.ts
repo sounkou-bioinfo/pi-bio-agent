@@ -44,6 +44,7 @@ describe("Pi coding-agent extension", () => {
       "bio_graph_window",
       "bio_list_duckdb_extensions",
       "bio_list_memory",
+      "bio_list_sources",
       "bio_query",
       "bio_recall",
       "bio_remember",
@@ -284,6 +285,8 @@ describe("Pi coding-agent extension", () => {
   test("safe registry and SQL tools execute through shared core logic", async () => {
     const { tools } = loadExtension();
     const byName = new Map(tools.map((tool) => [tool.name, tool]));
+    const sources = await byName.get("bio_list_sources")!.execute("id", { query: "monarch", root: "examples" }, undefined, undefined, { cwd: process.cwd() });
+    assert.ok(sources.details.entries.some((entry: { manifestPath: string }) => entry.manifestPath === "examples/monarch-kg-http/manifest.json"));
     const extensions = await byName.get("bio_list_duckdb_extensions")!.execute("id", { query: "duckhts" });
     assert.ok(extensions.details.extensions.length > 0);
     const valid = await byName.get("bio_validate_select")!.execute("id", { sql: "SELECT * FROM bio_nodes;" });

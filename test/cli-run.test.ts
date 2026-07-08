@@ -4,6 +4,7 @@ import { promises as fsp } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mainRun, parseFlags } from "../src/cli/run.js";
+import { mainCatalog } from "../src/cli/catalog.js";
 import { openBioStore } from "../src/hosts/bio-store.js";
 import { observationAsOfKey } from "../src/duckdb/observations.js";
 import * as sdk from "../src/index.js";
@@ -39,6 +40,27 @@ const PROFILE_MACROS = [
 ].join(";");
 
 describe("cli: query/run over a manifest (provider-agnostic entry point)", () => {
+  test("catalog lists manifest-backed sources before a host chooses one to describe/query", async () => {
+    const s = sink();
+    const code = await mainCatalog(["--root", "examples", "--query", "opentargets"], s.deps);
+    assert.equal(code, 0, s.err.join("\n"));
+    const printed = JSON.parse(s.out.join("\n")) as {
+      schema: string;
+      entries: Array<{ manifestPath: string; id: string; resources: Array<{ table?: string }>; operations: Array<{ id: string; runnable: boolean }>; capabilityHints: string[] }>;
+    };
+    assert.equal(printed.schema, "pi-bio.manifest_catalog.v1");
+    assert.deepEqual(printed.entries.map((entry) => entry.manifestPath), ["examples/connectors/opentargets-graphql.json"]);
+    assert.equal(printed.entries[0]!.resources[0]!.table, "opentargets_target_associated_diseases");
+    assert.deepEqual(printed.entries[0]!.operations, [{ id: "opentargets.associated_diseases", title: "OpenTargets associated diseases for one target", transport: "duckdb.sql", runnable: true }]);
+    assert.ok(printed.entries[0]!.capabilityHints.includes("duckdb.extension.ducknng"));
+  });
+
+  test("catalog usage errors are explicit", async () => {
+    const s = sink();
+    assert.equal(await mainCatalog(["--bogus", "x"], s.deps), 2);
+    assert.match(s.err.join("\n"), /unknown flag\(s\) for 'catalog'.*--bogus/);
+  });
+
   test("query runs the agent's ad-hoc SQL and prints the answer rows", async () => {
     const s = sink();
     const code = await mainRun("query", [MANIFEST, "--db", ":memory:", "--sql",

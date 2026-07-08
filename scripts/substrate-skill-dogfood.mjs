@@ -38,11 +38,22 @@ assert.deepEqual(pkg.pi?.skills, ["./skills"], "package exposes skills to hosts 
 
 const skillText = await fs.readFile(join(repoRoot, "skills", "pi-bio-agent", "SKILL.md"), "utf8");
 assert.match(skillText, /pi-bio-agent query\/run/, "skill points non-Pi hosts at the CLI substrate");
+assert.match(skillText, /pi-bio-agent catalog/, "skill points non-Pi hosts at manifest-backed source discovery");
 assert.match(skillText, /ClawBio-like systems/, "skill names the ClawBio-style anti-sprawl migration path");
-assert.match(skillText, /Skills Are Graduation/, "skill keeps skills as graduation, not the computation");
+assert.match(skillText, /Skill Graduation Rule/, "skill keeps skills as graduation, not the computation");
 
 const workdir = await fs.mkdtemp(join(tmpdir(), "pi-bio-substrate-skill-"));
 await fs.cp(join(repoRoot, "examples", "rare-high-impact"), workdir, { recursive: true });
+
+const catalog = await runCli(repoRoot, [
+  "catalog",
+  "--root", "examples",
+  "--query", "rare",
+]);
+assert.equal(catalog.ok, undefined, "catalog is a discovery document, not a run response");
+const rareEntry = catalog.entries.find((entry) => entry.manifestPath === "examples/rare-high-impact/manifest.json");
+assert.ok(rareEntry, "catalog discovers the rare-high-impact manifest before a host runs it");
+assert.deepEqual(rareEntry.operations.map((op) => op.id), ["rare_high_impact.report"]);
 
 const described = await runCli(workdir, [
   "query", "manifest.json",
@@ -81,8 +92,9 @@ assert.equal(runFactCount, 1, "CLI dogfood run is recorded as a run:<id> ledger 
 console.log(JSON.stringify({
   dogfood: "substrate-skill",
   ok: true,
-  integrationPoint: "package skill -> non-Pi host -> pi-bio-agent CLI -> manifest SQL -> observation ledger",
+  integrationPoint: "package skill -> non-Pi host -> catalog -> pi-bio-agent CLI -> manifest SQL -> observation ledger",
   skill: "skills/pi-bio-agent/SKILL.md",
+  catalogEntry: rareEntry.manifestPath,
   manifest: "examples/rare-high-impact/manifest.json",
   runId: run.runId,
   buckets: Object.fromEntries(buckets),
