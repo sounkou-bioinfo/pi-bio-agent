@@ -13,7 +13,14 @@ write_nanoarrow(data.frame(n = nrow(df), mean_x = mean(df$x), status = "ok"), ou
 
 # 2) FILE outputs — written to the cwd (the work dir), declared in the manifest, captured into CAS by the host
 write.csv(df, "rows.csv", row.names = FALSE)        # a 'table' artifact (re-readable via read_csv over its CAS path)
-writeLines(c("# summarize report", paste("rows:", nrow(df)), paste("mean_x:", mean(df$x))), "report.txt")  # a 'file' artifact
+writeLines(c(
+  "<!doctype html>",
+  "<html><head><meta charset='utf-8'><title>summarize report</title></head><body>",
+  "<h1>summarize report</h1>",
+  paste0("<p>rows: ", nrow(df), "</p>"),
+  paste0("<p>mean_x: ", mean(df$x), "</p>"),
+  "</body></html>"
+), "report.html")                                  # an HTML report artifact
 svg("plot.svg", width = 5, height = 3.2)
 barplot(df$x, names.arg = seq_len(nrow(df)), col = "#2C7FB8", xlab = "row", ylab = "x", main = "Input values")
 invisible(dev.off())

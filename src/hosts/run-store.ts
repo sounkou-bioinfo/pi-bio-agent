@@ -457,7 +457,13 @@ export async function describeBioManifestFromPath(req: { cwd: string; manifestPa
 function resolvedComputeFacts(manifest: BioManifest, resources: string[]): RunReplaySpec["compute"] | undefined {
   const r = (manifest.provides?.resources ?? []).find((x) => x.resolver === COMPUTE_RESOLVER && resources.includes(x.id));
   if (!r) return undefined;
-  const p = r.params as { table?: string; command?: readonly string[]; inputSql?: string; resultTable?: "arrow" | "artifacts"; outputs?: Array<{ name: string; path: string; kind?: string }> };
+  const p = r.params as {
+    table?: string;
+    command?: readonly string[];
+    inputSql?: string;
+    resultTable?: "arrow" | "artifacts";
+    outputs?: Array<{ name: string; path: string; kind?: string; mediaType?: string; semanticRole?: string; attrs?: Record<string, unknown> }>;
+  };
   // Build with ONLY DEFINED fields — never leave `undefined`-valued keys. The run-object INPUT CASID is hashed from
   // this in-memory `replay.compute`, but replay.json (JSON.stringify) DROPS undefined keys, so an undefined-valued
   // key would make the digest recomputed from the recorded replay differ from the original — a compute.run run

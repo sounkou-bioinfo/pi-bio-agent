@@ -60,8 +60,9 @@ These items are no longer open substrate work in `pi-bio-agent`.
   [cas-metadata-gc.test.ts](../test/cas-metadata-gc.test.ts).
 - **Figures and reports are CAS-addressed artifacts.** `recordArtifactReference` records intrinsic byte metadata on
   `cas:<digest>` plus an ordinary graph reference from the producing/displaying node. Media type, semantic role,
-  plotting system, source digest, and spec digest ride as artifact/reference metadata; there is no separate plot
-  table. Session-ingest image blocks and training-corpus export use the same path. Evidence:
+  plotting system, source digest, and spec digest ride as artifact/reference metadata; declared compute outputs can
+  also carry open `mediaType`, `semanticRole`, and `attrs` metadata into receipts and files-only artifact tables.
+  There is no separate plot table. Session-ingest image blocks and training-corpus export use the same path. Evidence:
   [artifacts.ts](../src/hosts/artifacts.ts), [artifact-observations.test.ts](../test/artifact-observations.test.ts),
   [session-ingest.test.ts](../test/session-ingest.test.ts), [training-corpus.test.ts](../test/training-corpus.test.ts),
   [compute-artifacts-example.test.ts](../test/compute-artifacts-example.test.ts),
@@ -166,8 +167,9 @@ consumer-pulled, or a non-goal.
 3. **Training corpus hardening.** Redaction policy, label schema, export contract, and VARIANT-shredded Parquet are
    required once a real corpus consumer exists. The base ledger remains `value_json`; typed Parquet is a derived
    export.
-4. **Renderer/report product metadata.** Core has CAS-addressed figure/report artifacts. Richer renderer-specific
-   metadata, review-packet structure, and UI report models wait for real R/Python/HTML reports that need them.
+4. **Renderer/report product metadata.** Core has CAS-addressed figure/report artifacts plus open declared-output
+   metadata for real R/Python/bash-produced reports and figures. Richer renderer-specific schemas, review-packet
+   structure, and UI report models wait for downstream applications that need them.
 5. **SDK maintenance.** Required exports should follow real sibling consumers. Each new public type/helper needs a
    packed external-consumer dogfood so the library remains usable outside this repo.
 6. **Workbench package abstractions.** `pi-bio-workbench` should remain a downstream app. Core closes over primitives

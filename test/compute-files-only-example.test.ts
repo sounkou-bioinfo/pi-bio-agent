@@ -131,4 +131,42 @@ describe("example: files-only compute.run — the table is the captured-artifact
     });
     assert.equal(out.ok, false, "params.extensions must be an array of strings -> fail closed");
   });
+
+  test("files-only artifact tables carry optional media and semantic metadata", async () => {
+    const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-fo-meta-"));
+    const manifest = {
+      schema: "pi-bio.manifest.v1", id: "fo-meta", version: "0.0.0", title: "x", description: "x", provides: {
+        resolvers: [{ id: "compute.run", version: "0.1.0", title: "x", description: "x", output: { mode: "table" } }],
+        resources: [{ id: "artifacts", title: "x", kind: "virtual", resolver: "compute.run", params: {
+          table: "artifacts",
+          command: ["sh", "-c", "printf '<html>ok</html>' > report.html; printf '<svg></svg>' > plot.svg"],
+          resultTable: "artifacts",
+          outputs: [
+            { name: "report", path: "report.html", kind: "file", mediaType: "text/html", semanticRole: "report", attrs: { renderer: "shell" } },
+            { name: "plot", path: "plot.svg", kind: "file", mediaType: "image/svg+xml", semanticRole: "figure" },
+          ],
+        } }],
+      },
+    };
+    const mpath = join(cwd, "manifest.json");
+    await fs.writeFile(mpath, JSON.stringify(manifest));
+    const casDir = await fs.mkdtemp(join(tmpdir(), "pi-bio-fo-meta-cas-"));
+    const out = await runBioQueryFromManifest({
+      cwd,
+      dbPath: ":memory:",
+      manifestPath: mpath,
+      sql: "SELECT name, media_type, semantic_role, attrs::VARCHAR AS attrs FROM artifacts ORDER BY name",
+      compute: { runner: nodeComputeRunner() },
+      cas: fsCasStore(casDir),
+      runId: "fo-meta",
+      now: "T1",
+    });
+    assert.equal(out.ok, true, out.ok ? "" : `run failed: ${(out as { error?: unknown }).error}`);
+    if (!out.ok) return;
+    const rows = JSON.parse(await fs.readFile(join(out.runDir, "result.json"), "utf8")).rows as Array<{ name: string; media_type: string; semantic_role: string; attrs: string | null }>;
+    assert.deepEqual(rows, [
+      { name: "plot", media_type: "image/svg+xml", semantic_role: "figure", attrs: null },
+      { name: "report", media_type: "text/html", semantic_role: "report", attrs: '{"renderer":"shell"}' },
+    ]);
+  });
 });

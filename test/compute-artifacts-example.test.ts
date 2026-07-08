@@ -45,18 +45,27 @@ describe("example: compute.run with FILE outputs captured into CAS (the #3 artif
     const artifacts = summary.provenance.filter((p) => p.source.startsWith("artifact:"));
     assert.equal(artifacts.length, 3, "three declared file outputs captured");
     const byName = Object.fromEntries(artifacts.map((a) => [a.source, a]));
-    for (const name of ["artifact:rows_csv", "artifact:report", "artifact:plot_svg"]) {
+    for (const name of ["artifact:rows_csv", "artifact:report_html", "artifact:plot_svg"]) {
       const a = byName[name]!;
       assert.match(a.digest ?? "", /^sha256:[0-9a-f]{64}$/, `${name} has a sha256 digest`);
       // the bytes are actually in CAS at that address
       const digest = a.digest!.replace("sha256:", "");
       assert.equal(await cas.has({ algorithm: "sha256", digest }), true, `${name} bytes are in CAS`);
     }
+    assert.ok(byName["artifact:rows_csv"]!.notes?.includes("media_type:text/csv"));
+    assert.ok(byName["artifact:rows_csv"]!.notes?.includes("semantic_role:table"));
+    assert.ok(byName["artifact:report_html"]!.notes?.includes("media_type:text/html"));
+    assert.ok(byName["artifact:report_html"]!.notes?.includes("semantic_role:report"));
+    assert.ok(byName["artifact:report_html"]!.notes?.includes('attrs:{"renderer":"R","template":"inline-html"}'));
+    assert.ok(byName["artifact:plot_svg"]!.notes?.includes("media_type:image/svg+xml"));
+    assert.ok(byName["artifact:plot_svg"]!.notes?.includes("semantic_role:figure"));
+    assert.ok(byName["artifact:plot_svg"]!.notes?.includes('attrs:{"renderer":"R base graphics","source_table":"values"}'));
 
     // and the captured content is the real file (read the 'report' artifact back from CAS)
-    const reportDigest = byName["artifact:report"]!.digest!.replace("sha256:", "");
+    const reportDigest = byName["artifact:report_html"]!.digest!.replace("sha256:", "");
     const reportBytes = await fs.readFile(cas.pathFor({ algorithm: "sha256", digest: reportDigest }), "utf8");
-    assert.match(reportBytes, /rows: 5/, "the captured report.txt has the real content");
+    assert.match(reportBytes, /<html>/, "the captured report.html is HTML");
+    assert.match(reportBytes, /rows: 5/, "the captured report.html has the real content");
 
     const plotDigest = byName["artifact:plot_svg"]!.digest!.replace("sha256:", "");
     const plotBytes = await fs.readFile(cas.pathFor({ algorithm: "sha256", digest: plotDigest }), "utf8");

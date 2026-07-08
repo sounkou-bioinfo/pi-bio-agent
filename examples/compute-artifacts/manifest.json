@@ -18,9 +18,23 @@
           "inputSql": "SELECT x FROM values",
           "command": ["Rscript", "./summarize.R"],
           "outputs": [
-            { "name": "rows_csv", "path": "rows.csv", "kind": "table" },
-            { "name": "report", "path": "report.txt", "kind": "file" },
-            { "name": "plot_svg", "path": "plot.svg", "kind": "file" }
+            { "name": "rows_csv", "path": "rows.csv", "kind": "table", "mediaType": "text/csv", "semanticRole": "table" },
+            {
+              "name": "report_html",
+              "path": "report.html",
+              "kind": "file",
+              "mediaType": "text/html",
+              "semanticRole": "report",
+              "attrs": { "renderer": "R", "template": "inline-html" }
+            },
+            {
+              "name": "plot_svg",
+              "path": "plot.svg",
+              "kind": "file",
+              "mediaType": "image/svg+xml",
+              "semanticRole": "figure",
+              "attrs": { "renderer": "R base graphics", "source_table": "values" }
+            }
           ],
           "timeoutMs": 120000
         }

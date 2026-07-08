@@ -14,8 +14,9 @@ The hard split (the `nf-r-ipc` lesson): **values go through the IPC; files never
 child's work dir and **content-addressed** beside it. Nextflow's content-addressed work dir is *our CAS-of-bytes*,
 so this is mostly composition (`compute.run` + CAS), not new substrate.
 
-A compute op declares `outputs: [{ name, path, kind? }]`; the child writes them into its `cwd`; after a clean
-exit the resolver captures each into CAS and records `{name, path, digest, size}` in the receipt — the same
+A compute op declares `outputs: [{ name, path, kind?, mediaType?, semanticRole?, attrs? }]`; the child writes them
+into its `cwd`; after a clean exit the resolver captures each into CAS and records
+`{name, path, digest, size, mediaType?, semanticRole?, attrs?}` in the receipt — the same
 receipt `nf-r-ipc` keeps (script digest + input digests + exit + stdout/stderr + **output digest** + wall time).
 Declaring outputs **requires a host-injected CAS** (fails closed without one); a declared output the child didn't
 write is also fail-closed.
@@ -32,11 +33,12 @@ n  mean_x  status
 5     3.0  ok
 ```
 
-The VALUE came back as a table (n=5); the declared FILE outputs (`rows.csv`, `report.txt`, `plot.svg`) were captured into CAS — verified content-addressed in `test/compute-artifacts-example.test.ts`.
+The VALUE came back as a table (n=5); the declared FILE outputs (`rows.csv`, `report.html`, `plot.svg`) were captured into CAS with media/role metadata — verified content-addressed in `test/compute-artifacts-example.test.ts`.
 <!-- END GENERATED:artifacts-run -->
 
 `test/compute-artifacts-example.test.ts` verifies the three declared outputs (`rows.csv` as `kind: table`,
-`report.txt` and the base-R-rendered `plot.svg` as `kind: file`) are captured **content-addressed in CAS** (the
-receipt's `sha256:` digests resolve to the real bytes), and that declaring `outputs` **without** a CAS fails closed.
+`report.html` and the base-R-rendered `plot.svg` as `kind: file`) are captured **content-addressed in CAS** (the
+receipt's `sha256:` digests resolve to the real bytes), their open media/semantic metadata is carried through, and
+declaring `outputs` **without** a CAS fails closed.
 A `table`-kind artifact is re-readable downstream via `read_csv` over its CAS path; a `file`-kind one is referenced
 by handle.

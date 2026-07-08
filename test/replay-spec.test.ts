@@ -54,6 +54,41 @@ describe("C1b-ii: replay.json seed", () => {
     assert.match(replay.environment!.observedDigest!, /^sha256:[0-9a-f]{64}$/);
   });
 
+  test("compute replay facts include declared artifact metadata", async () => {
+    const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-replay-meta-"));
+    const manifest = {
+      schema: "pi-bio.manifest.v1", id: "replay-meta", version: "0.0.0", title: "x", description: "x", provides: {
+        resolvers: [{ id: "compute.run", version: "0.1.0", title: "x", description: "x", output: { mode: "table" } }],
+        resources: [{ id: "artifacts", title: "x", kind: "virtual", resolver: "compute.run", params: {
+          table: "artifacts",
+          command: ["sh", "-c", "printf '<svg></svg>' > plot.svg"],
+          resultTable: "artifacts",
+          outputs: [{ name: "plot", path: "plot.svg", kind: "file", mediaType: "image/svg+xml", semanticRole: "figure", attrs: { renderer: "shell" } }],
+        } }],
+      },
+    };
+    const mpath = join(cwd, "manifest.json");
+    await fs.writeFile(mpath, JSON.stringify(manifest));
+    const cas = fsCasStore(await fs.mkdtemp(join(tmpdir(), "pi-bio-replay-meta-cas-")));
+    const out = await runBioQueryFromManifest({
+      cwd,
+      dbPath: ":memory:",
+      manifestPath: mpath,
+      sql: "SELECT name FROM artifacts",
+      compute: { runner: nodeComputeRunner() },
+      cas,
+      runId: "r-meta",
+      now: "T1",
+    });
+    assert.equal(out.ok, true, out.ok ? "" : `run failed: ${(out as { error?: unknown }).error}`);
+    if (!out.ok) return;
+
+    const replay = await readReplay(out.runDir);
+    assert.deepEqual(replay.compute!.outputs, [
+      { name: "plot", path: "plot.svg", kind: "file", mediaType: "image/svg+xml", semanticRole: "figure", attrs: { renderer: "shell" } },
+    ]);
+  });
+
   test("a plain (non-compute) query persists replay.json without a compute block", async () => {
     const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-replay-"));
     const manifest = {

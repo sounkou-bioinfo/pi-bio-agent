@@ -43,12 +43,14 @@ import { attestEnvironment, validateEnvDescriptor, ENV_ATTESTATION_SCHEMA, type 
 //   extensions  DuckDB extensions to LOAD first; nanoarrow (the Arrow-IPC codec) is loaded ONLY when Arrow I/O
 //               is actually used (an input table, or an "arrow" result) — a pure files-only op loads no codec
 //   outputs     OPTIONAL declared FILE outputs — the #3 artifact transport (file outputs ARE a thing in bioinfo):
-//               [{ name, path, kind?: "file"|"table" }]. The child writes them into its WORK DIR (its cwd); after
+//               [{ name, path, kind?, mediaType?, semanticRole?, attrs? }]. The child writes them into its WORK DIR (its cwd); after
 //               a clean exit the resolver captures each into CAS (content-addressed) and records {name, path,
-//               digest, size} in the receipt. Values come back via Arrow (the table); FILES go via CAS and NEVER
-//               through the IPC or model context — the nf-r-ipc/Nextflow split (Nextflow's content-addressed work
-//               dir = our CAS). Capture streams file bytes into CAS; no library-imposed default size ceiling.
-//               Requires a host-injected CAS (fails closed without one).
+//               digest, size, mediaType?, semanticRole?, attrs?} in the receipt / artifact listing. Labels remain
+//               open data: "figure", "report", "qc_plot", "html_report", etc. carry through but no code branches
+//               on them. Values come back via Arrow (the table); FILES go via CAS and NEVER through the IPC or
+//               model context — the nf-r-ipc/Nextflow split (Nextflow's content-addressed work dir = our CAS).
+//               Capture streams file bytes into CAS; no library-imposed default size ceiling. Requires a
+//               host-injected CAS (fails closed without one).
 //   maxOutputBytes OPTIONAL host quota for a declared output file. It can reject oversized artifacts, but is NOT a
 //               memory-safety primitive; capture streams into CAS.
 //   environment OPTIONAL declared EnvDescriptor (C1) — the reproduction CONTRACT (a conda/micromamba/renv lock, a
@@ -105,19 +107,34 @@ export function computeRunResolver(runner: ComputeRunner): BioResolverImpl {
 
     // Declared FILE outputs (#3 artifact transport). Paths are RELATIVE to the work dir (no '..' / absolute — the
     // child cannot smuggle a read of an arbitrary host file out through a "declared output").
-    const outputs: Array<{ name: string; path: string; kind: "file" | "table" }> = [];
+    const outputs: Array<{ name: string; path: string; kind: string; mediaType?: string; semanticRole?: string; attrs?: Record<string, unknown> }> = [];
     if (p.outputs != null) {
-      if (!Array.isArray(p.outputs)) throw new Error("compute.run: params.outputs must be an array of { name, path, kind? }");
+      if (!Array.isArray(p.outputs)) throw new Error("compute.run: params.outputs must be an array of { name, path, kind?, mediaType?, semanticRole?, attrs? }");
       for (let i = 0; i < p.outputs.length; i++) {
-        const o = p.outputs[i] as { name?: unknown; path?: unknown; kind?: unknown };
+        const o = p.outputs[i] as { name?: unknown; path?: unknown; kind?: unknown; mediaType?: unknown; semanticRole?: unknown; attrs?: unknown };
         if (typeof o.name !== "string" || !o.name) throw new Error(`compute.run: outputs[${i}].name (string) is required`);
         // Cross-platform path isolation (don't assume POSIX): reject absolute (incl. a Windows drive `C:\`) and any
         // `..` segment split on EITHER separator. A resolve-based containment re-check happens at read time too.
         if (typeof o.path !== "string" || !o.path || isAbsolute(o.path) || /^[A-Za-z]:/.test(o.path) || o.path.split(/[\\/]+/).includes("..")) {
           throw new Error(`compute.run: outputs[${i}].path must be a relative path within the work dir (no '..' / absolute)`);
         }
-        if (o.kind !== undefined && o.kind !== "file" && o.kind !== "table") throw new Error(`compute.run: outputs[${i}].kind must be 'file' or 'table'`);
-        outputs.push({ name: o.name, path: o.path, kind: (o.kind as "file" | "table") ?? "file" });
+        if (o.kind !== undefined && (typeof o.kind !== "string" || !o.kind)) throw new Error(`compute.run: outputs[${i}].kind must be a non-empty string`);
+        if (o.mediaType !== undefined && (typeof o.mediaType !== "string" || !o.mediaType)) throw new Error(`compute.run: outputs[${i}].mediaType must be a non-empty string`);
+        if (o.semanticRole !== undefined && (typeof o.semanticRole !== "string" || !o.semanticRole)) throw new Error(`compute.run: outputs[${i}].semanticRole must be a non-empty string`);
+        let attrs: Record<string, unknown> | undefined;
+        if (o.attrs !== undefined) {
+          if (typeof o.attrs !== "object" || o.attrs === null || Array.isArray(o.attrs)) throw new Error(`compute.run: outputs[${i}].attrs must be an object`);
+          try { JSON.stringify(o.attrs); } catch { throw new Error(`compute.run: outputs[${i}].attrs must be JSON-serializable`); }
+          attrs = o.attrs as Record<string, unknown>;
+        }
+        outputs.push({
+          name: o.name,
+          path: o.path,
+          kind: (o.kind as string | undefined) ?? "file",
+          ...(o.mediaType !== undefined ? { mediaType: o.mediaType } : {}),
+          ...(o.semanticRole !== undefined ? { semanticRole: o.semanticRole } : {}),
+          ...(attrs !== undefined ? { attrs } : {}),
+        });
       }
       if (!ctx.cas) throw new Error("compute.run: params.outputs requires a host-injected CAS store (none bound) — fail closed");
     }
@@ -194,8 +211,11 @@ export function computeRunResolver(runner: ComputeRunner): BioResolverImpl {
       // 3c. FILES-ONLY result -> the table IS the artifacts listing (one row per captured output). The tool returned
       //     no rectangular value, but its files are now CAS handles the agent can query (digest) and read downstream.
       if (resultTable === "artifacts") {
-        await ctx.conn.run(`CREATE OR REPLACE TABLE ${p.table} (name VARCHAR, path VARCHAR, kind VARCHAR, digest VARCHAR, size BIGINT)`);
-        for (const a of artifacts) await ctx.conn.run(`INSERT INTO ${p.table} VALUES (?, ?, ?, ?, ?)`, [a.name, a.path, a.kind, a.digest, a.size]);
+        await ctx.conn.run(`CREATE OR REPLACE TABLE ${p.table} (name VARCHAR, path VARCHAR, kind VARCHAR, digest VARCHAR, size BIGINT, media_type VARCHAR, semantic_role VARCHAR, attrs JSON)`);
+        for (const a of artifacts) await ctx.conn.run(
+          `INSERT INTO ${p.table} VALUES (?, ?, ?, ?, ?, ?, ?, json(?))`,
+          [a.name, a.path, a.kind, a.digest, a.size, a.mediaType ?? null, a.semanticRole ?? null, a.attrs === undefined ? null : JSON.stringify(a.attrs)],
+        );
       }
 
       // Provenance digest that actually PINS THE COMPUTATION (not just the argv string): for each command entry
@@ -245,7 +265,21 @@ export function computeRunResolver(runner: ComputeRunner): BioResolverImpl {
               ...(envAttestation.declared ? [`env_declared:${envAttestation.declared.digest}`] : []),
               ...(envAttestation.observed ? [`env_observed:${envAttestation.observed.digest}`] : []), ...envNotes] },
           // one provenance entry per captured FILE artifact (CAS digest = the receipt's "output digest")
-          ...artifacts.map((a) => ({ source: `artifact:${a.name}`, retrievedAt: now, digest: a.digest, notes: ["compute.run", "artifact", a.kind, `path:${a.path}`, `size:${a.size}`] })),
+          ...artifacts.map((a) => ({
+            source: `artifact:${a.name}`,
+            retrievedAt: now,
+            digest: a.digest,
+            notes: [
+              "compute.run",
+              "artifact",
+              a.kind,
+              `path:${a.path}`,
+              `size:${a.size}`,
+              ...(a.mediaType ? [`media_type:${a.mediaType}`] : []),
+              ...(a.semanticRole ? [`semantic_role:${a.semanticRole}`] : []),
+              ...(a.attrs ? [`attrs:${JSON.stringify(a.attrs)}`] : []),
+            ],
+          })),
         ],
       };
     } finally {

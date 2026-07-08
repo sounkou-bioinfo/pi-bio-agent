@@ -379,7 +379,14 @@ export interface RunReplaySpec {
   protectedSessionVariablesDigest?: string;
   duckdbConfigDigest?: string;
   /** the RESOLVED compute execution facts (what actually ran on this host). */
-  compute?: { resourceId?: string; table?: string; command?: readonly string[]; inputSql?: string; resultTable?: "arrow" | "artifacts"; outputs?: Array<{ name: string; path: string; kind?: string }> };
+  compute?: {
+    resourceId?: string;
+    table?: string;
+    command?: readonly string[];
+    inputSql?: string;
+    resultTable?: "arrow" | "artifacts";
+    outputs?: Array<{ name: string; path: string; kind?: string; mediaType?: string; semanticRole?: string; attrs?: Record<string, unknown> }>;
+  };
   /** env SUMMARY (status + digests); the full attestation is in receipts.json. Enriched AFTER the run resolves. */
   environment?: EnvAttestationSummary;
   /** stable digests of the receipts this run produced — reproduce()'s pin on the exact provenance it should match. */

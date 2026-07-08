@@ -40,10 +40,24 @@ describe("captureDeclaredOutputsToCas: shared file-artifact capture safety", () 
     const dir = await workDir();
     await fs.writeFile(join(dir, "out.txt"), "hello");
     const cas = fakeCas();
-    const arts = await captureDeclaredOutputsToCas({ workDir: dir, outputs: [{ name: "o", path: "out.txt", kind: "file" }], cas });
+    const arts = await captureDeclaredOutputsToCas({
+      workDir: dir,
+      outputs: [{
+        name: "o",
+        path: "out.txt",
+        kind: "file",
+        mediaType: "text/plain",
+        semanticRole: "report",
+        attrs: { renderer: "test" },
+      }],
+      cas,
+    });
     assert.equal(arts.length, 1);
     assert.equal(arts[0]!.size, 5);
     assert.match(arts[0]!.digest, /^sha256:[a-f0-9]{64}$/);
+    assert.equal(arts[0]!.mediaType, "text/plain");
+    assert.equal(arts[0]!.semanticRole, "report");
+    assert.deepEqual(arts[0]!.attrs, { renderer: "test" });
     assert.equal(cas.puts.length, 1, "the bytes were put into CAS");
     assert.equal(cas.puts[0]!.bytes.toString(), "hello");
   });

@@ -92,7 +92,12 @@ describe("ActionCache: input CASID -> output CASID (LLVM CAS ActionCache in the 
   test("compute facts: the input digest is STABLE across a replay.json round-trip (no undefined keys to be dropped)", () => {
     // resolvedComputeFacts omits undefined optional fields, so the in-memory replay.compute equals the one recovered
     // from replay.json (JSON drops undefined keys). Same digest either way -> a compute.run run object recomputes.
-    const proc = { resourceId: "r", command: ["Rscript", "fit.R"], resultTable: "artifacts" as const };
+    const proc = {
+      resourceId: "r",
+      command: ["Rscript", "fit.R"],
+      resultTable: "artifacts" as const,
+      outputs: [{ name: "plot", path: "plot.svg", kind: "file", mediaType: "image/svg+xml", semanticRole: "figure", attrs: { renderer: "R" } }],
+    };
     assert.equal(
       actionInputDigest({ ...base, compute: proc }),
       actionInputDigest({ ...base, compute: JSON.parse(JSON.stringify(proc)) }),
@@ -113,6 +118,11 @@ describe("ActionCache: input CASID -> output CASID (LLVM CAS ActionCache in the 
     assert.notEqual(actionInputDigest(base), actionInputDigest({ ...base, duckdbConfigDigest: "sha256:cfg" }), "config changes the key");
     assert.notEqual(actionInputDigest(base), actionInputDigest({ ...base, hostReceiptDigests: ["sha256:" + "1".repeat(64)] }), "host capability policy receipts change the key");
     assert.notEqual(actionInputDigest(base), actionInputDigest({ ...base, compute: { command: ["Rscript", "fit.R"] } }), "compute changes the key");
+    assert.notEqual(
+      actionInputDigest({ ...base, compute: { command: ["Rscript", "fit.R"], outputs: [{ name: "plot", path: "plot.svg", mediaType: "image/svg+xml" }] } }),
+      actionInputDigest({ ...base, compute: { command: ["Rscript", "fit.R"], outputs: [{ name: "plot", path: "plot.svg", mediaType: "text/plain" }] } }),
+      "declared output metadata is part of the compute/replay identity",
+    );
     assert.notEqual(actionInputDigest(base), actionInputDigest({ ...base, environment: { status: "matched", observedDigest: "sha256:e" } }), "environment changes the key");
   });
 

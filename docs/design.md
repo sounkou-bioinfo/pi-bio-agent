@@ -353,7 +353,11 @@ Three things keep this consistent with the rest of the substrate:
   table, `examples/compute-run`); declared **file outputs** streamed content-addressed into **CAS**
   (`resultTable: "artifacts"` + `captureDeclaredOutputsToCas` in `src/duckdb/artifact-capture.ts`: relative-path-only, symlink/non-regular-file rejecting, realpath-confined to the work dir, optional host quota,
   fail-closed-without-CAS; `examples/compute-artifacts`); and the **files-only** case where the resource's table
-  is the captured-artifacts listing (`examples/compute-files-only`). Environment receipts are also host-extensible:
+  is the captured-artifacts listing (`examples/compute-files-only`). Declared file outputs may carry open
+  `mediaType`, `semanticRole`, and `attrs` metadata, so an R/Python/bash tool can produce an HTML report, SVG
+  figure, CSV side table, BAM, or QC bundle without a renderer-specific core model. Those fields ride in receipts
+  and, for files-only resources, in the artifact table; review packets and UI report schemas remain downstream
+  product conventions. Environment receipts are also host-extensible:
   `withObservedEnvironment` wraps any `ComputeRunner` with a host-known `EnvDescriptor` (for example an `renv.lock`
   digest, package snapshot, container image, or module set) so a manifest's declared reproduction contract can match
   what the host says actually ran. The wrapper does not sniff the child process or infer packages; it reports

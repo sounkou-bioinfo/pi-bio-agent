@@ -19,6 +19,9 @@ export interface DeclaredOutput {
   name: string;
   path: string;
   kind?: string; // "file" | "table" | … (opaque here; carried through to the artifact record)
+  mediaType?: string;
+  semanticRole?: string;
+  attrs?: Record<string, unknown>;
 }
 
 /** A captured artifact: the declared identity plus its CAS content address + size. */
@@ -28,6 +31,9 @@ export interface CapturedArtifact {
   kind: string;
   digest: `sha256:${string}`;
   size: number;
+  mediaType?: string;
+  semanticRole?: string;
+  attrs?: Record<string, unknown>;
 }
 
 /**
@@ -65,7 +71,16 @@ export async function captureDeclaredOutputsToCas(opts: {
     if (real !== realDirRoot && !real.startsWith(realDirRoot + sep)) throw new Error(`${label}: declared output '${o.name}' realpath escaped the work dir`);
     const stored = await cas.putFile(real); // immutable + idempotent; streams, does not read the whole file into JS memory
     if (maxOutputBytes !== undefined && stored.size > maxOutputBytes) throw new Error(`${label}: declared output '${o.name}' captured ${stored.size} bytes, over the ${maxOutputBytes}-byte quota`);
-    artifacts.push({ name: o.name, path: o.path, kind: o.kind ?? "file", digest: `${stored.address.algorithm}:${stored.address.digest}` as `sha256:${string}`, size: stored.size });
+    artifacts.push({
+      name: o.name,
+      path: o.path,
+      kind: o.kind ?? "file",
+      digest: `${stored.address.algorithm}:${stored.address.digest}` as `sha256:${string}`,
+      size: stored.size,
+      ...(o.mediaType !== undefined ? { mediaType: o.mediaType } : {}),
+      ...(o.semanticRole !== undefined ? { semanticRole: o.semanticRole } : {}),
+      ...(o.attrs !== undefined ? { attrs: o.attrs } : {}),
+    });
   }
   return artifacts;
 }
