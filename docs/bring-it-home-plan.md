@@ -44,6 +44,7 @@ These items are no longer open substrate work in `pi-bio-agent`.
   implementations. Resume is checkpoint-based, not a workflow engine. Evidence: [jobs.ts](../src/core/jobs.ts),
   [job-store.ts](../src/hosts/job-store.ts), [job-runner.test.ts](../test/job-runner.test.ts),
   [job-step-plan.test.ts](../test/job-step-plan.test.ts), [ledger-job-runner.test.ts](../test/ledger-job-runner.test.ts),
+  [python-workflow-dogfood.test.ts](../test/python-workflow-dogfood.test.ts),
   [absurd-queue-push-dogfood.test.ts](../test/absurd-queue-push-dogfood.test.ts).
 - **Host-event receipts are open host facts.** `recordHostEvent` records one `host_event` fact plus optional ordinary
   links. `kind` is host-owned data, not a core enum. Evidence: [host-events.ts](../src/hosts/host-events.ts),
@@ -104,6 +105,11 @@ These items are no longer open substrate work in `pi-bio-agent`.
   option. Absence still skips cross-db remote reuse. Evidence: [operations.ts](../src/core/operations.ts),
   [run-store.ts](../src/hosts/run-store.ts), [reproduce.ts](../src/hosts/reproduce.ts),
   [host-run-operation.test.ts](../test/host-run-operation.test.ts).
+- **The packaged substrate skill is an integration point, not a computation pack.** Host presets install the
+  procedural skill for Codex, Pi, Claude, OpenCode, and GitHub Copilot; the package exposes `./skills`; and the
+  dogfood runs catalog -> manifest query/run -> ledger fact -> graph-window paging through the CLI. Evidence:
+  [install-skill.mjs](../scripts/install-skill.mjs), [substrate-skill-dogfood.mjs](../scripts/substrate-skill-dogfood.mjs),
+  [skill-validation.test.ts](../test/skill-validation.test.ts), [project-host.test.ts](../test/project-host.test.ts).
 
 The compact proof is:
 
@@ -141,17 +147,10 @@ consumer-pulled, or a non-goal.
    `submitBioJob` / `pollBioJob` read the same data path unchanged. That test is skipped when ducknng is unavailable.
    In a ducknng-provisioned environment, `npm run dogfood:nng-job-runner` gives explicit non-skipped transport
    evidence: a separate process writes status over ducknng RPC and the coordinator asserts status/digest history.
-   Remaining hardening is to exercise the same shape with R/Python/scheduler backends as real consumers need them.
-   This is not a request for another workflow engine.
-3. **Substrate skill and non-Pi host dogfood.** The packaged skill should keep onboarding weaker hosts into the
-   substrate: `pi-bio-agent catalog` / `bio_list_sources` now list validated manifest-backed sources/templates before
-   a host chooses one to describe or query; the rest of the loop is write or inspect a manifest, discover schemas
-   with `DESCRIBE` / `SUMMARIZE`, run bounded SQL, walk the ledger/graph with `pi-bio-agent graph-window` or
-   `bio_graph_window` when present, and promote only repeated workflows into thin playbooks. The packaged skill
-   dogfood now runs catalog -> query/run, records a ledger fact, and separately pages a declared graph table with a
-   CLI continuation handle. `check:skills` keeps the skill procedural guidance rather than a hidden API client,
-   secret store, or per-question computation pack.
-4. **Docs hygiene.** Keep README and guides action-first: real commands, real code chunks, no fake text-block
+   A focused Python checkpointed-workflow test also proves the same checkpoint/resume convention over real Python child
+   processes through `nodeComputeRunner`. Remaining hardening is to exercise scheduler-native backends when a real
+   consumer needs one. This is not a request for another workflow engine.
+3. **Docs hygiene.** Keep README and guides action-first: real commands, real code chunks, no fake text-block
    architecture diagrams, and no speculative filesystem-extension claims. Claims should point to commands, tests, or
    examples that currently run.
 
@@ -191,6 +190,7 @@ consumer-pulled, or a non-goal.
 - **Base durable runner/resume.** `AsyncRunner` is the lifecycle; `JobRunner` and checkpoint helpers specialize it.
   Resume means completed-prefix checkpoint reuse plus suffix rerun. Evidence: [job-store.ts](../src/hosts/job-store.ts),
   [ledger-job-runner.test.ts](../test/ledger-job-runner.test.ts),
+  [python-workflow-dogfood.test.ts](../test/python-workflow-dogfood.test.ts),
   [bring-it-home-dogfood.mjs](../scripts/bring-it-home-dogfood.mjs), [bring-it-home-dogfood.test.ts](../test/bring-it-home-dogfood.test.ts).
 - **ducknng/quack sibling upload and shared-data path.** Upload-shaped movement stays in the sibling transport, not
   in core. The non-skipped dogfood command loads an upload-capable sibling `ducknng.duckdb_extension`, streams local
@@ -218,6 +218,10 @@ consumer-pulled, or a non-goal.
   redaction remain consumer-pulled.
 - **Base SDK packaging.** Root, `/core`, `/duckdb`, and `/hosts` exports are checked by a packed downstream
   embedding dogfood. Expansion remains consumer-driven.
+- **Substrate skill and non-Pi host dogfood.** The skill is a host-neutral onboarding/playbook surface for agents
+  that do not run the Pi extension. It points them at catalog, manifest inspection, read-only SQL, ledger/graph
+  windowing, and thin playbook graduation. The installer covers Codex, Pi global/project, Claude, OpenCode, GitHub
+  Copilot, and generic destination roots; validation rejects executable clients, secrets, and patient identifiers.
 - **Lazy resource forcing.** Ad-hoc `bio_query` no longer resolves every manifest resource by default. When
   `resources` is omitted, the host infers the minimal resource set from DuckDB parser-discovered table references
   and manifest `params.table` values; catalog-style schema discovery can still force the inspected table. Ambiguous
