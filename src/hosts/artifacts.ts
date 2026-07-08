@@ -2,7 +2,7 @@ import type { TrustBlock } from "../core/knowledge-graph.js";
 import type { SqlConn } from "../core/ports.js";
 import { contentAddressUri, type ContentAddress } from "../core/resources.js";
 import { validateContentAddress } from "../core/storage.js";
-import { createBioObservationSchema, recordObservation, recordObservationLink } from "../duckdb/observations.js";
+import { createBioObservationSchema, recordMonotonicObservation, recordObservation, recordObservationLink } from "../duckdb/observations.js";
 import { addCasRef, initCasMetadata, recordCasObject } from "./cas-metadata.js";
 
 export interface CasArtifactFact {
@@ -28,6 +28,8 @@ export interface ArtifactReferenceInput {
   referenceStatementKey?: string;
   /** Optional shared-CAS metadata authority. Pass only after the artifact bytes have been written to that CAS. */
   casMetadata?: { conn: SqlConn; nowMs?: number; refId?: string; refType?: string };
+  /** Use for stateful artifact slots whose current reference must supersede older rows, e.g. run-produced outputs. */
+  referenceMonotonic?: { sentinel: string };
 }
 
 export interface ArtifactReferenceRecord {
@@ -99,17 +101,29 @@ export async function recordArtifactReference(conn: SqlConn, input: ArtifactRefe
     attrs: artifactAttrs,
     trust: input.trust,
   });
-  const referenceObservationId = await recordObservationLink(conn, {
-    statementKey: input.referenceStatementKey,
-    subjectId,
-    predicate,
-    objectId: casUri,
-    recordedAt: input.recordedAt,
-    source: input.source,
-    digest: input.digest ?? input.artifact.digest,
-    attrs: referenceAttrs,
-    trust: input.trust,
-  });
+  const referenceStatementKey = input.referenceStatementKey ?? `${subjectId}:${predicate}:${casUri}`;
+  const referenceObservationId = input.referenceMonotonic
+    ? await recordMonotonicObservation(conn, {
+      statementKey: referenceStatementKey,
+      subjectId,
+      predicate,
+      objectId: casUri,
+      source: input.source,
+      digest: input.digest ?? input.artifact.digest,
+      attrs: referenceAttrs,
+      trust: input.trust,
+    }, input.recordedAt, input.referenceMonotonic.sentinel)
+    : await recordObservationLink(conn, {
+      statementKey: referenceStatementKey,
+      subjectId,
+      predicate,
+      objectId: casUri,
+      recordedAt: input.recordedAt,
+      source: input.source,
+      digest: input.digest ?? input.artifact.digest,
+      attrs: referenceAttrs,
+      trust: input.trust,
+    });
 
   return { artifactObservationId, referenceObservationId, casUri };
 }

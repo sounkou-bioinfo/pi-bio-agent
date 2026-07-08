@@ -21,7 +21,9 @@ import { duckdbSqlMaterializeResolver } from "../duckdb/resolvers/duckdb-sql-mat
 import { duckhtsReadBcfResolver } from "../duckdb/resolvers/duckhts-read-bcf.js";
 import { httpTableResolver, type FetchLike } from "../duckdb/resolvers/http-table-scan.js";
 import { computeRunResolver } from "../duckdb/resolvers/compute-run.js";
+import { liveOutEdgesAsOf, recordMonotonicObservation, recordObservation } from "../duckdb/observations.js";
 import { addCasRef, dropCasRefs, initCasMetadata, recordCasObject, replaceCasRefs } from "./cas-metadata.js";
+import { recordArtifactReference } from "./artifacts.js";
 
 // Host-level run runner + store. Core returns { run, result, receipts }; persistence and resolver binding
 // live HERE, not in core. Only built-in resolver impls are bound; a manifest that declares any other
@@ -41,6 +43,7 @@ const NETWORK_RESOLVER = "http.get";
 // ComputeRunner (grants out-of-process compute by composition), exactly like http.get needs an injected fetch.
 const COMPUTE_RESOLVER = "compute.run";
 const PENDING_RUN_CAS_REF_TTL_MS = 24 * 60 * 60 * 1000;
+const RUN_ARTIFACT_SLOT_FUTURE = "9999-12-31T23:59:59.999Z";
 
 // Built-in resolvers whose params.path is a file location to resolve relative to the manifest's directory.
 const FILE_PATH_RESOLVERS = new Set(["duckdb.file_scan", "duckhts.read_bcf"]);
@@ -499,6 +502,137 @@ export function envSummaryFromReceipts(receipts: ReadonlyArray<{ provenance: Rea
   return undefined;
 }
 
+const SHA256_DIGEST = /^sha256:[0-9a-fA-F]{64}$/;
+
+function noteValue(notes: readonly string[] | undefined, prefix: string): string | undefined {
+  const hit = notes?.find((note) => note.startsWith(prefix));
+  return hit === undefined ? undefined : hit.slice(prefix.length);
+}
+
+function parseArtifactAttrs(notes: readonly string[] | undefined): { attrs: Record<string, unknown>; warning?: string } {
+  const raw = noteValue(notes, "attrs:");
+  if (raw === undefined) return { attrs: {} };
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? { attrs: parsed as Record<string, unknown> }
+      : { attrs: {}, warning: "attrs_note_not_object" };
+  } catch {
+    return { attrs: {}, warning: "attrs_note_invalid_json" };
+  }
+}
+
+async function recordRunArtifactBridgeWarning(
+  runLog: { store: SqlConn; author?: string } | undefined,
+  now: string,
+  runId: string,
+  err: unknown,
+): Promise<void> {
+  if (!runLog) return;
+  const message = err instanceof Error ? err.message : String(err);
+  const digest = canonicalDigest(["run_artifact_bridge_warning", runId, now, message]);
+  try {
+    await recordObservation(runLog.store, {
+      statementKey: `run:${runId}:artifact_bridge_warning:${digest}`,
+      subjectId: `run:${runId}`,
+      predicate: "artifact_bridge_warning",
+      value: { message },
+      recordedAt: now,
+      source: runLog.author,
+      digest,
+    });
+  } catch {
+    /* diagnostic-only: artifact bridge warnings must not fail the scientific run */
+  }
+}
+
+/** Fold compute-produced file artifacts from resolver receipts into the shared ledger.
+ *
+ * `compute.run` captures declared file outputs into CAS in the resolver layer. Once the run succeeds, this host layer
+ * has the run id, shared store, and optional CAS metadata authority needed to make those files normal graph
+ * artifacts (`run:<id> --produces--> cas:<digest>`), instead of leaving reports/figures buried only in receipt JSON.
+ */
+async function recordRunArtifactsFromReceipts(
+  runLog: { store: SqlConn; author?: string } | undefined,
+  now: string,
+  runId: string,
+  receipts: readonly ResolutionReceipt[],
+  replay: RunReplaySpec | undefined,
+  casMetadata?: { conn: SqlConn; nowMs?: number },
+): Promise<void> {
+  if (!runLog) return;
+  const runNode = `run:${runId}`;
+  const currentSlots = new Set<string>();
+  const artifactCasRefs: Array<{ address: { algorithm: "sha256"; digest: string } }> = [];
+  for (const receipt of receipts) {
+    const sourceReceiptDigest = receiptContentDigest(receipt);
+    for (const prov of receipt.provenance) {
+      if (!prov.source.startsWith("artifact:") || typeof prov.digest !== "string" || !SHA256_DIGEST.test(prov.digest)) continue;
+      const artifactName = prov.source.slice("artifact:".length);
+      const statementKey = `${runNode}:artifact:${receipt.resourceId}:${artifactName}`;
+      currentSlots.add(statementKey);
+      const notes = prov.notes ?? [];
+      const sizeRaw = noteValue(notes, "size:");
+      const sizeBytes = sizeRaw !== undefined && /^\d+$/.test(sizeRaw) ? Number(sizeRaw) : undefined;
+      const address = { algorithm: "sha256" as const, digest: prov.digest.slice("sha256:".length).toLowerCase() };
+      const declaredAttrs = parseArtifactAttrs(notes);
+      const attrs: Record<string, unknown> = {
+        ...declaredAttrs.attrs,
+        producer_run: runNode,
+        resource_id: receipt.resourceId,
+        artifact_name: artifactName,
+        source_receipt_digest: sourceReceiptDigest,
+        source_digest: sourceReceiptDigest,
+        ...(replay?.manifest?.digest ? { spec_digest: replay.manifest.digest } : {}),
+        ...(declaredAttrs.warning ? { artifact_metadata_warning: declaredAttrs.warning } : {}),
+      };
+      const path = noteValue(notes, "path:");
+      if (path !== undefined) attrs.path = path;
+      if (typeof attrs.renderer === "string" && attrs.plotting_system === undefined) attrs.plotting_system = attrs.renderer;
+      const mediaType = noteValue(notes, "media_type:");
+      const semanticRole = noteValue(notes, "semantic_role:");
+      await recordArtifactReference(runLog.store, {
+        artifact: {
+          digest: prov.digest as `sha256:${string}`,
+          ...(mediaType ? { mediaType } : {}),
+          ...(semanticRole ? { semanticRole } : {}),
+          ...(sizeBytes !== undefined ? { sizeBytes } : {}),
+        },
+        subjectId: runNode,
+        predicate: "produces",
+        recordedAt: now,
+        source: runLog.author,
+        digest: prov.digest,
+        attrs,
+        referenceStatementKey: statementKey,
+        referenceMonotonic: { sentinel: RUN_ARTIFACT_SLOT_FUTURE },
+      });
+      if (casMetadata) {
+        await recordCasObject(casMetadata.conn, address, sizeBytes ?? null, casMetadata.nowMs ?? Date.now());
+        artifactCasRefs.push({ address });
+      }
+    }
+  }
+  const liveSlots = await liveOutEdgesAsOf(runLog.store, runNode, RUN_ARTIFACT_SLOT_FUTURE);
+  for (const edge of liveSlots) {
+    if (edge.predicate !== "produces" || !edge.statement_key.startsWith(`${runNode}:artifact:`) || currentSlots.has(edge.statement_key)) continue;
+    await recordMonotonicObservation(runLog.store, {
+      statementKey: edge.statement_key,
+      subjectId: runNode,
+      predicate: "produces",
+      source: runLog.author,
+    }, now, RUN_ARTIFACT_SLOT_FUTURE);
+  }
+  if (casMetadata) {
+    await replaceCasRefs(casMetadata.conn, runNode, "artifact", artifactCasRefs, casMetadata.nowMs ?? Date.now());
+    return;
+  }
+  const casRefTable = await runLog.store.all<{ n: bigint }>(
+    `SELECT count(*) AS n FROM information_schema.tables WHERE lower(table_name) = 'cas_ref'`,
+  );
+  if (Number(casRefTable[0]?.n ?? 0) > 0) await runLog.store.run(`DELETE FROM cas_ref WHERE ref_id = ? AND ref_type = ?`, [runNode, "artifact"]);
+}
+
 /** Enrich the pre-run replay SEED once receipts exist: pin the receipt digests + the env attestation summary, so
  *  reproduce() has stable handles and a status without re-parsing provenance. */
 function enrichReplay(replay: RunReplaySpec, receipts: ResolutionReceipt[]): RunReplaySpec {
@@ -723,6 +857,11 @@ async function runAndPersist(
       const completedAt = injectedNow ?? systemClock();
       // Datomic + CAS: record the run as a fact in the ONE store, referencing content by digest (bytes stay outside).
       await recordRun(runLog, completedAt, { runId, identity, kind, status: attributedRun.status, error: undefined, dir: persisted.dir, replay: effectiveReplay, enriched, resultDigest, receiptsDigest, replayDigest, runObjectDigest });
+      try {
+        await recordRunArtifactsFromReceipts(runLog, completedAt, runId, receipts, enriched, casMetadata);
+      } catch (err) {
+        await recordRunArtifactBridgeWarning(runLog, completedAt, runId, err);
+      }
       // ActionCache (LLVM CAS): map this input's CASID -> the result's CASID, so an identical future run can be
       // memoized/deduped and reproduce() has an input->output handle. Only when both a CAS and the store are present.
       // SKIP a run with a LIVE SOURCE: its sourceReceiptDigests are blind to the source's CONTENT (sql_materialize /
@@ -808,6 +947,11 @@ async function runAndPersist(
         }
         const failedAt = injectedNow ?? systemClock(); // FAILURE time, not run start (see the success path)
         await recordRun(runLog, failedAt, { runId, identity, kind, status: attributedRun.status, error: error.message, dir: persisted.dir, replay: effectiveReplay, enriched, receiptsDigest, replayDigest });
+        try {
+          await recordRunArtifactsFromReceipts(runLog, failedAt, runId, [], enriched, casMetadata);
+        } catch (err) {
+          await recordRunArtifactBridgeWarning(runLog, failedAt, runId, err);
+        }
         const casRefs = cas ? { receipts: receiptsDigest, replay: replayDigest } : undefined;
         return { ok: false, runId, operationId: identity, status: error.run.status, error: error.message, casRefs, runDir: persisted.dir };
       } catch (innerError) {

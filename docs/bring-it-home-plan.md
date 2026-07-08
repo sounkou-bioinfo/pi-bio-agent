@@ -64,8 +64,12 @@ These items are no longer open substrate work in `pi-bio-agent`.
   `cas:<digest>` plus an ordinary graph reference from the producing/displaying node. Media type, semantic role,
   plotting system, source digest, and spec digest ride as artifact/reference metadata; declared compute outputs can
   also carry open `mediaType`, `semanticRole`, and `attrs` metadata into receipts and files-only artifact tables.
-  There is no separate plot table. Session-ingest image blocks and training-corpus export use the same path. Evidence:
+  CAS-backed successful runs with a store now fold those declared outputs into the same artifact fact/edge path, so
+  reports and figures produced by R/Python/bash compute are graph-walkable and corpus-visible. When the host also
+  supplies shared `casMetadata`, run-produced artifacts are rooted by run-scoped artifact refs. There is no separate
+  plot table. Session-ingest image blocks and training-corpus export use the same path. Evidence:
   [artifacts.ts](../src/hosts/artifacts.ts), [artifact-observations.test.ts](../test/artifact-observations.test.ts),
+  [run-observations.test.ts](../test/run-observations.test.ts),
   [session-ingest.test.ts](../test/session-ingest.test.ts), [training-corpus.test.ts](../test/training-corpus.test.ts),
   [compute-artifacts-example.test.ts](../test/compute-artifacts-example.test.ts),
   [bring-it-home-dogfood.test.ts](../test/bring-it-home-dogfood.test.ts).
@@ -176,9 +180,10 @@ consumer-pulled, or a non-goal.
 3. **Training corpus hardening.** Redaction policy, label schema, export contract, and VARIANT-shredded Parquet are
    required once a real corpus consumer exists. The base ledger remains `value_json`; typed Parquet is a derived
    export.
-4. **Renderer/report product metadata.** Core has CAS-addressed figure/report artifacts plus open declared-output
-   metadata for real R/Python/bash-produced reports and figures. Richer renderer-specific schemas, review-packet
-   structure, and UI report models wait for downstream applications that need them.
+4. **Renderer/report product metadata.** Core has CAS-addressed figure/report artifacts, declared-output metadata,
+   automatic compute-output artifact observations, and host-conditional shared-CAS artifact refs for real
+   R/Python/bash-produced reports and figures. Richer renderer-specific schemas, review-packet structure, and UI
+   report models wait for downstream applications that need them.
 5. **SDK maintenance.** Required exports should follow real sibling consumers. Each new public type/helper needs a
    packed external-consumer dogfood so the library remains usable outside this repo.
 6. **Workbench package abstractions.** `pi-bio-workbench` should remain a downstream app. Core closes over primitives
@@ -223,8 +228,9 @@ consumer-pulled, or a non-goal.
   closure artifact path, term-association projection, metadata packaging, superproperty expansion, multi-schema
   staging, and graph projection path exist. Remaining relation-graph policy and trust reconciliation are
   consumer-pulled.
-- **Base graphics/report artifact evidence.** Figures, reports, and session images are CAS artifacts linked through
-  `bio_observations`/`bio_edges_as_of`; renderer-specific report models remain downstream.
+- **Base graphics/report artifact evidence.** Figures, reports, compute-produced file outputs, and session images
+  are CAS artifacts linked through `bio_observations`/`bio_edges_as_of`; run-produced output roots are registered
+  under shared CAS metadata when the host supplies that authority. Renderer-specific report models remain downstream.
 - **Base training-corpus export.** Digest-only ledger/session/tool/run/artifact/event exports and redacted
   host-event-link exports exist. Labels and redaction remain consumer-pulled.
 - **Base SDK packaging.** Root, `/core`, `/duckdb`, and `/hosts` exports are checked by a packed downstream

@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { duckdbNodeConn } from "../src/duckdb/node-api.js";
 import type { SqlConn } from "../src/core/ports.js";
-import { createBioObservationSchema, observationAsOfKey } from "../src/duckdb/observations.js";
+import { createBioObservationSchema, materializeBioEdgesAsOf, observationAsOfKey } from "../src/duckdb/observations.js";
 import { promises as fsp } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -15,6 +15,7 @@ import type { CasStore } from "../src/core/cas.js";
 import { collectGarbage } from "../src/hosts/gc.js";
 import { dropCasRefs } from "../src/hosts/cas-metadata.js";
 import { MEMORY_NOW } from "../src/hosts/memory-store.js";
+import { nodeComputeRunner } from "../src/process/node-compute-runner.js";
 
 const conn = async (): Promise<SqlConn> => {
   const c = duckdbNodeConn(await (await DuckDBInstance.create(":memory:")).connect());
@@ -262,6 +263,165 @@ describe("run-observations: ad-hoc SQL folds into the ONE store as an as-of, att
     await dropCasRefs(store, `run:${rerun.runId}`);
     await collectGarbage(cwd, { casMode: "shared", metadata: { conn: store, cas, cutoffMs: 2000, graceMs: 0 }, minAgeMs: 1, runs: { keep: 0 } });
     for (const digest of rerunDigests) assert.equal(await cas.has({ algorithm: "sha256", digest }), false, "dropping the run ref releases CAS bytes to metadata GC");
+  });
+
+  test("compute-produced reports and figures become ledger artifacts with shared-CAS refs", async () => {
+    const store = await conn();
+    const cas = fsCasStore(await fsp.mkdtemp(join(tmpdir(), "cas-artifacts-")));
+    const cwd = await fsp.mkdtemp(join(tmpdir(), "run-artifacts-"));
+    const manifest = {
+      schema: "pi-bio.manifest.v1",
+      id: "artifact-ledger-run",
+      version: "0.1.0",
+      title: "Artifact ledger run",
+      description: "A files-only compute run that produces report and figure artifacts.",
+      provides: {
+        resolvers: [{ id: "compute.run", version: "0.1.0", title: "Compute", description: "Run a process", output: { mode: "table" } }],
+        resources: [{
+          id: "artifacts",
+          title: "Artifacts",
+          kind: "virtual",
+          resolver: "compute.run",
+          params: {
+            table: "artifacts",
+            command: ["sh", "-c", "printf '<html>ok</html>' > report.html; printf '<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>' > plot.svg"],
+            resultTable: "artifacts",
+            outputs: [
+              { name: "report", path: "report.html", kind: "file", mediaType: "text/html", semanticRole: "report", attrs: { renderer: "shell-html" } },
+              { name: "plot", path: "plot.svg", kind: "file", mediaType: "image/svg+xml", semanticRole: "figure", attrs: { renderer: "shell-svg", source_table: "none" } },
+            ],
+          },
+        }],
+      },
+    };
+    const manifestPath = join(cwd, "manifest.json");
+    await fsp.writeFile(manifestPath, JSON.stringify(manifest));
+
+    const res = await runBioQueryFromManifest({
+      cwd,
+      dbPath: ":memory:",
+      manifestPath,
+      sql: "SELECT name, digest, media_type, semantic_role FROM artifacts ORDER BY name",
+      runId: "artifact-run",
+      now: "2026-07-06T11:00:00.000Z",
+      store,
+      author: "agent:A",
+      compute: { runner: nodeComputeRunner() },
+      cas,
+      casMetadata: { conn: store, nowMs: 1000 },
+    });
+    assert.ok(res.ok);
+    if (!res.ok) return;
+
+    const resultRows = JSON.parse(await fsp.readFile(join(res.runDir, "result.json"), "utf8")).rows as Array<{
+      name: string;
+      digest: string;
+      media_type: string;
+      semantic_role: string;
+    }>;
+    assert.deepEqual(resultRows.map((r) => [r.name, r.media_type, r.semantic_role]), [
+      ["plot", "image/svg+xml", "figure"],
+      ["report", "text/html", "report"],
+    ]);
+    const artifactDigests = new Set(resultRows.map((r) => r.digest.slice("sha256:".length)));
+
+    const facts = await store.all<{ subject_id: string; media_type: string; semantic_role: string; size_bytes: bigint }>(
+      `SELECT subject_id,
+              json_extract_string(value_json, '$.media_type') AS media_type,
+              json_extract_string(value_json, '$.semantic_role') AS semantic_role,
+              CAST(json_extract_string(value_json, '$.size_bytes') AS BIGINT) AS size_bytes
+       FROM bio_observations
+       WHERE predicate = 'artifact'
+       ORDER BY semantic_role`,
+    );
+    assert.deepEqual(facts.map((f) => [f.media_type, f.semantic_role]), [
+      ["image/svg+xml", "figure"],
+      ["text/html", "report"],
+    ]);
+    assert.ok(facts.every((f) => f.subject_id.startsWith("cas:sha256:") && Number(f.size_bytes) > 0));
+
+    await materializeBioEdgesAsOf(store, MEMORY_NOW);
+    const edges = await store.all<{ predicate: string; to_id: string; attrs: string }>(
+      `SELECT predicate, to_id, attrs::VARCHAR AS attrs
+       FROM bio_edges_as_of
+       WHERE from_id = ?
+       ORDER BY to_id`,
+      [`run:${res.runId}`],
+    );
+    assert.equal(edges.length, 2);
+    assert.ok(edges.every((e) => e.predicate === "produces"));
+    const edgeAttrs = edges.map((e) => JSON.parse(e.attrs) as Record<string, unknown>);
+    assert.deepEqual(edgeAttrs.map((a) => [a.resource_id, a.artifact_name, a.producer_run, a.source_digest === a.source_receipt_digest]), [
+      ["artifacts", "plot", `run:${res.runId}`, true],
+      ["artifacts", "report", `run:${res.runId}`, true],
+    ]);
+    assert.deepEqual(edgeAttrs.map((a) => a.plotting_system).sort(), ["shell-html", "shell-svg"]);
+
+    const artifactRefs = await store.all<{ digest: string }>(
+      `SELECT digest FROM cas_ref WHERE ref_id = ? AND ref_type = 'artifact' ORDER BY digest`,
+      [`run:${res.runId}`],
+    );
+    assert.deepEqual(new Set(artifactRefs.map((r) => r.digest)), artifactDigests);
+
+    await store.run(`DELETE FROM cas_ref WHERE ref_id = ? AND ref_type = 'run'`, [`run:${res.runId}`]);
+    await collectGarbage(cwd, { casMode: "shared", metadata: { conn: store, cas, cutoffMs: 3000, graceMs: 0 }, minAgeMs: 1, runs: { keep: 0 } });
+    for (const digest of artifactDigests) {
+      assert.equal(await cas.has({ algorithm: "sha256", digest }), true, "artifact refs protect report/figure bytes after run-result refs are dropped");
+    }
+
+    const secondManifest = structuredClone(manifest);
+    secondManifest.provides.resources[0]!.params.command = ["sh", "-c", "printf '<html>new</html>' > report.html"];
+    secondManifest.provides.resources[0]!.params.outputs = [
+      { name: "report", path: "report.html", kind: "file", mediaType: "text/html", semanticRole: "report", attrs: { renderer: "shell-html-v2" } },
+    ];
+    await fsp.writeFile(manifestPath, JSON.stringify(secondManifest));
+    const rerun = await runBioQueryFromManifest({
+      cwd,
+      dbPath: ":memory:",
+      manifestPath,
+      sql: "SELECT name, digest, media_type, semantic_role FROM artifacts ORDER BY name",
+      runId: "artifact-run",
+      now: "2026-07-06T10:00:00.000Z",
+      store,
+      author: "agent:A",
+      compute: { runner: nodeComputeRunner() },
+      cas,
+      casMetadata: { conn: store, nowMs: 4000 },
+    });
+    assert.ok(rerun.ok);
+    if (!rerun.ok) return;
+    const rerunRows = JSON.parse(await fsp.readFile(join(rerun.runDir, "result.json"), "utf8")).rows as Array<{ name: string; digest: string }>;
+    const rerunArtifactDigests = new Set(rerunRows.map((r) => r.digest.slice("sha256:".length)));
+    assert.equal(rerunArtifactDigests.size, 1);
+
+    await materializeBioEdgesAsOf(store, MEMORY_NOW);
+    const rerunEdges = await store.all<{ to_id: string; attrs: string }>(
+      `SELECT to_id, attrs::VARCHAR AS attrs
+       FROM bio_edges_as_of
+       WHERE from_id = ? AND predicate = 'produces'
+       ORDER BY to_id`,
+      [`run:${rerun.runId}`],
+    );
+    assert.equal(rerunEdges.length, 1, "same-runId rerun tombstones produced artifacts that are no longer declared");
+    assert.equal((JSON.parse(rerunEdges[0]!.attrs) as Record<string, unknown>).artifact_name, "report");
+
+    const rerunArtifactRefs = await store.all<{ digest: string }>(
+      `SELECT digest FROM cas_ref WHERE ref_id = ? AND ref_type = 'artifact' ORDER BY digest`,
+      [`run:${rerun.runId}`],
+    );
+    assert.deepEqual(new Set(rerunArtifactRefs.map((r) => r.digest)), rerunArtifactDigests, "same-runId rerun replaces stale artifact roots");
+
+    await collectGarbage(cwd, { casMode: "shared", metadata: { conn: store, cas, cutoffMs: 5000, graceMs: 0 }, minAgeMs: 1, runs: { keep: 0 } });
+    for (const digest of artifactDigests) {
+      if (!rerunArtifactDigests.has(digest)) assert.equal(await cas.has({ algorithm: "sha256", digest }), false, "stale artifact roots are GC-eligible after rerun replacement");
+    }
+    for (const digest of rerunArtifactDigests) {
+      assert.equal(await cas.has({ algorithm: "sha256", digest }), true, "current run-produced artifact remains rooted");
+    }
+    const bridgeWarnings = await store.all<{ n: bigint }>(
+      `SELECT count(*) AS n FROM bio_observations WHERE predicate = 'artifact_bridge_warning'`,
+    );
+    assert.equal(Number(bridgeWarnings[0]?.n ?? 0), 0, "the happy artifact bridge path emits no warning event");
   });
 
   test("runId reuse without casMetadata clears prior metadata CAS refs from the run log store", async () => {

@@ -423,6 +423,10 @@ CAS is not a consent or retention policy. Sensitive deployments can add deletion
 For shared CAS, byte lifetime must be row-driven rather than inferred from local files. When a host supplies
 `casMetadata` on the same SQL authority as the run ledger, run persistence records each
 result/receipt/replay/run-object byte as a `cas_object` and roots it with durable `cas_ref` rows under `run:<id>`.
+CAS-backed compute runs that produce declared file outputs and are persisted with a store also fold those outputs
+through `recordArtifactReference`, so report/figure bytes get `cas:<digest>` artifact facts and `produces` edges
+from the run. When the host also supplies shared `casMetadata`, those produced artifacts are rooted under the
+run-scoped artifact ref set in the same metadata authority.
 The metadata GC then uses refs/leases as the root set instead of scraping run directories or JSON blobs.
 
 Filesystem-shaped access is a possible adapter over this model, not a replacement for it. The relevant shape is a
@@ -714,7 +718,11 @@ linked from the turn or child run with metadata such as `media_type`, `semantic_
 or SQL digest, and plotting system. The generative spec or source script belongs in the producing run's inputs or
 artifacts. This keeps the R-lineage graphics surface auditable, replayable where possible, and usable for later
 review or training views. `recordArtifactReference` is the reusable host helper for this: it writes intrinsic
-artifact metadata on the `cas:<digest>` fact and keeps display/production context on the edge.
+artifact metadata on the `cas:<digest>` fact and keeps display/production context on the edge. A successful
+CAS-backed `compute.run` with a store now uses that same helper for declared file outputs, so an R/Python/bash
+renderer that writes an HTML report or SVG/PDF figure becomes graph-walkable and corpus-visible as a produced
+artifact rather than remaining only inside `receipts.json`. Shared-CAS rooting for those produced artifacts is
+present when the host passes `casMetadata`; otherwise the graph fact/edge exists without a shared metadata root.
 
 ## Skills: proper use
 

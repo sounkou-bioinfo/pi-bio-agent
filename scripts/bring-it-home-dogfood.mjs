@@ -854,7 +854,7 @@ try {
   assert.equal(corpus.tables.sessions.rows, 1);
   assert.equal(corpus.tables.toolCalls.rows, 1);
   assert.equal(corpus.tables.runs.rows, 2);
-  assert.equal(corpus.tables.artifacts.rows, 1);
+  assert.equal(corpus.tables.artifacts.rows, 2);
   assert.equal(corpus.tables.hostEvents.rows, 4);
   assert.match(corpus.tables.units.parquetDigest, /^sha256:[0-9a-f]{64}$/);
   const corpusUnitsReadback = await conn.all(
@@ -864,10 +864,12 @@ try {
   assert.equal(asNumber(corpusUnitsReadback[0]?.artifacts), 1);
   const corpusArtifactsReadback = await conn.all(
     `SELECT source_node, semantic_role, plotting_system
-     FROM read_parquet(${sqlString(corpus.tables.artifacts.parquetPath)})`,
+     FROM read_parquet(${sqlString(corpus.tables.artifacts.parquetPath)})
+     ORDER BY source_node, semantic_role`,
   );
   assert.deepEqual(corpusArtifactsReadback.map((r) => [r.source_node, r.semantic_role, r.plotting_system]), [
     [hostCapRunNode, "figure", "inline-svg"],
+    [`run:${rEnvRun.runId}`, null, null],
   ]);
 
   const checkpointRow = await observationAsOfKey(

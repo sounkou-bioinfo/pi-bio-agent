@@ -44,7 +44,7 @@ describe("bring-it-home dogfood command", () => {
       renvEnvironment: { digest: string; packages: number; rVersion: string | null; bioconductor: string | null; envStatus: string; artifactRows: number };
       externalProjection: { edgeCount: number; closureCount: number };
       internalProjection: { edgesTable: string; edgeCount: number; closureTable: string; closureCount: number };
-      trainingCorpus: { digest: string; redaction: string; units: number; toolCalls: number; runs: number; hostEvents: number; parquetReadbackRows: number; unitsParquetDigest: string };
+      trainingCorpus: { digest: string; redaction: string; units: number; toolCalls: number; runs: number; artifacts: number; hostEvents: number; parquetReadbackRows: number; unitsParquetDigest: string };
       sdkConsumer: { publicExportsOnly: boolean; runtimeImports: boolean; packageSource: string; imports: string[] };
       observationCounts: Record<string, number>;
     };
@@ -108,9 +108,10 @@ describe("bring-it-home dogfood command", () => {
       units: summary.trainingCorpus.units,
       toolCalls: summary.trainingCorpus.toolCalls,
       runs: summary.trainingCorpus.runs,
+      artifacts: summary.trainingCorpus.artifacts,
       hostEvents: summary.trainingCorpus.hostEvents,
       parquetReadbackRows: summary.trainingCorpus.parquetReadbackRows,
-    }, { units: 1, toolCalls: 1, runs: 2, hostEvents: 4, parquetReadbackRows: 1 });
+    }, { units: 1, toolCalls: 1, runs: 2, artifacts: 2, hostEvents: 4, parquetReadbackRows: 1 });
     assert.match(summary.trainingCorpus.unitsParquetDigest, /^sha256:[0-9a-f]{64}$/);
     assert.deepEqual(summary.sdkConsumer, { publicExportsOnly: true, runtimeImports: true, packageSource: "npm-pack", imports: ["pi-bio-agent", "pi-bio-agent/core", "pi-bio-agent/duckdb", "pi-bio-agent/hosts"] });
     assert.equal(summary.observationCounts.host_event, 4);

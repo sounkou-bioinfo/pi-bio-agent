@@ -1048,10 +1048,13 @@ single in-memory DuckDB authority (`test/cas-metadata-gc.test.ts`), which exerci
 ducknng-served authority runs.
 
 Run and artifact roots are wired into this path: `run-store` registers result/receipt/replay/run-object bytes as
-`cas_object` rows and replaces durable `run:<id>` refs when `casMetadata` is supplied, while
-`recordArtifactReference` can register an artifact `cas_ref` after the caller has written the bytes to the shared
-CAS. Still open (integration, not core): resolvers taking a `withCasObject` lease around a cross-db `cas.pathFor`
-reuse; a `gc_epoch` row + a published tombstone/delete event for cross-node observers; the
+`cas_object` rows and replaces durable `run:<id>` refs when `casMetadata` is supplied. Successful CAS-backed
+`compute.run` executions with a store also fold declared output files through `recordArtifactReference`, so produced
+reports/figures get `cas:<digest>` artifact facts and `produces` edges; when `casMetadata` is supplied those outputs
+are rooted by a run-scoped artifact ref set that is replaced on rerun. Host adapters can still call
+`recordArtifactReference` directly after writing bytes to the shared CAS. Still open (integration, not core):
+resolvers taking a `withCasObject` lease around a cross-db `cas.pathFor` reuse; a `gc_epoch` row + a published
+tombstone/delete event for cross-node observers; the
 ducknng-served-authority dogfood script. A `utimes` LRU-touch on CAS hit is a cheap node-local nicety (cache
 semantics, not a lease): only if a real workload wants it.
 
