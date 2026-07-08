@@ -25,6 +25,7 @@ import { recordHostEvent } from "../dist/hosts/host-events.js";
 import { ingestSessionJsonl } from "../dist/hosts/session-ingest.js";
 import { exportTrainingCorpusParquet } from "../dist/hosts/training-corpus.js";
 import { nodeComputeRunner, withObservedEnvironment } from "../dist/hosts/index.js";
+import { submitCandidateForApproval, decideCandidateApproval } from "../dist/hosts/harness-adaptation.js";
 import { claimJob, createJobQueueSchema, finishJobClaim, recordJobClaimResult, recordJobClaimStatus } from "../dist/hosts/job-queue.js";
 import {
   cancelBioJob,
@@ -618,6 +619,83 @@ try {
     "dogfood.scheduler.stale_attempt_rejected",
   ]);
 
+  const governanceCandidate = {
+    id: "dogfood.governed_report",
+    version: "1.0.0",
+    fixtureSql: "CREATE TABLE nums AS SELECT * FROM (VALUES (1),(2),(3)) AS v(x)",
+    sql: "SELECT x, x * 2 AS y FROM nums ORDER BY x",
+    expected: [{ x: 1, y: 2 }, { x: 2, y: 4 }, { x: 3, y: 6 }],
+  };
+  const governanceSandboxInstance = await DuckDBInstance.create(":memory:");
+  const governanceSandboxRaw = await governanceSandboxInstance.connect();
+  const governanceSubmit = await submitCandidateForApproval(conn, governanceCandidate, {
+    sandbox: duckdbNodeConn(governanceSandboxRaw),
+    recordedAt: "2026-07-06T12:01:40.000Z",
+    source: "dogfood-governance-ci",
+  });
+  governanceSandboxRaw.closeSync?.();
+  governanceSandboxInstance.closeSync?.();
+  assert.equal(governanceSubmit.pendingApproval, true);
+  const governanceCandidateNode = `candidate:${governanceSubmit.specDigest}`;
+  const governanceSubmitEvent = await recordHostEvent(conn, {
+    subjectId: governanceCandidateNode,
+    kind: "workbench.governance.approval_submitted",
+    recordedAt: "2026-07-06T12:01:40.500Z",
+    source: "bring-it-home-dogfood",
+    digest: governanceSubmit.specDigest,
+    value: {
+      event_type: "approval_submitted",
+      operation_id: governanceCandidate.id,
+      operation_version: governanceCandidate.version,
+      validation: governanceSubmit.validation,
+      test: governanceSubmit.test,
+    },
+    links: [
+      { predicate: "governs", objectId: `operation:${governanceCandidate.id}` },
+      { predicate: "queued_in", objectId: "approval_queue:dogfood" },
+    ],
+  });
+  const governanceDecision = await decideCandidateApproval(conn, {
+    id: governanceCandidate.id,
+    version: governanceCandidate.version,
+    specDigest: governanceSubmit.specDigest,
+    approved: true,
+    decidedAt: "2026-07-06T12:01:41.000Z",
+    source: "reviewer:dogfood",
+    approvedBy: "reviewer:dogfood",
+    reason: "dogfood approval path",
+  });
+  assert.equal(governanceDecision.activated, true);
+  const governanceDecisionEvent = await recordHostEvent(conn, {
+    subjectId: governanceCandidateNode,
+    kind: "workbench.governance.approval_decided",
+    recordedAt: "2026-07-06T12:01:41.500Z",
+    source: "bring-it-home-dogfood",
+    digest: governanceSubmit.specDigest,
+    value: {
+      event_type: "approval_decided",
+      decision: "approved",
+      activated: governanceDecision.activated,
+      approved_by_digest: sha256("reviewer:dogfood"),
+      reason_digest: sha256("dogfood approval path"),
+    },
+    links: [
+      { predicate: "decides", objectId: `activation:operation:${governanceCandidate.id}` },
+      { predicate: "activates", objectId: `operation:${governanceCandidate.id}@${governanceCandidate.version}` },
+    ],
+  });
+  const governanceEventRows = await conn.all(`
+    SELECT json_extract_string(value_json, '$.kind') AS kind,
+           json_extract_string(value_json, '$.value.event_type') AS event_type
+    FROM bio_observations
+    WHERE predicate = 'host_event' AND subject_id = ?
+    ORDER BY recorded_at::TIMESTAMPTZ, observation_id
+  `, [governanceCandidateNode]);
+  assert.deepEqual(governanceEventRows.map((row) => [row.kind, row.event_type]), [
+    ["workbench.governance.approval_submitted", "approval_submitted"],
+    ["workbench.governance.approval_decided", "approval_decided"],
+  ]);
+
   const profileConn = new FakeDucknngProfileConn();
   const firstProfile = await refreshDucknngHttpProfile(profileConn, {
     profileId: "clinvar-read-dogfood",
@@ -886,7 +964,8 @@ try {
   assert.equal(corpus.tables.toolCalls.rows, 1);
   assert.equal(corpus.tables.runs.rows, 2);
   assert.equal(corpus.tables.artifacts.rows, 3);
-  assert.equal(corpus.tables.hostEvents.rows, 4);
+  assert.equal(corpus.tables.hostEvents.rows, 6);
+  assert.equal(corpus.tables.hostEventLinks.rows, 13);
   assert.match(corpus.tables.units.parquetDigest, /^sha256:[0-9a-f]{64}$/);
   const corpusUnitsReadback = await conn.all(
     `SELECT count(*) AS n, max(artifacts) AS artifacts FROM read_parquet(${sqlString(corpus.tables.units.parquetPath)})`,
@@ -945,6 +1024,12 @@ try {
       linkCount: schedulerEvents.reduce((n, event) => n + event.linkObservationIds.length, 0),
       kinds: schedulerEventKinds.map((row) => row.kind),
     },
+    governanceHostEvents: {
+      count: governanceEventRows.length,
+      linkCount: governanceSubmitEvent.linkObservationIds.length + governanceDecisionEvent.linkObservationIds.length,
+      kinds: governanceEventRows.map((row) => row.kind),
+      eventTypes: governanceEventRows.map((row) => row.event_type),
+    },
     checkpointKey: checkpointRow.statement_key,
     ducknngProfileReceipt: {
       profileId: profileReceipt.profileId,
@@ -988,6 +1073,7 @@ try {
         plottingSystem: row.plotting_system,
       })),
       hostEvents: corpus.tables.hostEvents.rows,
+      hostEventLinks: corpus.tables.hostEventLinks.rows,
       parquetReadbackRows: asNumber(corpusUnitsReadback[0]?.n),
       unitsParquetDigest: corpus.tables.units.parquetDigest,
     },

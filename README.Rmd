@@ -103,9 +103,10 @@ knitr::knit_engines$set(dogfood = function(options) {
       )
     ),
     trainingCorpus = c(
-      summary$trainingCorpus[c("toolCalls", "runs", "artifacts", "hostEvents", "parquetReadbackRows")],
+      summary$trainingCorpus[c("toolCalls", "runs", "artifacts", "hostEvents", "hostEventLinks", "parquetReadbackRows")],
       list(artifactRoles = artifact_roles)
     ),
+    governanceHostEvents = summary$governanceHostEvents[c("count", "linkCount", "kinds", "eventTypes")],
     sdkConsumer = summary$sdkConsumer[c("publicExportsOnly", "runtimeImports", "packageSource")],
     queueCancel = summary$queueCancel[c("staleWriteRejected", "resumedPhase")],
     renvEnvironment = summary$renvEnvironment[c("rVersion", "bioconductor", "envStatus", "artifactRows")]

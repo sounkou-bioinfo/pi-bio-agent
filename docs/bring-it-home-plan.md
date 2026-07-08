@@ -151,8 +151,10 @@ consumer-pulled, or a non-goal.
    than being guessed into this exact event-link table. The Pi extension also records `before_agent_start` context
    receipts and `input` delivery receipts as digests/counts only. The input receipt exposes source and streaming
    behavior (`steer` / `followUp` when Pi supplies it) plus payload/text/image digests; it does not store prompt text,
-   images, or infer later transform/handled status. Remaining work is concrete Pi/workbench hooks for interrupts and
-   governance events that a consumer actually reads. Do not add a closed event taxonomy.
+   images, or infer later transform/handled status. The bring-it-home dogfood now records host-owned approval
+   submitted/decided receipts around the existing durable governance gate and proves their stamped links survive into
+   the corpus export. Remaining concrete hook work is interrupt capture when a host exposes a real interrupt event a
+   consumer reads. Do not add a closed event taxonomy.
 2. **Durable workflow dogfood over the closed lifecycle.** The async lifecycle and checkpoint resume helper are
    built and the bring-it-home dogfood now runs checkpointed bash steps through `nodeComputeRunner`, reuses the
    completed prefix, reruns the suffix, and proves queue cancellation, expired-lease reclaim, and stale-attempt
@@ -216,11 +218,12 @@ consumer-pulled, or a non-goal.
   [ducknng-upload-dogfood.mjs](../scripts/ducknng-upload-dogfood.mjs). Run with
   `npm run dogfood:ducknng-upload` after building sibling `ducknng`, or set `DUCKNNG_EXTENSION_PATH`.
 - **`recordHostEvent` primitive.** Built as one open host event fact plus ordinary links. The bring-it-home dogfood
-  records both workbench-style input events and scheduler-style queue events without a closed event model. The Pi
-  extension records session lifecycle receipts, `before_agent_start` context receipts, and input delivery receipts
-  as digests/counts only. The corpus projection exposes lifecycle type/reason/parentage, input source/streaming
-  behavior/text digest, and event-link targets without raw payloads or raw link attrs. Remaining concrete hooks are
-  consumer-read driven: interrupts and governance events only when an app or corpus export actually queries them.
+  records workbench-style input events, scheduler-style queue events, and host-owned governance submitted/decided
+  events around the durable approval gate without a closed event model. The Pi extension records session lifecycle
+  receipts, `before_agent_start` context receipts, and input delivery receipts as digests/counts only. The corpus
+  projection exposes lifecycle type/reason/parentage, input source/streaming behavior/text digest, and event-link
+  targets without raw payloads or raw link attrs. Remaining concrete hooks are consumer-read driven: interrupts only
+  when an app or corpus export actually queries them.
 - **Foreign graph projection base.** A real external Monarch KGX HTTP path, internal observation-graph projection,
   and generated SemanticSQL `statements` -> `edge` view path exist. Remaining foreign-graph work is consumer
   conformance and adapter pressure, not a new graph primitive.

@@ -39,6 +39,7 @@ describe("bring-it-home dogfood command", () => {
         resultAnswer: number;
       };
       schedulerHostEvents: { count: number; linkCount: number; kinds: string[] };
+      governanceHostEvents: { count: number; linkCount: number; kinds: string[]; eventTypes: string[] };
       ducknngProfileReceipt: { policyDigest: string; rotatedFromDigest?: string; version: string; receiptChanged: boolean; subjectRestriction: { restricted: boolean; count: number; digest?: string } };
       hostCapabilityRun: { casMetadataRefs: number; artifactCasMetadataRefs: number };
       renvEnvironment: { digest: string; packages: number; rVersion: string | null; bioconductor: string | null; envStatus: string; artifactRows: number };
@@ -53,6 +54,7 @@ describe("bring-it-home dogfood command", () => {
         artifacts: number;
         artifactRoles: Array<{ sourceNode: string; mediaType: string | null; semanticRole: string | null; plottingSystem: string | null }>;
         hostEvents: number;
+        hostEventLinks: number;
         parquetReadbackRows: number;
         unitsParquetDigest: string;
       };
@@ -91,6 +93,18 @@ describe("bring-it-home dogfood command", () => {
         "dogfood.scheduler.stale_attempt_rejected",
       ],
     });
+    assert.deepEqual(summary.governanceHostEvents, {
+      count: 2,
+      linkCount: 4,
+      kinds: [
+        "workbench.governance.approval_submitted",
+        "workbench.governance.approval_decided",
+      ],
+      eventTypes: [
+        "approval_submitted",
+        "approval_decided",
+      ],
+    });
     assert.equal(summary.ducknngProfileReceipt.subjectRestriction.restricted, true);
     assert.equal(summary.ducknngProfileReceipt.subjectRestriction.count, 2);
     assert.match(summary.ducknngProfileReceipt.subjectRestriction.digest ?? "", /^sha256:[0-9a-f]{64}$/);
@@ -122,8 +136,9 @@ describe("bring-it-home dogfood command", () => {
       runs: summary.trainingCorpus.runs,
       artifacts: summary.trainingCorpus.artifacts,
       hostEvents: summary.trainingCorpus.hostEvents,
+      hostEventLinks: summary.trainingCorpus.hostEventLinks,
       parquetReadbackRows: summary.trainingCorpus.parquetReadbackRows,
-    }, { units: 1, toolCalls: 1, runs: 2, artifacts: 3, hostEvents: 4, parquetReadbackRows: 1 });
+    }, { units: 1, toolCalls: 1, runs: 2, artifacts: 3, hostEvents: 6, hostEventLinks: 13, parquetReadbackRows: 1 });
     assert.deepEqual(summary.trainingCorpus.artifactRoles, [
       {
         sourceNode: "run:dogfood-host-capability",
@@ -146,7 +161,7 @@ describe("bring-it-home dogfood command", () => {
     ]);
     assert.match(summary.trainingCorpus.unitsParquetDigest, /^sha256:[0-9a-f]{64}$/);
     assert.deepEqual(summary.sdkConsumer, { publicExportsOnly: true, runtimeImports: true, packageSource: "npm-pack", imports: ["pi-bio-agent", "pi-bio-agent/core", "pi-bio-agent/duckdb", "pi-bio-agent/hosts"] });
-    assert.equal(summary.observationCounts.host_event, 4);
+    assert.equal(summary.observationCounts.host_event, 6);
     assert.equal(summary.observationCounts.job_step_checkpoint, 2);
     assert.equal(summary.observationCounts.ducknng_http_profile_receipt, 1);
   });

@@ -137,7 +137,45 @@ async function seedCorpusLedger(c: SqlConn, root: string): Promise<{ sessionId: 
   };
   const sandbox = await conn();
   const sub = await submitCandidateForApproval(c, candidate, { sandbox, recordedAt: T4, source: "ci" });
-  await decideCandidateApproval(c, { id: candidate.id, version: candidate.version, specDigest: sub.specDigest, approved: true, decidedAt: T5, source: "approver:alice", approvedBy: "alice" });
+  const candidateNode = `candidate:${sub.specDigest}`;
+  await recordHostEvent(c, {
+    subjectId: candidateNode,
+    kind: "workbench.governance.approval_submitted",
+    recordedAt: T4,
+    source: "test-host",
+    digest: sub.specDigest,
+    value: {
+      event_type: "approval_submitted",
+      operation_id: candidate.id,
+      operation_version: candidate.version,
+      private_note: "secret governance submit text",
+    },
+    attrs: { private_channel: "governance-ui" },
+    links: [
+      { predicate: "governs", objectId: `operation:${candidate.id}` },
+      { predicate: "queued_in", objectId: "approval_queue:test" },
+    ],
+  });
+  const decision = await decideCandidateApproval(c, { id: candidate.id, version: candidate.version, specDigest: sub.specDigest, approved: true, decidedAt: T5, source: "approver:alice", approvedBy: "alice" });
+  await recordHostEvent(c, {
+    subjectId: candidateNode,
+    kind: "workbench.governance.approval_decided",
+    recordedAt: T5,
+    source: "test-host",
+    digest: sub.specDigest,
+    value: {
+      event_type: "approval_decided",
+      decision: "approved",
+      activated: decision.activated,
+      approved_by_digest: `sha256:${"a".repeat(64)}`,
+      private_note: "secret governance decision text",
+    },
+    attrs: { private_channel: "governance-ui" },
+    links: [
+      { predicate: "decides", objectId: `activation:operation:${candidate.id}`, attrs: { private_link_note: "secret governance link text" } },
+      { predicate: "activates", objectId: `operation:${candidate.id}@${candidate.version}` },
+    ],
+  });
   return { sessionId, runId };
 }
 
@@ -159,8 +197,8 @@ describe("training corpus export", () => {
     assert.equal(receipt.tables.runs.rows, 1);
     assert.equal(receipt.tables.artifacts.rows, 3, "the corpus preserves session image refs plus a run-produced artifact");
     assert.ok(receipt.tables.judgments.rows >= 4);
-    assert.equal(receipt.tables.hostEvents.rows, 2);
-    assert.equal(receipt.tables.hostEventLinks.rows, 1);
+    assert.equal(receipt.tables.hostEvents.rows, 4);
+    assert.equal(receipt.tables.hostEventLinks.rows, 5);
     assert.equal(receipt.tables.units.rows, 1);
 
     const unit = (await c.all<{ session_node: string; tool_calls: number; linked_runs: number; artifacts: number }>(
@@ -229,26 +267,62 @@ describe("training corpus export", () => {
     assert.equal(byKind.get("pi_coding_agent.session_lifecycle")!.reason, "fork");
     assert.equal(byKind.get("pi_coding_agent.session_lifecycle")!.parent_session_id, "parent-corpus");
     assert.equal(byKind.get("pi_coding_agent.session_lifecycle")!.payload_digest, `sha256:${"9".repeat(64)}`);
+    assert.equal(byKind.get("workbench.governance.approval_submitted")!.event_type, "approval_submitted");
+    assert.equal(byKind.get("workbench.governance.approval_decided")!.event_type, "approval_decided");
+    assert.equal(byKind.get("workbench.governance.approval_decided")!.payload_digest, null);
+    assert.doesNotMatch(JSON.stringify(hostEventRows), /secret governance submit text|secret governance decision text|governance-ui/);
 
     const hostEventLinkColumns = await c.all<{ column_name: string }>(`DESCRIBE ${TRAINING_CORPUS_TABLES.hostEventLinks}`);
     assert.equal(hostEventLinkColumns.some((col) => col.column_name === "attrs"), false, "host-event link attrs are not exported raw");
     const hostEventLinks = await c.all<Record<string, unknown>>(`SELECT * FROM ${TRAINING_CORPUS_TABLES.hostEventLinks}`);
-    assert.doesNotMatch(JSON.stringify(hostEventLinks), /secret link text|legacy secret link text|legacy.input.steer/);
+    assert.doesNotMatch(JSON.stringify(hostEventLinks), /secret link text|legacy secret link text|legacy.input.steer|secret governance link text/);
     assert.deepEqual(hostEventLinks.map((row) => ({
       kind: row.kind,
       subject_id: row.subject_id,
       predicate: row.predicate,
       object_id: row.object_id,
       host_event_statement_key: row.host_event_statement_key,
-    })), [{
-      kind: "workbench.input.steer",
-      subject_id: `session:${sessionId}`,
-      predicate: "affects",
-      object_id: `turn:${sessionId}:a1`,
-      host_event_statement_key: byKind.get("workbench.input.steer")!.statement_key,
-    }]);
-    assert.equal(hostEventLinks[0]!.host_event_digest, byKind.get("workbench.input.steer")!.event_digest);
-    assert.match(String(hostEventLinks[0]!.link_digest), /^sha256:/);
+    })).sort((a, b) => `${a.kind}:${a.predicate}`.localeCompare(`${b.kind}:${b.predicate}`)), [
+      {
+        kind: "workbench.governance.approval_decided",
+        subject_id: String(byKind.get("workbench.governance.approval_decided")!.subject_id),
+        predicate: "activates",
+        object_id: "operation:double.report@1.0.0",
+        host_event_statement_key: byKind.get("workbench.governance.approval_decided")!.statement_key,
+      },
+      {
+        kind: "workbench.governance.approval_decided",
+        subject_id: String(byKind.get("workbench.governance.approval_decided")!.subject_id),
+        predicate: "decides",
+        object_id: "activation:operation:double.report",
+        host_event_statement_key: byKind.get("workbench.governance.approval_decided")!.statement_key,
+      },
+      {
+        kind: "workbench.governance.approval_submitted",
+        subject_id: String(byKind.get("workbench.governance.approval_submitted")!.subject_id),
+        predicate: "governs",
+        object_id: "operation:double.report",
+        host_event_statement_key: byKind.get("workbench.governance.approval_submitted")!.statement_key,
+      },
+      {
+        kind: "workbench.governance.approval_submitted",
+        subject_id: String(byKind.get("workbench.governance.approval_submitted")!.subject_id),
+        predicate: "queued_in",
+        object_id: "approval_queue:test",
+        host_event_statement_key: byKind.get("workbench.governance.approval_submitted")!.statement_key,
+      },
+      {
+        kind: "workbench.input.steer",
+        subject_id: `session:${sessionId}`,
+        predicate: "affects",
+        object_id: `turn:${sessionId}:a1`,
+        host_event_statement_key: byKind.get("workbench.input.steer")!.statement_key,
+      },
+    ]);
+    for (const row of hostEventLinks) {
+      assert.equal(row.host_event_digest, byKind.get(String(row.kind))!.event_digest);
+      assert.match(String(row.link_digest), /^sha256:/);
+    }
   });
 
   test("exports the derived corpus tables as readable Parquet files", async () => {

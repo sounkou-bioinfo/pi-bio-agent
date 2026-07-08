@@ -506,7 +506,7 @@ npm run dogfood:bring-it-home
     "invoked_by": 1,
     "tool_call": 1,
     "run": 2,
-    "host_event": 4,
+    "host_event": 6,
     "job_step_checkpoint": 2
   },
   "ducknngProfile": {
@@ -536,7 +536,8 @@ npm run dogfood:bring-it-home
     "toolCalls": 1,
     "runs": 2,
     "artifacts": 3,
-    "hostEvents": 4,
+    "hostEvents": 6,
+    "hostEventLinks": 13,
     "parquetReadbackRows": 1,
     "artifactRoles": [
       {
@@ -550,6 +551,18 @@ npm run dogfood:bring-it-home
         "mediaType": "text/html",
         "semanticRole": "report"
       }
+    ]
+  },
+  "governanceHostEvents": {
+    "count": 2,
+    "linkCount": 4,
+    "kinds": [
+      "workbench.governance.approval_submitted",
+      "workbench.governance.approval_decided"
+    ],
+    "eventTypes": [
+      "approval_submitted",
+      "approval_decided"
     ]
   },
   "sdkConsumer": {
