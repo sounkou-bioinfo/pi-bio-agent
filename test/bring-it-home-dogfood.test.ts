@@ -40,11 +40,22 @@ describe("bring-it-home dogfood command", () => {
       };
       schedulerHostEvents: { count: number; linkCount: number; kinds: string[] };
       ducknngProfileReceipt: { policyDigest: string; rotatedFromDigest?: string; version: string; receiptChanged: boolean; subjectRestriction: { restricted: boolean; count: number; digest?: string } };
-      hostCapabilityRun: { casMetadataRefs: number };
+      hostCapabilityRun: { casMetadataRefs: number; artifactCasMetadataRefs: number };
       renvEnvironment: { digest: string; packages: number; rVersion: string | null; bioconductor: string | null; envStatus: string; artifactRows: number };
       externalProjection: { edgeCount: number; closureCount: number };
       internalProjection: { edgesTable: string; edgeCount: number; closureTable: string; closureCount: number };
-      trainingCorpus: { digest: string; redaction: string; units: number; toolCalls: number; runs: number; artifacts: number; hostEvents: number; parquetReadbackRows: number; unitsParquetDigest: string };
+      trainingCorpus: {
+        digest: string;
+        redaction: string;
+        units: number;
+        toolCalls: number;
+        runs: number;
+        artifacts: number;
+        artifactRoles: Array<{ sourceNode: string; mediaType: string | null; semanticRole: string | null; plottingSystem: string | null }>;
+        hostEvents: number;
+        parquetReadbackRows: number;
+        unitsParquetDigest: string;
+      };
       sdkConsumer: { publicExportsOnly: boolean; runtimeImports: boolean; packageSource: string; imports: string[] };
       observationCounts: Record<string, number>;
     };
@@ -89,6 +100,7 @@ describe("bring-it-home dogfood command", () => {
     assert.equal(summary.ducknngProfileReceipt.version, "2");
     assert.equal(summary.ducknngProfileReceipt.receiptChanged, true);
     assert.ok(summary.hostCapabilityRun.casMetadataRefs >= 3);
+    assert.equal(summary.hostCapabilityRun.artifactCasMetadataRefs, 2);
     assert.match(summary.renvEnvironment.digest, /^sha256:[0-9a-f]{64}$/);
     assert.deepEqual({
       packages: summary.renvEnvironment.packages,
@@ -111,7 +123,27 @@ describe("bring-it-home dogfood command", () => {
       artifacts: summary.trainingCorpus.artifacts,
       hostEvents: summary.trainingCorpus.hostEvents,
       parquetReadbackRows: summary.trainingCorpus.parquetReadbackRows,
-    }, { units: 1, toolCalls: 1, runs: 2, artifacts: 2, hostEvents: 4, parquetReadbackRows: 1 });
+    }, { units: 1, toolCalls: 1, runs: 2, artifacts: 3, hostEvents: 4, parquetReadbackRows: 1 });
+    assert.deepEqual(summary.trainingCorpus.artifactRoles, [
+      {
+        sourceNode: "run:dogfood-host-capability",
+        mediaType: "image/svg+xml",
+        semanticRole: "figure",
+        plottingSystem: "inline-svg",
+      },
+      {
+        sourceNode: "run:dogfood-host-capability",
+        mediaType: "text/html",
+        semanticRole: "report",
+        plottingSystem: null,
+      },
+      {
+        sourceNode: "run:dogfood-r-env",
+        mediaType: null,
+        semanticRole: null,
+        plottingSystem: null,
+      },
+    ]);
     assert.match(summary.trainingCorpus.unitsParquetDigest, /^sha256:[0-9a-f]{64}$/);
     assert.deepEqual(summary.sdkConsumer, { publicExportsOnly: true, runtimeImports: true, packageSource: "npm-pack", imports: ["pi-bio-agent", "pi-bio-agent/core", "pi-bio-agent/duckdb", "pi-bio-agent/hosts"] });
     assert.equal(summary.observationCounts.host_event, 4);

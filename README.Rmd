@@ -89,10 +89,12 @@ knitr::knit_engines$set(dogfood = function(options) {
   start <- regexpr("\\{\\n  \"dogfood\"", out_txt)
   if (start < 0) stop("dogfood render did not print summary JSON:\n", out_txt)
   summary <- jsonlite::fromJSON(substr(out_txt, start, nchar(out_txt)), simplifyVector = FALSE)
+  artifact_roles <- Filter(function(x) !is.null(x$semanticRole), summary$trainingCorpus$artifactRoles)
+  artifact_roles <- lapply(artifact_roles, function(x) Filter(Negate(is.null), x))
   proof <- list(
     observationCounts = summary$observationCounts[c("executes", "invoked_by", "tool_call", "run", "host_event", "job_step_checkpoint")],
     ducknngProfile = summary$ducknngProfileReceipt[c("version", "receiptChanged", "subjectRestriction")],
-    casMetadata = summary$hostCapabilityRun[c("casMetadataRefs")],
+    casMetadata = summary$hostCapabilityRun[c("casMetadataRefs", "artifactCasMetadataRefs")],
     graphProjection = list(
       external = summary$externalProjection[c("edgeCount", "closureCount")],
       internal = list(
@@ -100,7 +102,10 @@ knitr::knit_engines$set(dogfood = function(options) {
         closureCountAtLeast3 = summary$internalProjection$closureCount >= 3
       )
     ),
-    trainingCorpus = summary$trainingCorpus[c("toolCalls", "runs", "hostEvents", "parquetReadbackRows")],
+    trainingCorpus = c(
+      summary$trainingCorpus[c("toolCalls", "runs", "artifacts", "hostEvents", "parquetReadbackRows")],
+      list(artifactRoles = artifact_roles)
+    ),
     sdkConsumer = summary$sdkConsumer[c("publicExportsOnly", "runtimeImports", "packageSource")],
     queueCancel = summary$queueCancel[c("staleWriteRejected", "resumedPhase")],
     renvEnvironment = summary$renvEnvironment[c("rVersion", "bioconductor", "envStatus", "artifactRows")]
@@ -300,7 +305,8 @@ npm run dogfood:bring-it-home
 ```
 
 It exercises host-event receipts, step checkpoints/resume, SemanticSQL projection,
-ducknng profile receipts, SDK exports, and real process compute when R is available.
+ducknng profile receipts, SDK exports, figure/report CAS artifacts, and real process
+compute when R is available.
 
 Run the Pi session trace dogfood after installing the extension and configuring an
 image-capable model:

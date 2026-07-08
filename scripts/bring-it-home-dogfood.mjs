@@ -798,7 +798,38 @@ try {
       spec_digest: profileReceipt.policyDigest,
       plotting_system: "inline-svg",
     },
+    casMetadata: { conn, nowMs: 1783283000000, refId: hostCapRunNode, refType: "artifact" },
   });
+  const reportHtml = Buffer.from("<html><body><h1>Variant consequence counts</h1><p>rows: 3</p></body></html>");
+  const reportDigest = sha256(reportHtml);
+  await hostCapCas.put({ algorithm: "sha256", digest: reportDigest.slice("sha256:".length) }, reportHtml);
+  await recordArtifactReference(conn, {
+    artifact: {
+      digest: reportDigest,
+      mediaType: "text/html",
+      semanticRole: "report",
+      sizeBytes: reportHtml.length,
+    },
+    subjectId: hostCapRunNode,
+    predicate: "produces",
+    recordedAt: LATER,
+    source: "bring-it-home-dogfood",
+    attrs: {
+      producer_run: hostCapRunNode,
+      source_digest: hostCapRun.casRefs.result,
+      spec_digest: profileReceipt.policyDigest,
+      renderer: "inline-html",
+    },
+    casMetadata: { conn, nowMs: 1783283000_001, refId: hostCapRunNode, refType: "artifact" },
+  });
+  const hostCapArtifactCasRefs = await conn.all(
+    `SELECT digest FROM cas_ref WHERE ref_id = ? AND ref_type = 'artifact' ORDER BY digest`,
+    [hostCapRunNode],
+  );
+  assert.deepEqual(
+    new Set(hostCapArtifactCasRefs.map((r) => r.digest)),
+    new Set([figureDigest.slice("sha256:".length), reportDigest.slice("sha256:".length)]),
+  );
 
   await conn.run(`
     CREATE TABLE external_kg_raw(subject TEXT, predicate TEXT, object TEXT);
@@ -854,22 +885,23 @@ try {
   assert.equal(corpus.tables.sessions.rows, 1);
   assert.equal(corpus.tables.toolCalls.rows, 1);
   assert.equal(corpus.tables.runs.rows, 2);
-  assert.equal(corpus.tables.artifacts.rows, 2);
+  assert.equal(corpus.tables.artifacts.rows, 3);
   assert.equal(corpus.tables.hostEvents.rows, 4);
   assert.match(corpus.tables.units.parquetDigest, /^sha256:[0-9a-f]{64}$/);
   const corpusUnitsReadback = await conn.all(
     `SELECT count(*) AS n, max(artifacts) AS artifacts FROM read_parquet(${sqlString(corpus.tables.units.parquetPath)})`,
   );
   assert.equal(asNumber(corpusUnitsReadback[0]?.n), corpus.tables.units.rows);
-  assert.equal(asNumber(corpusUnitsReadback[0]?.artifacts), 1);
+  assert.equal(asNumber(corpusUnitsReadback[0]?.artifacts), 2);
   const corpusArtifactsReadback = await conn.all(
-    `SELECT source_node, semantic_role, plotting_system
+    `SELECT source_node, media_type, semantic_role, plotting_system
      FROM read_parquet(${sqlString(corpus.tables.artifacts.parquetPath)})
      ORDER BY source_node, semantic_role`,
   );
-  assert.deepEqual(corpusArtifactsReadback.map((r) => [r.source_node, r.semantic_role, r.plotting_system]), [
-    [hostCapRunNode, "figure", "inline-svg"],
-    [`run:${rEnvRun.runId}`, null, null],
+  assert.deepEqual(corpusArtifactsReadback.map((r) => [r.source_node, r.media_type, r.semantic_role, r.plotting_system]), [
+    [hostCapRunNode, "image/svg+xml", "figure", "inline-svg"],
+    [hostCapRunNode, "text/html", "report", null],
+    [`run:${rEnvRun.runId}`, null, null, null],
   ]);
 
   const checkpointRow = await observationAsOfKey(
@@ -929,6 +961,7 @@ try {
       matched: hostCapReproduced.matched,
       resultMatched: hostCapReproduced.resultMatched,
       casMetadataRefs: asNumber(hostCapCasRefRows[0]?.n),
+      artifactCasMetadataRefs: hostCapArtifactCasRefs.length,
     },
     renvEnvironment: {
       digest: renvEnvDigest,
@@ -948,6 +981,12 @@ try {
       toolCalls: corpus.tables.toolCalls.rows,
       runs: corpus.tables.runs.rows,
       artifacts: corpus.tables.artifacts.rows,
+      artifactRoles: corpusArtifactsReadback.map((row) => ({
+        sourceNode: row.source_node,
+        mediaType: row.media_type,
+        semanticRole: row.semantic_role,
+        plottingSystem: row.plotting_system,
+      })),
       hostEvents: corpus.tables.hostEvents.rows,
       parquetReadbackRows: asNumber(corpusUnitsReadback[0]?.n),
       unitsParquetDigest: corpus.tables.units.parquetDigest,

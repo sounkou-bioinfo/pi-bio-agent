@@ -74,9 +74,14 @@ SQL:
 
 ``` sql
 WITH distinct_calls AS (
-  SELECT DISTINCT CHROM, POS, REF, ALT, significance
+  SELECT DISTINCT
+    CHROM,
+    POS,
+    REF,
+    ALT,
+    significance
   FROM clinvar,
-       UNNEST(INFO_CLNSIG) AS u(significance)
+    UNNEST(INFO_CLNSIG) AS u(significance)
   WHERE significance IS NOT NULL
 )
 SELECT
@@ -514,7 +519,8 @@ npm run dogfood:bring-it-home
     }
   },
   "casMetadata": {
-    "casMetadataRefs": 4
+    "casMetadataRefs": 4,
+    "artifactCasMetadataRefs": 2
   },
   "graphProjection": {
     "external": {
@@ -529,8 +535,22 @@ npm run dogfood:bring-it-home
   "trainingCorpus": {
     "toolCalls": 1,
     "runs": 2,
+    "artifacts": 3,
     "hostEvents": 4,
-    "parquetReadbackRows": 1
+    "parquetReadbackRows": 1,
+    "artifactRoles": [
+      {
+        "sourceNode": "run:dogfood-host-capability",
+        "mediaType": "image/svg+xml",
+        "semanticRole": "figure",
+        "plottingSystem": "inline-svg"
+      },
+      {
+        "sourceNode": "run:dogfood-host-capability",
+        "mediaType": "text/html",
+        "semanticRole": "report"
+      }
+    ]
   },
   "sdkConsumer": {
     "publicExportsOnly": true,
@@ -551,8 +571,8 @@ npm run dogfood:bring-it-home
 ```
 
 It exercises host-event receipts, step checkpoints/resume, SemanticSQL
-projection, ducknng profile receipts, SDK exports, and real process
-compute when R is available.
+projection, ducknng profile receipts, SDK exports, figure/report CAS
+artifacts, and real process compute when R is available.
 
 Run the Pi session trace dogfood after installing the extension and
 configuring an image-capable model:
