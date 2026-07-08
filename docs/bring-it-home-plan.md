@@ -123,13 +123,7 @@ consumer-pulled, or a non-goal.
 
 ### Active / Not Deferred
 
-1. **ducknng/quack sibling upload and shared-data path.** The direction is now narrower and evidenced, but not closed
-   in the default gate: mutable shared state is the server-backed `SqlConn` path; upload-shaped movement is the
-   sibling ducknng/quack transport path. `test/ducknng-upload-shared-data.test.ts` proves an upload-capable sibling
-   build can stream local SQL rows into a remote table and that a host can record the committed upload through
-   `recordHostEvent` and graph links. It remains active until this conformance runs in a non-skipped sibling/product
-   gate or a downstream host consumes it. Core should not grow a transport-specific upload primitive.
-2. **Concrete host adapters over `recordHostEvent`.** The primitive exists; the open work is the adapter layer:
+1. **Concrete host adapters over `recordHostEvent`.** The primitive exists; the open work is the adapter layer:
    the Pi extension now records `session_start` / `session_compact` / `session_shutdown` lifecycle hooks as an open
    `pi_coding_agent.session_lifecycle` host event on the `session:<id>` node after the persisted JSONL snapshot is
    ingested; the payload includes the raw-session digest so corpus consumers can distinguish runtime lifecycle intent
@@ -137,12 +131,12 @@ consumer-pulled, or a non-goal.
    stale-attempt rejection events as open host facts that the training corpus exports. Remaining work is concrete
    Pi/workbench hooks for steers, interrupts, before-provider context digests, session switching, and governance
    events that a consumer actually reads. Do not add a closed event taxonomy.
-3. **Durable workflow dogfood over the closed lifecycle.** The async lifecycle and checkpoint resume helper are
+2. **Durable workflow dogfood over the closed lifecycle.** The async lifecycle and checkpoint resume helper are
    built and the bring-it-home dogfood now runs checkpointed bash steps through `nodeComputeRunner`, reuses the
    completed prefix, reruns the suffix, and proves queue cancellation, expired-lease reclaim, and stale-attempt
    write rejection through the ledger. Remaining hardening is to exercise the same shape with R/Python/NNG/scheduler
    backends as real consumers need them. This is not a request for another workflow engine.
-4. **Substrate skill and non-Pi host dogfood.** The packaged skill should keep onboarding weaker hosts into the
+3. **Substrate skill and non-Pi host dogfood.** The packaged skill should keep onboarding weaker hosts into the
    substrate: `pi-bio-agent catalog` / `bio_list_sources` now list validated manifest-backed sources/templates before
    a host chooses one to describe or query; the rest of the loop is write or inspect a manifest, discover schemas
    with `DESCRIBE` / `SUMMARIZE`, run bounded SQL, walk the ledger/graph with `pi-bio-agent graph-window` or
@@ -150,7 +144,7 @@ consumer-pulled, or a non-goal.
    dogfood now runs catalog -> query/run, records a ledger fact, and separately pages a declared graph table with a
    CLI continuation handle. `check:skills` keeps the skill procedural guidance rather than a hidden API client,
    secret store, or per-question computation pack.
-5. **Docs hygiene.** Keep README and guides action-first: real commands, real code chunks, no fake text-block
+4. **Docs hygiene.** Keep README and guides action-first: real commands, real code chunks, no fake text-block
    architecture diagrams, and no speculative filesystem-extension claims. Claims should point to commands, tests, or
    examples that currently run.
 
@@ -190,6 +184,13 @@ consumer-pulled, or a non-goal.
 - **Base durable runner/resume.** `AsyncRunner` is the lifecycle; `JobRunner` and checkpoint helpers specialize it.
   Resume means completed-prefix checkpoint reuse plus suffix rerun. Evidence: [job-store.ts](../src/hosts/job-store.ts),
   [bring-it-home-dogfood.mjs](../scripts/bring-it-home-dogfood.mjs), [bring-it-home-dogfood.test.ts](../test/bring-it-home-dogfood.test.ts).
+- **ducknng/quack sibling upload and shared-data path.** Upload-shaped movement stays in the sibling transport, not
+  in core. The non-skipped dogfood command loads an upload-capable sibling `ducknng.duckdb_extension`, streams local
+  SQL rows into a remote DuckDB table through `ducknng_upload_table`, rejects a type-mismatched partial append, and
+  records the committed upload as a host event plus ordinary graph links. Evidence:
+  [ducknng-upload-shared-data.test.ts](../test/ducknng-upload-shared-data.test.ts),
+  [ducknng-upload-dogfood.mjs](../scripts/ducknng-upload-dogfood.mjs). Run with
+  `npm run dogfood:ducknng-upload` after building sibling `ducknng`, or set `DUCKNNG_EXTENSION_PATH`.
 - **`recordHostEvent` primitive.** Built as one open host event fact plus ordinary links. The bring-it-home dogfood
   records both workbench-style input events and scheduler-style queue events without a closed event model. The
   pending item is concrete Pi/workbench runtime wiring, not a new host-event model.
@@ -247,6 +248,7 @@ npm run check:docs
 npm run check:examples
 npm run check:readme-tools
 npm run dogfood:bring-it-home
+npm run dogfood:ducknng-upload  # requires an upload-capable sibling ducknng build or DUCKNNG_EXTENSION_PATH
 npm run dogfood:sdk-host-embedding
 ```
 
