@@ -134,10 +134,13 @@ data, deterministic compute, receipts, and recorded approvals.
 - CAS, resolver receipts, replay specs, and environment evidence are part of the
   result, not optional metadata.
 - Compute is a host-injected async port: submit, status, collect, cancel. The core
-  records the contract and evidence; hosts decide what processes, credentials, and
-  network access are allowed.
-- The model handles routing, schema inspection, SQL composition, and typed
-  judgment. It is not the source of biomedical facts.
+  records the contract, durable queue status, step checkpoints, replay specs, and
+  evidence; hosts decide what processes, credentials, and network access are
+  allowed. Resume is checkpoint-based, not a workflow engine.
+- The model or human handles routing, schema inspection, SQL composition, and
+  typed judgment over an apparatus of manifests, tables, graphs, receipts, and
+  gates. It is not the source of biomedical facts; constraints are what make the
+  computation auditable.
 
 ## See It
 

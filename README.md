@@ -31,10 +31,14 @@ declared data, deterministic compute, receipts, and recorded approvals.
 - CAS, resolver receipts, replay specs, and environment evidence are
   part of the result, not optional metadata.
 - Compute is a host-injected async port: submit, status, collect,
-  cancel. The core records the contract and evidence; hosts decide what
-  processes, credentials, and network access are allowed.
-- The model handles routing, schema inspection, SQL composition, and
-  typed judgment. It is not the source of biomedical facts.
+  cancel. The core records the contract, durable queue status, step
+  checkpoints, replay specs, and evidence; hosts decide what processes,
+  credentials, and network access are allowed. Resume is
+  checkpoint-based, not a workflow engine.
+- The model or human handles routing, schema inspection, SQL
+  composition, and typed judgment over an apparatus of manifests,
+  tables, graphs, receipts, and gates. It is not the source of
+  biomedical facts; constraints are what make the computation auditable.
 
 ## See It
 
@@ -66,21 +70,22 @@ pi \
 
 Manifest path: `.pi/bio-agent/readme-clinvar-tp53.json`
 
-SQL:
-
 ``` sql
 WITH distinct_calls AS (
   SELECT DISTINCT CHROM, POS, REF, ALT, significance
-  FROM clinvar, UNNEST(INFO_CLNSIG) AS u(significance)
+  FROM clinvar,
+       UNNEST(INFO_CLNSIG) AS u(significance)
   WHERE significance IS NOT NULL
 )
-SELECT significance AS "clinical-significance", COUNT(*) AS n
+SELECT
+  significance AS clinical_significance,
+  COUNT(*) AS n
 FROM distinct_calls
 GROUP BY significance
 ORDER BY n DESC, significance;
 ```
 
-| clinical-significance                        |    n |
+| clinical_significance                        |    n |
 |----------------------------------------------|-----:|
 | Pathogenic                                   | 3593 |
 | Conflicting_classifications_of_pathogenicity | 2917 |
@@ -420,7 +425,7 @@ npm run dogfood:bring-it-home
     "invoked_by": 1,
     "tool_call": 1,
     "run": 2,
-    "host_event": 1,
+    "host_event": 4,
     "job_step_checkpoint": 2
   },
   "ducknngProfile": {
@@ -448,7 +453,7 @@ npm run dogfood:bring-it-home
   "trainingCorpus": {
     "toolCalls": 1,
     "runs": 2,
-    "hostEvents": 1,
+    "hostEvents": 4,
     "parquetReadbackRows": 1
   },
   "sdkConsumer": {
