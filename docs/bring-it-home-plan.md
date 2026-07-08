@@ -81,7 +81,7 @@ These items are no longer open substrate work in `pi-bio-agent`.
   taxon-constraint views. Evidence: [semantic-sql.ts](../src/duckdb/semantic-sql.ts),
   [graph-projection.test.ts](../test/graph-projection.test.ts), [design.md](design.md#the-semanticsql-shape-source-spec---local-graph-tables).
 - **Training corpus export is a derived projection.** The core exports digest-only session/tool/run/artifact/event
-  tables, host-event link rows, and Parquet receipts from the ledger under the `pi-bio.training_corpus.v2` receipt
+  tables, host-event link rows, and Parquet receipts from the ledger under the `pi-bio.training_corpus.v3` receipt
   contract. Redaction policy and labels are
   application-owned. Evidence:
   [training-corpus.ts](../src/hosts/training-corpus.ts), [training-corpus.test.ts](../test/training-corpus.test.ts).
@@ -145,7 +145,9 @@ consumer-pulled, or a non-goal.
    corpus-readable as redacted rows, so a recorded steer/interrupt/governance event can point at the affected
    turn/run/workflow without exposing private link attrs. Older unstamped links remain ordinary graph edges rather
    than being guessed into this exact event-link table. The Pi extension also records `before_agent_start` context
-   receipts as digests/counts only. Remaining work is concrete Pi/workbench hooks for steers, interrupts, and
+   receipts and `input` delivery receipts as digests/counts only. The input receipt exposes source and streaming
+   behavior (`steer` / `followUp` when Pi supplies it) plus payload/text/image digests; it does not store prompt text,
+   images, or infer later transform/handled status. Remaining work is concrete Pi/workbench hooks for interrupts and
    governance events that a consumer actually reads. Do not add a closed event taxonomy.
 2. **Durable workflow dogfood over the closed lifecycle.** The async lifecycle and checkpoint resume helper are
    built and the bring-it-home dogfood now runs checkpointed bash steps through `nodeComputeRunner`, reuses the
@@ -210,10 +212,10 @@ consumer-pulled, or a non-goal.
   `npm run dogfood:ducknng-upload` after building sibling `ducknng`, or set `DUCKNNG_EXTENSION_PATH`.
 - **`recordHostEvent` primitive.** Built as one open host event fact plus ordinary links. The bring-it-home dogfood
   records both workbench-style input events and scheduler-style queue events without a closed event model. The Pi
-  extension records session lifecycle receipts and `before_agent_start` context receipts as digests/counts only, and
-  the corpus projection exposes lifecycle type/reason/parentage plus event-link targets without raw payloads or raw
-  link attrs. Remaining concrete hooks are consumer-read driven: steers, interrupts, and governance events only when
-  an app or corpus export actually queries them.
+  extension records session lifecycle receipts, `before_agent_start` context receipts, and input delivery receipts
+  as digests/counts only. The corpus projection exposes lifecycle type/reason/parentage, input source/streaming
+  behavior/text digest, and event-link targets without raw payloads or raw link attrs. Remaining concrete hooks are
+  consumer-read driven: interrupts and governance events only when an app or corpus export actually queries them.
 - **Foreign graph projection base.** A real external Monarch KGX HTTP path, internal observation-graph projection,
   and generated SemanticSQL `statements` -> `edge` view path exist. Remaining foreign-graph work is consumer
   conformance and adapter pressure, not a new graph primitive.

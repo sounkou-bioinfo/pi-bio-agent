@@ -128,6 +128,58 @@ describe("Pi coding-agent extension", () => {
     }
   });
 
+  test("input hook records steer/follow-up delivery metadata without storing input text", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "pi-bio-ext-input-"));
+    const { handlers } = loadExtension(createBioExtension({ author: "agent:test" }));
+    const input = handlers.get("input")?.[0];
+    assert.ok(input, "input handler registered");
+
+    const out = await input!({
+      type: "input",
+      text: "private steering instruction",
+      source: "interactive",
+      streamingBehavior: "steer",
+    }, {
+      cwd,
+      sessionManager: { getSessionId: () => "input-session" },
+    });
+    assert.deepEqual(out, { action: "continue" });
+
+    const store = await openBioStore(cwd);
+    try {
+      const rows = await store.conn.all<{ value_json: string; attrs: string | null }>(
+        "SELECT value_json, attrs FROM bio_observations WHERE predicate = 'host_event' AND json_extract_string(value_json, '$.kind') = 'pi_coding_agent.input'",
+      );
+      assert.equal(rows.length, 1);
+      assert.doesNotMatch(JSON.stringify(rows), /private steering instruction/);
+      const value = JSON.parse(rows[0]!.value_json) as { kind: string; value: Record<string, unknown> };
+      assert.equal(value.kind, "pi_coding_agent.input");
+      assert.equal(value.value.event_type, "input");
+      assert.equal(value.value.input_source, "interactive");
+      assert.equal(value.value.streaming_behavior, "steer");
+      assert.match(String(value.value.payload_digest), /^sha256:[0-9a-f]{64}$/);
+      assert.match(String(value.value.text_digest), /^sha256:[0-9a-f]{64}$/);
+      assert.equal(value.value.text_chars, "private steering instruction".length);
+      assert.equal(value.value.image_count, 0);
+
+      await materializeTrainingCorpus(store.conn);
+      const events = await store.conn.all<{ kind: string; event_type: string | null; input_source: string | null; streaming_behavior: string | null; text_digest: string | null }>(
+        `SELECT kind, event_type, input_source, streaming_behavior, text_digest
+         FROM ${TRAINING_CORPUS_TABLES.hostEvents}
+         WHERE subject_id = 'session:input-session'`,
+      );
+      assert.deepEqual(events, [{
+        kind: "pi_coding_agent.input",
+        event_type: "input",
+        input_source: "interactive",
+        streaming_behavior: "steer",
+        text_digest: String(value.value.text_digest),
+      }]);
+    } finally {
+      store.close();
+    }
+  });
+
   test("before_agent_start warns and continues when context receipt open fails", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "pi-bio-ext-prompt-open-fail-"));
     const { handlers } = loadExtension(createBioExtension({

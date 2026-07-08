@@ -149,7 +149,7 @@ describe("training corpus export", () => {
     await c.run(`CREATE TABLE ${TRAINING_CORPUS_TABLES.messages} AS SELECT 'persistent-main-table' AS marker`);
 
     const receipt = await materializeTrainingCorpus(c, { asOf: "2026-07-06T10:00:06.000Z" });
-    assert.equal(receipt.schema, "pi-bio.training_corpus.v2");
+    assert.equal(receipt.schema, "pi-bio.training_corpus.v3");
     assert.equal(receipt.redaction, "digest_only");
     assert.match(receipt.digest, /^sha256:[0-9a-f]{64}$/);
     assert.equal(receipt.tables.sessions.rows, 1);
@@ -222,6 +222,9 @@ describe("training corpus export", () => {
     const byKind = new Map(hostEventRows.map((row) => [String(row.kind), row]));
     assert.equal(byKind.get("workbench.input.steer")!.payload_digest, `sha256:${"5".repeat(64)}`);
     assert.equal(byKind.get("workbench.input.steer")!.event_type, null);
+    assert.equal(byKind.get("workbench.input.steer")!.input_source, null);
+    assert.equal(byKind.get("workbench.input.steer")!.streaming_behavior, null);
+    assert.equal(byKind.get("workbench.input.steer")!.text_digest, null);
     assert.equal(byKind.get("pi_coding_agent.session_lifecycle")!.event_type, "session_start");
     assert.equal(byKind.get("pi_coding_agent.session_lifecycle")!.reason, "fork");
     assert.equal(byKind.get("pi_coding_agent.session_lifecycle")!.parent_session_id, "parent-corpus");

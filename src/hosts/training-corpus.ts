@@ -34,7 +34,7 @@ export interface TrainingCorpusTableReceipt {
 }
 
 export interface TrainingCorpusReceipt {
-  schema: "pi-bio.training_corpus.v2";
+  schema: "pi-bio.training_corpus.v3";
   asOf: string;
   redaction: "digest_only";
   tables: Record<TrainingCorpusTableName, TrainingCorpusTableReceipt>;
@@ -60,7 +60,7 @@ async function tableCounts(conn: SqlConn, asOf: string, files: Partial<Record<Tr
     tables[name] = { table, rows: Number(rows[0]?.n ?? 0), ...files[name] };
   }
   const stable = {
-    schema: "pi-bio.training_corpus.v2",
+    schema: "pi-bio.training_corpus.v3",
     asOf,
     redaction: "digest_only",
     tables: Object.fromEntries(Object.entries(tables).map(([name, t]) => [name, { table: t.table, rows: t.rows, parquetDigest: t.parquetDigest }])),
@@ -270,7 +270,10 @@ export async function materializeTrainingCorpus(conn: SqlConn, opts: TrainingCor
        json_extract_string(e.value_json, '$.value.event_type') AS event_type,
        json_extract_string(e.value_json, '$.value.reason') AS reason,
        json_extract_string(e.value_json, '$.value.parent_session_id') AS parent_session_id,
+       json_extract_string(e.value_json, '$.value.input_source') AS input_source,
+       json_extract_string(e.value_json, '$.value.streaming_behavior') AS streaming_behavior,
        json_extract_string(e.value_json, '$.value.payload_digest') AS payload_digest,
+       json_extract_string(e.value_json, '$.value.text_digest') AS text_digest,
        e.observation_id AS event_digest,
        e.recorded_at,
        e.source,

@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionContext, SessionShutdownEvent, SessionStartEvent } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, InputEvent, SessionShutdownEvent, SessionStartEvent } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { summarizeBioContext, type BioContext } from "../../src/core/context.js";
 import { validateReadOnlySelect } from "../../src/core/knowledge-graph.js";
@@ -272,6 +272,25 @@ function lifecycleHostEventValue(
   };
 }
 
+function inputHostEventValue(event: InputEvent): Record<string, unknown> {
+  const imageCount = event.images?.length ?? 0;
+  return {
+    event_type: "input",
+    input_source: event.source,
+    streaming_behavior: event.streamingBehavior ?? null,
+    payload_digest: canonicalDigest({
+      text: event.text,
+      images: event.images ?? [],
+      source: event.source,
+      streaming_behavior: event.streamingBehavior ?? null,
+    }),
+    text_digest: canonicalDigest(event.text),
+    text_chars: event.text.length,
+    image_count: imageCount,
+    images_digest: imageCount > 0 ? canonicalDigest(event.images ?? []) : null,
+  };
+}
+
 export interface BioExtensionOptions {
   network?: { fetch: FetchLike };
   /** COMPUTE grant: the host injects a ComputeRunner so a manifest's `compute.run` resources can execute.
@@ -458,6 +477,34 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
     }
   }
 
+  async function recordInputReceipt(ctx: ExtensionContext, event: InputEvent): Promise<void> {
+    const sessionId = ctx.sessionManager?.getSessionId?.();
+    if (typeof sessionId !== "string" || sessionId.length === 0) return;
+    let store: BioStore | undefined;
+    try {
+      store = await tryOpen(openStore, ctx.cwd ?? process.cwd());
+    } catch (e) {
+      console.warn(`bio-agent: input receipt skipped (${e instanceof Error ? e.message : String(e)}); continuing`);
+      return;
+    }
+    if (!store) return;
+    try {
+      const value = inputHostEventValue(event);
+      await recordHostEvent(store.conn, {
+        subjectId: `session:${sessionId}`,
+        kind: "pi_coding_agent.input",
+        recordedAt: systemClock(),
+        source: author,
+        digest: typeof value.payload_digest === "string" ? value.payload_digest : undefined,
+        value,
+      });
+    } catch (e) {
+      console.warn(`bio-agent: input receipt failed (${e instanceof Error ? e.message : String(e)}); continuing`);
+    } finally {
+      store.close();
+    }
+  }
+
   function toolcallNodeFromContext(ctx: ExtensionContext, toolCallId: unknown): { sessionId: string; node: string } | undefined {
     const sessionId = ctx.sessionManager?.getSessionId?.();
     if (typeof sessionId !== "string" || sessionId.length === 0 || typeof toolCallId !== "string" || toolCallId.length === 0) return undefined;
@@ -510,6 +557,11 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
   });
   pi.on("session_shutdown", async (event, ctx) => {
     await syncSessionOrWarn(ctx, event);
+  });
+
+  pi.on("input", async (event, ctx) => {
+    await recordInputReceipt(ctx, event);
+    return { action: "continue" };
   });
 
   // Give the agent a persistent, drift-resistant orientation to pi-bio-agent on every turn (the pi-coding-agent
