@@ -501,10 +501,12 @@ The same prefix table also enables the SemanticSQL `subject_prefix` view. When a
 `textual_transformation(subject, predicate, value)` table is declared, the helper exposes `processed_statement`; with
 both prefix and transformation tables present it also exposes the source-spec `match` view for SQL-native text
 matching across labeled ontology/FHIR/RDF resources.
-When a staged SemanticSQL `term_association` table is declared, the helper exposes the canonical association columns
-with the same optional prefix canonicalization. An ordinary graph projection profile can then project those
-associations into `bio_edges`; evidence stays available on the canonical association columns unless a consumer
-defines a separate graph-ready metadata view.
+When a staged SemanticSQL `term_association` source table is declared under a distinct target name, the helper
+exposes the canonical association columns with the same optional prefix canonicalization. An ordinary graph
+projection profile can then project those associations into `bio_edges`; source-spec columns such as
+`evidence_type`, `publication`, and `source` stay on the association view and do not become generic graph trust
+policy. If the caller points at an already-canonical `term_association` table as both source and target, the helper
+leaves it untouched; prefix canonicalization in that aliasing shape fails closed.
 The generated `edge` view then uses the same graph projection profile and closure path as KGX, memory, and
 observation graphs. This is compatibility with the SemanticSQL source-spec ecosystem, useful for RDF/OWL,
 Semantic-Web, FHIR-shaped, and ontology-derived data; it is not a hidden OWL reasoner.

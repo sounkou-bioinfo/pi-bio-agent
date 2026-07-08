@@ -720,12 +720,13 @@ JOIN, not a walker. See [`design.md`](./design.md#the-semanticsql-shape-source-s
     with both prefix and transformation tables present it also exposes `match`.
     When a staged SemanticSQL `entailed_edge(subject,predicate,object)` table is supplied, the closure-backed
     relation-graph, node-pair overlap, and taxon-constraint propagation views are generated too. When a staged
-    SemanticSQL `term_association` table is supplied, the helper exposes the canonical association columns, and the
-    existing graph projection profile maps them into `bio_edges`. Generated `edge_with_metadata` projects matching
-    OWL axiom annotations, evidence xrefs, and OBO problem rows into graph-ready `attrs`/`trust`. This gives
-    Semantic Web, ontology-derived, and FHIR-shaped RDF data a SemanticSQL inspection surface without a
-    source-specific adapter. We still do not parse the full upstream LinkML source to generate every DDL/view;
-    parity expands only when a concrete grounding or traversal consumer needs more of the source spec.
+    SemanticSQL `term_association` source table is supplied under a distinct target name, the helper exposes the
+    canonical association columns and the existing graph projection profile maps them into `bio_edges`. Generated
+    `edge_with_metadata` projects matching OWL axiom annotations, evidence xrefs, and OBO problem rows into
+    graph-ready `attrs`/`trust`. This gives Semantic Web, ontology-derived, and FHIR-shaped RDF data a SemanticSQL
+    inspection surface without a source-specific adapter. We still do not parse the full upstream LinkML source to
+    generate every DDL/view; parity expands only when a concrete grounding or traversal consumer needs more of the
+    source spec.
   - **Prefix canonicalization is present, not a traversal primitive.** Here `prefix(prefix, base)` means namespace
     expansion/canonicalization (`HP` -> an HPO base IRI, `biolink` -> a Biolink base IRI), not run-id prefixes,
     observation-key prefixes, or graph walk policy. Remaining identifier hygiene is receipts and multi-database

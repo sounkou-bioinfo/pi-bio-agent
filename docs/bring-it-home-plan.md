@@ -144,8 +144,9 @@ consumer-pulled, or a non-goal.
    When a staged SemanticSQL `entailed_edge(subject,predicate,object)` table is declared, closure-backed
    relation-graph, node-pair overlap, and taxon-constraint propagation views, including most-specific inferred
    in-taxon, are generated over it. `edge_with_metadata` packages edge-level axiom annotations, evidence xrefs, and
-   source problem counts into graph-ready `attrs`/`trust` JSON; when a staged `term_association` table is declared,
-   its canonical columns can be projected into `bio_edges` through the same graph profile shape. Remaining parity is
+   source problem counts into graph-ready `attrs`/`trust` JSON; when a staged `term_association` source table is
+   declared under a distinct target name, its canonical columns can be projected into `bio_edges` through the same
+   graph profile shape. Remaining parity is
    relation-graph-specific equivalence/reflexivity/property-hierarchy policy, multi-ontology attachment, and
    source-specific trust weighting/reconciliation. Declared upstream `entailed_edge` artifacts now enter through the
    same graph projection profile when a resolver/host stages and receipts them.

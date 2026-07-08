@@ -302,8 +302,23 @@ function stanzaExpr(column: string | undefined): string {
   return column ? `CAST(${qident(column)} AS VARCHAR)` : "CAST(NULL AS VARCHAR)";
 }
 
+function defaultSchemaRelationKey(id: string): string {
+  const parts = id.split(".").map((part) => {
+    const trimmed = part.trim();
+    const unquoted = trimmed.startsWith("\"") && trimmed.endsWith("\"") ? trimmed.slice(1, -1).replace(/""/g, "\"") : trimmed;
+    return unquoted.toLowerCase();
+  });
+  if (parts.length === 1) return `main.${parts[0]}`;
+  if (parts.length === 2 && parts[0] === "main") return `main.${parts[1]}`;
+  return parts.join(".");
+}
+
+function sameDefaultSchemaRelation(a: string, b: string): boolean {
+  return defaultSchemaRelationKey(a) === defaultSchemaRelationKey(b);
+}
+
 function termAssociationSql(spec: SemanticSqlSourceSpec, target: string): string[] {
-  if (!spec.termAssociationSourceTable || spec.termAssociationSourceTable === target) return [];
+  if (!spec.termAssociationSourceTable || sameDefaultSchemaRelation(spec.termAssociationSourceTable, target)) return [];
   return [`CREATE OR REPLACE VIEW ${qident(target)} AS
 SELECT
   CAST(ta.id AS VARCHAR) AS id,
@@ -440,6 +455,11 @@ export function semanticSqlSourceViewSql(spec: SemanticSqlSourceSpec): string[] 
   const statements = qident(spec.statementsTable ?? "statements");
   const prefixTable = spec.prefixTable;
   const t = targets(spec);
+  if (spec.termAssociationSourceTable && sameDefaultSchemaRelation(spec.termAssociationSourceTable, t.termAssociationTable) && prefixTable) {
+    throw new Error(
+      "SemanticSQL termAssociationSourceTable matches the termAssociationTable target while prefix canonicalization is enabled; stage the raw association table under a different name or choose a distinct target",
+    );
+  }
   const labels = stringList(spec.predicates?.labels, DEFAULT_LABEL_PREDICATES);
   const definitions = stringList(spec.predicates?.definitions, DEFAULT_DEFINITION_PREDICATES);
   const synonyms = stringList(spec.predicates?.synonyms, DEFAULT_SYNONYM_PREDICATES);

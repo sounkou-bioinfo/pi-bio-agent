@@ -480,6 +480,34 @@ describe("graph projection profile: source relation -> compiled graph", () => {
       () => semanticSqlSourceViewSql({ schema: SEMANTIC_SQL_SOURCE_SPEC_SCHEMA, predicates: { labels: [] } }),
       /at least one non-empty string/,
     );
+    assert.doesNotThrow(() => semanticSqlSourceViewSql({
+      schema: SEMANTIC_SQL_SOURCE_SPEC_SCHEMA,
+      termAssociationSourceTable: "term_association",
+    }));
+    assert.throws(
+      () => semanticSqlSourceViewSql({
+        schema: SEMANTIC_SQL_SOURCE_SPEC_SCHEMA,
+        prefixTable: "prefix",
+        termAssociationSourceTable: "term_association",
+      }),
+      /termAssociationSourceTable matches the termAssociationTable target/,
+    );
+    assert.throws(
+      () => semanticSqlSourceViewSql({
+        schema: SEMANTIC_SQL_SOURCE_SPEC_SCHEMA,
+        prefixTable: "prefix",
+        termAssociationSourceTable: "main.term_association",
+      }),
+      /termAssociationSourceTable matches the termAssociationTable target/,
+    );
+    assert.throws(
+      () => semanticSqlSourceViewSql({
+        schema: SEMANTIC_SQL_SOURCE_SPEC_SCHEMA,
+        prefixTable: "prefix",
+        termAssociationSourceTable: "\"term_association\"",
+      }),
+      /termAssociationSourceTable matches the termAssociationTable target/,
+    );
   });
 
   test("validates a SemanticSQL-shaped projection profile and projects with one generated SQL statement", async () => {
