@@ -70,6 +70,8 @@ pi \
 
 Manifest path: `.pi/bio-agent/readme-clinvar-tp53.json`
 
+SQL:
+
 ``` sql
 WITH distinct_calls AS (
   SELECT DISTINCT CHROM, POS, REF, ALT, significance
@@ -81,8 +83,8 @@ SELECT
   significance AS clinical_significance,
   COUNT(*) AS n
 FROM distinct_calls
-GROUP BY significance
-ORDER BY n DESC, significance;
+GROUP BY clinical_significance
+ORDER BY n DESC, clinical_significance;
 ```
 
 | clinical_significance                        |    n |
@@ -410,7 +412,8 @@ pi-bio-agent query examples/run-ledger/manifest.json \
 }
 ```
 
-Window an edge-shaped graph table without loading the whole neighborhood:
+Window an edge-shaped graph table without loading the whole
+neighborhood:
 
 ``` sh
 pi-bio-agent query examples/graph-window/manifest.json \
