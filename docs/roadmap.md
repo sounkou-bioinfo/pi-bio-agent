@@ -1,238 +1,152 @@
 ---
 type: Reference
 title: Roadmap, success, and testing contract
-description: "Read before planning roadmap, success metrics, tests, or flagship work."
+description: "Read before planning roadmap, success metrics, tests, or flagship work; current core closure and consumer-pulled lanes."
 tags: [roadmap, testing, success, flagship]
 ---
 
 # Roadmap, success, and testing contract
 
-Decisions, not aspirations. This file is the spine: what we are building, the one claim that can
-falsify it, how we test, the flagship that exercises everything, the phase order, and the doctrine for
-how the harness is allowed to change.
+This document is the planning contract. The detailed current closure ledger is
+[`bring-it-home-plan.md`](./bring-it-home-plan.md); do not duplicate that evidence here.
 
-## 1. What we are building
+## What We Are Building
 
-A **library for agent-controlled scientific computation over a typed DuckDB graph substrate**, with biomedical
-workflows as the first domain.
+`pi-bio-agent` is a library for agent-controlled scientific computation over DuckDB:
 
-```text
-typed graph substrate    durable domain + harness structure (graph-as-SQL over DuckDB)
-operation specs/clients   controlled ways to touch outside data/tools
-code runtime              bounded composition over scoped clients (later)
-Pi extensions/skills      the first host-adapter and harness-adaptation surface
-study notes               machine-studying ingress into the graph
-skills                    stabilized-workflow packaging
+- manifests declare resources, resolvers, operations, effects, and reproducibility hints;
+- resolvers materialize declared data into DuckDB relations with receipts;
+- agents inspect schemas and compose read-only SQL;
+- optional compute runs out of process through a host-injected async runner;
+- runs, host events, memory, facts, graphics, reports, and artifacts become observations and CAS handles;
+- graph-shaped knowledge is queried as tables: `bio_edges`, `bio_edges_as_of`, and `entailed_edge`.
+
+The model or human may route, inspect, compose, and judge. It is not the source of biomedical facts. Facts come from
+declared data, deterministic compute, receipts, CAS artifacts, and recorded approvals.
+
+Core owns contracts, validators, registries, receipts, replay, CAS, graph/observation storage, and host-injected
+effect ports. Applications own manifests, operation packs, UI, domain datasets, review rubrics, report packets, and
+deployment policy.
+
+## Falsifiable Success
+
+The project succeeds only if the substrate lets an agent produce better-supported scientific answers with less
+inference/tool budget than a baseline that lacks the manifest/SQL/graph/provenance apparatus.
+
+Every serious run is gated first:
+
+- provenance is correct;
+- biomedical claims are supported by declared data or explicit recorded judgment;
+- no diagnosis or clinical recommendation is presented as a model fact;
+- receipts, replay specs, and environment evidence are present where the host can provide them;
+- tool/code/network/credential effects are host-granted and fail closed when unavailable;
+- large data, graphs, and artifacts remain queryable/addressable rather than pasted into prompt context.
+
+Only after those gates does a benchmark compare accuracy, evidence quality, wall-clock, token budget, and tool-call
+budget. This is the machine-studying claim made operational: the apparatus should improve the cost curve, not just
+add metadata.
+
+## Testing Contract
+
+`npm run check` is the single local gate. It runs typecheck, the full test suite, docs/index drift checks,
+example-readme drift checks, README tool-list checks, and skill validation.
+
+The test pyramid is now real:
+
+- **Pure contract tests**: validators, canonical digests, graph/profile specs, run specs, env descriptors.
+- **SQL/KG tests**: read-only SQL validation, plan hermeticity, SemanticSQL views, closure, graph projection.
+- **Effect tests**: local file/CAS/run ledger, CLI, memory, artifacts, DuckDB init/config, host policies.
+- **Application-operation tests**: connector manifests, coloc, rare-high-impact, compute examples, OpenTargets,
+  Monarch KG HTTP, DuckHTS range reads.
+- **Flagship/dogfood tests**: bring-it-home, SDK host embedding, substrate skill, Pi session trace, ducknng upload
+  when the sibling extension is available.
+- **Harness-adaptation tests**: approvals, activate/rollback, temporal skills, package skill validation and install
+  presets, Pi extension tool registration and lifecycle receipts.
+
+For roadmap work, add a focused test first when the behavior is a contract. For docs-only cleanup, run
+`npm run docs:index`, `npm run check:docs`, and any README/example generator affected by the edit.
+
+## Current Core Status
+
+Core is closed over the main primitives needed by a downstream workbench:
+
+- provider-agnostic manifest/query/run path;
+- read-only SQL guard plus plan hermeticity;
+- lazy resource forcing;
+- host-injected network and compute ports;
+- SQL-native network through ducknng and host-owned HTTP profiles;
+- `duckhts.read_bcf` range reads;
+- `compute.run` over async runner semantics with table, file, and files-only artifact outputs;
+- CAS byte store, shared CAS metadata, refs, leases, and GC;
+- replay/reproduce/action-cache contracts;
+- durable job queue, cancellation, and checkpoint resume;
+- open `recordHostEvent` facts and redacted training-corpus export;
+- graph projection profiles and SemanticSQL source-spec base parity;
+- figures/reports/session images as CAS-addressed artifacts linked through observations;
+- SDK base exports checked by a packed external-consumer dogfood;
+- packaged host-neutral skill plus installer presets for Pi, Codex, Claude, OpenCode, and GitHub Copilot.
+
+The compact evidence commands are:
+
+```sh
+npm run dogfood:bring-it-home
+npm run dogfood:sdk-host-embedding
+npm run dogfood:substrate-skill
 ```
 
-**The harness records itself in the same graph: carefully scoped.** Capabilities, adapters, specs,
-skills, runs, artifacts, and extension declarations live as facts alongside domain data (e.g.
-`manifest —provides→ operation`, `run —produced→ artifact`). Executable code still lives in package
-files / CAS / artifacts: the graph records declarations, provenance, dependencies, activation, and
-outputs, not the running code. Inspectable as graph data without the graph becoming the executor. See
-[`ontology-and-knowledge-graphs.md`](./ontology-and-knowledge-graphs.md#the-graph-bet-the-domain-wager).
+Run `npm run dogfood:pi-session-trace` when Pi/model credentials are configured and a session-level integration
+check is needed.
 
-## 2. Falsifiable success (the headline)
+## Flagship Role
 
-Capabilities are enabling contracts and safety gates, not co-equal success metrics. There is one
-falsifiable claim, and it is the spine of the project:
+The rare-high-impact variant example remains the minimal safety skeleton: count only documented-rare high-impact
+variants, abstain on missing frequency, exclude benign loss-of-function calls, and prove the answer by SQL over
+declared resources. Its purpose is to prevent skill sprawl and over-calling, not to be a clinical-genomics product.
 
-> Does the graph/notes/harness substrate let the agent produce **better-supported answers with less
-> inference/tool budget** than a baseline?
+Clinical genomics, report review, UI, and domain-specific judgment rubrics belong in a downstream workbench. If that
+workbench cannot express a workflow as declared resources -> SQL/materialization -> optional compute -> recorded run
+-> observations/links -> CAS artifacts -> replay/export, then core has a real gap. If it can, keep the behavior
+downstream.
 
-This is a **gated objective**. Gates first: a run that fails any of these fails regardless of score:
+## Consumer-Pulled Lanes
 
-```text
-provenance correct
-no unsupported biomedical claims
-no diagnosis / clinical-recommendation framing
-reproducible run receipt
-explicit sources / evidence
-bounded tool / code behavior
-```
+These are not current core implementation requests. They become core only when a concrete consumer repeats the shape
+and cannot express it through existing primitives:
 
-Only then **measure**: accuracy or evidence-quality **per token / tool-call / wall-clock budget**,
-against a baseline without the notes/graph substrate. The enabling capabilities are the means; the
-cost-curve is the evidence they were worth it. (The
-[machine-studying](./machine-studying-lineage.md) framing, made operational.)
+- runtime interrupt/abort adapters over `recordHostEvent`;
+- scheduler-native backends for SLURM, `targets`, `mirai`, `nanonext`, Modal, or worker pools;
+- scoped relation/resource visibility narrower than the injected `SqlConn`;
+- SemanticSQL relation-graph policy, trust reconciliation, and thin ontology-ingest adapters;
+- training-corpus labels, redaction policy, export contracts, or typed Parquet schemas;
+- renderer-specific review packets, notebook/report schemas, or UI report models;
+- SDK helpers beyond current exports;
+- workbench package abstractions after a downstream app proves repeated shape;
+- external-tool robustness for `rv`, OpenTargets, ChEMBL, Monarch DuckDB, Nextflow, and similar systems;
+- shared node identity normalization for BioBTree-style multi-source KGs;
+- ducknng-fs / DuckTinyCC research.
 
-## 3. Testing contract
+The refinement ledger in [`refinments.md`](./refinments.md) tracks these without treating them as active substrate
+work.
 
-A pyramid plus a conformance cross-cut. Layers 1–3 substantially exist today; 4–6 do not.
+## Harness-Adaptation Doctrine
 
-1. **Pure contract tests**: validators/projections. Deterministic, fail-closed, no I/O.
-2. **SQL/KG tests**: schema DDL, constraints, dangling links, external-inbound guard, read-only SQL
-   validation. Fake `SqlConn` and real in-memory DuckDB.
-3. **Effect tests**: real local effects (notes, CAS, run ledger, DuckDB sync, CLI). No ambient
-   activation; explicit write flags.
-4. **Application-operation tests**: API clients: mock-network by default, request-shape goldens, provenance.
-   Live integration only via explicit config/CLI arg.
-5. **Flagship fixture tests**: synthetic project in, expected graph/run/report out (§4). Assert
-   structure, provenance, safety framing, bounded tool-calls/time, **not** prose.
-6. **Harness-adaptation tests**: a generated extension/spec/skill ships a manifest, declares its
-   effects, passes static validation, carries tests, survives install/reload, and rolls back.
-   **The agent may propose; CI decides whether it becomes real.**
+Safe adaptation is declarative, validated, reversible, recorded, and activated at an explicit host boundary.
 
-**Conformance cross-cut** (asserted across layers): no provider-specific shape in core; resolvers fail
-closed; no ambient network/env activation; writes gated behind explicit flags; application connectors and
-case-workflow code must go through manifests, resolvers, operations, and recorded runs rather than bypassing the
-substrate.
+Allowed path:
 
-## 4. Flagship: "rare high-impact variants" walking skeleton
+1. propose a manifest, operation spec, resolver adapter, extension, or skill;
+2. validate it with the relevant schema and fail-closed guards;
+3. test it against fixtures or live-gated integration;
+4. record the candidate, result, and decision in observations;
+5. activate at a reload/install/CLI boundary;
+6. roll back by appending a new temporal state, never by rewriting history.
 
-A forcing function landed early, not a finale, with a concrete public target. From the project's origin
-(ClawBio, a per-question skill-sprawl agent): *"how many rare high-impact variants do I have?"* required
-hand-writing a skill, and the hard part was **abstention**: a naive count over-called (~110), but once
-you refuse to call "no frequency data" rare, the defensible number collapses (~6 documented-rare LoF, 1
-disease-relevant).
+Forbidden path:
 
-It exposes both bets at once: *substrate over skill sprawl* (the count is one SQL filter over annotated
-variants) and the *abstention/safety gate* (no-frequency ≠ rare; benign LoF ≠ actionable). Intentionally
-tiny: composition pressure, not clinical realism:
+- editing core files in place as an agent adaptation;
+- monkey-patching tools;
+- silently changing execution behavior;
+- hiding network, filesystem, process, credential, or tenant policy in prompt text;
+- promoting a biomedical fact without declared data, deterministic computation, or recorded judgment.
 
-```text
-3 synthetic variants (no-frequency, benign LoF, documented-rare disease-relevant)
-1 mocked annotation table (frequency + consequence; duckhts-shaped, real reader drops in)
-1 note with the abstention caveat
-1 SQL filter: rare ∧ high-impact ∧ frequency-known   (a query, not a skill)
-1 run record + provenance
-1 result (count via SQL GROUP BY) + caveats: what was excluded and why
-```
-
-No live APIs, no ACMG engine, **no diagnosis language**. It forces the whole substrate to compose:
-resolvers → DuckDB tables → the operation's SQL → the answer → run record + receipts → provenance. The
-test asserts the abstention, structure, provenance, and stability, not prose.
-
-## 5. Phases (walking skeleton first)
-
-Inverted from substrate-first: a thin flagship lands early and stays green as substrate thickens behind it.
-
-**Current position:** the flagship is built (manifest #1); `runOperation` produces run records, results,
-and resolution receipts, persisted under `.pi/bio-agent/runs/`. Built out since: the SQL-native network
-path (`ducknng_ncurl_table` plus scoped/subject-admitted HTTP profiles), the compute pillar (`compute.run` over
-Arrow IPC), region-scoped `duckhts.read_bcf`, CAS-of-bytes, and the two-pillar coloc flagship
-(`examples/coloc`, multi-tissue post-GWAS colocalization).
-
-**Temporal memory + one Datomic/CAS store: built.** Notes, skills, facts, and runs are append-only,
-as-of, attributed observations in one `bio_observations` store: a Datomic-style immutable fact log.
-Agent tools use it; the legible file is a view. When the host injects a `cas`, result/receipt/replay
-bytes stay outside the DB (referenced by digest); an LLVM-style ActionCache gives hash-dedup and replay.
-Sandboxing and effect-limits are the host's job, never ours.
-
-```text
-Phase 0 (done)   Flagship skeleton: manifest #1, runOperation -> run/result/receipts, host persistence.
-Phase 1 (done)   Run/provenance substrate: run+receipt persistence + CAS-of-bytes. Temporal anchoring +
-                 KG-fact recording are consumed by Phase 4 (built with it, not speculative).
-Phase 2 (done)   Network is SQL-native: ducknng_ncurl_table composes URL/headers/body in SQL and parses
-                 JSON -> table with no TS resolver; ducknng HTTP profiles keep token headers host-owned.
-Phase 3 (done)   Out-of-process compute: compute.run (Arrow IPC) with timeout/output caps, process-
-                 group kill, script-bytes provenance, fail-closed. Table, file, and files-only outputs
-                 all built (declared outputs captured into CAS). The resolver materializes one result, but
-                 the runner underneath is async-shaped (`submit/status/collect/cancel`) so local process,
-                 worker-pool, and durable queue implementations share one lifecycle.
-Phase 4 (active) Safe harness-adaptation surface: declare -> validate -> test -> record -> activate ->
-                 rollback. Consumes Phase 1's leftover (record = judgments as KG facts; activate/
-                 rollback = as-of temporality). See slice status below.
-```
-
-The expertise-per-budget measurement (§2) runs continuously now that the Phase 0 skeleton exists.
-
-### Phase 4 slices (walking skeleton first)
-
-Foundation is the **temporal provenance statement**: Phase 4 promotes selected results/judgments and
-activation events into `bio_observations`, whose edge-like rows project into graph shape as of time t
-(`bio_edges` stays the atemporal compiled graph). The irreducible **human** stays at `activate` (the
-approval gate): the substrate provides the rails, the sign-off is hosted, not computed
-([design.md](./design.md#where-the-human-stays-in-the-loop-the-judgmentapproval-boundary)).
-
-- **4.0. Temporal provenance store. Built.** `bio_observations` keyed by `statement_key`; `asOf(t)` =
-  latest row per key; rollback = append a row pointing at an older version. Edge-like rows project into
-  `bio_edges_as_of(t)` with `entailed_edge` closure.
-- **4.1. Record a real judgment. Built.** The production `examples/coloc` run records its per-tissue
-  posteriors as time-versioned KG facts: `runColocRecord` (`src/producers/coloc-record.ts`) runs the
-  manifest, parses the posteriors, and records each one as a scalar observation plus the thresholded
-  PP.H4 > t call as an edge into `bio_edges_as_of`. The mapping is defined once (shared by the example
-  CLI `examples/coloc/record.mjs` and the test) and uses only the generic `recordObservation`: coloc
-  is one producer, not a shape the substrate bends toward; there is no `PP.Hk` logic in `src/core`.
-- **4.2. Activate/rollback state machine. Built.** Current active version is latest-as-of; rollback
-  appends the prior version (never mutates).
-- **4.3: declare → validate → test → record → activate happy path. Built.** Validate → run the
-  candidate over its fixture in a sandbox → record status → activate iff both pass AND an injected
-  approval policy approves. The candidate is generic data, not a bio example.
-- **4.4. Rollback + durable approval gate. Built.** The substrate owns only park + resume: submit
-  records `approval="pending"`; decide resumes it later (across restart/human delay), activating iff
-  approved. A decision is terminal; deciding an unsubmitted/failed candidate fails closed. RBAC, quorum,
-  notifications, identity, and approval UX stay the host's.
-
-Discipline: each slice earns the next: do not build the state machine or loop ahead of its consumer.
-The forbidden/allowed table in §6 is the invariant every slice must already satisfy.
-
-### Reproducibility + long-running lane (C/L): library obligations
-
-Reproducibility and long-running tasks are domain-inherent library goals (a 6-hour result that can't say
-what produced it is a weak receipt): required, not deferred. Built interleaved **C1 → L1 → C2 → L2/L3**;
-the lane is **complete**.
-
-- **C1: environment identity + replay seed. Built.** Runtime-agnostic `EnvDescriptor` (composite
-  layers, no runtime privileged), deterministic `envDigest`, explicit `unknown` (never a fake pin),
-  declared-vs-observed attestation. Every run seeds `replay.json` with actual inputs. It does not execute replay.
-- **L1: async runner skeleton. Built.** `AsyncRunner` is the shared lifecycle. `ComputeRunner` handles compute
-  tasks; the replay/run specialization records job status/result observations in the same temporal substrate as
-  Phase 4. In-memory, ledger-backed, and queue-backed implementations exist; outputs can be CAS refs.
-- **L1.5: durable queue/lease coordination. Built.** `hosts/job-queue.ts` provides an operational queue over
-  `SqlConn`: enqueue replay specs, atomically claim the next available job, heartbeat/extend leases, park a
-  job as waiting, and finish a live claim. The observation ledger remains the status/result audit truth; the
-  queue is the worker coordination index. This is where Absurd-style task/run/checkpoint/event tables integrate:
-  as backend coordination feeding CAS handles, replay specs, receipts, and ledger observations.
-- **C2: reproduceRun().** Re-execute `replay.json` + attestation, diff digests →
-  reproduced/diverged/not_reproducible (honest reasons, never fake confidence).
-- **L2/L3: durable resume + cancellation. Built.** Rehydrate job status without the runner; cancel
-  records a terminal `cancelled` phase where the ledger wins over process memory. Strictly-monotonic,
-  terminal-is-terminal.
-
-What stays the host's (named consumers now exist, and the coloc flagship forces the interface): micromamba/conda/renv/container execution, SLURM/k8s/Modal adapters, scheduler policy, semantic env compatibility, and push notification.
-
-### Later lane (not core): NNG host capabilities
-
-A note, not a build: deferred until a real cross-machine/worker-pool consumer forces it. Two
-capabilities unrelated as abstractions but merged as a host SERVICE, never as a substrate concept:
-**storage/namespace** (`ducknng-fs`: `path → metadata → digest/bytes` over ducknng RPC + CAS + a future
-FUSE host-port) and **execution/control** (pure NNG process calling, slotting behind the existing
-`ComputeRunner` port: no new core lifecycle). Order: `nngComputeRunner` (shared run dir/CAS, contract
-unchanged) → pure Arrow-over-NNG cross-machine runner → `ducknng-fs` host port.
-
-The specific pending compute mode is therefore **NNG-backed stateful external compute**, not a new operation semantics:
-Arrow IPC payloads over ducknng to a remote or persistent worker, declared outputs captured to CAS, environment
-attestation recorded, and durable status/result/cancel exposed through the same async runner + ledger evidence model. A persistent
-Python/R/Julia kernel is a sessionful runner implementation with explicit session handles and replay boundaries;
-it must not smuggle ambient REPL variables into a run receipt.
-
-**Guardrail:** process calling must not depend on the filesystem conceptually. The fs is a staging
-convenience; the execution model stays manifest-declares → host-injects-runner → runner-executes →
-resolver-materializes → records what happened.
-
-## 6. Harness-adaptation doctrine (mods vs hooks)
-
-Extending the harness is core to the Pi lineage: packages, extensions, custom tools, skills, prompts,
-reload/install boundaries. `pi-bio-agent` inherits that and makes it biomedical-safe and provenance-
-aware. The lineage is **agent-mediated extension through explicit harness surfaces, not arbitrary self-
-mutation.** This answers the harness-update failure mode directly:
-
-> **Safe adaptation is declarative, validated, reversible, recorded, and never edits core in place.**
-
-Core updates happen through package / git / update mechanisms; agent-authored changes enter only as
-application-owned specs, skills, or extensions: with tests and reload boundaries.
-
-```text
-bad (forbidden)                       good (the only path)
-  edit core files in place              propose a declared extension/spec/skill
-  monkey-patch tools                    validate it (fail-closed contract)
-  silently change execution behavior    test it (CI gates it)
-  hidden env/process activation         record it in graph/run provenance
-                                        activate at a boundary (/reload, install, CLI flag)
-                                        remove / roll it back
-```
-
-**This is a design invariant now, not a Phase-4 add-on.** Every new surface must already be compatible
-with `declare → validate → test → record → activate → rollback`, even before the adaptation tooling is
-built.
+Every new surface must fit this doctrine before it ships.

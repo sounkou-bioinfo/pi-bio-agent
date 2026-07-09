@@ -775,7 +775,7 @@ even before adaptation tooling exists:
 
 Concretely: `declare → validate → test → record → activate → rollback`. Forbidden: editing core runtime
 files in place, monkey-patching tools, silent behavior changes, hidden env/process activation. See
-[`roadmap.md`](./roadmap.md#6-harness-adaptation-doctrine-mods-vs-hooks) for the full doctrine and the
+[`roadmap.md`](./roadmap.md#harness-adaptation-doctrine) for the full doctrine and the
 graph model of harness state.
 
 ### Where the human stays in the loop (the judgment/approval boundary)

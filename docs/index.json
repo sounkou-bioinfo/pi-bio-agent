@@ -170,7 +170,7 @@
       "path": "docs/roadmap.md",
       "type": "Reference",
       "title": "Roadmap, success, and testing contract",
-      "description": "Read before planning roadmap, success metrics, tests, or flagship work.",
+      "description": "Read before planning roadmap, success metrics, tests, or flagship work; current core closure and consumer-pulled lanes.",
       "tags": [
         "roadmap",
         "testing",

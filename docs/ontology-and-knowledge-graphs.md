@@ -38,7 +38,7 @@ and run history with the same graph-as-SQL it uses for biology. Crucially, **exe
 in package files / CAS / artifacts**: the graph records declarations, provenance, dependencies,
 activation, and outputs, never the running code. That boundary is what lets the harness be queryable and
 self-describing without the graph becoming an executor (and is the substrate behind the
-harness-adaptation doctrine in [`roadmap.md`](./roadmap.md#6-harness-adaptation-doctrine-mods-vs-hooks)).
+harness-adaptation doctrine in [`roadmap.md`](./roadmap.md#harness-adaptation-doctrine)).
 
 It is a *bet*, not a theorem, and the design hedges it honestly: not all bio data is usefully
 graph-shaped (dense matrices, sequences, large tables stay tabular/extension-backed or in CAS; the graph
