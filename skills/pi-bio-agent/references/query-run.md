@@ -11,6 +11,7 @@ Find candidate manifests first when you do not already know the path:
 
 ```sh
 pi-bio-agent catalog --query uniprot
+pi-bio-agent describe <manifestPath>
 ```
 
 ```sh
@@ -26,6 +27,9 @@ Optional flags:
 - `--init-sql "INSTALL duckhts FROM community; LOAD duckhts;"`: host provisioning SQL run before resource resolution.
 - `--ledger auto`: record the run into the project observation ledger.
 - `--run-id id`: caller-chosen run identity for correlation, idempotent orchestration, or external audit references.
+- `--network fetch`: explicitly bind the capped WHATWG-fetch adapter for `http.get`.
+- `--compute local`: explicitly bind the local async process runner for `compute.run`.
+- `--cas-root <dir>`: capture results and declared process outputs in a filesystem CAS.
 
 ## Host Inputs In The Plain CLI
 
@@ -39,10 +43,12 @@ The plain CLI is a visible host surface, not a full application host.
 - Ledger: use `--ledger auto` to record a run into `.pi/bio-agent/store.duckdb`.
 - Remote cache isolation: use `--remote-cache-scope <scope>` when a host wants scoped shared HTTP/CAS reuse.
 
-The plain CLI does **not** currently inject `http.get`, `compute.run`, protected session variables, or credential
-profiles. Those are provided by Pi or by an embedding application through the SDK. Keep secrets out of manifests,
-`--bindings`, and shell history. For credentialed HTTP, the host should commission a ducknng HTTP profile or wrap
-`http.get` with auth policy, then expose only non-secret ids/receipts to the run.
+The plain CLI binds no network or process capability by default. `--network fetch` and `--compute local` are explicit
+grants; the operating-system/container policy remains the real isolation layer. Use `--cas-root` for declared file
+outputs. Host-owned values can come from `--protected-bindings-file`; DuckDB startup settings from
+`--duckdb-config-file`; secret-free policy receipts from `--host-receipts-file`. The CLI can also commission declared
+ducknng HTTP profiles with `--ducknng-http-profile`; credential values come from a named environment variable or
+stdin and only the redacted profile receipt is pinned. Keep secrets out of manifests, `--bindings`, and shell history.
 
 Inspect first:
 

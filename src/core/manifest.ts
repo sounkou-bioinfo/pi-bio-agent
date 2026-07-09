@@ -62,10 +62,10 @@ export interface BioManifest {
   };
 }
 
-/** A structured summary of ONE manifest — its resources, operations (with the runnable ids), resolvers, and
+/** A structured summary of ONE manifest — its resources, operations, resolvers, and
  *  term sets. This is the "describe THIS program" view: an agent reads it to learn what a manifest declares
  *  (which operation ids `bio_run_operation` accepts, which resolver each resource needs) without parsing raw
- *  JSON. Pure over an already-validated manifest; no I/O. */
+ *  JSON. Pure over an already-validated manifest; it deliberately makes no host-runnability claim. */
 export interface ManifestDescription {
   id: string;
   title: string;
@@ -73,7 +73,7 @@ export interface ManifestDescription {
   schema: string;
   version: string;
   resources: { id: string; title: string; resolver: string }[];
-  operations: { id: string; title: string; transport: string; runnable: boolean; description: string }[];
+  operations: { id: string; title: string; transport: string; requiredResources: string[]; description: string }[];
   resolvers: { id: string; title: string }[];
   termSets: { id: string; title: string; ordered: boolean; members: number }[];
 }
@@ -87,12 +87,11 @@ export function describeManifest(m: BioManifest): ManifestDescription {
     schema: m.schema,
     version: m.version,
     resources: (p.resources ?? []).map((r) => ({ id: r.id, title: r.title, resolver: r.resolver })),
-    // `runnable` = a duckdb.sql operation bio_run_operation can execute; other transports are host-gated.
     operations: (p.operations ?? []).map((o) => ({
       id: o.id,
       title: o.title,
       transport: o.transport,
-      runnable: o.transport === "duckdb.sql",
+      requiredResources: o.sql?.requiredResources ?? [],
       description: o.description,
     })),
     resolvers: (p.resolvers ?? []).map((r) => ({ id: r.id, title: r.title })),

@@ -46,8 +46,8 @@ test("installer help lists every accepted host preset and link mode", async () =
     env: {},
   });
   assert.equal(code, 0);
-  assert.deepEqual(out, []);
-  const help = err.join("\n");
+  assert.deepEqual(err, []);
+  const help = out.join("\n");
   for (const preset of [
     "generic",
     "pi",

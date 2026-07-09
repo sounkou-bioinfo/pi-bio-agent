@@ -36,7 +36,8 @@ const ducknngTlsAvailable = await (async () => {
       raw.closeSync?.();
       inst.closeSync?.();
     }
-  } catch {
+  } catch (error) {
+    if (ducknngExtensionPath) throw error;
     return false;
   }
 })();

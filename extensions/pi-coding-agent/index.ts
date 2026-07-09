@@ -24,6 +24,8 @@ import { systemClock } from "../../src/core/clock.js";
 import type { SqlConn, ComputeRunner } from "../../src/core/ports.js";
 import type { FetchLike } from "../../src/duckdb/resolvers/http-table-scan.js";
 import { canonicalDigest } from "../../src/core/reproducibility.js";
+import type { RunReplaySpec } from "../../src/core/reproducibility.js";
+import { reproduceRun } from "../../src/hosts/reproduce.js";
 
 function text(payload: unknown) {
   const body = typeof payload === "string" ? payload : JSON.stringify(payload, null, 2);
@@ -49,7 +51,7 @@ const BIO_ORIENTATION = [
   "How to work:",
   "- DISCOVER cheaply: your MEMORY is the index — check `bio_list_memory` / `bio_walk_memory` FIRST. For",
   "  manifest-backed sources/templates, call `bio_list_sources`, then call `bio_describe_model` with ONE",
-  "  `manifestPath` (a local path OR an http(s) URL) to learn its resources, resolvers, and RUNNABLE operation ids.",
+  "  `manifestPath` (a local path OR an http(s) URL) to learn its resources, resolvers, and host admission status.",
   "  Never read every example, and never parse raw manifest JSON. With no argument `bio_describe_model` describes",
   "  the global model; `bio_list_duckdb_extensions` shows the readable-format surface.",
   "- RUN: `bio_run_operation(dbPath, manifestPath, operationId)` runs a declared operation and receipts it under",
@@ -540,8 +542,8 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
         source: author,
         attrs,
       });
-    } catch {
-      /* best-effort trace edge: never fail a completed scientific run because the chat/run link could not be logged */
+    } catch (error) {
+      console.warn(`bio-agent: tool/run link for '${runId}' was not recorded (${error instanceof Error ? error.message : String(error)}); the scientific run remains persisted`);
     }
   }
 
@@ -578,9 +580,9 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
   pi.registerTool({
     name: "bio_list_sources",
     label: "List manifest-backed sources",
-    description: "List validated manifest-backed sources/templates the agent can inspect and run. This is the source-catalog answer to connector/skill sprawl: it returns manifest paths, declared tables, operations, resolvers, and host capability hints; then call bio_describe_model on one manifestPath before querying. The default root is the project examples/ directory when present, otherwise the packaged examples/ directory.",
+    description: "List validated manifest-backed sources/templates the agent can inspect and run. This is the source-catalog answer to connector/skill sprawl: it returns manifest paths, declared tables, operations, resolvers, and host requirements; then call bio_describe_model on one manifestPath for this host's admission assessment. The default root is the project examples/ directory when present, otherwise the packaged examples/ directory.",
     parameters: Type.Object({
-      query: Type.Optional(Type.String({ description: "Optional text search over manifest path, id, title, description, resources, operations, resolvers, and capability hints." })),
+      query: Type.Optional(Type.String({ description: "Optional text search over manifest path, id, title, description, resources, operations, resolvers, and host requirements." })),
       root: Type.Optional(Type.String({ description: "Optional catalog root to scan for pi-bio manifest JSON files. Relative paths resolve against cwd." })),
       includeInvalid: Type.Optional(Type.Boolean({ description: "When true, include invalid pi-bio manifest files and their validation errors." })),
     }),
@@ -597,14 +599,14 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
   pi.registerTool({
     name: "bio_describe_model",
     label: "Describe Pi Bio model",
-    description: "Describe the pi-bio-agent model. With no argument: the global domain model (SQL-first bio primitives, ontology/KG modeling, provenance, DuckDB extension substrate, context contract). With a manifestPath: THAT manifest's resources, operations (including the runnable operation ids bio_run_operation accepts), resolvers, and term sets — the discovery path, so you never parse raw manifest JSON by hand. The manifestPath may be a local path OR an http(s) URL (a remote manifest registry); a URL uses the host-granted network and fails closed when none is injected.",
+    description: "Describe the pi-bio-agent model. With no argument: the global domain model. With a manifestPath: THAT manifest's resources, operations, resolvers, term sets, and this host's ready/blocked/unknown admission assessment. The manifestPath may be local or http(s); a URL uses host-granted network and fails closed when none is injected.",
     parameters: Type.Object({
       manifestPath: Type.Optional(Type.String({ description: "Optional path to a manifest JSON — a local path (relative to cwd or absolute) OR an http(s) URL. When set, describe that specific manifest instead of the global domain model." })),
     }),
     async execute(_id, params: { manifestPath?: string }, _signal, _onUpdate, ctx) {
       if (params.manifestPath) {
         // describe THIS program: resources/operations/resolvers/termSets. Local path or (host-granted) URL.
-        return text(await describeBioManifestFromPath({ cwd: ctx.cwd, manifestPath: params.manifestPath, network }));
+        return text(await describeBioManifestFromPath({ cwd: ctx.cwd, manifestPath: params.manifestPath, network, compute: computeGrant }));
       }
       const bioCtx: BioContext = {
         sources: [],
@@ -667,6 +669,29 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
         const out = await runBioQueryFromManifest({ cwd: ctx.cwd, dbPath, manifestPath, sql, resources, bindings, runId, network, compute: computeGrant, cas, remoteCacheScope, protectedSessionBindings, protectedSessionVariables, signal, store: storeConn, author });
         await recordToolRunLink(storeConn, ctx, id, "bio_query", out.runId);
         return out;
+      }));
+    },
+  });
+
+  pi.registerTool({
+    name: "bio_reproduce_run",
+    label: "Reproduce a bio run",
+    description: "Re-execute a persisted replay.json against a fresh DuckDB database and compare pinned source, result, and environment digests. Returns matched, concrete missing/extra digests, or an explicit notReproducible reason.",
+    parameters: Type.Object({
+      replayPath: Type.String({ description: "Path to a persisted replay.json, relative to cwd or absolute." }),
+      dbPath: Type.Optional(Type.String({ description: "Fresh DuckDB database path for the verification execution. Defaults to ':memory:'." })),
+    }),
+    async execute(id, params: { replayPath: string; dbPath?: string }, signal, _onUpdate, ctx) {
+      const replay = JSON.parse(await readFile(resolve(ctx.cwd, params.replayPath), "utf8")) as RunReplaySpec;
+      const dbPath = params.dbPath ?? ":memory:";
+      const reproduceCas = cas ?? (replay.resultDigest ? fsCasStore(join(ctx.cwd, ".pi", "bio-agent", "cas")) : undefined);
+      return text(await withRunLog(openStore, ctx.cwd, dbPath, async (storeConn) => {
+        const result = await reproduceRun({
+          cwd: ctx.cwd, replay, dbPath, network, compute: computeGrant, cas: reproduceCas, remoteCacheScope,
+          protectedSessionBindings, protectedSessionVariables, signal, store: storeConn, author,
+        });
+        if (result.reproductionRunId) await recordToolRunLink(storeConn, ctx, id, "bio_reproduce_run", result.reproductionRunId);
+        return result;
       }));
     },
   });

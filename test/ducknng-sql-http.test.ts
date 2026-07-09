@@ -15,7 +15,10 @@ const ducknngAvailable = await (async () => {
     if (!ducknngExtensionPath) await c.run("INSTALL ducknng FROM community");
     await c.run(ducknngLoadSql);
     return true;
-  } catch { return false; }
+  } catch (error) {
+    if (ducknngExtensionPath) throw error;
+    return false;
+  }
 })();
 
 describe("SQL-native HTTP grounding via ducknng (a local ducknng server is the deterministic fixture)", { skip: ducknngAvailable ? false : "ducknng unavailable (provision: INSTALL ducknng FROM community on a matching DuckDB)" }, () => {
@@ -53,6 +56,7 @@ describe("SQL-native HTTP grounding via ducknng (a local ducknng server is the d
     await conn.run(ducknngLoadSql);
     if (!(await ducknngHttpProfilesAvailable(conn))) {
       inst.closeSync();
+      assert.equal(ducknngExtensionPath, undefined, "an explicitly supplied owned ducknng build must provide HTTP profiles");
       t.skip("ducknng HTTP profiles unavailable in this build");
       return;
     }
@@ -138,6 +142,7 @@ describe("SQL-native HTTP grounding via ducknng (a local ducknng server is the d
     await conn.run(ducknngLoadSql);
     if (!(await ducknngHttpProfileSubjectsAvailable(conn))) {
       inst.closeSync();
+      assert.equal(ducknngExtensionPath, undefined, "an explicitly supplied owned ducknng build must provide subject-restricted HTTP profiles");
       t.skip("ducknng subject-restricted HTTP profiles unavailable in this build");
       return;
     }

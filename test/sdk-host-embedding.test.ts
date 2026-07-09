@@ -4,11 +4,10 @@ import { promisify } from "node:util";
 import { describe, test } from "node:test";
 
 const execFileAsync = promisify(execFile);
-const npmCmd = process.platform === "win32" ? "npm.cmd" : "npm";
 
 describe("SDK host embedding dogfood", () => {
   test("runs a host-composed query with injected DuckDB, CAS, compute, policy, receipts, and CAS metadata", { timeout: 20_000 }, async () => {
-    const { stdout } = await execFileAsync(npmCmd, ["run", "dogfood:sdk-host-embedding"], {
+    const { stdout } = await execFileAsync(process.execPath, ["scripts/sdk-host-embedding.mjs"], {
       cwd: process.cwd(),
       maxBuffer: 4 * 1024 * 1024,
     });

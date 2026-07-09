@@ -173,6 +173,20 @@ async function validateSkill(skillDir, root) {
     ]) {
       if (!text.includes(heading)) errors.push(`${relSkillFile}: missing required section '${heading}'`);
     }
+
+    const extensionSource = await readFile(join(repoRoot, "extensions", "pi-coding-agent", "index.ts"), "utf8");
+    const registeredTools = new Set([...extensionSource.matchAll(/pi\.registerTool\(\{\s*name:\s*"(bio_[A-Za-z0-9_]+)"/g)].map((match) => match[1]));
+    const nonToolRelations = new Set(["bio_edges", "bio_edges_as_of", "bio_observations"]);
+    const documentedBioNames = new Set();
+    for (const path of await listMarkdownFiles(skillDir)) {
+      const body = await readFile(path, "utf8");
+      for (const match of body.matchAll(/\bbio_[A-Za-z0-9_]+\b/g)) documentedBioNames.add(match[0]);
+    }
+    for (const name of documentedBioNames) {
+      if (!nonToolRelations.has(name) && !registeredTools.has(name)) {
+        errors.push(`${relSkillFile}: documents unknown Pi tool '${name}' (not registered by extensions/pi-coding-agent)`);
+      }
+    }
   }
 
   const mdFiles = await listMarkdownFiles(skillDir);

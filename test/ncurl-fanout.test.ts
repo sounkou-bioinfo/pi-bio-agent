@@ -16,7 +16,10 @@ const ducknngAvailable = await (async () => {
     await c.run("INSTALL ducknng FROM community");
     await c.run("LOAD ducknng");
     return true;
-  } catch { return false; }
+  } catch (error) {
+    if (process.env.DUCKNNG_EXTENSION_PATH) throw error;
+    return false;
+  }
 })();
 
 const CANNED = '[{"input":"x","most_severe_consequence":"missense_variant"}]';

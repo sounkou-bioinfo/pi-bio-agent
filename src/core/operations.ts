@@ -84,7 +84,10 @@ export async function runQuery(
   // Pre-flight: the request must be RUNNABLE before it becomes a run — every named resource is registered and
   // its resolver has a bound impl. These are config errors (thrown plainly, NOT failed runs). Runtime failures
   // (a resolver that errors, or the SQL) happen below, after the run has started, and ARE recorded as failed.
+  const seenResources = new Set<string>();
   for (const rid of resources) {
+    if (seenResources.has(rid)) throw new Error(`query '${id}' lists duplicate resource '${rid}'; declare distinct resource ids for distinct executions`);
+    seenResources.add(rid);
     const resource = registry.getResource(rid);
     if (!resource) throw new Error(`query '${id}' requires unregistered resource '${rid}'`);
     if (!registry.hasResolverImpl(resource.resolver)) throw new Error(`resolver '${resource.resolver}' is declared but no implementation is bound`);
@@ -130,7 +133,7 @@ export async function runQuery(
     return { result, run, receipts };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    run = appendRunEvent(run, { type: "failed", at: now, message });
+    run = appendRunEvent(run, { type: signal?.aborted ? "cancelled" : "failed", at: now, message });
     run = { ...run, error: message };
     throw new OperationRunError(message, run, receipts);
   }

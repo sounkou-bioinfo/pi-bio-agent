@@ -1,15 +1,18 @@
 import { promises as fs } from "node:fs";
 import { join, resolve } from "node:path";
 import type { SqlConn } from "../core/ports.js";
+import type { HostCapabilityReceipt } from "../core/reproducibility.js";
 import { runBioOperationFromManifest, runBioQueryFromManifest } from "../hosts/run-store.js";
 import { openBioStore } from "../hosts/bio-store.js";
+import { fsCasStore } from "../hosts/fs-cas.js";
+import { cappedFetchLike, DEFAULT_MAX_RESPONSE_BYTES } from "../hosts/network.js";
+import { nodeComputeRunner } from "../process/node-compute-runner.js";
 import type { DucknngHttpProfileSpec } from "../duckdb/http-profiles.js";
 
 // The `query` / `run` CLI engine — the substrate's actual value at a provider-agnostic entry point (not Pi-only).
 // It wraps the SAME tested host functions the Pi extension uses (runBioQueryFromManifest / runBioOperationFromManifest),
-// so the CLI and the agent share one code path. Deliberately FAIL-CLOSED like the default Pi entrypoint: no network,
-// no out-of-process compute are bound here, so a networked/compute manifest fails closed. (A networked CLI variant
-// can compose a fetch in later, the visible-choice discipline — never an ambient default.)
+// so the CLI and the agent share one code path. Effects remain opt-in: `--network fetch`, `--compute local`, and
+// `--cas-root` compose the existing host ports explicitly; absent flags leave those resolvers unbound.
 //
 //   pi-bio-agent query <manifest.json> --db <path|:memory:> --sql "<read-only SQL>" [--resources a,b] [--run-id id]
 //   pi-bio-agent run   <manifest.json> --db <path|:memory:> --operation <operationId>   [--run-id id]
@@ -23,6 +26,7 @@ export interface RunCliDeps {
   err: (line: string) => void;
   env?: NodeJS.ProcessEnv;
   readStdin?: () => Promise<string>;
+  signal?: AbortSignal;
 }
 
 /** Parse `--key value` and `--key=value` pairs after the positional manifest path. Repeated keys keep the last.
@@ -70,9 +74,27 @@ function parseBindings(raw: string | undefined): Record<string, unknown> | undef
 
 const USAGE =
   "usage:\n" +
-  "  pi-bio-agent query <manifest.json> --db <path|:memory:> --sql \"<SELECT/WITH/DESCRIBE/SUMMARIZE>\" [--resources a,b] [--bindings '{...}'] [--init-sql \"INSTALL ...; LOAD ...\"] [--ducknng-http-profile <json>] [--remote-cache-scope <scope>] [--run-id id] [--ledger <path|auto> [--author name]]\n" +
-  "  pi-bio-agent run   <manifest.json> --db <path|:memory:> --operation <id> [--bindings '{...}'] [--init-sql \"INSTALL ...; LOAD ...\"] [--ducknng-http-profile <json>] [--remote-cache-scope <scope>] [--run-id id] [--ledger <path|auto> [--author name]]\n" +
-  "  --ledger records the run as a run:<id> fact in the shared bio_observations store (path, or 'auto' for the project default); --author attributes it (default 'cli'); --remote-cache-scope enables host-scoped shared HTTP/CAS reuse; --ducknng-http-profile commissions a host HTTP profile on this run's DuckDB connection using authHeaderValueEnv or authHeaderValueStdin.";
+  "  pi-bio-agent query <manifest.json> --db <path|:memory:> --sql \"<SELECT/WITH/DESCRIBE/SUMMARIZE>\" [host options]\n" +
+  "  pi-bio-agent run   <manifest.json> --db <path|:memory:> --operation <id> [host options]\n" +
+  "  host options: [--network fetch [--max-response-bytes n]] [--compute local] [--cas-root dir] [--bindings '{...}'] [--protected-bindings-file json] [--protected-variables a,b] [--duckdb-config-file json] [--init-sql \"INSTALL ...; LOAD ...\"] [--ducknng-http-profile json] [--host-receipts-file json] [--remote-cache-scope scope] [--run-id id] [--ledger <path|auto> [--author name]]";
+
+async function readJsonFile<T>(cwd: string, path: string, label: string): Promise<T> {
+  let text: string;
+  try {
+    text = await fs.readFile(resolve(cwd, path), "utf8");
+  } catch (error) {
+    throw new Error(`${label} is not readable: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error(`${label} must contain valid JSON`);
+  }
+}
+
+function assertObject(value: unknown, label: string): asserts value is Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${label} must be a JSON object`);
+}
 
 /** Split a `;`-separated SQL string into statements WITHOUT splitting a `;` inside a single-quoted string literal
  *  (with `''` escapes). Enough for the provisioning escape hatch (`SET VARIABLE tls = fn('a;b')`); not a full
@@ -156,12 +178,20 @@ export async function mainRun(sub: string, argv: string[], deps: RunCliDeps): Pr
     // PER-SUBCOMMAND flags, not a shared set: `run --resources` / `query --operation` would otherwise be accepted
     // and SILENTLY IGNORED (a `run` still resolves the operation's own requiredResources — the caller's --resources
     // exclusion is a no-op), which is exactly the surprising fall-through the unknown-flag hardening exists to stop.
-    const COMMON = ["db", "bindings", "run-id", "init-sql", "ledger", "author", "remote-cache-scope", "ducknng-http-profile"];
+    const COMMON = [
+      "db", "bindings", "run-id", "init-sql", "ledger", "author", "remote-cache-scope", "ducknng-http-profile",
+      "network", "max-response-bytes", "compute", "cas-root", "duckdb-config-file", "protected-bindings-file",
+      "protected-variables", "host-receipts-file",
+    ];
     const KNOWN = new Set(sub === "query" ? [...COMMON, "sql", "resources"] : [...COMMON, "operation"]);
     const unknown = Object.keys(flags).filter((k) => !KNOWN.has(k));
     if (unknown.length) throw new Error(`unknown flag(s) for '${sub}': ${unknown.map((k) => `--${k}`).join(", ")}`); // a typo / wrong-subcommand flag must not silently fall back
     const empty = Object.entries(flags).filter(([, v]) => v === "").map(([k]) => k);
     if (empty.length) throw new Error(`flag(s) with an empty value: ${empty.map((k) => `--${k}`).join(", ")}`); // `--db=` etc.
+    if (flags.network && flags.network !== "fetch") throw new Error("--network currently accepts only 'fetch'");
+    if (flags.compute && flags.compute !== "local") throw new Error("--compute currently accepts only 'local'");
+    if (flags["max-response-bytes"] && flags.network !== "fetch") throw new Error("--max-response-bytes requires --network fetch");
+    if (flags["max-response-bytes"] && (!Number.isSafeInteger(Number(flags["max-response-bytes"])) || Number(flags["max-response-bytes"]) < 1)) throw new Error("--max-response-bytes must be a positive safe integer");
     bindings = parseBindings(flags.bindings);
   } catch (e) { deps.err(e instanceof Error ? e.message : String(e)); deps.err(USAGE); return 2; }
 
@@ -176,12 +206,37 @@ export async function mainRun(sub: string, argv: string[], deps: RunCliDeps): Pr
   if (sub === "run" && !flags.operation) { deps.err("run requires --operation <operationId>"); deps.err(USAGE); return 2; }
   if (sub !== "query" && sub !== "run") { deps.err(USAGE); return 2; }
   let ducknngHttpProfiles: DucknngHttpProfileSpec[] | undefined;
+  let duckdbConfig: Record<string, string> | undefined;
+  let protectedSessionBindings: Record<string, unknown> | undefined;
+  let hostCapabilityReceipts: HostCapabilityReceipt[] | undefined;
   try {
     ducknngHttpProfiles = await loadDucknngHttpProfiles(flags["ducknng-http-profile"], deps);
+    if (flags["duckdb-config-file"]) {
+      const value = await readJsonFile<unknown>(deps.cwd, flags["duckdb-config-file"], "--duckdb-config-file");
+      assertObject(value, "--duckdb-config-file");
+      if (Object.values(value).some((entry) => typeof entry !== "string")) throw new Error("--duckdb-config-file values must be strings");
+      duckdbConfig = value as Record<string, string>;
+    }
+    if (flags["protected-bindings-file"]) {
+      const value = await readJsonFile<unknown>(deps.cwd, flags["protected-bindings-file"], "--protected-bindings-file");
+      assertObject(value, "--protected-bindings-file");
+      protectedSessionBindings = value;
+    }
+    if (flags["host-receipts-file"]) {
+      const value = await readJsonFile<unknown>(deps.cwd, flags["host-receipts-file"], "--host-receipts-file");
+      if (!Array.isArray(value) || value.some((entry) => !entry || typeof entry !== "object" || Array.isArray(entry))) throw new Error("--host-receipts-file must be a JSON array of receipt objects");
+      hostCapabilityReceipts = value as HostCapabilityReceipt[];
+    }
   } catch (e) {
-    deps.err(`--ducknng-http-profile: ${e instanceof Error ? e.message : String(e)}`);
+    deps.err(e instanceof Error ? e.message : String(e));
     return 2;
   }
+  const protectedSessionVariables = flags["protected-variables"]?.split(",").map((name) => name.trim()).filter(Boolean);
+  const cas = flags["cas-root"] ? fsCasStore(resolve(deps.cwd, flags["cas-root"])) : undefined;
+  const compute = flags.compute === "local" ? { runner: nodeComputeRunner() } : undefined;
+  const network = flags.network === "fetch"
+    ? { fetch: cappedFetchLike(globalThis.fetch, Number(flags["max-response-bytes"] ?? DEFAULT_MAX_RESPONSE_BYTES)) }
+    : undefined;
   // Optional LEDGER opt-in: fold this run into the shared bio_observations store as a `run:<id>` fact — the thesis'
   // "compute status is a row in the one ledger" demonstrated from the provider-agnostic CLI, not just the extension.
   // EXPLICIT + path-specified (`--ledger <path|auto>`), never an ambient default (the CLI's visible-choice
@@ -196,7 +251,11 @@ export async function mainRun(sub: string, argv: string[], deps: RunCliDeps): Pr
       return 1;
     }
   }
-  const common = { cwd: deps.cwd, dbPath, manifestPath, runId, bindings, duckdbInitSql, remoteCacheScope, ducknngHttpProfiles, ...(ledger ? { store: ledger.conn, author: flags.author ?? "cli" } : {}) };
+  const common = {
+    cwd: deps.cwd, dbPath, manifestPath, runId, bindings, duckdbInitSql, remoteCacheScope, ducknngHttpProfiles,
+    network, compute, cas, signal: deps.signal, duckdbConfig, protectedSessionBindings, protectedSessionVariables, hostCapabilityReceipts,
+    ...(ledger ? { store: ledger.conn, author: flags.author ?? "cli", ...(cas ? { casMetadata: { conn: ledger.conn } } : {}) } : {}),
+  };
 
   let res;
   try {
@@ -218,9 +277,9 @@ export async function mainRun(sub: string, argv: string[], deps: RunCliDeps): Pr
     deps.out(JSON.stringify({ ok: false, runId: res.runId, status: res.status, runDir: res.runDir }, null, 2));
     return 1;
   }
-  // success: emit the response summary + the actual answer rows (result.json under the run dir)
-  let rows: unknown = undefined;
-  try { rows = JSON.parse(await fs.readFile(join(res.runDir, "result.json"), "utf8")).rows; } catch { /* files-only / no rows */ }
+  // CLI runs always serialize their result view. A successful run with a missing/corrupt result file is evidence
+  // corruption, not an empty answer, so let the error surface instead of silently printing `rows: undefined`.
+  const rows = JSON.parse(await fs.readFile(join(res.runDir, "result.json"), "utf8")).rows;
   deps.out(JSON.stringify({ ok: true, runId: res.runId, status: res.status, rowCount: res.rowCount, artifacts: res.artifacts, runDir: res.runDir, rows }, null, 2));
   return 0;
 }

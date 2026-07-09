@@ -3,8 +3,8 @@
 `compute.run` is for work that SQL is poor at: R models, Python packages, command-line bioinformatics tools, report
 generators, or other processes. It is a manifest resolver, not an ambient escape hatch.
 
-Compute is host-granted. A run fails closed unless the host injects a `ComputeRunner`. The plain CLI currently does
-not bind compute by default; Pi or an application host can.
+Compute is host-granted. A run fails closed unless the host injects a `ComputeRunner`. The plain CLI binds the local
+process runner only when `--compute local` is present; declared file outputs also need `--cas-root`.
 
 ## Table Result
 
@@ -88,6 +88,14 @@ capture them into CAS and receipts.
 ```
 
 Declared outputs are evidence. Do not hide important output files outside the declared `outputs` list.
+
+```sh
+pi-bio-agent query compute-manifest.json \
+  --db :memory: \
+  --compute local \
+  --cas-root .pi/bio-agent/cas \
+  --sql "SELECT * FROM summary"
+```
 
 ## When To Use Compute
 

@@ -20,7 +20,7 @@
       "path": "docs/bring-it-home-plan.md",
       "type": "Proposal",
       "title": "Bring-it-home plan — core substrate closure",
-      "description": "Core-library closure ledger after the workbench split: what is closed in pi-bio-agent, what proves it, and what remains outside core.",
+      "description": "Core-library closure ledger after the workbench split: proven substrate capabilities, honest limits, and the downstream work that should pull any next abstraction.",
       "tags": [
         "roadmap",
         "substrate",
@@ -197,7 +197,7 @@
       "path": "docs/refinments.md",
       "type": "Worklog",
       "title": "Refinements",
-      "description": "Live cleanup targets that still need concrete consumer pressure before they become core work.",
+      "description": "Concrete sharp edges and consumer-pulled work that remain after core substrate closure.",
       "tags": [
         "refinements",
         "open-issues",

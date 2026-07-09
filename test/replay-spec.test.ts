@@ -40,18 +40,20 @@ describe("C1b-ii: replay.json seed", () => {
     assert.deepEqual(authored.provides.resources[0].params.command, ["sh", "./render.sh"], "authored command stays relative (portable)");
 
     // resolved compute facts carry THIS host's absolute path (what actually ran) — both are stored
-    assert.equal(replay.compute!.resourceId, "tracks");
-    assert.equal(replay.compute!.resultTable, "artifacts");
-    assert.equal(replay.compute!.command![0], "sh");
-    assert.ok(isAbsolute(replay.compute!.command![1] as string), "resolved command path is absolute (execution fact)");
-    assert.equal(replay.compute!.command![1], resolve(process.cwd(), "examples", "compute-files-only", "render.sh"));
+    assert.equal(replay.computeResources?.length, 1);
+    const compute = replay.computeResources![0]!;
+    assert.equal(compute.resourceId, "tracks");
+    assert.equal(compute.resultTable, "artifacts");
+    assert.equal(compute.command![0], "sh");
+    assert.ok(isAbsolute(compute.command![1] as string), "resolved command path is absolute (execution fact)");
+    assert.equal(compute.command![1], resolve(process.cwd(), "examples", "compute-files-only", "render.sh"));
 
     // C1b-iii enrichment: receipts exist now, so replay is pinned to their digests + carries the env summary
     assert.ok(Array.isArray(replay.sourceReceiptDigests) && replay.sourceReceiptDigests.length > 0, "receipt digests pinned");
     assert.ok(replay.sourceReceiptDigests!.every((d) => /^sha256:[0-9a-f]{64}$/.test(d)));
-    assert.ok(replay.environment, "env attestation summary present");
-    assert.equal(replay.environment!.status, "observed_only", "nodeComputeRunner probed, no declaration");
-    assert.match(replay.environment!.observedDigest!, /^sha256:[0-9a-f]{64}$/);
+    assert.ok(compute.environment, "per-resource env attestation summary present");
+    assert.equal(compute.environment!.status, "observed_only", "nodeComputeRunner probed, no declaration");
+    assert.match(compute.environment!.observedDigest!, /^sha256:[0-9a-f]{64}$/);
   });
 
   test("compute replay facts include declared artifact metadata", async () => {
@@ -84,7 +86,7 @@ describe("C1b-ii: replay.json seed", () => {
     if (!out.ok) return;
 
     const replay = await readReplay(out.runDir);
-    assert.deepEqual(replay.compute!.outputs, [
+    assert.deepEqual(replay.computeResources![0]!.outputs, [
       { name: "plot", path: "plot.svg", kind: "file", mediaType: "image/svg+xml", semanticRole: "figure", attrs: { renderer: "shell" } },
     ]);
   });
@@ -104,7 +106,7 @@ describe("C1b-ii: replay.json seed", () => {
     if (!out.ok) return;
     const replay = await readReplay(out.runDir);
     assert.equal(replay.kind, "query");
-    assert.equal(replay.compute, undefined, "no compute resource -> no compute block");
+    assert.equal(replay.computeResources, undefined, "no compute resource -> no compute block");
     assert.equal(replay.sql, "SELECT x FROM nums");
   });
 });

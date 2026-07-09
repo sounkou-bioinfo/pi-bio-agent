@@ -19,7 +19,8 @@ const ducknngUploadAvailable = await (async () => {
     if (Number(fn.getRowObjects()[0]?.n ?? 0) === 0) return false;
     await raw.run("SELECT ducknng_register_upload_methods(false)");
     return true;
-  } catch {
+  } catch (error) {
+    if (ducknngExtensionPath) throw error;
     return false;
   } finally {
     inst?.closeSync();

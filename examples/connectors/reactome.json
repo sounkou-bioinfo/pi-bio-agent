@@ -11,6 +11,7 @@
       "params": {
         "table": "reactome_entity",
         "extensions": ["ducknng"],
+        "declaredSources": ["https://reactome.org/ContentService/data/query/"],
         "sql": "SELECT * FROM ducknng_ncurl_table('https://reactome.org/ContentService/data/query/' || getvariable('reactome_id'), 'GET', '[{\"name\":\"Accept\",\"value\":\"application/json\"}]', ''::BLOB, 20000, coalesce(getvariable('tls'), 0)::UBIGINT)"
       }
     }]

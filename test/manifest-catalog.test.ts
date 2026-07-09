@@ -8,7 +8,7 @@ import { listManifestCatalog } from "../src/hosts/manifest-catalog.js";
 describe("manifest catalog: source discovery is manifest-backed, not connector code", () => {
   test("lists validated packaged manifests with table, operation, and capability hints", async () => {
     const catalog = await listManifestCatalog({ cwd: process.cwd(), root: "examples", query: "clinvar" });
-    assert.equal(catalog.schema, "pi-bio.manifest_catalog.v1");
+    assert.equal(catalog.schema, "pi-bio.manifest_catalog.v2");
     assert.equal(catalog.root, "examples");
     assert.equal(catalog.invalid.length, 0);
     assert.ok(catalog.entries.length >= 1);
@@ -18,20 +18,20 @@ describe("manifest catalog: source discovery is manifest-backed, not connector c
     assert.deepEqual(clinvar.resources.map((r) => ({ id: r.id, resolver: r.resolver, table: r.table })), [
       { id: "clinvar", resolver: "duckhts.read_bcf", table: "clinvar" },
     ]);
-    assert.ok(clinvar.capabilityHints.includes("duckdb.extension.duckhts"));
-    assert.ok(clinvar.capabilityHints.includes("network.egress"));
+    assert.ok(clinvar.requirements.includes("duckdb.extension.duckhts"));
+    assert.ok(clinvar.requirements.includes("network.egress"));
   });
 
   test("discovers GraphQL and operation manifests without per-source TypeScript connectors", async () => {
     const catalog = await listManifestCatalog({ cwd: process.cwd(), root: "examples", query: "graphql" });
     const openTargets = catalog.entries.find((entry) => entry.id === "connector-opentargets-graphql");
     assert.ok(openTargets);
-    assert.deepEqual(openTargets.operations.map((op) => ({ id: op.id, runnable: op.runnable })), [
-      { id: "opentargets.associated_diseases", runnable: true },
+    assert.deepEqual(openTargets.operations.map((op) => ({ id: op.id, requiredResources: op.requiredResources })), [
+      { id: "opentargets.associated_diseases", requiredResources: ["opentargets_target_associated_diseases"] },
     ]);
     assert.deepEqual(openTargets.resolverIds, ["duckdb.sql_materialize"]);
-    assert.ok(openTargets.capabilityHints.includes("duckdb.extension.ducknng"));
-    assert.ok(openTargets.capabilityHints.includes("network.egress"));
+    assert.ok(openTargets.requirements.includes("duckdb.extension.ducknng"));
+    assert.ok(openTargets.requirements.includes("network.egress"));
   });
 
   test("can include invalid pi-bio manifests as validation data for host/catalog maintainers", async () => {

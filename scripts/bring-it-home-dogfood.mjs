@@ -115,7 +115,7 @@ async function compileExternalConsumer() {
   const consumerRoot = await fs.mkdtemp(join(tmpdir(), "pi-bio-sdk-consumer-"));
   try {
     await fs.writeFile(join(consumerRoot, "package.json"), JSON.stringify({ type: "module", private: true }), "utf8");
-    const packed = await execFileAsync(npmCmd, ["pack", "--silent", "--pack-destination", consumerRoot], {
+    const packed = await execFileAsync(npmCmd, ["pack", "--silent", "--ignore-scripts", "--pack-destination", consumerRoot], {
       cwd: process.cwd(),
       maxBuffer: 2 * 1024 * 1024,
     });

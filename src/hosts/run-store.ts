@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import { systemClock } from "../core/clock.js";
-import { RUN_REPLAY_SPEC_SCHEMA, receiptContentDigest, canonicalDigest, hostCapabilityReceiptDigest, type HostCapabilityReceipt, type RunReplaySpec, type EnvAttestationSummary } from "../core/reproducibility.js";
+import { RUN_REPLAY_SPEC_SCHEMA, receiptContentDigest, canonicalDigest, hostCapabilityReceiptDigest, type HostCapabilityReceipt, type RunReplaySpec, type EnvAttestationSummary, type ComputeReplayResource, type RunReplayOutcome } from "../core/reproducibility.js";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { createBioRegistry, describeManifest, validateBioManifest, type BioRegistry, type BioManifest, type ManifestDescription, type ResolutionReceipt } from "../core/manifest.js";
@@ -21,9 +21,11 @@ import { duckdbSqlMaterializeResolver } from "../duckdb/resolvers/duckdb-sql-mat
 import { duckhtsReadBcfResolver } from "../duckdb/resolvers/duckhts-read-bcf.js";
 import { httpTableResolver, type FetchLike } from "../duckdb/resolvers/http-table-scan.js";
 import { computeRunResolver } from "../duckdb/resolvers/compute-run.js";
-import { liveOutEdgesAsOf, recordMonotonicObservation, recordObservation } from "../duckdb/observations.js";
+import { liveOutEdgesAsOf, recordMonotonicObservation } from "../duckdb/observations.js";
 import { addCasRef, dropCasRefs, initCasMetadata, recordCasObject, replaceCasRefs } from "./cas-metadata.js";
 import { recordArtifactReference } from "./artifacts.js";
+import { assessManifestHost, type HostCapabilityStatus, type ManifestHostAssessment } from "./manifest-capabilities.js";
+import { recordManifestDeclarations } from "./declaration-graph.js";
 
 // Host-level run runner + store. Core returns { run, result, receipts }; persistence and resolver binding
 // live HERE, not in core. Only built-in resolver impls are bound; a manifest that declares any other
@@ -383,6 +385,42 @@ export type RunOperationResponse =
   | { ok: true; runId: string; operationId: string; status: BioRunRecord["status"]; rowCount: number; artifacts: PersistedRun["files"]; casRefs?: RunCasRefs; runDir: string }
   | { ok: false; runId: string; operationId: string; status: BioRunRecord["status"]; error: string; casRefs?: RunCasRefs; runDir: string };
 
+export class RunEvidenceRecordingError extends Error {
+  readonly runId: string;
+  readonly runDir: string;
+  readonly phase: "declaration_projection" | "run_observation" | "artifact_projection";
+
+  constructor(args: { runId: string; runDir: string; phase: RunEvidenceRecordingError["phase"]; cause: unknown }) {
+    const detail = args.cause instanceof Error ? args.cause.message : String(args.cause);
+    super(`run '${args.runId}' was persisted at '${args.runDir}', but required ledger evidence failed during ${args.phase}: ${detail}`, { cause: args.cause });
+    this.name = "RunEvidenceRecordingError";
+    this.runId = args.runId;
+    this.runDir = args.runDir;
+    this.phase = args.phase;
+  }
+}
+
+async function recordRequiredRunEvidence(
+  runLog: { store: SqlConn; author?: string } | undefined,
+  args: { runId: string; runDir: string; phase: RunEvidenceRecordingError["phase"] },
+  write: () => Promise<void>,
+): Promise<void> {
+  if (!runLog) return;
+  try {
+    await write();
+  } catch (cause) {
+    throw new RunEvidenceRecordingError({ ...args, cause });
+  }
+}
+
+function replayManifestSnapshot(replay: RunReplaySpec | undefined): BioManifest {
+  const snapshot = replay?.manifest?.snapshot;
+  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) {
+    throw new Error("required run evidence needs the authored manifest snapshot");
+  }
+  return snapshot as BioManifest;
+}
+
 function resolveInCwd(cwd: string, p: string): string {
   return p === ":memory:" || isAbsolute(p) ? p : resolve(cwd, p);
 }
@@ -423,12 +461,18 @@ async function inferQueryResourcesFromManifest(manifest: BioManifest, sql: strin
   }
 }
 
-/** Describe ONE manifest by path (resolved safely within cwd): parse, validate, and summarize its
- *  resources/operations (with the runnable operation ids)/resolvers/termSets. The agent's discovery path — learn
- *  what a manifest declares without reading raw JSON. Validation/parse failures are RETURNED, not thrown: a
- *  describe must never crash a probe. */
-export async function describeBioManifestFromPath(req: { cwd: string; manifestPath: string; network?: { fetch: FetchLike } }): Promise<
-  { manifestPath: string; valid: false; errors: string[] } | ({ manifestPath: string; valid: true } & ManifestDescription)
+/** Describe ONE manifest by path (resolved safely within cwd): parse, validate, summarize its declarations, and
+ *  assess them against this host's resolver bindings/capability attestations. Validation/parse failures are
+ *  returned, not thrown: a describe must never crash a probe. */
+export async function describeBioManifestFromPath(req: {
+  cwd: string;
+  manifestPath: string;
+  network?: { fetch: FetchLike };
+  compute?: { runner: ComputeRunner };
+  signal?: AbortSignal;
+  capabilities?: Readonly<Record<string, HostCapabilityStatus>>;
+}): Promise<
+  { manifestPath: string; valid: false; errors: string[] } | ({ manifestPath: string; valid: true; host: ManifestHostAssessment } & ManifestDescription)
 > {
   const isUrl = /^https?:\/\//i.test(req.manifestPath);
   let raw: BioManifest;
@@ -439,7 +483,7 @@ export async function describeBioManifestFromPath(req: { cwd: string; manifestPa
       // as any connector — so it fails closed when the host injected no network (the default entrypoint), and
       // is available under the networked entrypoint. Never an ambient fetch.
       if (!req.network) return { manifestPath: req.manifestPath, valid: false, errors: ["a URL manifest needs host-granted network; the default entrypoint injects none (fail closed)"] };
-      const res = await req.network.fetch(req.manifestPath, { method: "GET" });
+      const res = await req.network.fetch(req.manifestPath, { method: "GET", signal: req.signal });
       if (!res.ok) return { manifestPath: req.manifestPath, valid: false, errors: [`fetch failed: HTTP ${res.status}`] };
       source = await res.text();
     } else {
@@ -451,45 +495,57 @@ export async function describeBioManifestFromPath(req: { cwd: string; manifestPa
   }
   const errors = validateBioManifest(raw);
   if (errors.length) return { manifestPath: req.manifestPath, valid: false, errors };
-  return { manifestPath: req.manifestPath, valid: true, ...describeManifest(raw) };
+  const registry = createBioRegistry();
+  registry.registerManifest(raw);
+  const injected: Record<string, BioResolverImpl | undefined> = {
+    [NETWORK_RESOLVER]: req.network ? httpTableResolver(req.network.fetch) : undefined,
+    [COMPUTE_RESOLVER]: req.compute ? computeRunResolver(req.compute.runner) : undefined,
+  };
+  for (const resolver of raw.provides.resolvers ?? []) {
+    const impl = BUILTIN_RESOLVERS[resolver.id] ?? injected[resolver.id];
+    if (impl) registry.bindResolverImpl(resolver.id, impl);
+  }
+  const resolverBindings = new Set((raw.provides.resolvers ?? []).filter((resolver) => registry.hasResolverImpl(resolver.id)).map((resolver) => resolver.id));
+  const capabilities: Record<string, HostCapabilityStatus> = {
+    ...(req.network ? { "host.fetch": "available" as const } : {}),
+    ...(req.compute ? { "compute.runner": "available" as const } : {}),
+    ...req.capabilities,
+  };
+  return { manifestPath: req.manifestPath, valid: true, ...describeManifest(raw), host: assessManifestHost(raw, { resolverBindings, capabilities }) };
 }
 
-/** The RESOLVED compute.run facts for a run's resources (absolute command paths etc. — what actually ran on
- *  this host), captured beside the authored manifest snapshot so replay has BOTH portable intent and local facts.
- *  First compute resource among `resources` (the walking-skeleton case; coloc/files-only declare one). */
-function resolvedComputeFacts(manifest: BioManifest, resources: string[]): RunReplaySpec["compute"] | undefined {
-  const r = (manifest.provides?.resources ?? []).find((x) => x.resolver === COMPUTE_RESOLVER && resources.includes(x.id));
-  if (!r) return undefined;
-  const p = r.params as {
-    table?: string;
-    command?: readonly string[];
-    inputSql?: string;
-    resultTable?: "arrow" | "artifacts";
-    outputs?: Array<{ name: string; path: string; kind?: string; mediaType?: string; semanticRole?: string; attrs?: Record<string, unknown> }>;
-  };
-  // Build with ONLY DEFINED fields — never leave `undefined`-valued keys. The run-object INPUT CASID is hashed from
-  // this in-memory `replay.compute`, but replay.json (JSON.stringify) DROPS undefined keys, so an undefined-valued
-  // key would make the digest recomputed from the recorded replay differ from the original — a compute.run run
-  // object then isn't recomputable from its own replay (breaks reproduce/dedup). Omitting the keys keeps them equal.
-  return {
-    resourceId: r.id,
-    ...(p.table !== undefined ? { table: p.table } : {}),
-    ...(p.command !== undefined ? { command: p.command } : {}),
-    ...(p.inputSql !== undefined ? { inputSql: p.inputSql } : {}),
-    ...(p.resultTable !== undefined ? { resultTable: p.resultTable } : {}),
-    ...(p.outputs !== undefined ? { outputs: p.outputs } : {}),
-  };
+/** Resolved compute.run facts in the same order as the resources actually resolved. */
+function resolvedComputeResources(manifest: BioManifest, resources: string[]): ComputeReplayResource[] | undefined {
+  const declarations = new Map((manifest.provides?.resources ?? []).map((resource) => [resource.id, resource]));
+  const facts = resources.flatMap((resourceId): ComputeReplayResource[] => {
+    const resource = declarations.get(resourceId);
+    if (!resource || resource.resolver !== COMPUTE_RESOLVER) return [];
+    const p = resource.params as {
+      table?: string;
+      command?: readonly string[];
+      inputSql?: string;
+      resultTable?: "arrow" | "artifacts";
+      outputs?: Array<{ name: string; path: string; kind?: string; mediaType?: string; semanticRole?: string; attrs?: Record<string, unknown> }>;
+    };
+    // Omit undefined fields so the in-memory action key is identical after replay.json round-trips through JSON.
+    return [{
+      resourceId,
+      ...(p.table !== undefined ? { table: p.table } : {}),
+      ...(p.command !== undefined ? { command: p.command } : {}),
+      ...(p.inputSql !== undefined ? { inputSql: p.inputSql } : {}),
+      ...(p.resultTable !== undefined ? { resultTable: p.resultTable } : {}),
+      ...(p.outputs !== undefined ? { outputs: p.outputs } : {}),
+    }];
+  });
+  return facts.length > 0 ? facts : undefined;
 }
 
-/** The env attestation SUMMARY lifted from the receipts' `environment` provenance entry (compute.run records
- *  it as notes). Returns the FIRST compute receipt that carries one — a deliberate walking-skeleton limit: today a
- *  run has at most ONE compute.run resource. LIMITATION (owed when multi-compute runs ship): with two+ compute
- *  resources this captures only the first, so reproduce()'s env-drift check would miss drift in a LATER resource's
- *  environment. The fix is a per-receipt env summary (keyed by resourceId) compared per resource; not built now
- *  because there is no multi-compute consumer yet (building it would be speculative). Exported so
- *  reproduce() can recompute the RE-RUN's env summary and compare it to the pinned one (env lives in provenance
- *  NOTES, which receiptContentDigest drops — so without this check an env-drifted re-run would falsely 'match'). */
-export function envSummaryFromReceipts(receipts: ReadonlyArray<{ provenance: ReadonlyArray<{ source: string; notes?: string[] }> }>): EnvAttestationSummary | undefined {
+/** Environment summaries keyed to the compute receipt that produced them. Provenance notes are intentionally
+ *  excluded from receiptContentDigest, so reproduce must compare these summaries separately. */
+export function computeEnvironmentSummariesFromReceipts(
+  receipts: ReadonlyArray<{ resourceId: string; provenance: ReadonlyArray<{ source: string; notes?: string[] }> }>,
+): Array<{ resourceId: string; environment: EnvAttestationSummary }> {
+  const summaries: Array<{ resourceId: string; environment: EnvAttestationSummary }> = [];
   for (const r of receipts) {
     const e = r.provenance.find((p) => p.source === "environment");
     const notes = e?.notes ?? [];
@@ -497,9 +553,12 @@ export function envSummaryFromReceipts(receipts: ReadonlyArray<{ provenance: Rea
     if (!status) continue;
     const declaredDigest = notes.find((n) => n.startsWith("env_declared:"))?.slice("env_declared:".length);
     const observedDigest = notes.find((n) => n.startsWith("env_observed:"))?.slice("env_observed:".length);
-    return { status, ...(declaredDigest ? { declaredDigest } : {}), ...(observedDigest ? { observedDigest } : {}) };
+    summaries.push({
+      resourceId: r.resourceId,
+      environment: { status, ...(declaredDigest ? { declaredDigest } : {}), ...(observedDigest ? { observedDigest } : {}) },
+    });
   }
-  return undefined;
+  return summaries;
 }
 
 const SHA256_DIGEST = /^sha256:[0-9a-fA-F]{64}$/;
@@ -519,30 +578,6 @@ function parseArtifactAttrs(notes: readonly string[] | undefined): { attrs: Reco
       : { attrs: {}, warning: "attrs_note_not_object" };
   } catch {
     return { attrs: {}, warning: "attrs_note_invalid_json" };
-  }
-}
-
-async function recordRunArtifactBridgeWarning(
-  runLog: { store: SqlConn; author?: string } | undefined,
-  now: string,
-  runId: string,
-  err: unknown,
-): Promise<void> {
-  if (!runLog) return;
-  const message = err instanceof Error ? err.message : String(err);
-  const digest = canonicalDigest(["run_artifact_bridge_warning", runId, now, message]);
-  try {
-    await recordObservation(runLog.store, {
-      statementKey: `run:${runId}:artifact_bridge_warning:${digest}`,
-      subjectId: `run:${runId}`,
-      predicate: "artifact_bridge_warning",
-      value: { message },
-      recordedAt: now,
-      source: runLog.author,
-      digest,
-    });
-  } catch {
-    /* diagnostic-only: artifact bridge warnings must not fail the scientific run */
   }
 }
 
@@ -633,17 +668,28 @@ async function recordRunArtifactsFromReceipts(
   if (Number(casRefTable[0]?.n ?? 0) > 0) await runLog.store.run(`DELETE FROM cas_ref WHERE ref_id = ? AND ref_type = ?`, [runNode, "artifact"]);
 }
 
-/** Enrich the pre-run replay SEED once receipts exist: pin the receipt digests + the env attestation summary, so
- *  reproduce() has stable handles and a status without re-parsing provenance. */
-function enrichReplay(replay: RunReplaySpec, receipts: ResolutionReceipt[]): RunReplaySpec {
-  const environment = envSummaryFromReceipts(receipts);
-  return { ...replay, sourceReceiptDigests: receipts.map((r) => receiptContentDigest(r)), ...(environment ? { environment } : {}) };
+/** Enrich a prospective replay with the evidence and terminal outcome that the execution actually produced.
+ *  Every compute resource in a successful run must have an attestation. A failed/cancelled run may stop before a
+ *  later resource can emit one; any earlier resource attestations are still retained. */
+function enrichReplay(replay: RunReplaySpec, receipts: ResolutionReceipt[], outcome: RunReplayOutcome): RunReplaySpec {
+  const environments = new Map(computeEnvironmentSummariesFromReceipts(receipts).map((entry) => [entry.resourceId, entry.environment]));
+  const computeResources = replay.computeResources?.map((resource) => {
+    const environment = environments.get(resource.resourceId);
+    if (!environment && outcome.status === "succeeded") throw new Error(`run evidence: compute resource '${resource.resourceId}' produced no environment attestation`);
+    return environment ? { ...resource, environment } : resource;
+  });
+  return {
+    ...replay,
+    sourceReceiptDigests: receipts.map((r) => receiptContentDigest(r)),
+    ...(computeResources ? { computeResources } : {}),
+    outcome,
+  };
 }
 
 /** Acquire → use → release: own a DuckDB instance/connection for one run, persist the result (or a failed-run
  *  receipt), and close on EVERY path so no handle leaks. `body` does the actual core run. */
 /** Record a run as a `run:<id>` fact in the shared store, referencing the immutable content (receipt/manifest
- *  digests) — bytes stay in files/CAS outside. Best-effort: the shared-ledger log must never fail the run. */
+ *  digests) — bytes stay in files/CAS outside. When a store is supplied this is required evidence, not logging. */
 async function recordRun(
   runLog: { store: SqlConn; author?: string } | undefined,
   now: string,
@@ -667,11 +713,7 @@ async function recordRun(
     replayDigest: args.replayDigest,
     runObjectDigest: args.runObjectDigest,
   };
-  try {
-    await recordRunObservation(runLog.store, obs, now, runLog.author);
-  } catch {
-    /* best-effort: never fail a run because the shared-ledger log failed */
-  }
+  await recordRunObservation(runLog.store, obs, now, runLog.author);
 }
 
 async function runAndPersist(
@@ -798,7 +840,7 @@ async function runAndPersist(
     try {
       const { run, result, receipts } = await body(conn, protectedVariableNames);
       const attributedRun = annotateRunWithHostCapabilities(run, effectiveHostCapabilityRefs);
-      let enriched = effectiveReplay ? enrichReplay(effectiveReplay, receipts) : undefined;
+      let enriched = effectiveReplay ? enrichReplay(effectiveReplay, receipts, { status: "succeeded" }) : undefined;
       // result rows -> CAS FIRST (needed to retarget the artifact below); the run:<id> fact references it by digest.
       const resultDigest = await putCas(result.rows);
       // PIN the result-content digest into the replay, so reproduce() can verify the OUTPUT matched, not just the
@@ -856,12 +898,19 @@ async function runAndPersist(
       // visible as succeeded before it actually completed. Injected `now` (tests) collapses this to the fixed value.
       const completedAt = injectedNow ?? systemClock();
       // Datomic + CAS: record the run as a fact in the ONE store, referencing content by digest (bytes stay outside).
-      await recordRun(runLog, completedAt, { runId, identity, kind, status: attributedRun.status, error: undefined, dir: persisted.dir, replay: effectiveReplay, enriched, resultDigest, receiptsDigest, replayDigest, runObjectDigest });
-      try {
-        await recordRunArtifactsFromReceipts(runLog, completedAt, runId, receipts, enriched, casMetadata);
-      } catch (err) {
-        await recordRunArtifactBridgeWarning(runLog, completedAt, runId, err);
-      }
+      await recordRequiredRunEvidence(runLog, { runId, runDir: persisted.dir, phase: "declaration_projection" }, async () => {
+        await recordManifestDeclarations(runLog!.store, {
+          manifest: replayManifestSnapshot(effectiveReplay),
+          manifestDigest: effectiveReplay!.manifest!.digest,
+          recordedAt: completedAt,
+          source: runLog!.author,
+          run: { runId, kind, identity, resources: enriched?.resources },
+        });
+      });
+      await recordRequiredRunEvidence(runLog, { runId, runDir: persisted.dir, phase: "run_observation" }, () =>
+        recordRun(runLog, completedAt, { runId, identity, kind, status: attributedRun.status, error: undefined, dir: persisted.dir, replay: effectiveReplay, enriched, resultDigest, receiptsDigest, replayDigest, runObjectDigest }));
+      await recordRequiredRunEvidence(runLog, { runId, runDir: persisted.dir, phase: "artifact_projection" }, () =>
+        recordRunArtifactsFromReceipts(runLog, completedAt, runId, receipts, enriched, casMetadata));
       // ActionCache (LLVM CAS): map this input's CASID -> the result's CASID, so an identical future run can be
       // memoized/deduped and reproduce() has an input->output handle. Only when both a CAS and the store are present.
       // SKIP a run with a LIVE SOURCE: its sourceReceiptDigests are blind to the source's CONTENT (sql_materialize /
@@ -916,8 +965,12 @@ async function runAndPersist(
       // A run that started and failed at runtime persists a failed-run receipt and returns ok:false; the
       // failure is auditable, not lost. Pre-flight/config errors (which never became a run) still throw.
       try {
-        const enriched = effectiveReplay ? enrichReplay(effectiveReplay, error.receipts) : undefined;
         const attributedRun = annotateRunWithHostCapabilities(error.run, effectiveHostCapabilityRefs);
+        const failureOutcome: RunReplayOutcome = {
+          status: attributedRun.status === "cancelled" ? "cancelled" : "failed",
+          errorDigest: canonicalDigest(error.message),
+        };
+        const enriched = effectiveReplay ? enrichReplay(effectiveReplay, error.receipts, failureOutcome) : undefined;
         // SAME lean-mode data-loss fix as the success path: CAS-write the failed run's receipts/replay BEFORE
         // persistFailedRun deletes/skips the JSON files, so a crash/failed-put can't strand the provenance bytes.
         const receiptsDigest = await putCas(error.receipts);
@@ -946,12 +999,19 @@ async function runAndPersist(
           await clearRunCasRefsAfterCommit();
         }
         const failedAt = injectedNow ?? systemClock(); // FAILURE time, not run start (see the success path)
-        await recordRun(runLog, failedAt, { runId, identity, kind, status: attributedRun.status, error: error.message, dir: persisted.dir, replay: effectiveReplay, enriched, receiptsDigest, replayDigest });
-        try {
-          await recordRunArtifactsFromReceipts(runLog, failedAt, runId, [], enriched, casMetadata);
-        } catch (err) {
-          await recordRunArtifactBridgeWarning(runLog, failedAt, runId, err);
-        }
+        await recordRequiredRunEvidence(runLog, { runId, runDir: persisted.dir, phase: "declaration_projection" }, async () => {
+          await recordManifestDeclarations(runLog!.store, {
+            manifest: replayManifestSnapshot(effectiveReplay),
+            manifestDigest: effectiveReplay!.manifest!.digest,
+            recordedAt: failedAt,
+            source: runLog!.author,
+            run: { runId, kind, identity, resources: enriched?.resources },
+          });
+        });
+        await recordRequiredRunEvidence(runLog, { runId, runDir: persisted.dir, phase: "run_observation" }, () =>
+          recordRun(runLog, failedAt, { runId, identity, kind, status: attributedRun.status, error: error.message, dir: persisted.dir, replay: effectiveReplay, enriched, receiptsDigest, replayDigest }));
+        await recordRequiredRunEvidence(runLog, { runId, runDir: persisted.dir, phase: "artifact_projection" }, () =>
+          recordRunArtifactsFromReceipts(runLog, failedAt, runId, [], enriched, casMetadata));
         const casRefs = cas ? { receipts: receiptsDigest, replay: replayDigest } : undefined;
         return { ok: false, runId, operationId: identity, status: error.run.status, error: error.message, casRefs, runDir: persisted.dir };
       } catch (innerError) {
@@ -994,7 +1054,7 @@ export async function runBioOperationFromManifest(req: RunOperationRequest): Pro
   // every resource the manifest happens to declare. Otherwise replay.json would record an unrelated compute.run
   // resource's command as "what ran" even though runOperation never resolved it (a provenance lie).
   const requiredResources = op.sql.requiredResources ?? [];
-  const proc = resolvedComputeFacts(manifest, requiredResources);
+  const computeResources = resolvedComputeResources(manifest, requiredResources);
   const replay: RunReplaySpec = {
     schema: RUN_REPLAY_SPEC_SCHEMA, runId, kind: "operation",
     manifest: { digest: manifestDigest, snapshot: raw, path: req.manifestPath },
@@ -1004,7 +1064,7 @@ export async function runBioOperationFromManifest(req: RunOperationRequest): Pro
     ...(protectedNamesDigest ? { protectedSessionVariablesDigest: protectedNamesDigest } : {}), // pin additional protected names declared by the host
     ...(req.duckdbConfig ? { duckdbConfigDigest: canonicalDigest(req.duckdbConfig) } : {}), // pin WHICH config (digest, not the secret-bearing config itself)
     ...(hostCapabilityRefs.length ? { hostReceiptDigests: hostCapabilityRefs.map((r) => r.digest) } : {}),
-    ...(proc ? { compute: proc } : {}),
+    ...(computeResources ? { computeResources } : {}),
   };
   return runAndPersist(req.cwd, req.dbPath, runId, req.operationId, "operation", (conn) => runOperation(registry, conn, { operationId: req.operationId, runId, now, signal: req.signal, cas: req.cas, remoteCacheScope: req.remoteCacheScope }), req.now, req.duckdbInitSql, req.bindings, req.protectedSessionBindings, req.protectedSessionVariables, req.duckdbConfig, req.sqlPolicy, replay, hostCapabilityRefs, req.ducknngHttpProfiles, req.store ? { store: req.store, author: req.author } : undefined, req.cas, req.casMetadata, req.serialize);
 }
@@ -1084,7 +1144,7 @@ export async function runBioQueryFromManifest(req: RunQueryRequest): Promise<Run
   const resources = req.resources ?? await inferQueryResourcesFromManifest(manifest, req.sql);
   const now = req.now ?? systemClock();
   const runId = req.runId ?? `query-${Date.now()}-${randomUUID().slice(0, 8)}`; // globally unique: see runBioOperationFromManifest
-  const proc = resolvedComputeFacts(manifest, resources);
+  const computeResources = resolvedComputeResources(manifest, resources);
   const replay: RunReplaySpec = {
     schema: RUN_REPLAY_SPEC_SCHEMA, runId, kind: "query",
     manifest: { digest: manifestDigest, snapshot: raw, path: req.manifestPath },
@@ -1094,7 +1154,7 @@ export async function runBioQueryFromManifest(req: RunQueryRequest): Promise<Run
     ...(protectedNamesDigest ? { protectedSessionVariablesDigest: protectedNamesDigest } : {}), // pin additional protected names declared by the host
     ...(req.duckdbConfig ? { duckdbConfigDigest: canonicalDigest(req.duckdbConfig) } : {}), // pin WHICH config (digest, not the secret-bearing config itself)
     ...(hostCapabilityRefs.length ? { hostReceiptDigests: hostCapabilityRefs.map((r) => r.digest) } : {}),
-    ...(proc ? { compute: proc } : {}),
+    ...(computeResources ? { computeResources } : {}),
   };
   return runAndPersist(req.cwd, req.dbPath, runId, "ad-hoc.query", "query", (conn, protectedSessionVariables) => runQuery(registry, conn, { sql: req.sql, resources, runId, now, signal: req.signal, cas: req.cas, remoteCacheScope: req.remoteCacheScope, protectedSessionVariables }), req.now, req.duckdbInitSql, req.bindings, req.protectedSessionBindings, req.protectedSessionVariables, req.duckdbConfig, req.sqlPolicy, replay, hostCapabilityRefs, req.ducknngHttpProfiles, req.store ? { store: req.store, author: req.author } : undefined, req.cas, req.casMetadata, req.serialize);
 }

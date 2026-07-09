@@ -42,6 +42,9 @@ jobs:
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
+      - name: Provision DuckHTS
+        run: npm run provision:duckhts
+
       - name: Typecheck and test
         run: npm run check
 
@@ -50,3 +53,51 @@ jobs:
 
       - name: Verify package contents
         run: npm pack --dry-run
+
+  owned-ducknng:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Cache owned ducknng build
+        uses: actions/cache@v4
+        with:
+          path: |
+            .pi/ducknng
+            .pi/src/ducknng
+          key: owned-ducknng-${{ runner.os }}-${{ hashFiles('package-lock.json', 'scripts/provision-ducknng-owned.sh') }}
+
+      - name: Provision and verify owned ducknng
+        run: |
+          npm run provision:ducknng-owned
+          duckdb_version="$(node -e 'process.stdout.write(require("@duckdb/node-api/package.json").version.replace(/-.*/, ""))')"
+          echo "DUCKNNG_EXTENSION_PATH=$PWD/.pi/ducknng/duckdb-${duckdb_version}/ducknng.duckdb_extension" >> "$GITHUB_ENV"
+
+      - name: Compile integration tests
+        run: rm -rf dist-test && npx tsc -p tsconfig.test.json
+
+      - name: Exercise owned transport, auth, retry, upload, TLS, and RPC
+        run: >-
+          node --test
+          dist-test/test/ncurl-retry.test.js
+          dist-test/test/ncurl-fanout.test.js
+          dist-test/test/ducknng-sql-http.test.js
+          dist-test/test/ducknng-http-profiles.test.js
+          dist-test/test/ducknng-upload-shared-data.test.js
+          dist-test/test/ducknng-tls-auth.test.js
+          dist-test/test/ducknng-rpc-mutate.test.js
+          dist-test/test/ducknng-rpc-blackboard.test.js
+          dist-test/test/ducknng-socket-reachability.test.js
+
+      - name: Require upload dogfood (no skipped lane)
+        run: npm run dogfood:ducknng-upload

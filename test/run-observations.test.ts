@@ -8,7 +8,7 @@ import { promises as fsp } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { recordRunObservation } from "../src/hosts/run-observations.js";
-import { runBioQueryFromManifest, runBioOperationFromManifest, markRunDbOpenError, isRunDbOpenError, persistRun, persistFailedRun } from "../src/hosts/run-store.js";
+import { runBioQueryFromManifest, runBioOperationFromManifest, markRunDbOpenError, isRunDbOpenError, persistRun, persistFailedRun, RunEvidenceRecordingError } from "../src/hosts/run-store.js";
 import type { RunPayload } from "../src/hosts/run-store.js";
 import { fsCasStore } from "../src/hosts/fs-cas.js";
 import type { CasStore } from "../src/core/cas.js";
@@ -78,10 +78,42 @@ describe("run-observations: ad-hoc SQL folds into the ONE store as an as-of, att
 
   test("recordRunObservation ensures the ledger schema on a FRESH store — the first run's fact is not silently dropped", async () => {
     // a host-injected/custom store that was NOT pre-provisioned (no createBioObservationSchema). recordRun logs
-    // best-effort (swallows failures), so without an internal ensure-schema the FIRST run's fact would vanish.
+    // into it directly, so the schema must be established before the FIRST run fact is appended.
     const c = duckdbNodeConn(await (await DuckDBInstance.create(":memory:")).connect());
     await recordRunObservation(c, { runId: "fresh1", kind: "query", identity: "ad-hoc.query", status: "succeeded" }, "2026-01-01T00:00:00Z", "agent:A");
     assert.ok(await observationAsOfKey(c, "run:fresh1", MEMORY_NOW), "the first run recorded even though the store started with no schema");
+  });
+
+  test("a supplied store is a required evidence sink: recording failure is explicit after files persist", async () => {
+    const inner = await conn();
+    const store: SqlConn = {
+      run: (sql, params) => inner.run(sql, params),
+      all: (sql, params) => {
+        if (/INSERT INTO bio_observations/i.test(sql) && params?.[3] === "run") throw new Error("ledger unavailable");
+        return inner.all(sql, params);
+      },
+    };
+    const cwd = await fsp.mkdtemp(join(tmpdir(), "required-run-evidence-"));
+    const runId = "ledger-required";
+    await assert.rejects(
+      () => runBioQueryFromManifest({
+        cwd,
+        dbPath: ":memory:",
+        manifestPath: resolve(process.cwd(), "examples/variant-counts/manifest.json"),
+        sql: "SELECT count(*) AS n FROM variants",
+        runId,
+        store,
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof RunEvidenceRecordingError);
+        assert.equal(error.phase, "run_observation");
+        assert.equal(error.runId, runId);
+        assert.match(error.message, /ledger unavailable/);
+        return true;
+      },
+    );
+    assert.equal(JSON.parse(await fsp.readFile(join(cwd, ".pi", "bio-agent", "runs", runId, "run.json"), "utf8")).status, "succeeded");
+    assert.equal(await observationAsOfKey(inner, `run:${runId}`, MEMORY_NOW), null, "the caller is not told success when the required run fact is absent");
   });
 
   test("an OPERATION run records kind 'operation' (from the explicit kind, not an identity sentinel)", async () => {
@@ -344,7 +376,7 @@ describe("run-observations: ad-hoc SQL folds into the ONE store as an as-of, att
     const edges = await store.all<{ predicate: string; to_id: string; attrs: string }>(
       `SELECT predicate, to_id, attrs::VARCHAR AS attrs
        FROM bio_edges_as_of
-       WHERE from_id = ?
+       WHERE from_id = ? AND predicate = 'produces'
        ORDER BY to_id`,
       [`run:${res.runId}`],
     );

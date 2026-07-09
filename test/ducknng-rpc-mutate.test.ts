@@ -13,7 +13,10 @@ const ducknngAvailable = await (async () => {
     await c.run("INSTALL ducknng FROM community");
     await c.run("LOAD ducknng");
     return true;
-  } catch { return false; }
+  } catch (error) {
+    if (process.env.DUCKNNG_EXTENSION_PATH) throw error;
+    return false;
+  }
 })();
 
 async function startServer(name: string, seedSql: string[]): Promise<{ conn: Awaited<ReturnType<DuckDBInstance["connect"]>>; url: string; close: () => Promise<void> }> {

@@ -75,14 +75,11 @@ pi-bio-agent graph-window \
 When Pi extension graph tools are available:
 
 - `bio_graph_window` over `bio_edges_as_of` to walk run/toolcall/memory links.
-- `bio_list_memory`, `bio_read_memory`, and `bio_walk_memory` for study notes.
+- `bio_list_memory`, `bio_recall`, and `bio_walk_memory` for study notes.
 
-For session-linked runs, look for:
-
-```text
-toolcall:<session>:<callId> --executes--> run:<runId>
-run:<runId> --invoked_by--> toolcall:<session>:<callId>
-```
+For session-linked runs, query for an `executes` edge from `toolcall:<session>:<callId>` to `run:<runId>` and the
+inverse `invoked_by` edge. Recorded runs also link to their manifest/resources through `uses_manifest` and
+`uses_resource`.
 
 ## If The Store Is Locked
 

@@ -50,6 +50,7 @@ describe("Pi coding-agent extension", () => {
       "bio_query",
       "bio_recall",
       "bio_remember",
+      "bio_reproduce_run",
       "bio_run_operation",
       "bio_study_plan",
       "bio_validate_graph_projection",

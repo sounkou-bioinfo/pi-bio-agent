@@ -217,7 +217,7 @@ Priority order:
 4. **JSON-RPC over stdio**: machine interface for editors, other agents, or wrappers that do not run inside Pi. Start with stdio rather than a daemon.
 5. **MCP server surface**: optional later wrapper that projects selected operations/resources as MCP tools/resources. MCP is a transport, not the core architecture.
 
-All surfaces should call the same internal functions. The CLI must not reimplement Pi logic; the Pi extension must not hide logic that the CLI/JSON-RPC cannot exercise. This keeps tests surface-independent.
+All surfaces should call the same internal functions. The CLI must not reimplement Pi logic; the Pi extension must not hide logic that the CLI cannot exercise. `describe`, query/run, explicit fetch/local-compute/CAS grants, graph windows, and reproduction all compose the same host functions and ports. This keeps tests surface-independent.
 
 Initial command/RPC families:
 
@@ -367,7 +367,13 @@ Three things keep this consistent with the rest of the substrate:
   host-provided descriptor is invalid, `compute.run` records an explicit unknown/probe-failed environment observation
   rather than a fake match. The process path is not missing: `compute.run` already owns argv-in-a-run-dir execution,
   Arrow/table results, declared file artifacts, CAS capture, environment evidence, receipts, replay, and async
-  `ComputeRunner` integration.
+  `ComputeRunner` integration. The replay spec records these as `computeResources[]` in execution order, with the
+  environment summary attached to the resource that used it. Reproduction compares every resource separately;
+  duplicate resource ids are rejected before execution because they would make that evidence ambiguous. The
+  two-compute drift regression in `test/reproduce.test.ts` keeps receipts and output bytes equal while changing only
+  the second environment, and requires the replay verdict to fail. The same replay pins its terminal outcome:
+  failures and cancellations carry an error digest, retain any partial receipts and environment evidence, and match
+  only when a fresh execution reaches the same terminal outcome with the same available provenance.
 
   This is a materialization boundary over the async compute primitive, not a separate synchronous compute world. A
   host may run it through a local child process, an NNG worker, a scheduler, or an Absurd-style queue backend. The
@@ -488,42 +494,21 @@ The staging SQL should produce canonical KGX/SemanticSQL edge columns (`subject`
 An ordinary `GraphProjectionProfile` then projects the table into `bio_edges`. The Monarch KG HTTP example uses the
 downloadable KGX TSV association files through DuckDB `httpfs`; Monarch is a binding of the generic KGX/SemanticSQL
 edge path, not a special resolver.
-For sources that arrive in the canonical SemanticSQL base shape, `materializeSemanticSqlSourceViews` generates the
-stable DuckDB views from staged `statements`: RDF/RDFS typed statement views, labels, definitions, synonyms,
-mappings, deprecated nodes, ontology status, and term rows. It also covers the next upstream compatibility tier:
-RDF list/member views, node/identifier and summary views, OWL node/property classifications, axiom annotation and
-restriction views, OBO synonym/mapping/contributor/orcid views, and OBO problem views for duplicate labels, trailing
-whitespace, and predicates used with both literal values and object nodes. Its generated `edge` view follows the
-relation-graph shape for named subclass/subproperty rows, `subClassOf someValuesFrom` restriction rows, and selected
-`rdf:type` assertions whose object is a known class; it also exposes RO `part_of` / `has_part` edge filters and
-ChEBI conjugate-acid/base edge filters and charge statements, plus source-spec subgraph-by-parent/child/self views
-over that generated `edge`. When a staged SemanticSQL
-`entailed_edge(subject, predicate, object)` table is declared, the helper adds the closure-backed relation-graph
-inspection views: subgraph-by-ancestor/descendant, entailed subclass/type filters, cycle reports,
-`node_pairwise_overlap`, and direct/inferred taxon-constraint views. It also exposes `edge_by_superproperty`, a
-consumer-pulled expansion of generated `edge` rows through the transitive `rdfs:subPropertyOf` hierarchy; each row
-preserves the direct predicate as `source_predicate`. It still does not treat every object triple as a relation-graph
-edge.
-The generated `edge_with_metadata` view keeps the same `subject,predicate,object` edge columns and adds graph-ready
-`attrs` / `trust` JSON from matching OWL axiom annotations, evidence xrefs, and source quality problems. It is a
-mechanical metadata packaging layer, not a scoring policy.
-When a staged `prefix(prefix, base)` table is declared, the generated views canonicalize matching IRIs to CURIEs.
-The same prefix table also enables the SemanticSQL `subject_prefix` view. When a staged
-`textual_transformation(subject, predicate, value)` table is declared, the helper exposes `processed_statement`; with
-both prefix and transformation tables present it also exposes the source-spec `match` view for SQL-native text
-matching across labeled ontology/FHIR/RDF resources.
-When a staged SemanticSQL `term_association` source table is declared under a distinct target name, the helper
-exposes the canonical association columns with the same optional prefix canonicalization. An ordinary graph
-projection profile can then project those associations into `bio_edges`; source-spec columns such as
-`evidence_type`, `publication`, and `source` stay on the association view and do not become generic graph trust
-policy. If the caller points at an already-canonical `term_association` table as both source and target, the helper
-leaves it untouched; prefix canonicalization in that aliasing shape fails closed.
-For multi-ontology staging, `targetSchema` prefixes every generated default target view that the caller did not name
-explicitly. This lets separate SemanticSQL source artifacts materialize into schemas such as `mondo.edge` and
-`hp.edge`, then join across them with ordinary DuckDB SQL.
-The generated `edge` view then uses the same graph projection profile and closure path as KGX, memory, and
-observation graphs. This is compatibility with the SemanticSQL source-spec ecosystem, useful for RDF/OWL,
-Semantic-Web, FHIR-shaped, and ontology-derived data; it is not a hidden OWL reasoner.
+For canonical SemanticSQL sources, `materializeSemanticSqlSourceViews` generates the concrete RDF/RDFS, OWL, OBO,
+relation-graph, taxon, similarity, and `transitive_edge` views used by manifests and graph projection. Prefix,
+upstream `entailed_edge`, term-association, textual-transformation, and target-schema inputs are optional and enable
+their corresponding views. Local additions such as metadata packaging and superproperty expansion remain visibly
+separate from the upstream names.
+
+Compatibility is pinned to the 82 concrete `CREATE VIEW` names generated by upstream commit
+`83503077e867419c18a211d97105d8ead554e947`; [graph-projection.test.ts](../test/graph-projection.test.ts) fails if a
+name is missing. This is a concrete view-shape contract, not a claim of behavioral equivalence with every future
+generator or a hidden OWL reasoner. DuckDB-specific implementations are tested on local fixtures, including
+cycle-safe shortest-depth `transitive_edge` traversal.
+
+`term_association` evidence, publication, and source columns remain source data. KGX qualifiers and knowledge-source
+fields remain asserted-edge metadata. Neither becomes a core trust score until a consumer supplies reconciliation
+policy.
 
 - **`bio_edges(from_id, predicate, to_id, attrs, trust)`**: the statement/edge base (`subject=from_id,
   predicate, object=to_id`). Labels, synonyms, definitions, and relations are all just rows; the predicate is

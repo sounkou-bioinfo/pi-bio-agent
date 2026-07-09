@@ -1,11 +1,11 @@
 import { promises as fs } from "node:fs";
 import { createHash } from "node:crypto";
 import { join, resolve, isAbsolute } from "node:path";
-import { RUN_REPLAY_SPEC_SCHEMA, receiptContentDigest, canonicalDigest, hostCapabilityReceiptDigests, type HostCapabilityReceipt, type RunReplaySpec } from "../core/reproducibility.js";
+import { RUN_REPLAY_SPEC_SCHEMA, receiptContentDigest, canonicalDigest, hostCapabilityReceiptDigests, type EnvAttestationSummary, type HostCapabilityReceipt, type RunReplayOutcome, type RunReplaySpec } from "../core/reproducibility.js";
 import type { CasStore } from "../core/cas.js";
-import type { ComputeRunner } from "../core/ports.js";
+import type { ComputeRunner, SqlConn } from "../core/ports.js";
 import type { FetchLike } from "../duckdb/resolvers/http-table-scan.js";
-import { runBioOperationFromManifest, runBioQueryFromManifest, envSummaryFromReceipts, type RunOperationResponse } from "./run-store.js";
+import { runBioOperationFromManifest, runBioQueryFromManifest, computeEnvironmentSummariesFromReceipts, type RunOperationResponse } from "./run-store.js";
 
 // C2 — reproduce(). Given a RunReplaySpec (the durable replay inputs L1's job carries), re-execute it against a
 // FRESH db and compare the produced receipts' DETERMINISTIC content digests to the spec's sourceReceiptDigests.
@@ -26,10 +26,12 @@ import { runBioOperationFromManifest, runBioQueryFromManifest, envSummaryFromRec
 
 export interface ReproduceResult {
   runId: string;
+  /** Run id of the fresh verification execution. */
+  reproductionRunId?: string;
   kind: RunReplaySpec["kind"];
-  /** the re-run completed without a run-level failure. */
+  /** The fresh execution reached the same terminal status/error identity. An expected failure can reproduce. */
   reproduced: boolean;
-  /** receipts AND (if pinned) the result content matched. Only meaningful when `reproduced`. */
+  /** Terminal outcome, receipts, environments, and any pinned result content all matched. */
   matched: boolean;
   expected: string[];
   produced: string[];
@@ -40,11 +42,18 @@ export interface ReproduceResult {
   resultMatched?: boolean;
   expectedResultDigest?: string;
   producedResultDigest?: string;
-  /** ENVIRONMENT-content check: the re-run's observed env fingerprint vs the pinned one (compute.run only —
-   *  env lives in provenance notes that the receipt digest drops). undefined = not pinned/not checkable. */
+  /** Per-resource environment check. Provenance notes are outside receiptContentDigest, so this is an independent
+   *  replay condition. undefined means neither run used compute. */
   environmentMatched?: boolean;
-  expectedEnvDigest?: string;
-  producedEnvDigest?: string;
+  environmentComparisons?: Array<{
+    resourceId: string;
+    expected: EnvAttestationSummary[];
+    produced: EnvAttestationSummary[];
+    matched: boolean;
+  }>;
+  outcomeMatched: boolean;
+  expectedOutcome: RunReplayOutcome;
+  producedOutcome: RunReplayOutcome;
   /** Set (with a reason) when the run CANNOT be honestly verified — an un-snapshotted live source and no output
    *  content pin. The roadmap's third C2 outcome: not_reproducible, never fake confidence. `matched` is false. */
   notReproducible?: string;
@@ -59,6 +68,8 @@ export interface ReproduceRequest {
   dbPath?: string;
   network?: { fetch: FetchLike };
   compute?: { runner: ComputeRunner };
+  /** Host cancellation for network resolution, compute, and result materialization during the fresh run. */
+  signal?: AbortSignal;
   cas?: CasStore;
   /** Host-owned cross-db remote-cache isolation scope for the re-run. Not stored in replay; receipts/content
    *  still decide whether reproduction matched. */
@@ -75,6 +86,9 @@ export interface ReproduceRequest {
   protectedSessionVariables?: string[];
   /** Secret-free host capability policy receipts pinned by the original run, e.g. ducknng HTTP profile receipts. */
   hostCapabilityReceipts?: readonly HostCapabilityReceipt[];
+  /** Optional required evidence sink for the fresh verification run. */
+  store?: SqlConn;
+  author?: string;
   now?: string;
 }
 
@@ -82,13 +96,56 @@ function assertReproducible(replay: RunReplaySpec): void {
   if (!replay || replay.schema !== RUN_REPLAY_SPEC_SCHEMA) throw new Error("reproduce: not a valid RunReplaySpec (fail closed)");
   if (!replay.manifest?.path && !replay.manifest?.snapshot) throw new Error("reproduce: replay has no manifest to re-run (fail closed)");
   if (!replay.manifest?.path) throw new Error("reproduce: this slice re-runs from replay.manifest.path (same-host); a snapshot-only replay is not yet supported");
-  // Verify against SOMETHING: pinned source receipts (provenance) OR a pinned result digest (output content). A
+  if (!replay.outcome) throw new Error("reproduce: replay has no terminal outcome pin (fail closed)");
+  if (!["succeeded", "failed", "cancelled"].includes(replay.outcome.status)) throw new Error("reproduce: replay has an invalid terminal outcome status (fail closed)");
+  if (replay.outcome.status === "succeeded" && replay.outcome.errorDigest !== undefined) {
+    throw new Error("reproduce: succeeded replay must not carry an errorDigest (fail closed)");
+  }
+  if (replay.outcome.status !== "succeeded" && !/^sha256:[0-9a-f]{64}$/.test(replay.outcome.errorDigest ?? "")) {
+    throw new Error(`reproduce: ${replay.outcome.status} replay has no valid errorDigest (fail closed)`);
+  }
+  // Verify against SOMETHING: pinned source receipts (provenance), output content, or an expected terminal failure. A
   // resource-free run (e.g. `SELECT 1`) legitimately has zero receipts but IS reproducible via its resultDigest —
   // only refuse a truly hollow replay that pins neither (a vacuous 'match' is worse than an honest refusal).
   const hasReceiptPins = Array.isArray(replay.sourceReceiptDigests) && replay.sourceReceiptDigests.length > 0;
-  if (!hasReceiptPins && !replay.resultDigest) {
-    throw new Error("reproduce: replay pins neither sourceReceiptDigests nor a resultDigest to verify against (fail closed). A resource-free run must carry a resultDigest — run it with a CAS so the output content is pinned.");
+  const hasFailurePin = replay.outcome.status !== "succeeded" && replay.outcome.errorDigest !== undefined;
+  if (!hasReceiptPins && !replay.resultDigest && !hasFailurePin) {
+    throw new Error("reproduce: replay pins neither sourceReceiptDigests, a resultDigest, nor a terminal failure to verify against (fail closed). A successful resource-free run must carry a resultDigest — run it with a CAS so the output content is pinned.");
   }
+  if (replay.computeResources) {
+    const ids = new Set<string>();
+    for (const resource of replay.computeResources) {
+      if (!resource.resourceId || ids.has(resource.resourceId)) throw new Error("reproduce: computeResources must have unique non-empty resourceId values (fail closed)");
+      ids.add(resource.resourceId);
+    }
+  }
+}
+
+function compareComputeEnvironments(
+  replay: RunReplaySpec,
+  receipts: ReadonlyArray<{ resourceId: string; provenance: ReadonlyArray<{ source: string; notes?: string[] }> }>,
+): Pick<ReproduceResult, "environmentMatched" | "environmentComparisons"> {
+  const expected = new Map<string, EnvAttestationSummary[]>();
+  for (const resource of replay.computeResources ?? []) {
+    if (resource.environment) expected.set(resource.resourceId, [resource.environment]);
+  }
+  const produced = new Map<string, EnvAttestationSummary[]>();
+  for (const entry of computeEnvironmentSummariesFromReceipts(receipts)) {
+    produced.set(entry.resourceId, [...(produced.get(entry.resourceId) ?? []), entry.environment]);
+  }
+  if (expected.size === 0 && produced.size === 0) return {};
+  const resourceIds = [...new Set([...expected.keys(), ...produced.keys()])].sort();
+  const environmentComparisons = resourceIds.map((resourceId) => {
+    const expectedForResource = expected.get(resourceId) ?? [];
+    const producedForResource = produced.get(resourceId) ?? [];
+    return {
+      resourceId,
+      expected: expectedForResource,
+      produced: producedForResource,
+      matched: canonicalDigest(expectedForResource) === canonicalDigest(producedForResource),
+    };
+  });
+  return { environmentMatched: environmentComparisons.every((entry) => entry.matched), environmentComparisons };
 }
 
 function normalizeProtectedSessionVariables(names: readonly string[]): string[] {
@@ -147,7 +204,8 @@ export async function reproduceRun(req: ReproduceRequest): Promise<ReproduceResu
   const base = {
     cwd: req.cwd, dbPath: req.dbPath ?? ":memory:", manifestPath: replay.manifest!.path!,
     bindings: replay.bindings, duckdbInitSql: req.duckdbInitSql, protectedSessionBindings: req.protectedSessionBindings, protectedSessionVariables: req.protectedSessionVariables, duckdbConfig: req.duckdbConfig, hostCapabilityReceipts: req.hostCapabilityReceipts,
-    network: req.network, compute: req.compute, cas: req.cas, remoteCacheScope: req.remoteCacheScope,
+    network: req.network, compute: req.compute, signal: req.signal, cas: req.cas, remoteCacheScope: req.remoteCacheScope,
+    store: req.store, author: req.author,
     runId: `reproduce-${shortId}${suffix}`, now: req.now,
   };
 
@@ -158,10 +216,13 @@ export async function reproduceRun(req: ReproduceRequest): Promise<ReproduceResu
   else if (replay.sql) res = await runBioQueryFromManifest({ ...base, sql: replay.sql, resources: replay.resources });
   else throw new Error("reproduce: replay carries neither an operationId nor sql (nothing to re-run)");
 
-  if (!res.ok) { const exp = replay.sourceReceiptDigests ?? []; return { runId: replay.runId, kind: replay.kind, reproduced: false, matched: false, expected: exp, produced: [], missing: exp, extra: [], runDir: res.runDir, error: res.error }; }
-
   const receipts = JSON.parse(await fs.readFile(join(res.runDir, "receipts.json"), "utf8")) as (Omit<Parameters<typeof receiptContentDigest>[0], "provenance"> & { provenance: Array<{ source: string; digest?: string; notes?: string[] }> })[];
   const produced: string[] = receipts.map((r) => receiptContentDigest(r));
+  const producedOutcome: RunReplayOutcome = res.ok
+    ? { status: "succeeded" }
+    : { status: res.status === "cancelled" ? "cancelled" : "failed", errorDigest: canonicalDigest(res.error) };
+  const expectedOutcome = replay.outcome!;
+  const outcomeMatched = canonicalDigest(producedOutcome) === canonicalDigest(expectedOutcome);
   // An un-snapshotted LIVE source is declared BY THE RESOLVER (which alone knows whether it captured content): a
   // `live_source` provenance note. duckdb.sql_materialize (reads arbitrary SQL/read_csv_auto — can't cheaply digest
   // its inputs) always sets it; file_scan sets it only for a remote/unreadable path (no content digest). A receipt
@@ -180,33 +241,28 @@ export async function reproduceRun(req: ReproduceRequest): Promise<ReproduceResu
   const producedResultDigest = res.casRefs?.result;
   let resultMatched: boolean | undefined;
   if (expectedResultDigest) {
-    if (!producedResultDigest) throw new Error("reproduce: replay pins a resultDigest but the re-run produced none — pass a `cas` so the result content can be verified (fail closed)");
+    if (res.ok && !producedResultDigest) throw new Error("reproduce: replay pins a resultDigest but the re-run produced none — pass a `cas` so the result content can be verified (fail closed)");
     resultMatched = producedResultDigest === expectedResultDigest;
   }
-  // ENVIRONMENT drift: a compute.run run's environment attestation lives in the receipt's provenance NOTES
-  // (env_observed:/env_status:), which receiptContentDigest DROPS — so a re-run under a DIFFERENT environment
-  // (different tool versions/layers) but identical output would otherwise falsely 'match'. If the replay pinned an
-  // observed env fingerprint, recompute the re-run's and compare: a mismatch is real env drift, not a match. Only
-  // compute.run runs carry an env summary; a pure-SQL run has none on either side, so this is a no-op there.
-  const expectedEnvDigest = replay.environment?.observedDigest;
-  const producedEnvDigest = envSummaryFromReceipts(receipts)?.observedDigest;
-  let environmentMatched: boolean | undefined;
-  if (expectedEnvDigest) environmentMatched = producedEnvDigest === expectedEnvDigest;
+  // Each compute resource must reproduce its own attestation. Checking only one global digest lets drift in a later
+  // resource falsely match when outputs happen to stay identical.
+  const { environmentMatched, environmentComparisons } = compareComputeEnvironments(replay, receipts);
   // Roadmap C2 — never fake confidence: if the ONLY basis is receipts (no CAS resultDigest to verify OUTPUT content)
   // AND any source is un-snapshotted/live, the receipt match doesn't prove the output is the same (data.csv could
   // have changed underneath). That is not_reproducible, not a match.
   if (expectedResultDigest === undefined && hasLiveSource) {
     return {
-      runId: replay.runId, kind: replay.kind, reproduced: true, matched: false,
-      expected, produced, missing, extra, runDir: res.runDir,
+      runId: replay.runId, reproductionRunId: res.runId, kind: replay.kind, reproduced: outcomeMatched, matched: false,
+      expected, produced, missing, extra, environmentMatched, environmentComparisons,
+      outcomeMatched, expectedOutcome, producedOutcome, runDir: res.runDir, ...(!res.ok ? { error: res.error } : {}),
       notReproducible: "an un-snapshotted live source (a sourceSnapshot with no version, e.g. duckdb.sql_materialize over read_csv_auto) is not content-verified and no resultDigest pins the output — re-run with a `cas` to pin output content",
     };
   }
   return {
-    runId: replay.runId, kind: replay.kind, reproduced: true,
-    // provenance, (when pinned) output content, AND (when pinned) the observed environment must all match
-    matched: receiptsMatched && (resultMatched ?? true) && (environmentMatched ?? true),
+    runId: replay.runId, reproductionRunId: res.runId, kind: replay.kind, reproduced: outcomeMatched,
+    matched: outcomeMatched && receiptsMatched && (resultMatched ?? true) && (environmentMatched ?? true),
     expected, produced, missing, extra, resultMatched, expectedResultDigest, producedResultDigest,
-    environmentMatched, expectedEnvDigest, producedEnvDigest, runDir: res.runDir,
+    environmentMatched, environmentComparisons, outcomeMatched, expectedOutcome, producedOutcome,
+    runDir: res.runDir, ...(!res.ok ? { error: res.error } : {}),
   };
 }

@@ -6,8 +6,8 @@ import { join, resolve } from "node:path";
 import { runBioOperationFromManifest, runBioQueryFromManifest } from "../src/hosts/run-store.js";
 import { reproduceRun } from "../src/hosts/reproduce.js";
 import { fsCasStore } from "../src/hosts/fs-cas.js";
-import { nodeComputeRunner } from "../src/process/node-compute-runner.js";
-import type { RunReplaySpec } from "../src/core/reproducibility.js";
+import { nodeComputeRunner, withObservedEnvironment } from "../src/process/node-compute-runner.js";
+import type { EnvDescriptor, RunReplaySpec } from "../src/core/reproducibility.js";
 import { ducknngHttpProfileReceiptFromInfo } from "../src/duckdb/http-profiles.js";
 
 // C2 — reproduce(): re-execute a RunReplaySpec against a fresh db and compare the produced receipts' DETERMINISTIC
@@ -65,10 +65,7 @@ describe("C2: reproduce() compares deterministic receipt content, not wall-clock
     assert.equal(drift.matched, false, "matched=false when the output content drifted, even with matching receipts");
   });
 
-  test("(#2) compares the observed ENVIRONMENT: env drift is caught even when receipts + result content match", async () => {
-    // A compute.run run's env attestation lives in the receipt's provenance NOTES, which receiptContentDigest
-    // DROPS — so a re-run under a different environment but identical output would falsely 'match' on receipts+result
-    // alone. reproduce recomputes the re-run's observed env and compares it to the pinned observedDigest.
+  test("a pure-SQL replay has no environment comparison", async () => {
     const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-repro-env-"));
     const cas = fsCasStore(await fs.mkdtemp(join(tmpdir(), "pi-bio-cas-")));
     const out = await runBioQueryFromManifest({ cwd, dbPath: ":memory:", manifestPath: MANIFEST, sql: SQL, cas, runId: "origenv", now: "2026-07-01T00:00:00Z" });
@@ -79,13 +76,145 @@ describe("C2: reproduce() compares deterministic receipt content, not wall-clock
     const base = await reproduceRun({ cwd, replay, cas });
     assert.equal(base.matched, true);
     assert.equal(base.environmentMatched, undefined, "no env pin -> no env check, matched stands on receipts+result");
+    assert.equal(base.environmentComparisons, undefined);
+  });
 
-    // pin an observed env fingerprint the re-run cannot reproduce (this pure-SQL re-run observes NO env): drift.
-    const pinnedEnv: RunReplaySpec = { ...replay, environment: { status: "observed_only", observedDigest: "sha256:" + "a".repeat(64) } };
-    const rep = await reproduceRun({ cwd, replay: pinnedEnv, cas });
-    assert.equal(rep.environmentMatched, false, "the pinned observed env was not reproduced -> env drift");
-    assert.equal(rep.matched, false, "matched=false on env drift even though receipts + result content matched");
-    assert.equal(rep.expectedEnvDigest, "sha256:" + "a".repeat(64));
+  test("checks every compute resource: drift in the second environment cannot falsely match", async () => {
+    const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-repro-multi-env-"));
+    const cas = fsCasStore(await fs.mkdtemp(join(tmpdir(), "pi-bio-repro-multi-env-cas-")));
+    const firstEnvironment: EnvDescriptor = {
+      schema: "pi-bio.env_descriptor.v1",
+      kind: "composite",
+      layers: [{ kind: "module", name: "first-stack", version: "1" }],
+    };
+    const secondEnvironment = (version: string): EnvDescriptor => ({
+      schema: "pi-bio.env_descriptor.v1",
+      kind: "composite",
+      layers: [{ kind: "module", name: "second-stack", version }],
+    });
+    const manifest = {
+      schema: "pi-bio.manifest.v1", id: "multi-compute-replay", version: "0.0.0", title: "x", description: "x",
+      provides: {
+        resolvers: [{ id: "compute.run", version: "0.1.0", title: "x", description: "x", output: { mode: "table" } }],
+        resources: [
+          { id: "first", title: "x", kind: "virtual", resolver: "compute.run", params: {
+            table: "first_artifacts", command: ["sh", "-c", "printf first > first.txt"], resultTable: "artifacts",
+            outputs: [{ name: "first", path: "first.txt", kind: "file" }], environment: firstEnvironment,
+          } },
+          { id: "second", title: "x", kind: "virtual", resolver: "compute.run", params: {
+            table: "second_artifacts", command: ["sh", "-c", "printf second > second.txt"], resultTable: "artifacts",
+            outputs: [{ name: "second", path: "second.txt", kind: "file" }], environment: secondEnvironment("1"),
+          } },
+        ],
+      },
+    };
+    const manifestPath = join(cwd, "manifest.json");
+    await fs.writeFile(manifestPath, JSON.stringify(manifest));
+    const runner = (secondVersion: string) => withObservedEnvironment(nodeComputeRunner(), (spec) =>
+      spec.command.some((part) => part.includes("second.txt")) ? secondEnvironment(secondVersion) : firstEnvironment);
+    const sql = "SELECT a.digest AS first_digest, b.digest AS second_digest FROM first_artifacts a CROSS JOIN second_artifacts b";
+
+    const original = await runBioQueryFromManifest({
+      cwd, dbPath: ":memory:", manifestPath, sql, resources: ["first", "second"],
+      compute: { runner: runner("1") }, cas, runId: "multi-original", now: "2026-07-01T00:00:00Z",
+    });
+    assert.equal(original.ok, true, original.ok ? "" : original.error);
+    if (!original.ok) return;
+    const replay = JSON.parse(await fs.readFile(join(original.runDir, "replay.json"), "utf8")) as RunReplaySpec;
+    assert.deepEqual(replay.computeResources?.map((resource) => resource.resourceId), ["first", "second"]);
+    assert.ok(replay.computeResources?.every((resource) => resource.environment?.status === "matched"));
+
+    const reproduced = await reproduceRun({ cwd, replay, compute: { runner: runner("2") }, cas });
+    assert.equal(reproduced.reproduced, true, reproduced.error);
+    assert.equal(reproduced.resultMatched, true, "both commands still produced the same output bytes");
+    assert.deepEqual(reproduced.missing, [], "receipt content still matches because the declared env digest is stable");
+    assert.deepEqual(reproduced.extra, []);
+    assert.equal(reproduced.environmentMatched, false);
+    assert.equal(reproduced.matched, false, "second-resource environment drift invalidates the replay");
+    assert.deepEqual(
+      reproduced.environmentComparisons?.map((entry) => [entry.resourceId, entry.matched]),
+      [["first", true], ["second", false]],
+    );
+
+  });
+
+  test("an identical failed compute rerun compares its real partial receipts and reproduces the failure", async () => {
+    const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-repro-failed-compute-"));
+    const cas = fsCasStore(await fs.mkdtemp(join(tmpdir(), "pi-bio-repro-failed-compute-cas-")));
+    await fs.writeFile(join(cwd, "input.csv"), "value\n1\n");
+    const manifest = {
+      schema: "pi-bio.manifest.v1", id: "failed-compute-replay", version: "0.0.0",
+      title: "Failed compute replay", description: "Resolve a pinned input before a deterministic process failure.",
+      provides: {
+        resolvers: [
+          { id: "duckdb.file_scan", version: "0.1.0", title: "File scan", description: "Read a declared file.", output: { mode: "table" } },
+          { id: "compute.run", version: "0.1.0", title: "Compute", description: "Run a declared process.", output: { mode: "table" } },
+        ],
+        resources: [
+          { id: "input", title: "Pinned input", kind: "virtual", resolver: "duckdb.file_scan", params: { path: "input.csv", table: "input_rows" } },
+          { id: "boom", title: "Failing process", kind: "virtual", resolver: "compute.run", params: {
+            table: "boom", command: ["sh", "-c", "exit 7"], resultTable: "artifacts",
+            outputs: [{ name: "never", path: "never.txt", kind: "file" }],
+          } },
+        ],
+      },
+    };
+    const manifestPath = join(cwd, "manifest.json");
+    await fs.writeFile(manifestPath, JSON.stringify(manifest));
+    const original = await runBioQueryFromManifest({
+      cwd, dbPath: ":memory:", manifestPath, sql: "SELECT * FROM boom", resources: ["input", "boom"],
+      compute: { runner: nodeComputeRunner() }, cas, runId: "failed-original", now: "2026-07-01T00:00:00Z",
+    });
+    assert.equal(original.ok, false);
+    const replay = JSON.parse(await fs.readFile(join(original.runDir, "replay.json"), "utf8")) as RunReplaySpec;
+    assert.equal(replay.outcome?.status, "failed");
+    assert.equal(replay.sourceReceiptDigests?.length, 1, "the successful first resource is retained");
+    assert.equal(replay.computeResources?.[0]?.environment, undefined, "the process failed before it could attest an environment");
+
+    const reproduced = await reproduceRun({ cwd, replay, compute: { runner: nodeComputeRunner() }, cas });
+    assert.equal(reproduced.reproduced, true, reproduced.error);
+    assert.equal(reproduced.outcomeMatched, true);
+    assert.equal(reproduced.matched, true, "same failure and same partial provenance reproduce exactly");
+    assert.equal(reproduced.produced.length, 1, "failed rerun receipts are compared, not discarded");
+    assert.deepEqual(reproduced.missing, []);
+    assert.deepEqual(reproduced.extra, []);
+  });
+
+  test("an identical pre-spawn cancellation is a reproducible terminal outcome without hollow receipt pins", async () => {
+    const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-repro-cancelled-compute-"));
+    const cas = fsCasStore(await fs.mkdtemp(join(tmpdir(), "pi-bio-repro-cancelled-compute-cas-")));
+    const manifest = {
+      schema: "pi-bio.manifest.v1", id: "cancelled-compute-replay", version: "0.0.0",
+      title: "Cancelled compute replay", description: "Cancel a declared process before it starts.",
+      provides: {
+        resolvers: [{ id: "compute.run", version: "0.1.0", title: "Compute", description: "Run a declared process.", output: { mode: "table" } }],
+        resources: [{ id: "work", title: "Cancelled process", kind: "virtual", resolver: "compute.run", params: {
+          table: "work", command: ["sh", "-c", "printf done > done.txt"], resultTable: "artifacts",
+          outputs: [{ name: "done", path: "done.txt", kind: "file" }],
+        } }],
+      },
+    };
+    const manifestPath = join(cwd, "manifest.json");
+    await fs.writeFile(manifestPath, JSON.stringify(manifest));
+    const originalSignal = new AbortController();
+    originalSignal.abort();
+    const original = await runBioQueryFromManifest({
+      cwd, dbPath: ":memory:", manifestPath, sql: "SELECT * FROM work", resources: ["work"],
+      compute: { runner: nodeComputeRunner() }, signal: originalSignal.signal, cas, runId: "cancelled-original", now: "2026-07-01T00:00:00Z",
+    });
+    assert.equal(original.ok, false);
+    assert.equal(original.status, "cancelled");
+    const replay = JSON.parse(await fs.readFile(join(original.runDir, "replay.json"), "utf8")) as RunReplaySpec;
+    assert.equal(replay.outcome?.status, "cancelled");
+    assert.deepEqual(replay.sourceReceiptDigests, []);
+
+    const replaySignal = new AbortController();
+    replaySignal.abort();
+    const reproduced = await reproduceRun({ cwd, replay, compute: { runner: nodeComputeRunner() }, signal: replaySignal.signal, cas });
+    assert.equal(reproduced.reproduced, true, reproduced.error);
+    assert.equal(reproduced.outcomeMatched, true);
+    assert.equal(reproduced.matched, true);
+    assert.deepEqual(reproduced.produced, []);
   });
 
   test("duckdbConfig reproducibility: replay pins the config DIGEST; reproduce must re-supply a matching config", async () => {
@@ -267,6 +396,19 @@ describe("C2: reproduce() compares deterministic receipt content, not wall-clock
     const receipts = JSON.parse(await fs.readFile(join((out as { runDir: string }).runDir, "receipts.json"), "utf8")) as Array<{ provenance: Array<{ source: string; notes?: string[] }> }>;
     const proc = receipts.flatMap((r) => r.provenance).find((p) => p.source === "compute.run");
     assert.ok(proc?.notes?.includes("live_source"), "compute.run provenance marks live_source (output not content-pinned)");
+
+    const replay = JSON.parse(await fs.readFile(join((out as { runDir: string }).runDir, "replay.json"), "utf8")) as RunReplaySpec;
+    const controller = new AbortController();
+    controller.abort();
+    const cancelled = await reproduceRun({
+      cwd,
+      replay,
+      compute: { runner: nodeComputeRunner() },
+      cas,
+      signal: controller.signal,
+    });
+    assert.equal(cancelled.reproduced, false, "an aborted verification run must not report successful reproduction");
+    assert.match(cancelled.error ?? "", /signal already aborted/, "reproduction cancellation reaches the async compute runner");
   });
 
   test("a near-max-length original runId still reproduces — the derived 'reproduce-…' id is bounded to the 128-char limit", async () => {
@@ -295,7 +437,7 @@ describe("C2: reproduce() compares deterministic receipt content, not wall-clock
 
   test("fail closed: a replay with no pinned digests, or no manifest path, refuses (no hollow match)", async () => {
     const { cwd, replay } = await runOnce();
-    await assert.rejects(() => reproduceRun({ cwd, replay: { ...replay, sourceReceiptDigests: [], resultDigest: undefined } }), /pins neither sourceReceiptDigests nor a resultDigest/);
+    await assert.rejects(() => reproduceRun({ cwd, replay: { ...replay, sourceReceiptDigests: [], resultDigest: undefined } }), /pins neither sourceReceiptDigests, a resultDigest, nor a terminal failure/);
     await assert.rejects(() => reproduceRun({ cwd, replay: { ...replay, manifest: undefined } }), /no manifest to re-run/);
   });
 });

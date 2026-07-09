@@ -32,6 +32,7 @@ sanitize_paths <- function(txt) {
   txt <- gsub(wd, ".", txt, fixed = TRUE)
   txt <- gsub("rare_high_impact\\.report-[0-9]+-[0-9a-f]+", "rare_high_impact.report-<run>", txt, perl = TRUE)
   txt <- gsub("query-[0-9]+-[0-9a-f]+", "query-<run>", txt, perl = TRUE)
+  txt <- gsub("reproduce-readme-variant-counts-[0-9]+", "reproduce-readme-variant-counts-<run>", txt, perl = TRUE)
   txt <- gsub("pid[ =][0-9]+", "pid <pid>", txt, perl = TRUE)
   txt <- gsub("/tmp/pi-bio-handoff-cas-[0-9]+", "/tmp/pi-bio-handoff-cas-<run>", txt, perl = TRUE)
   txt <- gsub("[ \t]+(?=\n|$)", "", txt, perl = TRUE)
@@ -177,14 +178,18 @@ pi install git:github.com/sounkou-bioinfo/pi-bio-agent
 
 Use the CLI without Pi:
 
-```{biocli, cache=TRUE}
-query examples/variant-counts/manifest.json --db :memory: --sql "SELECT consequence, count(*) AS n FROM variants GROUP BY consequence ORDER BY consequence"
+```{r cli-ledger-reset, include=FALSE}
+unlink(c(".pi/bio-agent/readme-store.duckdb", ".pi/bio-agent/readme-store.duckdb.wal"), force = TRUE)
 ```
 
-Run a declared operation:
+```{biocli}
+query examples/variant-counts/manifest.json --db :memory: --run-id readme-variant-counts --ledger .pi/bio-agent/readme-store.duckdb --author readme --sql "SELECT consequence, count(*) AS n FROM variants GROUP BY consequence ORDER BY consequence"
+```
 
-```{biocli, cache=TRUE}
-run examples/rare-high-impact/manifest.json --db :memory: --operation rare_high_impact.report
+Verify that run against a fresh database:
+
+```{biocli}
+reproduce .pi/bio-agent/runs/readme-variant-counts/replay.json
 ```
 
 Use it as a library:
@@ -207,9 +212,9 @@ npm install
 npm run check
 ```
 
-`npm run check` runs typecheck, tests, docs/example drift checks, and README tool-list
-checks. CI provisions real R and the pinned `nanoarrow` package so process-compute
-examples exercise real spawned `Rscript`, not a mock.
+`npm run check` runs typecheck, tests, docs/example drift checks, skill conformance, and README tool-list checks. CI
+provisions real R, pinned `nanoarrow`, and DuckHTS before the full suite. A separate owned-ducknng job requires
+retry, subject-scoped HTTP profiles, upload, TLS, RPC, and socket behavior.
 
 ## How it works
 
@@ -228,6 +233,14 @@ Host capabilities are explicit. If no `fetch` is injected, `http.get` is unavail
 If no `ComputeRunner` is injected, `compute.run` is unavailable. The library validates
 manifests, SQL shape, receipts, and replay. The host owns filesystem, network,
 credentials, and process isolation.
+
+The plain CLI keeps those grants explicit: `--network fetch` binds a capped WHATWG-fetch adapter,
+`--compute local` binds the local async runner, `--cas-root` captures outputs, and host-owned config/protected values
+come from JSON files rather than manifest data. An embedding host can replace each port with stricter policy.
+
+Manifest inspection does not infer runnability from an operation's transport. It reports declarations separately
+from this host's `ready`, `blocked`, or `unknown` admission status. A bound resolver with an unattested extension or
+egress requirement remains `unknown` until the host proves it.
 
 For credentialed SQL-native HTTP, the CLI can commission a ducknng HTTP profile on the
 same DuckDB connection as the run. The profile file contains non-secret policy plus a
@@ -270,17 +283,17 @@ observations, so these are ordinary SQL questions:
 - what did the agent learn?
 - what was this job's status at a time?
 - which tool call produced this scientific run?
+- which manifest, operation, and resources did it use?
+
+When a host supplies the ledger, run facts, manifest-declaration links, and declared artifact projections are
+required evidence. A recording failure is returned with the already-persisted run path; it is not silently converted
+into success. `pi-bio-agent reproduce` and `bio_reproduce_run` re-execute `replay.json` against a fresh database and
+report source, output, or environment drift.
 
 Pi session JSONL is ingested as `session:`, `turn:`, `msg:`, `toolcall:`, and `cas:`
 observations. Bio tools record controlled run links at tool execution time, from Pi's
 real tool-call id and only after the target run fact exists. The ingester does not scan
 transcript text for run-looking strings.
-
-Query a recorded run ledger:
-
-```{biocli, cache=TRUE}
-query examples/run-ledger/manifest.json --db :memory: --sql "SELECT tool, status, count(*) n FROM run_ledger GROUP BY 1, 2 ORDER BY n DESC"
-```
 
 Window an edge-shaped graph table without loading the whole neighborhood:
 
@@ -307,7 +320,8 @@ npm run dogfood:bring-it-home
 
 It exercises host-event receipts, step checkpoints/resume, SemanticSQL projection,
 ducknng profile receipts, SDK exports, figure/report CAS artifacts, and real process
-compute when R is available.
+compute when R is available. SemanticSQL compatibility is pinned to the concrete generated-view names at upstream
+commit `83503077e867419c18a211d97105d8ead554e947`; it is not a claim of equivalence with every future generator.
 
 Run the Pi session trace dogfood after installing the extension and configuring an
 image-capable model:
@@ -351,6 +365,7 @@ extension's `registerTool()` calls (`npm run readme:tools`); `npm run check` fai
 - `bio_describe_model` — Describe Pi Bio model
 - `bio_run_operation` — Run a bio operation
 - `bio_query` — Run an ad-hoc bio query
+- `bio_reproduce_run` — Reproduce a bio run
 - `bio_list_duckdb_extensions` — List bio DuckDB extensions
 - `bio_validate_select` — Validate bio SQL SELECT
 - `bio_validate_graph_projection` — Validate graph projection
@@ -370,7 +385,7 @@ Project-local skills and the memory store live under `.pi/bio-agent/` in the cur
 ## Host-neutral agent skill
 
 The package also ships `skills/pi-bio-agent/`: a procedural guide for hosts that do not run the Pi extension. It is
-not a biomedical computation pack. It tells an agent to discover manifests, inspect tables with
+not a biomedical computation pack. It tells an agent to discover and describe manifests, inspect tables with
 `DESCRIBE` / `SUMMARIZE`, run read-only SQL through `pi-bio-agent query`, and use `graph-window` for bounded ledger or
 KG walks.
 
@@ -450,8 +465,9 @@ npm install
 npm run check     # typecheck + tests + docs/readme/examples staleness gates (the single gate)
 ```
 
-`npm run provision:duckhts` installs the DuckHTS community extension for the `duckhts.read_bcf` resolver
-(explicit; never auto-installed during `check`). Runtime Pi APIs are peer dependencies supplied by Pi itself.
+`npm run provision:duckhts` installs the DuckHTS community extension for local `duckhts.read_bcf` tests.
+`npm run provision:ducknng-owned` verifies the owned retry/auth/upload/TLS/RPC surface. Runtime Pi APIs are peer
+dependencies supplied by Pi itself.
 
 ## Status & contributing
 

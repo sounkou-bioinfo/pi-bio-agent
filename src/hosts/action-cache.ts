@@ -54,7 +54,7 @@ function canonicalize(v: unknown): unknown {
   return v;
 }
 
-export function actionInputDigest(replay: Pick<RunReplaySpec, "kind" | "manifest" | "operationId" | "sql" | "resources" | "bindings" | "sourceReceiptDigests" | "hostReceiptDigests" | "duckdbInitSqlDigest" | "protectedSessionBindingsDigest" | "protectedSessionVariablesDigest" | "duckdbConfigDigest" | "compute" | "environment">): string {
+export function actionInputDigest(replay: Pick<RunReplaySpec, "kind" | "manifest" | "operationId" | "sql" | "resources" | "bindings" | "sourceReceiptDigests" | "hostReceiptDigests" | "duckdbInitSqlDigest" | "protectedSessionBindingsDigest" | "protectedSessionVariablesDigest" | "duckdbConfigDigest" | "computeResources">): string {
   const canonical = JSON.stringify(canonicalize([
     replay.kind,
     replay.manifest?.digest ?? null,
@@ -72,8 +72,7 @@ export function actionInputDigest(replay: Pick<RunReplaySpec, "kind" | "manifest
     replay.protectedSessionBindingsDigest ?? null, // host-owned protected session values can change declared-op results; digest only, never the values
     replay.protectedSessionVariablesDigest ?? null, // protected-name declarations change the ad-hoc guard surface; pin the boundary
     replay.duckdbConfigDigest ?? null,   // DuckDB config (extensions/secrets/dirs) can change the result
-    replay.compute ?? null,              // compute.run command/inputSql/outputs are the computation itself
-    replay.environment ?? null,          // a different attested environment can yield a different result
+    replay.computeResources ?? null,     // per-resource command/input/outputs/environment are the computation
   ]));
   return `sha256:${createHash("sha256").update(canonical).digest("hex")}`;
 }
@@ -118,11 +117,11 @@ export async function recallRunResult(
   store: SqlConn,
   cas: CasStore,
   // MUST be the SAME field set actionInputDigest keys on — omitting the result-affecting execution facts
-  // (duckdbInitSqlDigest/protectedSession*Digest/duckdbConfigDigest/compute/environment) would compute a WEAKER recall key than the one the
+  // (duckdbInitSqlDigest/protectedSession*Digest/duckdbConfigDigest/computeResources) would compute a WEAKER recall key than the one the
   // run was stored under, so a caller's minimal replay could collide with a simpler run and serve its wrong rows.
   // (`resultDigest` is NOT part of the input key — it's the run's RECORDED output, used below to fail closed on a
   // memo that has since diverged.)
-  replay: Pick<RunReplaySpec, "kind" | "manifest" | "operationId" | "sql" | "resources" | "bindings" | "sourceReceiptDigests" | "hostReceiptDigests" | "duckdbInitSqlDigest" | "protectedSessionBindingsDigest" | "protectedSessionVariablesDigest" | "duckdbConfigDigest" | "compute" | "environment" | "resultDigest">,
+  replay: Pick<RunReplaySpec, "kind" | "manifest" | "operationId" | "sql" | "resources" | "bindings" | "sourceReceiptDigests" | "hostReceiptDigests" | "duckdbInitSqlDigest" | "protectedSessionBindingsDigest" | "protectedSessionVariablesDigest" | "duckdbConfigDigest" | "computeResources" | "resultDigest">,
 ): Promise<{ rows: unknown[]; resultDigest: string } | null> {
   const outputDigest = await actionCacheGet(store, actionInputDigest(replay));
   if (!outputDigest) return null;

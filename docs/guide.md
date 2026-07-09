@@ -155,11 +155,13 @@ these are **SQL all the way down**: even fetching a remote API is a SQL table fu
   out-of-process child (`["Rscript","./fit.R"]`), and reads its Arrow output back as a table: the *data
   contract* stays SQL/Arrow even though the computation is external. Needs the host to supply a `ComputeRunner`
   (`runBioQueryFromManifest({ …, compute: { runner: nodeComputeRunner() } })`); absent, it fails closed. A host
+  using the plain CLI opts in with `--compute local` and supplies `--cas-root` when outputs include files. A host
   that knows the real execution environment can wrap any runner with `withObservedEnvironment` from
   `pi-bio-agent/hosts`, so receipts record an `EnvDescriptor` such as an `renv.lock` digest, package snapshot,
   container image, or scheduler module set.
 - `http.get`: `{ url, table, format? }`; an explicit HTTP fetch resolver for hosts that choose the JS `fetch`
-  port. Needs the host to supply `fetch` (`{ …, network: { fetch: globalThis.fetch } }`); absent, it fails closed.
+  port. Needs the host to supply `fetch` (`{ …, network: { fetch: globalThis.fetch } }`), or the plain CLI to opt in
+  with `--network fetch`; absent, it fails closed.
 
 So the bet holds end to end: **data** and **network** are SQL (table functions); **compute** is the one place
 code runs out-of-process, and even there the boundary is SQL/Arrow. The two capability resolvers

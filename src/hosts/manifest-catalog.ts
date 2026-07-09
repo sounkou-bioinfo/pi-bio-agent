@@ -2,6 +2,7 @@ import type { Dirent } from "node:fs";
 import { promises as fs } from "node:fs";
 import { basename, join, relative, resolve, sep } from "node:path";
 import { describeManifest, validateBioManifest, type BioManifest } from "../core/manifest.js";
+import { resourceCapabilityRequirements } from "./manifest-capabilities.js";
 
 export interface ManifestCatalogResource {
   id: string;
@@ -14,7 +15,7 @@ export interface ManifestCatalogOperation {
   id: string;
   title: string;
   transport: string;
-  runnable: boolean;
+  requiredResources: string[];
 }
 
 export interface ManifestCatalogEntry {
@@ -26,7 +27,7 @@ export interface ManifestCatalogEntry {
   resources: ManifestCatalogResource[];
   operations: ManifestCatalogOperation[];
   resolverIds: string[];
-  capabilityHints: string[];
+  requirements: string[];
 }
 
 export interface InvalidManifestCatalogEntry {
@@ -35,7 +36,7 @@ export interface InvalidManifestCatalogEntry {
 }
 
 export interface ManifestCatalog {
-  schema: "pi-bio.manifest_catalog.v1";
+  schema: "pi-bio.manifest_catalog.v2";
   root: string;
   query?: string;
   entries: ManifestCatalogEntry[];
@@ -72,31 +73,8 @@ async function* walkJsonFiles(root: string): AsyncGenerator<string> {
   }
 }
 
-function asStringArray(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((x): x is string => typeof x === "string" && x.length > 0) : [];
-}
-
 function resourceTable(params: Record<string, unknown> | undefined): string | undefined {
   return typeof params?.table === "string" && params.table.length > 0 ? params.table : undefined;
-}
-
-function mentionsRemoteSource(value: unknown): boolean {
-  if (typeof value === "string") return /^https?:\/\//i.test(value) || /https?:\/\//i.test(value);
-  if (Array.isArray(value)) return value.some(mentionsRemoteSource);
-  if (value && typeof value === "object") return Object.values(value as Record<string, unknown>).some(mentionsRemoteSource);
-  return false;
-}
-
-function capabilityHints(manifest: BioManifest): string[] {
-  const hints = new Set<string>();
-  for (const r of manifest.provides.resources ?? []) {
-    if (r.resolver === "http.get") hints.add("host.fetch");
-    if (r.resolver === "compute.run") hints.add("compute.runner");
-    if (r.resolver === "duckhts.read_bcf") hints.add("duckdb.extension.duckhts");
-    for (const ext of asStringArray(r.params?.extensions)) hints.add(`duckdb.extension.${ext}`);
-    if (mentionsRemoteSource(r.params)) hints.add("network.egress");
-  }
-  return [...hints].sort();
 }
 
 function matchesQuery(entry: ManifestCatalogEntry, query: string | undefined): boolean {
@@ -110,7 +88,7 @@ function matchesQuery(entry: ManifestCatalogEntry, query: string | undefined): b
     ...entry.resources.flatMap((r) => [r.id, r.title, r.resolver, r.table ?? ""]),
     ...entry.operations.flatMap((o) => [o.id, o.title, o.transport]),
     ...entry.resolverIds,
-    ...entry.capabilityHints,
+    ...entry.requirements,
   ].join("\n").toLowerCase();
   return haystack.includes(q);
 }
@@ -133,10 +111,10 @@ function catalogEntry(cwd: string, file: string, manifest: BioManifest): Manifes
       id: o.id,
       title: o.title,
       transport: o.transport,
-      runnable: o.runnable,
+      requiredResources: o.requiredResources,
     })),
     resolverIds: described.resolvers.map((r) => r.id).sort(),
-    capabilityHints: capabilityHints(manifest),
+    requirements: [...new Set((manifest.provides.resources ?? []).flatMap(resourceCapabilityRequirements))].sort(),
   };
 }
 
@@ -167,7 +145,7 @@ export async function listManifestCatalog(req: ListManifestCatalogRequest): Prom
   entries.sort((a, b) => a.manifestPath.localeCompare(b.manifestPath));
   invalid.sort((a, b) => a.manifestPath.localeCompare(b.manifestPath));
   return {
-    schema: "pi-bio.manifest_catalog.v1",
+    schema: "pi-bio.manifest_catalog.v2",
     root: displayPath(cwd, root) || basename(root),
     ...(req.query?.trim() ? { query: req.query } : {}),
     entries,

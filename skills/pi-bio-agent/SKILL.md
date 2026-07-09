@@ -63,7 +63,13 @@ declared inputs, receipts, and replayable evidence.
    pi-bio-agent catalog --query clinvar
    ```
 
-   Pick one returned `manifestPath`, then inspect it or query it. In Pi, use `bio_list_sources` for the same step.
+   Pick one returned `manifestPath`, validate it, and inspect this CLI host's admission before resolving data:
+
+   ```sh
+   pi-bio-agent describe <manifestPath>
+   ```
+
+   In Pi, use `bio_list_sources` then `bio_describe_model` for the same steps.
 
 3. Run one real packaged query before inventing a task-specific manifest:
 
@@ -76,6 +82,7 @@ declared inputs, receipts, and replayable evidence.
 4. For the user's task: write or reuse a manifest, inspect tables, then answer with ad-hoc SQL.
 
    ```sh
+   pi-bio-agent describe manifest.json
    pi-bio-agent query manifest.json --db :memory: --sql "DESCRIBE table_name"
    pi-bio-agent query manifest.json --db :memory: --sql "SUMMARIZE table_name"
    pi-bio-agent query manifest.json --db :memory: --sql "SELECT * FROM table_name LIMIT 5"
@@ -87,6 +94,14 @@ declared inputs, receipts, and replayable evidence.
    ```sh
    pi-bio-agent query manifest.json --db :memory: --ledger auto --sql "<WITH/SELECT ...>"
    ```
+
+   Verify a persisted run by re-executing its replay against a fresh database:
+
+   ```sh
+   pi-bio-agent reproduce .pi/bio-agent/runs/<runId>/replay.json
+   ```
+
+   In Pi, call `bio_reproduce_run` with the same replay path.
 
 6. When a DuckDB database already contains edge-shaped graph rows, page them instead of serializing a whole
    neighborhood:

@@ -14,6 +14,7 @@
         "params": {
           "table": "vep_annotations",
           "extensions": ["ducknng"],
+          "declaredSources": ["https://rest.ensembl.org/vep/human/id"],
           "sql": "SELECT * FROM ducknng_ncurl_table(coalesce(getvariable('vep_base'), 'https://rest.ensembl.org') || '/vep/human/id', 'POST', '[{\"name\":\"Content-Type\",\"value\":\"application/json\"},{\"name\":\"Accept\",\"value\":\"application/json\"}]', json_object('ids', json(getvariable('vep_ids')))::VARCHAR::BLOB, 20000, coalesce(getvariable('tls'), 0)::UBIGINT)"
         }
       }

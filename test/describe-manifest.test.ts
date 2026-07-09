@@ -4,7 +4,7 @@ import { describeManifest, type BioManifest } from "../src/core/manifest.js";
 import { describeBioManifestFromPath } from "../src/hosts/run-store.js";
 
 describe("describeManifest: the 'describe THIS program' view", () => {
-  test("summarizes resources/operations/resolvers/termSets and flags runnable ops", () => {
+  test("summarizes declarations without pretending to know host runnability", () => {
     const m: BioManifest = {
       schema: "pi-bio.manifest.v1",
       id: "x",
@@ -21,17 +21,19 @@ describe("describeManifest: the 'describe THIS program' view", () => {
     const d = describeManifest(m);
     assert.deepEqual(d.resources, [{ id: "variants", title: "Variants", resolver: "duckdb.file_scan" }]);
     assert.equal(d.operations[0].id, "counts.by_consequence");
-    assert.equal(d.operations[0].runnable, true, "duckdb.sql operations are runnable by bio_run_operation");
+    assert.deepEqual(d.operations[0].requiredResources, []);
+    assert.equal("runnable" in d.operations[0], false);
     assert.deepEqual(d.termSets, [{ id: "impact", title: "Impact", ordered: true, members: 2 }]);
   });
 });
 
 describe("describeBioManifestFromPath: the agent discovery tool (no raw-JSON parsing)", () => {
-  test("describes a real example manifest and exposes the runnable operation id", async () => {
+  test("describes a real example manifest and assesses its actual host bindings", async () => {
     const out = await describeBioManifestFromPath({ cwd: process.cwd(), manifestPath: "examples/rare-high-impact/manifest.json" });
     assert.equal(out.valid, true);
     if (out.valid) {
-      assert.ok(out.operations.some((o) => o.id === "rare_high_impact.report" && o.runnable));
+      assert.ok(out.operations.some((o) => o.id === "rare_high_impact.report"));
+      assert.equal(out.host.operations.find((o) => o.id === "rare_high_impact.report")?.admission, "ready");
       assert.ok(out.resources.length >= 1);
     }
   });
@@ -47,7 +49,7 @@ describe("describeBioManifestFromPath: the agent discovery tool (no raw-JSON par
     const network = { fetch: async () => ({ ok: true, status: 200, text: async () => JSON.stringify(manifest) }) };
     const out = await describeBioManifestFromPath({ cwd: process.cwd(), manifestPath: "https://example.org/m.json", network });
     assert.equal(out.valid, true);
-    if (out.valid) assert.ok(out.operations.some((o) => o.id === "op.x" && o.runnable));
+    if (out.valid) assert.equal(out.host.operations.find((o) => o.id === "op.x")?.admission, "ready");
   });
 
   test("a URL manifest fails closed with no network — error returned, not thrown", async () => {

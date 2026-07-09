@@ -7,8 +7,8 @@
 // subset — `type`, `title`, `description`, `tags` — and throws on any other key or unquoted ':' rather than
 // pulling in a general YAML dependency. To support a new key (e.g. `resource`, `updated`), add it here; the
 // parser rejects unknown keys by design.
-import { readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const docsDir = join(dirname(fileURLToPath(import.meta.url)), "..", "docs");
@@ -48,10 +48,25 @@ function parseFrontmatter(file, text) {
   return { slug: file.replace(/\.md$/, ""), path: `docs/${file}`, type: fm.type, title: fm.title, description: fm.description, tags: fm.tags ?? [] };
 }
 
+function validateLocalLinks(file, text) {
+  for (const match of text.matchAll(/\]\(([^)]+)\)/g)) {
+    let target = match[1].trim().replace(/^<|>$/g, "").split(/\s+["']/)[0].split("#")[0];
+    if (!target || target.startsWith("#") || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(target)) continue;
+    if (!target.includes("/") && !/\.[A-Za-z0-9]+$/.test(target)) continue;
+    try { target = decodeURIComponent(target); } catch { /* use the authored path in the error below */ }
+    const path = resolve(docsDir, target);
+    if (!existsSync(path)) throw new Error(`docs/${file}: broken local link '${match[1]}'`);
+  }
+}
+
 const entries = readdirSync(docsDir)
   .filter((f) => f.endsWith(".md") && f !== "INDEX.md")
   .sort()
-  .map((f) => parseFrontmatter(f, readFileSync(join(docsDir, f), "utf8")))
+  .map((f) => {
+    const text = readFileSync(join(docsDir, f), "utf8");
+    validateLocalLinks(f, text);
+    return parseFrontmatter(f, text);
+  })
   .sort((a, b) => a.type.localeCompare(b.type) || a.title.localeCompare(b.title));
 
 const indexJson = `${JSON.stringify({ schema: "pi-bio.docs_index.v1", note: "generated from docs/*.md frontmatter by scripts/generate-docs-index.mjs — do not edit by hand", docs: entries }, null, 2)}\n`;

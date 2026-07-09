@@ -42,6 +42,12 @@ is meaningful: the host has not granted that capability.
 }
 ```
 
+The plain CLI grants its capped WHATWG-fetch adapter explicitly:
+
+```sh
+pi-bio-agent query api-demo.json --network fetch --db :memory: --sql "SELECT * FROM api_response LIMIT 5"
+```
+
 ## SQL-Native HTTP With ducknng
 
 Use `duckdb.sql_materialize` plus `ducknng_ncurl_table` when ducknng is provisioned. This also covers GraphQL POSTs.
@@ -129,4 +135,5 @@ Preferred shapes:
 - A declared operation intentionally consumes protected host state. Ad-hoc queries should not read protected session
   variables into result rows.
 
-The plain CLI can load provisioned extensions and pass non-secret bindings, but it is not a credential manager today.
+The plain CLI can grant fetch, load provisioned extensions, and pass non-secret bindings. Credentialed fetch policy
+beyond a ducknng HTTP profile belongs in an embedding host.

@@ -5,7 +5,7 @@ import { graphProjectionSql, validateGraphProjectionProfile, type GraphProjectio
 import { duckdbNodeConn } from "../src/duckdb/node-api.js";
 import { materializeEntailedEdges } from "../src/duckdb/graph-closure.js";
 import { materializeGraphProjectionProfile } from "../src/duckdb/graph-projection.js";
-import { materializeSemanticSqlSourceViews, semanticSqlSourceViewSql, SEMANTIC_SQL_SOURCE_SPEC_SCHEMA } from "../src/duckdb/semantic-sql.js";
+import { materializeSemanticSqlSourceViews, semanticSqlSourceViewSql, SEMANTIC_SQL_SOURCE_SPEC_SCHEMA, SEMANTIC_SQL_UPSTREAM_COMPATIBILITY } from "../src/duckdb/semantic-sql.js";
 import { createBioObservationSchema, materializeBioEdgesAsOf, recordObservationLink } from "../src/duckdb/observations.js";
 
 const profile: GraphProjectionProfile = {
@@ -127,6 +127,7 @@ describe("graph projection profile: source relation -> compiled graph", () => {
     assert.equal(views.entailedTypeEdgeTable, "entailed_type_edge");
     assert.equal(views.entailedEdgeCycleTable, "entailed_edge_cycle");
     assert.equal(views.entailedEdgeSamePredicateCycleTable, "entailed_edge_same_predicate_cycle");
+    assert.equal(views.transitiveEdgeTable, "transitive_edge");
     assert.equal(views.taxonTable, "taxon");
     assert.equal(views.directNeverInTaxonTable, "direct_never_in_taxon");
     assert.equal(views.directInTaxonTable, "direct_in_taxon");
@@ -144,7 +145,7 @@ describe("graph projection profile: source relation -> compiled graph", () => {
       { subject: "MONDO:0004979", value: "A chronic respiratory disorder." },
     ]);
     assert.deepEqual(await conn.all<{ subject: string; object: string }>(
-      "SELECT subject, object FROM mapping_statement WHERE subject = 'MONDO:0004979'",
+      "SELECT subject, object FROM has_mapping_statement WHERE subject = 'MONDO:0004979'",
     ), [
       { subject: "MONDO:0004979", object: "UMLS:C0004096" },
     ]);
@@ -244,6 +245,9 @@ describe("graph projection profile: source relation -> compiled graph", () => {
       "SELECT object FROM entailed_subclass_of_edge WHERE subject = 'MONDO:0004766' ORDER BY object",
     ), [{ object: "MONDO:0004784" }, { object: "MONDO:0004979" }]);
     assert.deepEqual(await conn.all<{ object: string }>("SELECT object FROM entailed_type_edge WHERE subject = 'MONDO:0004979'"), [{ object: "GO:0000001" }]);
+    assert.deepEqual(await conn.all<{ object: string; depth: number }>(
+      "SELECT object, CAST(depth AS INTEGER) AS depth FROM transitive_edge WHERE subject = 'MONDO:0004766' AND predicate = 'rdfs:subClassOf' ORDER BY depth, object",
+    ), [{ object: "MONDO:0004784", depth: 1 }, { object: "MONDO:0004979", depth: 2 }]);
     assert.deepEqual(
       await conn.all<{ anchor_object: string }>(
         "SELECT DISTINCT anchor_object FROM subgraph_edge_by_ancestor WHERE subject = 'MONDO:0004766' AND predicate = 'rdfs:subClassOf' ORDER BY anchor_object",
@@ -421,6 +425,19 @@ describe("graph projection profile: source relation -> compiled graph", () => {
       attrs: null,
       trust: null,
     }]);
+  });
+
+  test("pins the concrete upstream generated-view contract instead of claiming moving-target parity", () => {
+    const sql = semanticSqlSourceViewSql({
+      schema: SEMANTIC_SQL_SOURCE_SPEC_SCHEMA,
+      entailedEdgeTable: "entailed_edge_input",
+      termAssociationSourceTable: "term_association_input",
+      prefixTable: "prefix_input",
+      textualTransformationTable: "textual_transformation_input",
+    }).join("\n");
+    const generated = new Set([...sql.matchAll(/CREATE OR REPLACE VIEW\s+"([^"]+)"/g)].map((match) => match[1]));
+    const missing = SEMANTIC_SQL_UPSTREAM_COMPATIBILITY.concreteViews.filter((view) => !generated.has(view));
+    assert.deepEqual(missing, [], `missing concrete views from pinned upstream ${SEMANTIC_SQL_UPSTREAM_COMPATIBILITY.commit}`);
   });
 
   test("canonicalizes SemanticSQL IRI statements through a prefix table before graph projection", async () => {

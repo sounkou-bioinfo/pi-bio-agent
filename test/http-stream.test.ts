@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { readCapped } from "../src/duckdb/resolvers/http-stream.js";
-import { cappedFetchLike } from "../extensions/pi-coding-agent/index-networked.js";
+import { cappedFetchLike } from "../src/hosts/network.js";
 
 const enc = (s: string) => new TextEncoder().encode(s);
 async function* chunks(...parts: string[]) { for (const p of parts) yield enc(p); }

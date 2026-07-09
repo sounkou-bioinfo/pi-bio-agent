@@ -5,11 +5,10 @@ import { describe, test } from "node:test";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = process.cwd();
-const npmCmd = process.platform === "win32" ? "npm.cmd" : "npm";
 
 describe("bring-it-home dogfood command", () => {
   test("composes host events, checkpoints, graph projection, ducknng profile receipts, and SDK exports", { timeout: 20_000 }, async () => {
-    const { stdout } = await execFileAsync(npmCmd, ["run", "dogfood:bring-it-home"], {
+    const { stdout } = await execFileAsync(process.execPath, ["scripts/bring-it-home-dogfood.mjs"], {
       cwd: repoRoot,
       maxBuffer: 4 * 1024 * 1024,
     });

@@ -11,6 +11,7 @@
       "params": {
         "table": "uniprot_entry",
         "extensions": ["ducknng"],
+        "declaredSources": ["https://rest.uniprot.org/uniprotkb/"],
         "sql": "SELECT * FROM ducknng_ncurl_table('https://rest.uniprot.org/uniprotkb/' || getvariable('uniprot_acc') || '.json', 'GET', '[{\"name\":\"Accept\",\"value\":\"application/json\"}]', ''::BLOB, 20000, coalesce(getvariable('tls'), 0)::UBIGINT)"
       }
     }]

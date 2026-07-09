@@ -36,12 +36,25 @@ async function scalar(dbPath, sql, params = []) {
 const pkg = JSON.parse(await fs.readFile(join(repoRoot, "package.json"), "utf8"));
 assert.deepEqual(pkg.pi?.skills, ["./skills"], "package exposes skills to hosts that understand package skills");
 
-const skillText = await fs.readFile(join(repoRoot, "skills", "pi-bio-agent", "SKILL.md"), "utf8");
+const help = await execFileAsync(process.execPath, [cli, "--help"], { cwd: repoRoot });
+assert.match(help.stdout, /pi-bio-agent <catalog\|describe\|query\|run/);
+assert.equal(help.stderr, "", "root --help is a successful, quiet discovery command");
+
+const hostRoot = await fs.mkdtemp(join(tmpdir(), "pi-bio-skill-host-"));
+const installed = await runCli(repoRoot, ["install-skill", "--dest", join(hostRoot, "skills")]);
+assert.equal(installed.ok, true, "the package CLI installs the host-neutral skill");
+const installedSkill = join(installed.installed, "SKILL.md");
+const skillText = await fs.readFile(installedSkill, "utf8");
 assert.match(skillText, /pi-bio-agent query\/run/, "skill points non-Pi hosts at the CLI substrate");
 assert.match(skillText, /pi-bio-agent catalog/, "skill points non-Pi hosts at manifest-backed source discovery");
 assert.match(skillText, /pi-bio-agent graph-window/, "skill points non-Pi hosts at bounded graph inspection");
 assert.match(skillText, /ClawBio-like systems/, "skill names the ClawBio-style anti-sprawl migration path");
 assert.match(skillText, /Skill Graduation Rule/, "skill keeps skills as graduation, not the computation");
+
+const extensionSource = await fs.readFile(join(repoRoot, "extensions", "pi-coding-agent", "index.ts"), "utf8");
+const registeredTools = new Set([...extensionSource.matchAll(/pi\.registerTool\(\{\s*name:\s*"(bio_[A-Za-z0-9_]+)"/g)].map((match) => match[1]));
+const documentedToolNames = [...skillText.matchAll(/\b(bio_[A-Za-z0-9_]+)\b/g)].map((match) => match[1]).filter((name) => name !== "bio_edges_as_of");
+for (const name of documentedToolNames) assert.ok(registeredTools.has(name), `installed skill documents registered Pi tool ${name}`);
 
 const workdir = await fs.mkdtemp(join(tmpdir(), "pi-bio-substrate-skill-"));
 await fs.cp(join(repoRoot, "examples", "rare-high-impact"), workdir, { recursive: true });
@@ -55,6 +68,10 @@ assert.equal(catalog.ok, undefined, "catalog is a discovery document, not a run 
 const rareEntry = catalog.entries.find((entry) => entry.manifestPath === "examples/rare-high-impact/manifest.json");
 assert.ok(rareEntry, "catalog discovers the rare-high-impact manifest before a host runs it");
 assert.deepEqual(rareEntry.operations.map((op) => op.id), ["rare_high_impact.report"]);
+
+const admission = await runCli(workdir, ["describe", "manifest.json"]);
+assert.equal(admission.valid, true, "the non-Pi CLI validates the authored manifest before execution");
+assert.equal(admission.host.operations[0].admission, "ready", "the CLI reports concrete host admission");
 
 const described = await runCli(workdir, [
   "query", "manifest.json",
@@ -90,6 +107,10 @@ const runFactCount = await scalar(
 );
 assert.equal(runFactCount, 1, "CLI dogfood run is recorded as a run:<id> ledger fact");
 
+const reproduction = await runCli(workdir, ["reproduce", join(run.runDir, "replay.json")]);
+assert.equal(reproduction.reproduced, true);
+assert.equal(reproduction.matched, true, "the installed-skill CLI path verifies its own replay by digest");
+
 const graphDbPath = join(workdir, "graph-window.duckdb");
 const graphMaterialized = await runCli(workdir, [
   "query", join(repoRoot, "examples", "graph-window", "manifest.json"),
@@ -124,13 +145,14 @@ assert.equal(graphWindowNext.omittedCount, 0);
 console.log(JSON.stringify({
   dogfood: "substrate-skill",
   ok: true,
-  integrationPoint: "package skill -> non-Pi host -> catalog -> pi-bio-agent CLI -> manifest SQL + graph-window paging + observation ledger",
-  skill: "skills/pi-bio-agent/SKILL.md",
+  integrationPoint: "package skill -> non-Pi host -> catalog/describe -> pi-bio-agent CLI -> manifest SQL + graph-window paging + observation ledger",
+  skill: installedSkill,
   catalogEntry: rareEntry.manifestPath,
   manifest: "examples/rare-high-impact/manifest.json",
   runId: run.runId,
   buckets: Object.fromEntries(buckets),
   ledgerRunFacts: runFactCount,
+  reproduction: { reproduced: reproduction.reproduced, matched: reproduction.matched },
   graphWindow: {
     totalCount: graphWindow.totalCount,
     firstPageRows: graphWindow.rows.length,

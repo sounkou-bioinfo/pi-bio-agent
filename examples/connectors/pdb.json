@@ -11,6 +11,7 @@
       "params": {
         "table": "pdb_entry",
         "extensions": ["ducknng"],
+        "declaredSources": ["https://data.rcsb.org/rest/v1/core/entry/"],
         "sql": "SELECT * FROM ducknng_ncurl_table('https://data.rcsb.org/rest/v1/core/entry/' || getvariable('pdb_id'), 'GET', '[{\"name\":\"Accept\",\"value\":\"application/json\"}]', ''::BLOB, 20000, coalesce(getvariable('tls'), 0)::UBIGINT)"
       }
     }]

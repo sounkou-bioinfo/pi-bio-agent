@@ -37,12 +37,11 @@ export interface RunObservation {
   runObjectDigest?: string;
 }
 
-/** Record a run as a `run:<runId>` observation in the shared store, attributed to `author`. Best-effort at the
- *  call site (logging to the ledger must never fail the run itself). */
+/** Record a run as a `run:<runId>` observation in the shared store, attributed to `author`. A high-level runner
+ *  that was given a store treats this as required evidence and surfaces any failure to its caller. */
 export async function recordRunObservation(conn: SqlConn, run: RunObservation, now: string, author?: string): Promise<void> {
   // Ensure the ledger table exists FIRST: a fresh custom/server-backed store (a host-injected openStore) may not have
-  // it yet, and recordRun logs best-effort (swallows failures) — so without this the FIRST run's fact would be
-  // silently dropped. Idempotent (IF NOT EXISTS), like memory-store/skill-store's ensure-schema.
+  // it yet. Idempotent (IF NOT EXISTS), like memory-store/skill-store's ensure-schema.
   await createBioObservationSchema(conn, { ifNotExists: true });
   // strictly-monotonic recordedAt per run:<id> slot, SERIALIZED per slot: a REUSED runId re-run overwrites its files,
   // so its ledger fact must SUPERSEDE the prior one (be current) — a backdated `now` (< the existing latest), or a

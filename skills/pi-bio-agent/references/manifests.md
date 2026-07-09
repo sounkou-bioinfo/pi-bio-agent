@@ -100,8 +100,14 @@ pi-bio-agent catalog
 pi-bio-agent catalog --query graphql
 ```
 
-The catalog returns manifest paths, resources/tables, runnable operations, resolvers, and host capability hints. It
-is discovery only; run `pi-bio-agent query` or `pi-bio-agent run` against one returned `manifestPath`.
+The catalog returns manifest paths, resources/tables, declared operations, resolvers, and host requirements. It
+is discovery only. Validate and assess one result before execution:
+
+```sh
+pi-bio-agent describe <manifestPath>
+```
+
+Then run `pi-bio-agent query` or `pi-bio-agent run` against it.
 
 - `examples/variant-counts/manifest.json`
 - `examples/connectors/clinvar-region.json`

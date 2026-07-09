@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { promises as fsp } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { mainRun, parseFlags } from "../src/cli/run.js";
 import { mainCatalog } from "../src/cli/catalog.js";
 import { openBioStore } from "../src/hosts/bio-store.js";
@@ -46,13 +47,13 @@ describe("cli: query/run over a manifest (provider-agnostic entry point)", () =>
     assert.equal(code, 0, s.err.join("\n"));
     const printed = JSON.parse(s.out.join("\n")) as {
       schema: string;
-      entries: Array<{ manifestPath: string; id: string; resources: Array<{ table?: string }>; operations: Array<{ id: string; runnable: boolean }>; capabilityHints: string[] }>;
+      entries: Array<{ manifestPath: string; id: string; resources: Array<{ table?: string }>; operations: Array<{ id: string; requiredResources: string[] }>; requirements: string[] }>;
     };
-    assert.equal(printed.schema, "pi-bio.manifest_catalog.v1");
+    assert.equal(printed.schema, "pi-bio.manifest_catalog.v2");
     assert.deepEqual(printed.entries.map((entry) => entry.manifestPath), ["examples/connectors/opentargets-graphql.json"]);
     assert.equal(printed.entries[0]!.resources[0]!.table, "opentargets_target_associated_diseases");
-    assert.deepEqual(printed.entries[0]!.operations, [{ id: "opentargets.associated_diseases", title: "OpenTargets associated diseases for one target", transport: "duckdb.sql", runnable: true }]);
-    assert.ok(printed.entries[0]!.capabilityHints.includes("duckdb.extension.ducknng"));
+    assert.deepEqual(printed.entries[0]!.operations, [{ id: "opentargets.associated_diseases", title: "OpenTargets associated diseases for one target", transport: "duckdb.sql", requiredResources: ["opentargets_target_associated_diseases"] }]);
+    assert.ok(printed.entries[0]!.requirements.includes("duckdb.extension.ducknng"));
   });
 
   test("catalog usage errors are explicit", async () => {
@@ -70,6 +71,99 @@ describe("cli: query/run over a manifest (provider-agnostic entry point)", () =>
     assert.equal(printed.ok, true);
     assert.ok(printed.rowCount > 0, "produced rows");
     assert.deepEqual(printed.rows.map((r) => r.consequence), ["missense", "stop_gained", "synonymous"]);
+  });
+
+  test("explicit CLI network grant materializes a generic http.get resource", async () => {
+    const dir = await fsp.mkdtemp(join(tmpdir(), "cli-http-"));
+    const server = createServer((_req, res) => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end('[{"gene":"BRCA2","score":7}]');
+    });
+    await new Promise<void>((resolveListen) => server.listen(0, "127.0.0.1", resolveListen));
+    try {
+      const address = server.address();
+      assert.ok(address && typeof address === "object");
+      const manifestPath = join(dir, "manifest.json");
+      await fsp.writeFile(manifestPath, JSON.stringify({
+        schema: "pi-bio.manifest.v1",
+        id: "cli-http",
+        version: "0.1.0",
+        title: "CLI HTTP",
+        description: "Exercise the explicit CLI fetch grant.",
+        provides: {
+          resolvers: [{ id: "http.get", version: "0.1.0", title: "HTTP", description: "HTTP to table", output: { mode: "table" } }],
+          resources: [{ id: "api", title: "API", kind: "virtual", resolver: "http.get", params: { url: `http://127.0.0.1:${address.port}/genes`, table: "api", format: "json" } }],
+        },
+      }));
+      const s = sink();
+      const code = await mainRun("query", [manifestPath, "--network", "fetch", "--db", ":memory:", "--sql", "SELECT gene, score FROM api"], { ...s.deps, cwd: dir });
+      assert.equal(code, 0, s.err.join("\n"));
+      const result = JSON.parse(s.out[0]!) as { rows: Array<{ gene: string; score: number }> };
+      assert.deepEqual(result.rows, [{ gene: "BRCA2", score: 7 }]);
+    } finally {
+      await new Promise<void>((resolveClose, reject) => server.close((error) => error ? reject(error) : resolveClose()));
+    }
+  });
+
+  test("explicit CLI compute and CAS grants capture process artifacts", async () => {
+    const cwd = await fsp.mkdtemp(join(tmpdir(), "cli-compute-"));
+    const s = sink();
+    const code = await mainRun("query", [
+      resolve("examples/compute-files-only/manifest.json"),
+      "--db", ":memory:",
+      "--compute", "local",
+      "--cas-root", join(cwd, "cas"),
+      "--sql", "SELECT name, digest FROM tracks ORDER BY name",
+    ], { ...s.deps, cwd });
+    assert.equal(code, 0, s.err.join("\n"));
+    const result = JSON.parse(s.out[0]!) as { rows: Array<{ name: string; digest: string }> };
+    assert.deepEqual(result.rows.map((row) => row.name), ["regions_bed", "summary"]);
+    assert.ok(result.rows.every((row) => /^sha256:[0-9a-f]{64}$/.test(row.digest)));
+
+    const controller = new AbortController();
+    controller.abort();
+    const cancelled = sink();
+    const cancelledCode = await mainRun("query", [
+      resolve("examples/compute-files-only/manifest.json"),
+      "--db", ":memory:", "--compute", "local", "--cas-root", join(cwd, "cancelled-cas"),
+      "--sql", "SELECT name FROM tracks",
+    ], { ...cancelled.deps, cwd, signal: controller.signal });
+    assert.equal(cancelledCode, 1);
+    assert.match(cancelled.err.join("\n"), /signal already aborted/, "CLI cancellation reaches the local async runner before spawn");
+  });
+
+  test("CLI host files supply protected state and DuckDB config without serializing values into replay", async () => {
+    const cwd = await fsp.mkdtemp(join(tmpdir(), "cli-host-files-"));
+    const manifestPath = join(cwd, "manifest.json");
+    const protectedPath = join(cwd, "protected.json");
+    const configPath = join(cwd, "duckdb.json");
+    await fsp.writeFile(protectedPath, JSON.stringify({ api_token: "host-secret-value" }));
+    await fsp.writeFile(configPath, JSON.stringify({ threads: "2" }));
+    await fsp.writeFile(manifestPath, JSON.stringify({
+      schema: "pi-bio.manifest.v1",
+      id: "cli-protected",
+      version: "0.1.0",
+      title: "CLI protected state",
+      description: "Declared operation over protected host state.",
+      provides: { operations: [{
+        id: "host.summary", version: "0.1.0", title: "Host summary", description: "Use protected state without returning it.",
+        transport: "duckdb.sql", inputSchema: { type: "object" },
+        sql: { sqlTemplate: "SELECT length(getvariable('api_token')) AS token_chars", readOnly: true },
+      }] },
+    }));
+    const s = sink();
+    const code = await mainRun("run", [
+      manifestPath, "--db", ":memory:", "--operation", "host.summary",
+      "--protected-bindings-file", protectedPath,
+      "--duckdb-config-file", configPath,
+    ], { ...s.deps, cwd });
+    assert.equal(code, 0, s.err.join("\n"));
+    const result = JSON.parse(s.out[0]!) as { rows: Array<{ token_chars: number }>; runDir: string };
+    assert.deepEqual(result.rows, [{ token_chars: 17 }]);
+    const replay = await fsp.readFile(join(result.runDir, "replay.json"), "utf8");
+    assert.doesNotMatch(replay, /host-secret-value/);
+    assert.match(replay, /protectedSessionBindingsDigest/);
+    assert.match(replay, /duckdbConfigDigest/);
   });
 
   test("--ledger folds the CLI run into the shared store as an attributed run:<id> fact (thesis, from the CLI)", async () => {

@@ -1,14 +1,17 @@
 import { constants } from "node:fs";
+import { execFile } from "node:child_process";
 import { access, cp, mkdir, readFile, rm, symlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 
 export interface InstallSkillDeps {
   out: (line: string) => void;
   err: (line: string) => void;
   env?: NodeJS.ProcessEnv;
   sourceDir?: string;
+  linkCli?: () => Promise<void>;
 }
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -31,11 +34,12 @@ const HOST_SET = new Set<string>(HOSTS);
 type HostPreset = typeof HOSTS[number];
 
 export const installSkillUsage = (command: "install-skill" | "install-codex-skill"): string => [
-  `usage: pi-bio-agent ${command} [--host <preset>|--dest <host-skills-dir>] [--force] [--link]`,
+  `usage: pi-bio-agent ${command} [--host <preset>|--dest <host-skills-dir>] [--force] [--link] [--link-cli]`,
   "",
   "Installs the packaged pi-bio-agent substrate skill into an agent host's skill/playbook root.",
   `Presets: ${HOSTS.join(", ")}.`,
   "--dest is required for generic hosts.",
+  "--link-cli runs npm link for this package after installing the skill.",
 ].join("\n");
 
 function codexDestRoot(env: NodeJS.ProcessEnv): string {
@@ -61,8 +65,8 @@ function presetDestRoot(host: string, env: NodeJS.ProcessEnv): string | undefine
   return undefined;
 }
 
-function parseArgs(argv: string[], env: NodeJS.ProcessEnv, defaultHost: HostPreset, command: "install-skill" | "install-codex-skill"): { dest: string; force: boolean; link: boolean; host: string } {
-  const out: { dest?: string; force: boolean; link: boolean; host: string } = { force: false, link: false, host: defaultHost };
+function parseArgs(argv: string[], env: NodeJS.ProcessEnv, defaultHost: HostPreset, command: "install-skill" | "install-codex-skill"): { dest: string; force: boolean; link: boolean; linkCli: boolean; host: string } {
+  const out: { dest?: string; force: boolean; link: boolean; linkCli: boolean; host: string } = { force: false, link: false, linkCli: false, host: defaultHost };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--force") {
@@ -71,6 +75,10 @@ function parseArgs(argv: string[], env: NodeJS.ProcessEnv, defaultHost: HostPres
     }
     if (arg === "--link") {
       out.link = true;
+      continue;
+    }
+    if (arg === "--link-cli") {
+      out.linkCli = true;
       continue;
     }
     if (arg === "--host") {
@@ -114,14 +122,18 @@ async function validateSkill(path: string): Promise<void> {
 
 async function installSkill(argv: string[], deps: InstallSkillDeps, defaultHost: HostPreset, command: "install-skill" | "install-codex-skill"): Promise<number> {
   const env = deps.env ?? process.env;
-  let opts: { dest: string; force: boolean; link: boolean; host: string };
+  let opts: { dest: string; force: boolean; link: boolean; linkCli: boolean; host: string };
   try {
     opts = parseArgs(argv, env, defaultHost, command);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     const help = installSkillUsage(command);
-    if (message !== help) deps.err(message);
-    deps.err(help);
+    if (message !== help) {
+      deps.err(message);
+      deps.err(help);
+    } else {
+      deps.out(help);
+    }
     return message === help ? 0 : 2;
   }
 
@@ -140,6 +152,13 @@ async function installSkill(argv: string[], deps: InstallSkillDeps, defaultHost:
       await cp(source, target, { recursive: true });
     }
     await validateSkill(target);
+    if (opts.linkCli) {
+      if (deps.linkCli) await deps.linkCli();
+      else {
+        const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+        await promisify(execFile)(npm, ["link"], { cwd: packageRoot, maxBuffer: 8 * 1024 * 1024 });
+      }
+    }
     deps.out(JSON.stringify({
       ok: true,
       host: opts.host,
@@ -148,7 +167,10 @@ async function installSkill(argv: string[], deps: InstallSkillDeps, defaultHost:
       mode: opts.link ? "symlink" : "copy",
       cli: {
         command: "pi-bio-agent",
-        install: "Install the CLI for future runs with `npm install -g github:sounkou-bioinfo/pi-bio-agent`; this command only installs the skill directory.",
+        linkedByInstaller: opts.linkCli,
+        install: opts.linkCli
+          ? "The package CLI was linked onto PATH with npm link."
+          : "Install the CLI for future runs with `npm install -g github:sounkou-bioinfo/pi-bio-agent`, use `npx --yes github:sounkou-bioinfo/pi-bio-agent`, or rerun with --link-cli.",
       },
       next: opts.host === "codex"
         ? "Restart Codex to pick up the pi-bio-agent skill."

@@ -196,7 +196,7 @@ describe("host: bio_run_operation end-to-end", () => {
     assert.equal(res.ok, true, res.ok ? "" : `run failed: ${(res as { error?: unknown }).error}`);
     if (!res.ok) throw new Error("unreachable");
     const replay = JSON.parse(await fs.readFile(join(res.runDir, "replay.json"), "utf8"));
-    assert.equal(replay.compute, undefined, "the op required only CSV resources — the unrelated subprocess is not recorded as what ran");
+    assert.equal(replay.computeResources, undefined, "the op required only CSV resources — the unrelated subprocess is not recorded as what ran");
   });
 
   test("network is opt-in: http.get fails closed without a fetch, runs when one is injected", async () => {
@@ -422,6 +422,20 @@ describe("host: bio_run_operation end-to-end", () => {
         runId: "ambiguous-q", now: "2026-06-28T00:00:00Z",
       }),
       /table 'dup' is produced by multiple resources \(a, b\); pass resources explicitly/,
+    );
+  });
+
+  test("bio_query rejects duplicate resource ids before executing them twice", async () => {
+    const cwd = await tmpProject(manifest);
+    await assert.rejects(
+      () => runBioQueryFromManifest({
+        cwd,
+        dbPath: ":memory:",
+        manifestPath: "manifest.json",
+        sql: "SELECT count(*) AS n FROM annotated_variants",
+        resources: ["annotated_variants", "annotated_variants"],
+      }),
+      /duplicate resource 'annotated_variants'/,
     );
   });
 

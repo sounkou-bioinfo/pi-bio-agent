@@ -14,6 +14,7 @@
         "params": {
           "table": "ols4_candidates",
           "extensions": ["ducknng"],
+          "declaredSources": ["https://www.ebi.ac.uk/ols4/api/search"],
           "sql": "SELECT * FROM ducknng_ncurl_table(coalesce(getvariable('ols4_base'), 'https://www.ebi.ac.uk/ols4/api') || '/search?q=' || url_encode(getvariable('query')) || '&ontology=' || url_encode(coalesce(getvariable('ontology'), 'mondo')) || '&fieldList=obo_id,label', 'GET', NULL, NULL, 20000, coalesce(getvariable('tls'), 0)::UBIGINT)"
         }
       }

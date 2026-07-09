@@ -81,7 +81,7 @@ Core is closed over the main primitives needed by a downstream workbench:
 - replay/reproduce/action-cache contracts;
 - durable job queue, cancellation, and checkpoint resume;
 - open `recordHostEvent` facts and redacted training-corpus export;
-- graph projection profiles and SemanticSQL source-spec base parity;
+- graph projection profiles and the pinned SemanticSQL concrete-view compatibility contract;
 - figures/reports/session images as CAS-addressed artifacts linked through observations;
 - SDK base exports checked by a packed external-consumer dogfood;
 - packaged host-neutral skill plus installer presets for Pi, Codex, Claude, OpenCode, and GitHub Copilot.

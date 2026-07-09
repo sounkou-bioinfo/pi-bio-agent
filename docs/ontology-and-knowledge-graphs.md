@@ -29,16 +29,14 @@ family in the one log, not a parallel system.** The "memory and KG stop being tw
 this global bet; the study/[machine-studying](./machine-studying-lineage.md) angle is one consumer of
 the substrate, not its foundation.
 
-**The harness models itself in the same graph, but only its *declarations*, not its running code.**
-Capabilities, operation specs, resolvers, extensions, skills, runs, and artifacts become nodes, with
-edges like `manifest —provides→ operation`, `operation —requires→ resource`, `run —used→ capability`,
-`run —produced→ artifact`, `skill —derived_from→ study-note`, `operation —requires→ network-policy`.
-This makes the harness *inspectable as graph data*: the agent queries its own capabilities, provenance,
-and run history with the same graph-as-SQL it uses for biology. Crucially, **executable code still lives
-in package files / CAS / artifacts**: the graph records declarations, provenance, dependencies,
-activation, and outputs, never the running code. That boundary is what lets the harness be queryable and
-self-describing without the graph becoming an executor (and is the substrate behind the
-harness-adaptation doctrine in [`roadmap.md`](./roadmap.md#harness-adaptation-doctrine)).
+**The harness records authored declarations in the same graph, not its running code.** When a run has a supplied
+ledger, `recordManifestDeclarations` records manifest, resolver, resource, operation, and term-set nodes. It records
+`provides`, `resolved_by`, and `requires` edges, then links the run with `uses_manifest`, `uses_resource`, and, for a
+named operation, `executes_operation`. Artifact production and tool-call attribution use their existing ordinary
+edges. Host capability receipts remain digest references on the run until a consumer needs separate capability
+nodes; installed skills and extensions are not currently projected automatically. Executable code remains in
+package files and CAS artifacts. See [declaration-graph.ts](../src/hosts/declaration-graph.ts) and
+[declaration-graph.test.ts](../test/declaration-graph.test.ts).
 
 It is a *bet*, not a theorem, and the design hedges it honestly: not all bio data is usefully
 graph-shaped (dense matrices, sequences, large tables stay tabular/extension-backed or in CAS; the graph
@@ -82,13 +80,9 @@ Semantic SQL's source of truth is LinkML. It compiles to SQL base tables and vie
 `entailed_edge` for relation-graph closure. Tables like `edge`, `rdfs_label_statement`, and other
 domain-specific statement tables are generated views over those base tables.
 
-`pi-bio-agent` should port that source schema shape into DuckDB rather than wrap it as a special ontology client.
-The import path is:
-
-```text
-Semantic SQL LinkML source spec -> SQLite/Semantic SQL artifacts -> DuckDB staging tables
-  -> bio_edges / entailed_edge -> manifest SQL
-```
+`pi-bio-agent` ports that source shape into DuckDB rather than wrapping it as a special ontology client. SemanticSQL
+artifacts enter DuckDB staging tables, generated views feed `bio_edges` / `entailed_edge`, and manifests query those
+relations with ordinary SQL.
 
 SQLite is an interchange artifact; DuckDB is the query substrate. The exercised path maps Semantic SQL
 `edge(subject,predicate,object)` into `bio_edges(from_id,predicate,to_id)`, keeps term metadata `statements` in a

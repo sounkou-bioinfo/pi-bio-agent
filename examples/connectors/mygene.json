@@ -11,6 +11,7 @@
       "params": {
         "table": "gene_annotation",
         "extensions": ["ducknng"],
+        "declaredSources": ["https://mygene.info/v3/gene/"],
         "sql": "SELECT * FROM ducknng_ncurl_table('https://mygene.info/v3/gene/' || getvariable('gene_id'), 'GET', '[{\"name\":\"Accept\",\"value\":\"application/json\"}]', ''::BLOB, 20000, coalesce(getvariable('tls'), 0)::UBIGINT)"
       }
     }]

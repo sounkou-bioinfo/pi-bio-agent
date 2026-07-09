@@ -260,13 +260,32 @@ export function receiptContentDigest(r: ReceiptLike): `sha256:${string}` {
   });
 }
 
-/** The env attestation SUMMARY carried in a replay spec — status + digests only (the full EnvironmentAttestation
- *  lives in receipts.json). Kept a summary so replaySpecDigest stays order-stable (embedding full descriptors
- *  would make the replay digest sensitive to layer/package order unless re-canonicalized). */
+/** Environment identity carried in replay and receipt provenance: status + declared/observed digests. The authored
+ *  descriptor remains in the manifest; an observed descriptor is host-owned and is not serialized here. */
 export interface EnvAttestationSummary {
   status: EnvironmentAttestation["status"];
   declaredDigest?: string;
   observedDigest?: string;
+}
+
+/** Resolved execution facts for one compute.run resource. The environment belongs to the resource that used it;
+ *  keeping them together prevents a multi-compute replay from accidentally certifying only the first process. */
+export interface ComputeReplayResource {
+  resourceId: string;
+  table?: string;
+  command?: readonly string[];
+  inputSql?: string;
+  resultTable?: "arrow" | "artifacts";
+  outputs?: Array<{ name: string; path: string; kind?: string; mediaType?: string; semanticRole?: string; attrs?: Record<string, unknown> }>;
+  /** Same status/digest evidence recorded by this resource's receipt. Added after resolution. */
+  environment?: EnvAttestationSummary;
+}
+
+/** Terminal behavior pinned by a completed replay. Failed/cancelled runs use an error digest so replay can verify
+ *  the same outcome without copying diagnostic text into the replay identity. */
+export interface RunReplayOutcome {
+  status: "succeeded" | "failed" | "cancelled";
+  errorDigest?: `sha256:${string}`;
 }
 
 export interface HostCapabilityReceipt {
@@ -378,17 +397,10 @@ export interface RunReplaySpec {
    *  Names are pinned by digest so the ad-hoc query boundary is reproduced without serializing the declaration. */
   protectedSessionVariablesDigest?: string;
   duckdbConfigDigest?: string;
-  /** the RESOLVED compute execution facts (what actually ran on this host). */
-  compute?: {
-    resourceId?: string;
-    table?: string;
-    command?: readonly string[];
-    inputSql?: string;
-    resultTable?: "arrow" | "artifacts";
-    outputs?: Array<{ name: string; path: string; kind?: string; mediaType?: string; semanticRole?: string; attrs?: Record<string, unknown> }>;
-  };
-  /** env SUMMARY (status + digests); the full attestation is in receipts.json. Enriched AFTER the run resolves. */
-  environment?: EnvAttestationSummary;
+  /** RESOLVED compute facts in resource execution order. Each resource carries its own environment summary. */
+  computeResources?: ComputeReplayResource[];
+  /** Terminal outcome of the recorded execution. Absent only on a prospective job seed that has not run yet. */
+  outcome?: RunReplayOutcome;
   /** stable digests of the receipts this run produced — reproduce()'s pin on the exact provenance it should match. */
   sourceReceiptDigests?: string[];
   /** stable digests of host-owned capability policy receipts (secret-free), e.g. a ducknng HTTP profile policy. */
