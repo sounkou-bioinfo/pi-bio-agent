@@ -29,7 +29,7 @@ jobs:
 
       - name: Build substrate
         working-directory: pi-bio-agent
-        run: npm ci --no-audit --no-fund && npm run build
+        run: npm install --no-audit --no-fund && npm run build
 
       - name: Install workbench dependencies
         working-directory: pi-bio-workbench
