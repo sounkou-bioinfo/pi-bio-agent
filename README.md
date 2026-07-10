@@ -1,25 +1,25 @@
 # pi-bio-workbench
 
-`pi-bio-workbench` is the application repo that exercises `pi-bio-agent` as a real workbench. It is intentionally
-separate from the substrate: application bindings own manifests, fixtures, report conventions, host policy, and
-tests; `pi-bio-agent` owns the durable primitives.
+`pi-bio-workbench` is an API-first scientific workbench built on `pi-bio-agent`. Applications own domain
+resources, evidence relations, review policy, reports, and user-facing contracts. The substrate owns manifests,
+DuckDB execution, durable checkpoints, receipts, replay, CAS, and the observation graph.
 
-The first binding is clinical genomics. It demonstrates the two rare-disease directions over one evidence graph:
+The first binding is clinical genomics. It exercises two rare-disease traversal directions over the same declared
+case data:
 
-- **Direct:** variant/genotype-first triage, from observed variants to rare high-impact candidates and abstentions.
-- **Inverted:** phenotype/disease-first search, from observed HPO terms to gene/disease hypotheses and then back to
-  the genome for support or absence.
+- **Direct:** assess observed variants, retaining candidates, abstentions, and evidence conflicts.
+- **Inverted:** start from observed HPO terms, derive gene/disease hypotheses, and inspect all case variants in each
+  supported gene without collapsing them to one arbitrary row.
 
-Both directions produce one evidence packet, recorded in the same `bio_observations` ledger as the scientific runs.
-The packet is an app convention, not a substrate primitive.
+Both lanes close into the `case_evidence` relation. Reanalysis compares the shared `variant_assessment` relation
+with prior state. The evidence packet contains review-bearing rows rather than every routine exclusion; the complete
+relations remain available to SQL in the per-analysis DuckDB file. The SDK and CLI return that host path for local
+inspection; the HTTP contract does not expose it.
 
-This is not a complete clinical classification kernel. Known clinical-kernel edge cases must become fixtures before
-any classifier claim: carrier guards for recessive genes, SNV/CNV unification, CNV dosage tracks, loss-of-function
-entry gates, common-pathogenic exception lists, benign blocking for hotspot evidence, family QC, and phenotype
-information-content denominators. This repo starts one layer above that: it routes evidence, abstentions, gaps, and
-review targets through the substrate.
+This is evidence routing, not a complete clinical classification kernel. It does not claim ACMG/AMP classification,
+causal diagnosis, or clinical validity beyond the declared fixture data.
 
-## Run
+## Run the binding
 
 ```sh
 npm install
@@ -27,4 +27,33 @@ npm run check
 npm run demo:clinical
 ```
 
-The app depends on the sibling substrate through `"pi-bio-agent": "file:../pi-bio-agent"`.
+One analysis executes two recorded scientific operations and a packet step. Reusing its analysis id resumes from
+the durable step checkpoints:
+
+```sh
+node dist/cli.js run examples/clinical-genomics CASE-RD-001 analysis-demo
+node dist/cli.js run examples/clinical-genomics CASE-RD-001 analysis-demo
+```
+
+The second invocation reports zero executed steps and three reused steps. Scientific result, receipt, replay, and
+run-object bytes live in CAS; checkpoints carry only their references. Reusing an analysis id after a declared input
+file changes fails closed because the task replay digest pins those input bytes.
+
+## Run the API
+
+```sh
+npm run serve -- examples/clinical-genomics 8787
+```
+
+```sh
+curl -sS http://localhost:8787/v1/clinical-analyses \
+  -H 'content-type: application/json' \
+  -d '{"caseId":"CASE-RD-001"}'
+```
+
+The same Zod route schemas validate requests and generate the OpenAPI 3.1 document at
+`http://localhost:8787/openapi.json`. The server fixes the clinical workspace at startup; clients cannot submit a
+host path in the request, and host store paths are not part of the response contract.
+
+The app depends on the sibling substrate through `"pi-bio-agent": "file:../pi-bio-agent"`. It consumes substrate
+APIs directly and does not vendor or reimplement them.

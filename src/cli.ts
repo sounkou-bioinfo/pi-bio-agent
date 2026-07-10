@@ -1,15 +1,20 @@
+#!/usr/bin/env node
 import { resolve } from "node:path";
 import { runClinicalGenomicsWorkbench } from "./clinical-genomics.js";
+import { startWorkbenchServer } from "./server.js";
 
-const exampleDir = resolve(process.argv[2] ?? "examples/clinical-genomics");
-const caseId = process.argv[3] ?? "CASE-RD-001";
+const args = process.argv.slice(2);
+const command = args[0] ?? "run";
 
-const out = await runClinicalGenomicsWorkbench({ exampleDir, caseId });
-
-console.log(`case: ${out.packet.caseId}`);
-console.log(`packet: ${out.packetUri}`);
-console.log(`store: ${out.storePath}`);
-console.log("summary:");
-console.table([out.packet.summary]);
-console.log("review queue:");
-console.table(out.packet.summary.reviewQueue);
+if (command === "serve") {
+  startWorkbenchServer(args[1], args[2]);
+} else if (command === "run") {
+  const result = await runClinicalGenomicsWorkbench({
+    exampleDir: resolve(args[1] ?? "examples/clinical-genomics"),
+    caseId: args[2] ?? "CASE-RD-001",
+    ...(args[3] ? { analysisId: args[3] } : {}),
+  });
+  console.log(JSON.stringify(result, null, 2));
+} else {
+  throw new Error("usage: pi-bio-workbench [run <workspace> <case-id> [analysis-id] | serve <workspace> [port]]");
+}

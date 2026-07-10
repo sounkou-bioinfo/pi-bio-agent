@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout workbench
+        uses: actions/checkout@v4
+        with:
+          path: pi-bio-workbench
+
+      - name: Checkout substrate
+        uses: actions/checkout@v4
+        with:
+          repository: sounkou-bioinfo/pi-bio-agent
+          ref: 0bdc88ffe6c9756914879263ac571ef576789878
+          path: pi-bio-agent
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Build substrate
+        working-directory: pi-bio-agent
+        run: npm ci --no-audit --no-fund && npm run build
+
+      - name: Install workbench dependencies
+        working-directory: pi-bio-workbench
+        run: npm ci --no-audit --no-fund
+
+      - name: Check workbench
+        working-directory: pi-bio-workbench
+        run: npm run check
+
+      - name: Build workbench
+        working-directory: pi-bio-workbench
+        run: npm run build

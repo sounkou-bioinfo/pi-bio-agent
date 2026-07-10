@@ -10,12 +10,18 @@ const check = process.argv.includes("--check");
 
 const template = JSON.parse(await fs.readFile(templatePath, "utf8"));
 
-for (const op of template.provides?.operations ?? []) {
-  const sql = op.sql ?? {};
-  if (!sql.sqlFile) continue;
-  const sqlText = await fs.readFile(join(exampleDir, sql.sqlFile), "utf8");
-  sql.sqlTemplate = sqlText.trim();
-  delete sql.sqlFile;
+async function inlineSql(target, textKey) {
+  if (!target?.sqlFile) return;
+  const sqlText = await fs.readFile(join(exampleDir, target.sqlFile), "utf8");
+  target[textKey] = sqlText.trim();
+  delete target.sqlFile;
+}
+
+for (const resource of template.provides?.resources ?? []) {
+  await inlineSql(resource.params, "sql");
+}
+for (const operation of template.provides?.operations ?? []) {
+  await inlineSql(operation.sql, "sqlTemplate");
 }
 
 const rendered = `${JSON.stringify(template, null, 2)}\n`;

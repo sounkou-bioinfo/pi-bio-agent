@@ -17,10 +17,15 @@
     "typecheck": "tsc --noEmit",
     "test": "rm -rf dist-test && tsc -p tsconfig.test.json && node --test dist-test/test/*.test.js",
     "check": "npm run check:manifest && npm run typecheck && npm test",
-    "demo:clinical": "npm run build && node dist/cli.js"
+    "demo:clinical": "npm run build && node dist/cli.js run",
+    "serve": "npm run build && node dist/server.js"
   },
   "dependencies": {
-    "pi-bio-agent": "file:../pi-bio-agent"
+    "@hono/node-server": "^2.0.8",
+    "@hono/zod-openapi": "^1.4.0",
+    "hono": "^4.12.28",
+    "pi-bio-agent": "file:../pi-bio-agent",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

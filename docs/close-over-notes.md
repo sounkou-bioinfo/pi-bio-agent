@@ -1,39 +1,48 @@
 # Close-over notes
 
-This repo is the application split from `pi-bio-agent`. It should consume substrate primitives directly and only
-promote a new primitive after a second concrete use proves it.
+This repo is the application split from `pi-bio-agent`. It consumes substrate primitives directly. A new substrate
+primitive is warranted only when the application cannot express a concrete workflow through the existing ports.
 
-## First binding
+## Clinical binding
 
-The clinical-genomics example is an evidence workflow, not a completed clinical classification kernel.
+The clinical example is one evidence task with three durable steps:
 
-- Direct lane: observed variants -> candidate / abstention / exclusion buckets.
-- Inverted lane: observed phenotypes -> gene/disease hypotheses -> supporting variant, abstained variant, or gap.
-- Reanalysis lane: current evidence status vs prior evidence status; only new/upgraded review-worthy rows become
-  reanalysis signals.
+1. `clinical.case_evidence` resolves raw tables and declared SQL relations, then returns bounded review evidence
+   from direct and inverted traversal.
+2. `clinical.reanalysis_diff` compares the same variant-assessment semantics with declared prior state and status
+   order.
+3. The application builds one evidence packet, writes it to CAS, and links the case, analysis, packet, and scientific
+   runs in the observation ledger.
 
-The two directions differ by traversal order, not by storage model. Both close into one evidence packet, one CAS
-artifact, and one `case:<id>` observation with links to the three `run:<id>` facts.
+The relations carry the domain logic:
 
-## Substrate Used As-Is
+- `variant_assessment` parses frequency once and records candidate, abstention, exclusion, missingness, and conflict.
+- `phenotype_hypothesis` counts observed term matches without claiming an information-content score.
+- `case_evidence` reconciles traversal order while retaining every matching variant.
+- `reanalysis_evidence` uses a declared status-order table and abstains on unknown vocabularies.
 
-- `runBioOperationFromManifest` for all scientific steps.
-- `openBioStore` / `bio_observations` for the app packet and graph links.
-- `fsCasStore` for the packet artifact and run-result CAS references.
-- `recordObservation` / `recordObservationLink` for app-owned case nodes and packet links.
+## Substrate used as-is
 
-No new substrate primitive was needed for this first slice.
+- `runBioOperationFromManifest` for scientific execution and run evidence.
+- `runJobStepsWithCheckpoints` for prefix resume under one replay digest.
+- `openBioStore` and observation links for application state and provenance.
+- `CasStore` / `fsCasStore` for immutable run objects and the evidence packet.
+- `duckdb.sql_materialize` for intermediate relations; no clinical parser or query helper was added to TypeScript.
 
-## Gaps Not Yet Promoted
+The application consumes `response.result.rows` directly and runs with `serialize: false`. It does not read exported
+`result.json` files as an internal transport.
+The complete materialized relations persist in a per-analysis DuckDB file; the packet and ledger checkpoints remain
+bounded to review evidence and content references.
 
-- The evidence-packet schema is app-owned until another binding needs the same report contract.
-- Runtime host-event receipts remain deferred until review/steer/interrupt capture is used by a concrete workflow.
-- `CasStore` is not exported as a package-root SDK type. This app works around it with
-  `ReturnType<typeof fsCasStore>`. Promote only when a second host CAS implementation needs the interface at the app
-  boundary.
+## Current application limits
 
-## Clinical Kernel Boundary
+- The local API host uses filesystem CAS. A production remote artifact host will need a concrete read-capable
+  artifact adapter instead of assuming local `pathFor` access.
+- The API executes this short fixture task inline. A background scheduler should be introduced only with the first
+  workflow whose latency requires submit/status/cancel at the application boundary; core already exposes the async
+  runner lifecycle.
+- The fixture does not establish a clinical classifier. Carrier guards, SNV/CNV reconciliation, dosage evidence,
+  loss-of-function entry gates, family QC, and phenotype information-content methods remain application work.
 
-Do not claim clinical-kernel completion here. Fixtures still needed before a classifier claim include recessive
-carrier guards, SNV/CNV unification, CNV dosage, loss-of-function entry gates, common-pathogenic exception lists,
-benign blocking for hotspot evidence, family QC, and phenotype information-content denominators.
+No new core primitive was required for this slice. The first concrete pressure is remote artifact retrieval, not a
+new workflow engine or a generic workbench action registry.

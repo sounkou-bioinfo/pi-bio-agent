@@ -1,9 +1,9 @@
 {
   "schema": "pi-bio.manifest.v1",
   "id": "clinical-genomics-workbench",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "title": "Clinical genomics workbench binding",
-  "description": "Direct and inverted rare-disease evidence passes over one declared case resource set. This binding routes evidence; it is not a complete ACMG/AMP kernel.",
+  "description": "Direct and inverted rare-disease evidence passes reconciled into one declared relation. This binding routes evidence; it is not a complete ACMG/AMP kernel.",
   "provides": {
     "resolvers": [
       {
@@ -11,6 +11,13 @@
         "version": "0.1.0",
         "title": "DuckDB file scan",
         "description": "Read a local file into a DuckDB table.",
+        "output": { "mode": "table" }
+      },
+      {
+        "id": "duckdb.sql_materialize",
+        "version": "0.1.0",
+        "title": "DuckDB SQL materialization",
+        "description": "Materialize a declared read-only SQL relation.",
         "output": { "mode": "table" }
       }
     ],
@@ -38,7 +45,7 @@
       },
       {
         "id": "gene_phenotype",
-        "title": "Gene phenotype curation",
+        "title": "Gene phenotype evidence",
         "kind": "virtual",
         "resolver": "duckdb.file_scan",
         "params": { "path": "data/gene_phenotype.csv", "table": "gene_phenotype" }
@@ -49,14 +56,49 @@
         "kind": "virtual",
         "resolver": "duckdb.file_scan",
         "params": { "path": "data/prior_assessment.csv", "table": "prior_assessment" }
+      },
+      {
+        "id": "assessment_status_order",
+        "title": "Assessment status order",
+        "kind": "virtual",
+        "resolver": "duckdb.file_scan",
+        "params": { "path": "data/assessment_status_order.csv", "table": "assessment_status_order" }
+      },
+      {
+        "id": "variant_assessment",
+        "title": "Normalized variant assessment",
+        "kind": "virtual",
+        "resolver": "duckdb.sql_materialize",
+        "params": { "table": "variant_assessment", "sqlFile": "relations/variant_assessment.sql" }
+      },
+      {
+        "id": "phenotype_hypothesis",
+        "title": "Phenotype-supported hypotheses",
+        "kind": "virtual",
+        "resolver": "duckdb.sql_materialize",
+        "params": { "table": "phenotype_hypothesis", "sqlFile": "relations/phenotype_hypothesis.sql" }
+      },
+      {
+        "id": "case_evidence",
+        "title": "Reconciled direct and inverted case evidence",
+        "kind": "virtual",
+        "resolver": "duckdb.sql_materialize",
+        "params": { "table": "case_evidence", "sqlFile": "relations/case_evidence.sql" }
+      },
+      {
+        "id": "reanalysis_evidence",
+        "title": "Current versus prior assessment",
+        "kind": "virtual",
+        "resolver": "duckdb.sql_materialize",
+        "params": { "table": "reanalysis_evidence", "sqlFile": "relations/reanalysis_evidence.sql" }
       }
     ],
     "operations": [
       {
-        "id": "clinical.direct_variant_triage",
-        "version": "0.1.0",
-        "title": "Direct variant-first rare-disease triage",
-        "description": "Bucket observed variants into candidate, abstention, and exclusion groups. Unknown frequency is abstained, not counted as rare.",
+        "id": "clinical.case_evidence",
+        "version": "0.2.0",
+        "title": "Direct and inverted case evidence",
+        "description": "Return review-bearing rows from both traversal directions over one reconciled evidence relation, preserving missingness, conflicts, abstentions, and review targets without exporting routine exclusions.",
         "transport": "duckdb.sql",
         "inputSchema": {
           "type": "object",
@@ -64,42 +106,30 @@
           "required": ["case_id"]
         },
         "notes": [
-          "Direct lane: genotype/variant first.",
-          "Unknown allele frequency is abstained from, not counted as rare.",
-          "Benign-annotated variants are excluded even when rare and high impact."
+          "Direct starts from observed variants; inverted starts from observed phenotypes.",
+          "The two lanes share variant assessment semantics and retain all matching evidence-bearing variants.",
+          "Missing frequency and missing genotype support remain explicit evidence rows.",
+          "Routine direct-lane exclusions remain queryable in variant_assessment but are not copied into the evidence packet."
         ],
         "sql": {
           "readOnly": true,
-          "requiredResources": ["case_variants", "so_loss_of_function"],
-          "sqlFile": "operations/direct_variant_triage.sql"
-        }
-      },
-      {
-        "id": "clinical.inverted_phenotype_hypotheses",
-        "version": "0.1.0",
-        "title": "Inverted phenotype-first rare-disease hypotheses",
-        "description": "Start from observed phenotypes, rank gene/disease hypotheses, then inspect the case genome for supporting or missing variants.",
-        "transport": "duckdb.sql",
-        "inputSchema": {
-          "type": "object",
-          "properties": { "case_id": { "type": "string" } },
-          "required": ["case_id"]
-        },
-        "notes": [
-          "Inverted lane: phenotype/disease first, then interrogate the genome.",
-          "A phenotype-supported gene with no supporting variant is retained as a gap, not silently dropped."
-        ],
-        "sql": {
-          "readOnly": true,
-          "requiredResources": ["case_variants", "so_loss_of_function", "case_hpo", "gene_phenotype"],
-          "sqlFile": "operations/inverted_phenotype_hypotheses.sql"
+          "requiredResources": [
+            "case_variants",
+            "so_loss_of_function",
+            "case_hpo",
+            "gene_phenotype",
+            "variant_assessment",
+            "phenotype_hypothesis",
+            "case_evidence"
+          ],
+          "sqlFile": "operations/case_evidence.sql"
         }
       },
       {
         "id": "clinical.reanalysis_diff",
-        "version": "0.1.0",
+        "version": "0.2.0",
         "title": "Reanalysis diff",
-        "description": "Compare the current direct-lane evidence status with a prior case status and surface new, upgraded, downgraded, unchanged, and dropped variants.",
+        "description": "Compare the shared current variant assessment with a prior assessment and retain unknown status vocabularies as an abstention.",
         "transport": "duckdb.sql",
         "inputSchema": {
           "type": "object",
@@ -111,7 +141,14 @@
         ],
         "sql": {
           "readOnly": true,
-          "requiredResources": ["case_variants", "so_loss_of_function", "prior_assessment"],
+          "requiredResources": [
+            "case_variants",
+            "so_loss_of_function",
+            "prior_assessment",
+            "assessment_status_order",
+            "variant_assessment",
+            "reanalysis_evidence"
+          ],
           "sqlFile": "operations/reanalysis_diff.sql"
         }
       }
