@@ -40,15 +40,6 @@ async function setup() {
   return { conn, clock };
 }
 
-async function waitUntil(predicate: () => Promise<boolean> | boolean, timeoutMs = 5000, intervalMs = 20): Promise<void> {
-  const end = Date.now() + timeoutMs;
-  while (Date.now() < end) {
-    if (await predicate()) return;
-    await sleep(intervalMs);
-  }
-  throw new Error("timed out waiting for queue condition");
-}
-
 describe("queue-job-worker: production queue worker lifecycle", () => {
   test("runOne executes, records terminal running/result/status, and finishes the queue", async () => {
     const { conn, clock } = await setup();
@@ -265,12 +256,14 @@ describe("queue-job-worker: production queue worker lifecycle", () => {
     await enqueueJob(conn, { runId: "jk2", replay: replay("jk2"), now: clock() });
 
     let aborted = false;
+    const executorStarted = deferred<void>();
     const worker = createQueueJobWorker(conn, {
       clock,
       workerId: "w-cancel",
       leaseSeconds: 5,
       heartbeatMs: 250,
       executor: async (_, signal) => {
+        executorStarted.resolve();
         await new Promise<void>((resolve) => {
           signal.addEventListener("abort", () => {
             aborted = true;
@@ -282,7 +275,7 @@ describe("queue-job-worker: production queue worker lifecycle", () => {
     });
 
     const running = worker.runOne();
-    await waitUntil(async () => (await readJobQueueRecord(conn, "jk2"))?.phase === "running");
+    await executorStarted.promise;
     await cancelQueuedJob(conn, { runId: "jk2", now: clock() });
 
     assert.equal(await running, true);
@@ -297,6 +290,7 @@ describe("queue-job-worker: production queue worker lifecycle", () => {
 
     let staleAborted = false;
     let freshRan = false;
+    const staleStarted = deferred<void>();
 
     const stale = createQueueJobWorker(conn, {
       clock,
@@ -304,6 +298,7 @@ describe("queue-job-worker: production queue worker lifecycle", () => {
       leaseSeconds: 2,
       heartbeatMs: 1500,
       executor: async (_, signal) => {
+        staleStarted.resolve();
         await new Promise<void>((resolve) => {
           signal.addEventListener("abort", () => {
             staleAborted = true;
@@ -326,10 +321,7 @@ describe("queue-job-worker: production queue worker lifecycle", () => {
     });
 
     const staleRun = stale.runOne();
-    await waitUntil(async () => {
-      const rec = await readJobQueueRecord(conn, "jk3");
-      return rec?.phase === "running" && rec?.claimedBy === "w-old";
-    });
+    await staleStarted.promise;
 
     await conn.run("UPDATE pi_bio_job_queue SET claim_expires_at = ? WHERE run_id = ?", [new Date(Date.now() - 60_000).toISOString(), "jk3"]);
     const freshRun = fresh.runOne();
