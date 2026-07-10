@@ -60,6 +60,30 @@ Instructions for coding agents working in this repository.
 - Prefer a short "lesson" paragraph in `docs/design.md`, `docs/refinments.md`, or the relevant example README over another standalone doc.
 - If the lesson depends on a negative result, say that directly. Example: `ducknng_ncurl_table` is right for one response table; chunk fanout needs scalar AIO handles plus host orchestration today.
 
+## Do Not Re-Derive Proven Capabilities
+
+- Before proposing a new HTTP batching, retry, or rate-limit abstraction, inspect the existing implementation and
+  dogfood. `src/duckdb/ncurl-fanout.ts` owns bounded multi-batch AIO launch/drain/retry;
+  `src/duckdb/ncurl-retry.ts` owns single-endpoint SQL-native retry; and
+  `src/duckdb/resolvers/http-policies.ts` owns host-fetch `429`/`503`, `Retry-After`, capped backoff, and
+  cancellation. Their tests exercise transient and permanent failures.
+- `examples/wgs-chr22-annotation/live.mjs` already proves the real online-annotation path: an indexed `duckhts`
+  region read, Ensembl VEP `/region` batches of at most 200 variants, bounded `ncurlFanout`, response parsing,
+  ClinVar joining, and SQL reduction. `scripts/pipeline-fanout.mjs` separately dogfoods the bounded worker-pool
+  topology. Reuse and generalize this path; do not reopen whether an agent can execute rate-limited VEP calls.
+- Narrative-to-ontology grounding does not require a phenotype-mapper service or another mandatory package.
+  SemanticSQL-generated label/synonym views, DuckDB FTS or ordinary SQL, graph projection/closure, candidate
+  `TermSet`s, `decideGrounding`, and the host agent loop already compose the path from text to validated CURIEs.
+  External grounding packages may be benchmarks or optional providers only when a measured case demonstrates a
+  retrieval/reranking gap; do not add one to the baseline architecture by association.
+- Rare-disease application policy stays downstream. The inverted traversal is case narrative -> grounded phenotype
+  assertions -> Monarch disease/gene hypotheses -> assembly-pinned gene intervals -> indexed case-VCF range reads
+  -> existing VEP fanout -> SQL ranking -> literature evidence and gated review. This composition is application
+  work, not evidence for another core resolver, mapper, workflow engine, or per-question skill.
+- Agent and subagent coordination should pass durable relations, CAS references, checkpoints, and observations.
+  Prose handoffs may explain work, but they are not the scientific state and must not become the only record of a
+  candidate, source, score, or judgment.
+
 ## Pillars And Compute Lifecycle
 
 - The current pillars are data, network, compute, and knowledge/memory over DuckDB-centered provenance.
