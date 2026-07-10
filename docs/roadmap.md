@@ -58,8 +58,8 @@ The test pyramid is now real:
 - **Effect tests**: local file/CAS/run ledger, CLI, memory, artifacts, DuckDB init/config, host policies.
 - **Application-operation tests**: connector manifests, coloc, rare-high-impact, compute examples, OpenTargets,
   Monarch KG HTTP, DuckHTS range reads.
-- **Flagship/dogfood tests**: bring-it-home, SDK host embedding, substrate skill, Pi session trace, ducknng upload
-  when the sibling extension is available.
+- **Flagship/dogfood tests**: bring-it-home, SDK host embedding, substrate skill, Pi session trace, SSH remote worker,
+  and ducknng upload when the required hosts/extensions are available.
 - **Harness-adaptation tests**: approvals, activate/rollback, temporal skills, package skill validation and install
   presets, Pi extension tool registration and lifecycle receipts.
 
@@ -78,8 +78,8 @@ Core is closed over the main primitives needed by a downstream workbench:
 - `duckhts.read_bcf` range reads;
 - `compute.run` over async runner semantics with table, file, and files-only artifact outputs;
 - CAS byte store, shared CAS metadata, refs, leases, and GC;
-- replay/reproduce/action-cache contracts;
-- durable job queue, cancellation, and checkpoint resume;
+- path-portable manifest-snapshot replay, reproduce, and action-cache contracts;
+- durable job queue, lease-owning worker, cancellation, checkpoint resume, and parameterized remote `SqlConn`;
 - open `recordHostEvent` facts and redacted training-corpus export;
 - graph projection profiles and the pinned SemanticSQL concrete-view compatibility contract;
 - figures/reports/session images as CAS-addressed artifacts linked through observations;
@@ -95,7 +95,8 @@ npm run dogfood:substrate-skill
 ```
 
 Run `npm run dogfood:pi-session-trace` when Pi/model credentials are configured and a session-level integration
-check is needed.
+check is needed. `npm run dogfood:ssh-remote-worker` is the opt-in cross-machine proof; it uses `rig` by default or
+`PI_BIO_SSH_HOST`, installs a packed package remotely, and requires SSH reverse forwarding.
 
 ### Cross-actor conformance
 
@@ -112,9 +113,10 @@ A failure is classified before adding an abstraction:
 - one application needs orchestration, UI, policy, or a report shape: keep it in that application;
 - evidence or replay cannot represent what happened: that is a core gap.
 
-Distributed, machine-studying, Fugu-shaped, and RLM-shaped claims require real harness runs in the workbench. Unit
-tests here may prove data-plane mechanics, but cannot stand in for worker sessions, recursive model calls, restart
-recovery, cancellation, or expertise-versus-budget evaluation.
+The SSH dogfood proves one distributed lane: package installation, parameterized coordination SQL, lease claim,
+snapshot replay, staged input, and digest equality across hosts. Machine-studying, Fugu-shaped, and RLM-shaped claims
+still require real agent-harness runs in the workbench. Core tests and this one worker run do not establish recursive
+model behavior, scheduler operations, deployed restart/cancellation behavior, or expertise-versus-budget gains.
 
 ## Flagship Role
 

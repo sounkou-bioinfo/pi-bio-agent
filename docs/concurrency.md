@@ -19,7 +19,7 @@ integration.
 |---|---|---|
 | **Single project, serial** | `openBioStore(cwd)` (default) | the project-local file. Owner's open: **throws** on a lock conflict (a memory write must not be silently dropped). Runs share it open→write→close in sequence. |
 | **Best-effort read under contention** | `tryOpenBioStore(cwd)` | returns **null** on a lock conflict (a concurrent agent holds it) so a reader/logger degrades instead of failing; a *real* error (corruption/permissions) still throws. Used by the always-on recall index and the run-log: they are conveniences, not hard dependencies. `isBioStoreLocked(err)` is the discriminator. |
-| **Cross-process sharing** | a **server-backed store** injected through the host's `openStore` seam | one database service is the writer authority; clients use a host adapter. Ducknng RPC proves the transport mechanics, but this package does not yet ship a production parameterized remote `SqlConn`. Same-slug writes require the serialized execution model described below. |
+| **Cross-process sharing** | a **server-backed store** injected through the host's `openStore` seam | one database service is the writer authority. `createSqlConnHttpClient` / `createSqlConnHttpServer` provide a parameterized, authenticated reference transport with serialized execution; ducknng RPC provides the NNG transport lane. Same-slug writes require the serialized execution model described below. |
 
 `tryOpenBioStore` only makes a *single-file* deployment degrade gracefully. It is **not** how you get real
 concurrency: for that you move the store to a server.
@@ -54,10 +54,12 @@ function ducknngConn(local, url) {              // `local` = a throwaway :memory
 }
 ```
 
-**Parameters**: current ducknng RPC sends a SQL *string*, so the dogfood inlines a deliberately narrow set of
-validated values. Do not present that as a general adapter. A production deployment needs a parameterized protocol
-or an application service with typed methods. **Security is opt-in**: the server only accepts writes after `ducknng_register_exec_method(...)`,
-with mTLS / peer-allowlists (see [`resources-and-tool-specs.md`](./resources-and-tool-specs.md#multi-agent-by-attribution-authorization-stays-the-hosts-job)); reads need no extra grant.
+Current ducknng RPC sends a SQL string, so the older dogfood above inlines a deliberately narrow set of validated
+values; it is not the general adapter. The package-level HTTP transport sends SQL and parameters separately through
+the exact `SqlValue` tuple codec, requires a bearer token or authorization hook, bounds request/response bodies, and
+serializes calls into the owning connection. Hosts still supply TLS, service lifecycle, and admission policy.
+Ducknng deployments separately use exec opt-in plus mTLS / peer allowlists (see
+[`resources-and-tool-specs.md`](./resources-and-tool-specs.md#multi-agent-by-attribution-authorization-stays-the-hosts-job)).
 
 Because every row carries its **author** (`source`, part of observation identity) and an **as-of** time, a shared
 store stays attributed: two actors writing the same memory slug become two attributed revisions, not a silent
@@ -88,7 +90,11 @@ The transport is dogfooded end to end:
   DuckDB** (mutate-in-place shared state: exactly what supersession/tombstones need), exec opt-in.
 - `scripts/nng-job-runner.mjs`: a separate worker process writes a `job:<id>:status` observation over RPC that
   the coordinator reads back with the same `observationAsOfKey`: a language-agnostic distributed backend.
+- `npm run dogfood:ssh-remote-worker`: packs the library, installs it in a fresh directory on an SSH host, sends an
+  authenticated remote `SqlConn` through a reverse tunnel, claims a durable job, and reproduces a CAS-backed run
+  from its manifest snapshot plus staged data. The original manifest is absent; receipt and result digests match.
 
 The local file is the default for one project. Cross-process scripts prove that a serialized ducknng server can own
-the mutable DuckDB state while separate processes communicate over RPC. A production workbench still needs to supply
-the authenticated, parameterized `SqlConn` or typed service adapter, lifecycle management, and deployment policy.
+the mutable DuckDB state while separate processes communicate over RPC. The HTTP reference and SSH dogfood prove
+parameterized cross-host queue/ledger composition. A production workbench still supplies TLS, worker lifecycle,
+input staging, CAS placement, credentials, and deployment policy.

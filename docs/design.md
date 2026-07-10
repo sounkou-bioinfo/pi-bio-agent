@@ -109,9 +109,15 @@ the related code.
   path. `src/hosts/job-store.ts` exposes the narrow helper
   (`runJobStepWithCheckpoint`) and the sequential-plan helper (`runJobStepsWithCheckpoints`) over
   `job_step_checkpoint` observations; neither is a workflow engine. Receipts, replay specs, CAS result/artifact
-  digests, and `bio_observations` prove what happened. See `src/core/ports.ts`,
+  digests, and `bio_observations` prove what happened. `createQueueJobWorker` is the lease-owning host adapter;
+  `createSqlConnHttpClient` / `createSqlConnHttpServer` give it a parameterized shared coordination connection.
+  Scientific execution remains local to the worker, which stages inputs and calls `reproduceRun` against the
+  replay's canonical manifest snapshot and explicit base directory. The SSH dogfood proves this across different
+  filesystems without the original manifest. See `src/core/ports.ts`,
   `src/core/jobs.ts`,
-  `src/hosts/job-queue.ts`, `src/hosts/job-store.ts`, `test/absurd-queue-push-dogfood.test.ts`,
+  `src/hosts/job-queue.ts`, `src/hosts/queue-job-worker.ts`, `src/hosts/remote-sql-conn.ts`,
+  `src/hosts/job-store.ts`, `test/absurd-queue-push-dogfood.test.ts`,
+  `scripts/dogfood-ssh-remote-worker.mjs`,
   `src/duckdb/resolvers/compute-run.ts`,
   `examples/compute-run/`, and `examples/compute-artifacts/`.
 
