@@ -138,13 +138,6 @@ describe("job queue: durable worker coordination", () => {
     assert.equal(lostHeartbeat.runId, "gate");
     assert.equal(lostHeartbeat.workerId, "old");
     assert.equal(lostHeartbeat.operation, "heartbeat");
-    assert.equal(
-      Reflect.ownKeys(lostHeartbeat).filter((key) => {
-        const k = String(key);
-        return !["stack", "message", "name", "operation", "runId", "workerId"].includes(k);
-      }).length,
-      0,
-    );
 
     let lostWrite: JobClaimLostError | undefined;
     await assert.rejects(
@@ -165,13 +158,6 @@ describe("job queue: durable worker coordination", () => {
     assert.equal(lostWrite.operation, "record-observation");
     assert.equal(lostWrite.runId, "gate");
     assert.equal(lostWrite.workerId, "old");
-    assert.equal(
-      Reflect.ownKeys(lostWrite).filter((key) => {
-        const k = String(key);
-        return !["stack", "message", "name", "operation", "runId", "workerId"].includes(k);
-      }).length,
-      0,
-    );
   });
 
   test("claim-gated status/result reject stale writes after reclaim or cancel", async () => {

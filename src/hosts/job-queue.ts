@@ -19,36 +19,14 @@ export type JobTerminalPhase = "succeeded" | "failed" | "cancelled";
 
 export type JobClaimLostOperation = "heartbeat" | "park" | "finish" | "record-observation";
 
-export interface JobClaimLostErrorInfo {
-  operation: JobClaimLostOperation;
-  runId: string;
-  workerId: string;
-}
-
 export class JobClaimLostError extends Error {
-  readonly operation: JobClaimLostOperation;
-  readonly runId: string;
-  readonly workerId: string;
-
-  constructor(operation: JobClaimLostOperation, runId: string, workerId: string);
-  constructor(info: JobClaimLostErrorInfo);
-  constructor(opOrInfo: JobClaimLostOperation | JobClaimLostErrorInfo, runId?: string, workerId?: string) {
-    const details: JobClaimLostErrorInfo =
-      typeof opOrInfo === "string"
-        ? {
-            operation: opOrInfo,
-            runId: runId ?? (() => {
-              throw new Error("job-queue: JobClaimLostError requires runId and workerId");
-            })(),
-            workerId: workerId ?? (() => {
-              throw new Error("job-queue: JobClaimLostError requires runId and workerId");
-            })(),
-          }
-        : opOrInfo;    super(`job-queue: job '${details.runId}' is not held by worker '${details.workerId}' (operation=${details.operation})`);
+  constructor(
+    readonly operation: JobClaimLostOperation,
+    readonly runId: string,
+    readonly workerId: string,
+  ) {
+    super(`job-queue: job '${runId}' is not held by worker '${workerId}' (operation=${operation})`);
     this.name = "JobClaimLostError";
-    this.operation = details.operation;
-    this.runId = details.runId;
-    this.workerId = details.workerId;
   }
 }
 
@@ -380,9 +358,6 @@ async function insertObservationForLiveClaim(conn: SqlConn, req: LiveJobClaimReq
   if (rows[0]) return rows[0].observation_id;
   const existing = await conn.all<{ observation_id: string }>("SELECT observation_id FROM bio_observations WHERE observation_id = ?", [id]);
   if (existing[0]) return id;
-  if (!(await readJobQueueRecord(conn, req.runId))) {
-    throw new JobClaimLostError("record-observation", req.runId, req.workerId);
-  }
   throw new JobClaimLostError("record-observation", req.runId, req.workerId);
 }
 

@@ -31,22 +31,6 @@ function deferred<T = void>(): { promise: Promise<T>; resolve: (value: T) => voi
   return { promise, resolve };
 }
 
-
-function normalizeSqlRows<T>(rows: readonly T[]): T[] {
-  const normalize = (value: unknown): unknown => {
-    if (value === null || typeof value !== "object") return value;
-    if (typeof (value as { micros?: unknown }).micros === "bigint") return String(value);
-    if (Array.isArray(value)) return value.map((entry) => normalize(entry));
-    const out = {} as Record<string, unknown>;
-    for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
-      out[key] = normalize(item);
-    }
-    return out as unknown;
-  };
-
-  return rows.map((row) => normalize(row) as unknown as T);
-}
-
 async function setup() {
   const conn = duckdbNodeConn(await (await DuckDBInstance.create(":memory:")).connect());
   await createBioObservationSchema(conn);
@@ -153,9 +137,13 @@ describe("queue-job-worker: production queue worker lifecycle", () => {
     assert.equal(await observationAsOfKey(conn, "job:jk-loop:result", FUTURE), null);
   });
 
-  test("abort during initial running-status write skips executor start", async () => {
+  test("abort during initial running-status write skips executor start", async (t) => {
     const db = await DuckDBInstance.create(":memory:");
     const raw = await db.connect();
+    t.after(() => {
+      raw.closeSync();
+      db.closeSync();
+    });
     const baseConn = duckdbNodeConn(raw);
     await createBioObservationSchema(baseConn);
     await createJobQueueSchema(baseConn);
@@ -211,8 +199,6 @@ describe("queue-job-worker: production queue worker lifecycle", () => {
     assert.equal((statusParsed.phase ?? statusParsed), "running");
     assert.equal(await observationAsOfKey(conn, "job:jk-early-stop:result", FUTURE), null);
 
-    raw.closeSync();
-    db.closeSync();
   });
 
   test("generic error messages are recorded by default and formatters are optional, capped, and fail-safe", async () => {
@@ -416,8 +402,7 @@ describe("queue-job-worker: production queue worker lifecycle", () => {
         peak = Math.max(peak, active);
         try {
           await sleep(sleepMs);
-          const rows = await base.all(sql, params);
-          return normalizeSqlRows(rows as readonly Record<string, unknown>[]) as unknown as T[];
+          return base.all<T>(sql, params);
         } finally {
           active -= 1;
         }

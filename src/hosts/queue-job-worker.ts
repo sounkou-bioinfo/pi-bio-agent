@@ -27,10 +27,10 @@ export type QueueJobExecutorErrorContext = {
 
 type JobTerminalPhase = "succeeded" | "failed" | "cancelled";
 
-type QueueJobExecutorResult = {
+export interface QueueJobExecutorResult {
   result?: JsonValue;
   artifacts?: JobArtifactRef[];
-};
+}
 
 export type QueueJobExecutor = (replay: RunReplaySpec, signal: AbortSignal) => Promise<QueueJobExecutorResult>;
 
@@ -110,9 +110,8 @@ function sanitizeExecutionError(
 }
 
 function isAbortError(error: unknown): boolean {
-  return error instanceof Error && (error.name === "AbortError" || error.name.startsWith("ABORT_ERR"));
+  return error instanceof Error && (error.name === "AbortError" || (error as Error & { code?: unknown }).code === "ABORT_ERR");
 }
-
 
 function parseStatus(valueJson: string | null): JobPhase | undefined {
   if (valueJson == null) return undefined;
@@ -135,8 +134,8 @@ function validateDeps(deps: QueueJobWorkerDeps): void {
   if (typeof deps.workerId !== "string" || deps.workerId.length === 0 || deps.workerId.trim() !== deps.workerId || Buffer.byteLength(deps.workerId, "utf8") > MAX_WORKER_ID_BYTES) {
     throw new Error("queue-job-worker: workerId must be a non-empty trimmed string no longer than 128 UTF-8 bytes");
   }
-  if (!Number.isInteger(deps.leaseSeconds) || deps.leaseSeconds <= 0) {
-    throw new Error("queue-job-worker: leaseSeconds must be a positive integer");
+  if (!Number.isInteger(deps.leaseSeconds) || deps.leaseSeconds <= 0 || deps.leaseSeconds > 86_400) {
+    throw new Error("queue-job-worker: leaseSeconds must be a positive integer no larger than 86400");
   }
   const heartbeatMs = deps.heartbeatMs ?? Math.floor((deps.leaseSeconds * 1000) / 2);
   if (!Number.isInteger(heartbeatMs) || heartbeatMs <= 0 || heartbeatMs >= deps.leaseSeconds * 1000) {
@@ -154,21 +153,16 @@ async function safeWrite(fn: () => Promise<unknown>): Promise<boolean> {
   }
 }
 
-/**
- * A compact durable queue worker for queue-backed run execution.
- */
 export function createQueueJobWorker(conn: SqlConn, deps: QueueJobWorkerDeps): QueueJobWorker {
   validateDeps(deps);
   const heartbeatMs = deps.heartbeatMs ?? Math.floor((deps.leaseSeconds * 1000) / 2);
-  const statusSlot = (runId: string): string => `job:${runId}:status`;
-  const resultSlot = (runId: string): string => `job:${runId}:result`;
 
   const terminalPhaseFor = async (runId: string, replayDigest: string): Promise<JobTerminalPhase | undefined> => {
-    const status = await observationAsOfKey(conn, statusSlot(runId), FUTURE);
+    const status = await observationAsOfKey(conn, `job:${runId}:status`, FUTURE);
     if (!status || status.digest !== replayDigest) return undefined;
     const phase = parseStatus(status.value_json);
     if (!phase || !isTerminal(phase)) return undefined;
-    const result = await observationAsOfKey(conn, resultSlot(runId), FUTURE);
+    const result = await observationAsOfKey(conn, `job:${runId}:result`, FUTURE);
     if (!result || result.digest !== replayDigest) return undefined;
     return phase;
   };
@@ -192,10 +186,10 @@ export function createQueueJobWorker(conn: SqlConn, deps: QueueJobWorkerDeps): Q
     if (signal?.aborted) return;
 
     const execution = new AbortController();
-    let claimExpiredOrCancelled = false;
+    let abandonAttempt = false;
     const onAbort = signal
       ? () => {
-          claimExpiredOrCancelled = true;
+          abandonAttempt = true;
           if (!execution.signal.aborted) execution.abort(signal.reason);
         }
       : undefined;
@@ -206,22 +200,27 @@ export function createQueueJobWorker(conn: SqlConn, deps: QueueJobWorkerDeps): Q
     }
 
     try {
-      await recordJobClaimStatus(conn, {
-        runId: claim.runId,
-        workerId: deps.workerId,
-        attempt: claim.attempt,
-        replayDigest: claim.replayDigest,
-        source: deps.source,
-        phase: "running",
-        recordedAt: deps.clock(),
-        message: "running",
-      });
-      if (claimExpiredOrCancelled || signal?.aborted) return;
+      try {
+        await recordJobClaimStatus(conn, {
+          runId: claim.runId,
+          workerId: deps.workerId,
+          attempt: claim.attempt,
+          replayDigest: claim.replayDigest,
+          source: deps.source,
+          phase: "running",
+          recordedAt: deps.clock(),
+          message: "running",
+        });
+      } catch (error) {
+        if (error instanceof JobClaimLostError) return;
+        throw error;
+      }
+      if (abandonAttempt || signal?.aborted) return;
 
       const heartbeat = (async () => {
-        while (!claimExpiredOrCancelled) {
+        while (!abandonAttempt) {
           const aborted = await waitForEither(heartbeatMs, execution.signal);
-          if (aborted || claimExpiredOrCancelled) return;
+          if (aborted || abandonAttempt) return;
           try {
             await heartbeatJobClaim(conn, {
               runId: claim.runId,
@@ -230,8 +229,8 @@ export function createQueueJobWorker(conn: SqlConn, deps: QueueJobWorkerDeps): Q
               leaseSeconds: deps.leaseSeconds,
             });
           } catch (error) {
-            if (!claimExpiredOrCancelled) {
-              claimExpiredOrCancelled = true;
+            if (!abandonAttempt) {
+              abandonAttempt = true;
               if (!execution.signal.aborted) execution.abort(error instanceof Error ? error : new Error(String(error)));
             }
             return;
@@ -246,7 +245,7 @@ export function createQueueJobWorker(conn: SqlConn, deps: QueueJobWorkerDeps): Q
       } catch (exc) {
         error = exc;
         if (isAbortError(exc)) {
-          claimExpiredOrCancelled = true;
+          abandonAttempt = true;
           if (!execution.signal.aborted) execution.abort(exc);
         }
       }
@@ -254,7 +253,7 @@ export function createQueueJobWorker(conn: SqlConn, deps: QueueJobWorkerDeps): Q
       if (!execution.signal.aborted) execution.abort();
       await heartbeat;
 
-      if (claimExpiredOrCancelled) return;
+      if (abandonAttempt) return;
 
       if (error) {
         const message = sanitizeExecutionError(error, deps.errorFormatter, {
