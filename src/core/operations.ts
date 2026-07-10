@@ -39,7 +39,8 @@ export class OperationRunError extends Error {
 
 /**
  * The general runner: resolve the named resources (materializing their tables), run a read-only SQL query
- * over them, and emit result + run record + provenance. The SQL is the CALLER's — usually the agent's, written
+ * over them, and emit result + run record + provenance. The SQL is the CALLER's, whether authored by a human,
+ * model-driven harness, or automation, and is commonly written
  * live after schema discovery (`describeTable`). A declared operation is just the special case where the SQL +
  * resources came from a registered, named, tested spec (see `runOperation`); most questions need no declared
  * operation, only declared resources. `now`/`runId` are injected for deterministic receipts.
@@ -53,7 +54,7 @@ export async function runQuery(
     runId: string;
     now: string;
     params?: readonly unknown[];
-    /** Identity for the run/result/provenance. A registered operation passes its id+version; an ad-hoc agent
+    /** Identity for the run/result/provenance. A registered operation passes its id+version; an ad-hoc caller
      *  query defaults to "ad-hoc.query". */
     id?: string;
     version?: string;
@@ -106,9 +107,9 @@ export async function runQuery(
     // threshold/ORDER BY on rank. Derived from declared manifest data (no external source, no receipt).
     await materializeScaleMembers(registry, conn);
 
-    // No column pre-declaration: the SQL the agent wrote references its columns, and DuckDB's binder is the
+    // No column pre-declaration: caller-authored SQL references its columns, and DuckDB's binder is the
     // arbiter — a missing column fails closed here with a clear binder error. Schema discovery (describeTable)
-    // is a primitive the agent CALLS to decide what SQL to write, not a contract the runner enforces.
+    // is a primitive the caller uses to decide what SQL to write, not a contract the runner enforces.
     const rows = await conn.all<Record<string, unknown>>(safeSql, params);
     const sourceSnapshots = receipts.flatMap((r) => r.sourceSnapshots);
     const result: OperationResult = { schema: "pi-bio.operation_result.v1", operationId: id, runId, sourceSnapshots, rows };
@@ -142,7 +143,7 @@ export async function runQuery(
 /**
  * Run a *declared* operation — a named, versioned, tested query that earned a spec (subtle/reused/safety-
  * critical, like the abstention flagship). It is just `runQuery` with the SQL + resources taken from the
- * registered spec. For everything else, the agent writes SQL live and calls `runQuery` directly; a manifest
+ * registered spec. For everything else, the caller writes SQL live and calls `runQuery` directly; a manifest
  * needs to declare only its resources, not an operation per question.
  */
 export async function runOperation(

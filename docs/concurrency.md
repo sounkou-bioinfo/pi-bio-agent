@@ -5,12 +5,13 @@ description: "Read before running pi-bio-agent memory across projects, processes
 tags: [memory, store, concurrency, ducknng, sharing]
 ---
 
-# Concurrent memory: inter-project / inter-agent / inter-process / inter-machine
+# Concurrent memory: inter-project / inter-actor / inter-process / inter-machine
 
 The one temporal store (`bio_observations` in a DuckDB, `src/hosts/bio-store.ts`) is where memory, facts, and runs
 live. DuckDB's local-file store is a **process-exclusive writer**: while one process holds it open read-write, any
 *other process* that opens the same file gets `IO Error: Could not set lock … Conflicting lock` (verified: cross-process open throws in ~10 ms, it does **not** block). That is correct for a single project run serially,
-but it is the wrong substrate for concurrent agents. This page is the map of how to run concurrently.
+but it is the wrong substrate for concurrent actors. This page maps the proven mechanics and remaining host
+integration.
 
 ## Three access modes
 
@@ -18,7 +19,7 @@ but it is the wrong substrate for concurrent agents. This page is the map of how
 |---|---|---|
 | **Single project, serial** | `openBioStore(cwd)` (default) | the project-local file. Owner's open: **throws** on a lock conflict (a memory write must not be silently dropped). Runs share it open→write→close in sequence. |
 | **Best-effort read under contention** | `tryOpenBioStore(cwd)` | returns **null** on a lock conflict (a concurrent agent holds it) so a reader/logger degrades instead of failing; a *real* error (corruption/permissions) still throws. Used by the always-on recall index and the run-log: they are conveniences, not hard dependencies. `isBioStoreLocked(err)` is the discriminator. |
-| **Cross-process sharing** | a **server-backed store** injected via the extension's `openStore` seam | one **DuckDB server** is the single writer; many clients read/write through it over RPC: **no file lock, so no contention**. This is how inter-project / inter-agent / inter-process / inter-machine memory works. Distinct slugs are straightforward; concurrent same-slug writes are linearized only when the server uses the serialized execution model described below. |
+| **Cross-process sharing** | a **server-backed store** injected through the host's `openStore` seam | one database service is the writer authority; clients use a host adapter. Ducknng RPC proves the transport mechanics, but this package does not yet ship a production parameterized remote `SqlConn`. Same-slug writes require the serialized execution model described below. |
 
 `tryOpenBioStore` only makes a *single-file* deployment degrade gracefully. It is **not** how you get real
 concurrency: for that you move the store to a server.
@@ -33,8 +34,8 @@ createBioExtension({ author: "agent:worker-3", openStore: myServerStore });
 
 `openStore(cwd)` returns a `BioStore` = `{ conn: SqlConn, close() }`. Because every memory op (`remember`,
 `recall`, `listMemory`, …) and every run recorder is written against the `SqlConn` port (`all` / `run`), a
-server-backed `conn` is a drop-in: route its `run(sql)` and `all(sql)` through **ducknng** RPC
-(`ducknng_run_rpc` / `ducknng_query_rpc`) to a `ducknng_start_server`, or through any other host-supplied server `SqlConn`. The
+server-backed `conn` is structurally a drop-in. A prototype can route `run(sql)` and `all(sql)` through **ducknng** RPC
+(`ducknng_run_rpc` / `ducknng_query_rpc`) to a `ducknng_start_server`, or through another host-supplied service. The
 client opens only a throwaway `:memory:` DuckDB to reach the RPC functions: it owns **no** shared state, holds
 **no** file lock; the *server* is the single writer.
 
@@ -53,14 +54,14 @@ function ducknngConn(local, url) {              // `local` = a throwaway :memory
 }
 ```
 
-**Parameters**: ducknng RPC sends a SQL *string*, so the params are inlined into it (escape values, or use
-server-side prepared statements). The example inlines with escaping as a dogfood; a production `openStore` over
-ducknng does robust param handling: host code, not a library default. **Security is opt-in**: the server only accepts writes after `ducknng_register_exec_method(...)`,
+**Parameters**: current ducknng RPC sends a SQL *string*, so the dogfood inlines a deliberately narrow set of
+validated values. Do not present that as a general adapter. A production deployment needs a parameterized protocol
+or an application service with typed methods. **Security is opt-in**: the server only accepts writes after `ducknng_register_exec_method(...)`,
 with mTLS / peer-allowlists (see [`resources-and-tool-specs.md`](./resources-and-tool-specs.md#multi-agent-by-attribution-authorization-stays-the-hosts-job)); reads need no extra grant.
 
 Because every row carries its **author** (`source`, part of observation identity) and an **as-of** time, a shared
-store stays attributed: two agents writing the same memory slug become two attributed revisions, not a silent
-clobber. That is Fugu's inter-workflow shared memory (report §3.2.2) made literal.
+store stays attributed: two actors writing the same memory slug become two attributed revisions, not a silent
+clobber. A model host decides which revisions enter a worker's context.
 
 > **Concurrent same-slug writes are linearized by a compare-and-set.** `remember`/`forget`
 > write the note/tombstone with `insertObservationIfSlotMax` (`src/duckdb/observations.ts`): a single
@@ -76,7 +77,7 @@ clobber. That is Fugu's inter-workflow shared memory (report §3.2.2) made liter
 > (`request_connection`) the precondition could read a stale snapshot, so keep the server on the serialized model
 > for shared same-slug writes.
 
-## This is proven, not aspirational
+## What is proven
 
 The transport is dogfooded end to end:
 
@@ -88,5 +89,6 @@ The transport is dogfooded end to end:
 - `scripts/nng-job-runner.mjs`: a separate worker process writes a `job:<id>:status` observation over RPC that
   the coordinator reads back with the same `observationAsOfKey`: a language-agnostic distributed backend.
 
-So: the local file is the default for one project; a ducknng **server** (or other host-supplied server conn) is the store when memory must be
-shared across projects, processes, agents, or machines: the same ducknng extension the topology scripts already use.
+The local file is the default for one project. Cross-process scripts prove that a serialized ducknng server can own
+the mutable DuckDB state while separate processes communicate over RPC. A production workbench still needs to supply
+the authenticated, parameterized `SqlConn` or typed service adapter, lifecycle management, and deployment policy.

@@ -49,7 +49,7 @@ in core**: the test that rejects the speculative zoo (Feature/Sample/Cohort/Matr
 4. **Declaration**: a registered capability/operation/view/term-set/predicate/resolver (via a manifest).
 5. **Run**: the ledger that produces facts/handles with provenance.
 6. **Memory**: machine-studying notes as time-stamped, authored revisions in the one `bio_observations` ledger
-   (`agent:memory:`), projected into the graph. Append-only, as-of-recallable, tombstone-retractable. *Not facts.*
+   (`memory:`), projected into the graph. Append-only, as-of-recallable, tombstone-retractable. *Not facts.*
 
 ## Boundaries
 
@@ -162,7 +162,7 @@ interface TemporalValidity { observedAt?: string; validFrom?: string; validTo?: 
 
 Bi-temporal (`valid_*` × `recordedAt`) makes **reanalysis** work ("what did we believe on date X"). It
 belongs on facts, evidence, resources, runs, and source snapshots, **and on memory notes**, which now live in
-the same append-only `bio_observations` ledger (`agent:memory:` namespace): every `remember`/`forget` is a
+the same append-only `bio_observations` ledger (`memory:` namespace): every `remember`/`forget` is a
 time-stamped, authored revision with as-of recall, full history, and tombstone retraction. The one exception is
 **CAS content** (timeless identity; only its *retrieval* is timed).
 
@@ -306,6 +306,6 @@ and analysis as manifest SQL, not per-source TypeScript.
 | Fact | `BioGraphNode`/`Edge`/`Snapshot`, `TrustBlock`, `Provenance` | `BioFact` + `EvidenceBlock` + `TemporalValidity`; recording judgments/results as edges |
 | Declaration | `BioOperationSpec`, `BioResolverSpec`, `BioManifest` registry (validated, frozen) | `PredicateDef` registry |
 | Run | `BioRunSpec`/`Record`/`Event` + host producer (`bio_run_operation` → run/result/receipts persisted) | richer run lifecycle (resume, budgets) |
-| Memory | temporal notes in `bio_observations` (`agent:memory:`: `remember`/`forget`/`recall`, as-of + history + author, projected into the graph) | richer recall ranking / cross-agent trust policy |
+| Memory | temporal notes in `bio_observations` (`memory:`: `remember`/`forget`/`recall`, as-of + history + author, projected into the graph) | richer recall ranking / cross-agent trust policy |
 
 Everything in the right column is built **consumer-driven**, when the flagship or a real manifest needs it, never speculatively.

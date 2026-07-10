@@ -1,16 +1,26 @@
 import { createHash } from "node:crypto";
-import { createReadStream, promises as fs } from "node:fs";
+import { createReadStream } from "node:fs";
 import { basename } from "node:path";
 import readline from "node:readline";
 import type { CasStore } from "../core/cas.js";
 import type { SqlConn } from "../core/ports.js";
 import { canonicalDigest } from "../core/reproducibility.js";
-import { createBioObservationSchema, recordObservation, recordObservationLink } from "../duckdb/observations.js";
+import {
+  createBioObservationSchema,
+  recordObservation,
+  recordObservationBatch,
+  recordObservationLink,
+  type BioObservationInput,
+} from "../duckdb/observations.js";
 import { recordArtifactReference } from "./artifacts.js";
+import { initCasMetadata, recordCasObject, replaceCasRefs } from "./cas-metadata.js";
 
 type JsonObject = Record<string, unknown>;
 
 const FUTURE = "9999-12-31T23:59:59.999Z";
+const SESSION_OBSERVATION_BATCH_SIZE = 500;
+
+export type SessionJsonlFormat = "pi" | "codex";
 
 export interface IngestSessionJsonlRequest {
   conn: SqlConn;
@@ -18,9 +28,11 @@ export interface IngestSessionJsonlRequest {
   /** Optional shared-CAS metadata authority; pass only when `cas` stores bytes visible to that authority. */
   casMetadata?: { conn: SqlConn; nowMs?: number };
   sessionPath: string;
+  /** Persisted host format. When omitted, the first JSONL object is used to distinguish Pi from Codex. */
+  format?: SessionJsonlFormat;
   /** Stable public id for the imported session. Defaults to the JSONL basename without `.jsonl`. */
   sessionId?: string;
-  /** Optional stable parent session id. When omitted, Pi's header `parentSession` path is used only as metadata. */
+  /** Optional stable parent session id. Codex `parent_thread_id` is already stable; Pi's parent path remains metadata. */
   parentSessionId?: string;
   /** Observation source/author. Defaults to `session-ingest`. */
   source?: string;
@@ -30,6 +42,7 @@ export interface IngestSessionJsonlRequest {
 
 export interface IngestSessionJsonlResult {
   sessionId: string;
+  format: SessionJsonlFormat;
   rawDigest: `sha256:${string}`;
   rawCasUri: `cas:sha256:${string}`;
   entries: number;
@@ -121,14 +134,275 @@ function digestJson(value: unknown): `sha256:${string}` {
   return canonicalDigest(value);
 }
 
-function firstSessionHeader(bytes: Buffer): JsonObject | undefined {
-  const firstLine = bytes.toString("utf8").split(/\r?\n/).find((line) => line.trim().length > 0);
-  if (!firstLine) return undefined;
-  try {
-    const parsed = JSON.parse(firstLine) as unknown;
-    return isObject(parsed) && parsed.type === "session" ? parsed : undefined;
-  } catch {
-    return undefined;
+interface SourceLine {
+  value: JsonObject;
+  lineNumber: number;
+  digest: `sha256:${string}`;
+}
+
+interface SessionEntry {
+  entry: JsonObject;
+  lineNumber: number;
+  sourceDigest: `sha256:${string}`;
+}
+
+interface ParsedSession {
+  format: SessionJsonlFormat;
+  formatLabel: "pi-session-jsonl" | "codex-rollout-jsonl";
+  header?: JsonObject;
+}
+
+async function* sourceLines(path: string): AsyncGenerator<SourceLine> {
+  const input = createReadStream(path, { encoding: "utf8" });
+  const reader = readline.createInterface({ input, crlfDelay: Infinity });
+  let lineNumber = 0;
+  for await (const rawLine of reader) {
+    lineNumber++;
+    const line = rawLine.trim();
+    if (!line) continue;
+    let parsed: unknown;
+    try { parsed = JSON.parse(line) as unknown; } catch (error) {
+      throw new Error(`ingestSessionJsonl: invalid JSON at line ${lineNumber}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    if (!isObject(parsed)) throw new Error(`ingestSessionJsonl: line ${lineNumber} is not a JSON object`);
+    yield { value: parsed, lineNumber, digest: digestJson(parsed) };
+  }
+}
+
+async function firstSourceLine(path: string): Promise<SourceLine | undefined> {
+  for await (const line of sourceLines(path)) return line;
+  return undefined;
+}
+
+function detectSessionFormat(first?: JsonObject): SessionJsonlFormat {
+  if (!first) return "pi";
+  const type = stringProp(first, "type");
+  if (type === "session_meta" || type === "response_item" || type === "event_msg" || type === "turn_context" || type === "world_state" || type === "compacted") return "codex";
+  return "pi";
+}
+
+function parseArguments(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  try { return JSON.parse(value) as unknown; } catch { return value; }
+}
+
+function codexCustomEntry(source: SourceLine, customType: string, data: Record<string, unknown> = {}): SessionEntry {
+  return {
+    lineNumber: source.lineNumber,
+    sourceDigest: source.digest,
+    entry: {
+      type: "custom",
+      id: `codex-line-${source.lineNumber}`,
+      timestamp: stringProp(source.value, "timestamp"),
+      customType,
+      data: { ...data, source_digest: source.digest },
+    },
+  };
+}
+
+interface CodexAdapterState {
+  previousMessageId?: string;
+  provider?: string;
+  model?: string;
+  hostTurnId?: string;
+  contextDigest?: `sha256:${string}`;
+}
+
+function codexHeader(source?: SourceLine): JsonObject | undefined {
+  if (!source || source.value.type !== "session_meta" || !isObject(source.value.payload)) return undefined;
+  const meta = source.value.payload;
+  return {
+    type: "session",
+    id: stringProp(meta, "id") ?? stringProp(meta, "session_id"),
+    timestamp: stringProp(meta, "timestamp") ?? stringProp(source.value, "timestamp"),
+    cwd: stringProp(meta, "cwd"),
+    parentSession: stringProp(meta, "parent_thread_id"),
+  };
+}
+
+function codexEntry(source: SourceLine, state: CodexAdapterState): SessionEntry {
+    const { value, lineNumber } = source;
+    const timestamp = stringProp(value, "timestamp");
+    const payload = isObject(value.payload) ? value.payload : undefined;
+    const type = stringProp(value, "type") ?? "unknown";
+    const payloadType = payload ? stringProp(payload, "type") : undefined;
+
+    if (type === "session_meta" && payload) {
+      state.provider = stringProp(payload, "model_provider") ?? state.provider;
+      return {
+        lineNumber,
+        sourceDigest: source.digest,
+        entry: { ...codexHeader(source), sourceDigest: source.digest },
+      };
+    }
+
+    if (type === "turn_context" && payload) {
+      state.hostTurnId = stringProp(payload, "turn_id") ?? state.hostTurnId;
+      state.model = stringProp(payload, "model") ?? state.model;
+      state.contextDigest = digestJson(payload);
+      return codexCustomEntry(source, "codex.turn_context", {
+        host_turn_id: state.hostTurnId ?? null,
+        model: state.model ?? null,
+        context_digest: state.contextDigest,
+      });
+    }
+
+    if (type === "event_msg" && payloadType === "task_started" && payload) {
+      state.hostTurnId = stringProp(payload, "turn_id") ?? state.hostTurnId;
+      return codexCustomEntry(source, "codex.task_started", { host_turn_id: state.hostTurnId ?? null });
+    }
+
+    if (type === "response_item" && payloadType === "message" && payload) {
+      const role = stringProp(payload, "role");
+      if (!role) {
+        return codexCustomEntry(source, "codex.response_item.message");
+      }
+      state.hostTurnId = isObject(payload.internal_chat_message_metadata_passthrough)
+        ? stringProp(payload.internal_chat_message_metadata_passthrough, "turn_id") ?? state.hostTurnId
+        : state.hostTurnId;
+      const id = stringProp(payload, "id") ?? `codex-line-${lineNumber}-message`;
+      const entry: SessionEntry = {
+        lineNumber,
+        sourceDigest: source.digest,
+        entry: {
+          type: "message",
+          id,
+          ...(state.previousMessageId ? { parentId: state.previousMessageId } : {}),
+          timestamp,
+          message: {
+            role,
+            content: payload.content ?? [],
+            provider: state.provider,
+            model: state.model,
+            api: "codex",
+            phase: stringProp(payload, "phase"),
+            hostTurnId: state.hostTurnId,
+            contextDigest: state.contextDigest,
+          },
+        },
+      };
+      state.previousMessageId = id;
+      return entry;
+    }
+
+    const isToolCall = type === "response_item" && payload && ["function_call", "custom_tool_call", "tool_search_call", "web_search_call"].includes(payloadType ?? "");
+    if (isToolCall) {
+      const callId = stringProp(payload!, "call_id") ?? stringProp(payload!, "id") ?? `codex-line-${lineNumber}-call`;
+      const name = stringProp(payload!, "name") ?? payloadType!;
+      const id = `codex-${callId}-call`;
+      state.hostTurnId = isObject(payload!.internal_chat_message_metadata_passthrough)
+        ? stringProp(payload!.internal_chat_message_metadata_passthrough, "turn_id") ?? state.hostTurnId
+        : state.hostTurnId;
+      const entry: SessionEntry = {
+        lineNumber,
+        sourceDigest: source.digest,
+        entry: {
+          type: "message",
+          id,
+          ...(state.previousMessageId ? { parentId: state.previousMessageId } : {}),
+          timestamp,
+          message: {
+            role: "assistant",
+            provider: state.provider,
+            model: state.model,
+            api: "codex",
+            hostTurnId: state.hostTurnId,
+            contextDigest: state.contextDigest,
+            content: [{
+              type: "toolCall",
+              id: callId,
+              name,
+              arguments: parseArguments(payload!.arguments ?? payload!.input ?? payload!.query ?? payload!.action ?? null),
+            }],
+          },
+        },
+      };
+      state.previousMessageId = id;
+      return entry;
+    }
+
+    const isToolResult = type === "response_item" && payload && ["function_call_output", "custom_tool_call_output", "tool_search_output", "web_search_output"].includes(payloadType ?? "");
+    if (isToolResult) {
+      const callId = stringProp(payload!, "call_id") ?? stringProp(payload!, "id") ?? `codex-line-${lineNumber}-call`;
+      const id = `codex-${callId}-result`;
+      const entry: SessionEntry = {
+        lineNumber,
+        sourceDigest: source.digest,
+        entry: {
+          type: "message",
+          id,
+          ...(state.previousMessageId ? { parentId: state.previousMessageId } : {}),
+          timestamp,
+          message: {
+            role: "toolResult",
+            toolCallId: callId,
+            toolName: stringProp(payload!, "name"),
+            ...(typeof payload!.is_error === "boolean" ? { isError: payload!.is_error } : {}),
+            content: payload!.output ?? payload!.result ?? null,
+            hostTurnId: state.hostTurnId,
+          },
+        },
+      };
+      state.previousMessageId = id;
+      return entry;
+    }
+
+    if (type === "compacted" && payload) {
+      return {
+        lineNumber,
+        sourceDigest: source.digest,
+        entry: {
+          type: "compaction",
+          id: stringProp(payload, "window_id") ?? `codex-line-${lineNumber}`,
+          timestamp,
+          summary: typeof payload.message === "string" ? payload.message : "",
+          details: {
+            window_number: typeof payload.window_number === "number" ? payload.window_number : null,
+            window_id: stringProp(payload, "window_id") ?? null,
+            previous_window_id: stringProp(payload, "previous_window_id") ?? null,
+            first_window_id: stringProp(payload, "first_window_id") ?? null,
+            replacement_history_digest: digestJson(payload.replacement_history ?? null),
+          },
+        },
+      };
+    }
+
+    const customType = type === "event_msg" && payloadType
+      ? `codex.${payloadType}`
+      : type === "response_item" && payloadType
+        ? `codex.response_item.${payloadType}`
+        : `codex.${type}`;
+    return codexCustomEntry(source, customType, {
+      host_turn_id: payload ? stringProp(payload, "turn_id") ?? state.hostTurnId ?? null : state.hostTurnId ?? null,
+    });
+}
+
+async function describeSession(path: string, first: SourceLine | undefined, requestedFormat?: SessionJsonlFormat): Promise<ParsedSession> {
+  const detected = detectSessionFormat(first?.value);
+  if (requestedFormat && first && requestedFormat !== detected) {
+    throw new Error(`ingestSessionJsonl: --format ${requestedFormat} does not match the first '${stringProp(first.value, "type") ?? "unknown"}' record (detected ${detected})`);
+  }
+  const format = requestedFormat ?? detected;
+  if (format === "codex") {
+    let header = codexHeader(first);
+    if (!header) {
+      for await (const source of sourceLines(path)) {
+        header = codexHeader(source);
+        if (header) break;
+      }
+    }
+    return { format, formatLabel: "codex-rollout-jsonl", header };
+  }
+  const header = first?.value.type === "session" ? first.value : undefined;
+  return { format, formatLabel: "pi-session-jsonl", header };
+}
+
+async function* sessionEntries(path: string, format: SessionJsonlFormat): AsyncGenerator<SessionEntry> {
+  const codexState: CodexAdapterState = {};
+  for await (const source of sourceLines(path)) {
+    yield format === "codex"
+      ? codexEntry(source, codexState)
+      : { entry: source.value, lineNumber: source.lineNumber, sourceDigest: source.digest };
   }
 }
 
@@ -140,16 +414,27 @@ async function putCas(cas: CasStore, bytes: Buffer | string): Promise<`sha256:${
 
 async function record(
   conn: SqlConn,
-  obs: Parameters<typeof recordObservation>[1],
-  counts: { observations: number },
+  obs: BioObservationInput,
+  counts: { observations: number; pending?: BioObservationInput[] },
 ): Promise<void> {
-  await recordObservation(conn, obs);
+  if (counts.pending) {
+    counts.pending.push(obs);
+    if (counts.pending.length >= SESSION_OBSERVATION_BATCH_SIZE) await flushPending(conn, counts);
+  } else {
+    await recordObservation(conn, obs);
+  }
   counts.observations++;
+}
+
+async function flushPending(conn: SqlConn, counts: { pending?: BioObservationInput[] }): Promise<void> {
+  if (!counts.pending?.length) return;
+  const batch = counts.pending.splice(0, counts.pending.length);
+  await recordObservationBatch(conn, batch);
 }
 
 async function recordEdge(
   conn: SqlConn,
-  counts: { observations: number },
+  counts: { observations: number; pending?: BioObservationInput[] },
   subjectId: string,
   predicate: string,
   objectId: string,
@@ -157,7 +442,20 @@ async function recordEdge(
   source: string,
   attrs?: Record<string, unknown>,
 ): Promise<void> {
-  await recordObservationLink(conn, { subjectId, predicate, objectId, recordedAt, source, attrs });
+  if (counts.pending) {
+    counts.pending.push({
+      statementKey: `${subjectId}:${predicate}:${objectId}`,
+      subjectId,
+      predicate,
+      objectId,
+      recordedAt,
+      source,
+      attrs,
+    });
+    if (counts.pending.length >= SESSION_OBSERVATION_BATCH_SIZE) await flushPending(conn, counts);
+  } else {
+    await recordObservationLink(conn, { subjectId, predicate, objectId, recordedAt, source, attrs });
+  }
   counts.observations++;
 }
 
@@ -376,45 +674,36 @@ async function recordControlEntry(args: {
   }
 }
 
-function parseJsonLine(line: string, lineNumber: number): JsonObject {
-  const parsed = JSON.parse(line) as unknown;
-  if (!isObject(parsed)) throw new Error(`ingestSessionJsonl: line ${lineNumber} is not a JSON object`);
-  return parsed;
-}
-
 /**
- * Import a Pi-style JSONL session into the one observation ledger. This deliberately uses Pi session JSONL as the
- * concrete host format today; public/redacted exports such as pi-share-hf are derived JSONL views that can be fed
- * through the same function when a host chooses them.
+ * Import a persisted host session into the one observation ledger. Host adapters reduce Pi session JSONL and Codex
+ * rollout JSONL to the same message/tool/control entries; the original bytes, not the reduced form, are retained in
+ * CAS. Runtime-only signals still require a host hook because no post-hoc importer can recover events the host did
+ * not persist.
  */
 export async function ingestSessionJsonl(req: IngestSessionJsonlRequest): Promise<IngestSessionJsonlResult> {
   await createBioObservationSchema(req.conn, { ifNotExists: true });
   const source = req.source ?? "session-ingest";
   const fallbackNow = req.now ?? new Date().toISOString();
-  const raw = await fs.readFile(req.sessionPath);
-  const header = firstSessionHeader(raw);
+  const storedRaw = await req.cas.putFile(req.sessionPath);
+  const snapshotPath = req.cas.pathFor(storedRaw.address);
+  const parsed = await describeSession(snapshotPath, await firstSourceLine(snapshotPath), req.format);
+  const header = parsed.header;
   const sessionId = req.sessionId ?? (header ? stringProp(header, "id") : undefined) ?? stripJsonl(basename(req.sessionPath));
   const parentSessionId = req.parentSessionId?.trim();
   if (req.parentSessionId !== undefined && !parentSessionId) throw new Error("ingestSessionJsonl: parentSessionId must be non-empty when provided");
   const sessionNode = node("session", sessionId);
   const headerParentSession = header ? stringProp(header, "parentSession") : undefined;
-  const inferredParentSessionId = parentSessionId;
-  const rawDigest = await putCas(req.cas, raw);
+  const inferredParentSessionId = parentSessionId ?? (parsed.format === "codex" ? headerParentSession : undefined);
+  const rawDigest = `sha256:${storedRaw.address.digest}` as `sha256:${string}`;
   const rawCasUri = casNode(rawDigest);
-  const counts = { observations: 0, artifacts: 0 };
+  const counts = { observations: 0, artifacts: 0, pending: [] as BioObservationInput[] };
   const seenArtifacts = new Set<string>();
   let entries = 0, messages = 0, turns = 0, toolCalls = 0;
   let previousUserMessageNode: string | undefined;
   let snapshotRecordedAt = fallbackNow;
 
-  const input = createReadStream(req.sessionPath, { encoding: "utf8" });
-  const reader = readline.createInterface({ input, crlfDelay: Infinity });
-  let lineNumber = 0;
-  for await (const rawLine of reader) {
-    lineNumber++;
-    const line = rawLine.trim();
-    if (!line) continue;
-    const entry = parseJsonLine(line, lineNumber);
+  for await (const parsedEntry of sessionEntries(snapshotPath, parsed.format)) {
+    const { entry, lineNumber, sourceDigest } = parsedEntry;
     entries++;
     const recordedAt = entryTime(entry, fallbackNow);
     snapshotRecordedAt = recordedAt;
@@ -427,13 +716,13 @@ export async function ingestSessionJsonl(req: IngestSessionJsonlRequest): Promis
       statementKey: entryNode,
       subjectId: entryNode,
       predicate: "session_entry",
-      value: { type: entryType, line_number: lineNumber, digest: entryDigest },
+      value: { type: entryType, line_number: lineNumber, digest: entryDigest, source_digest: sourceDigest },
       recordedAt,
       source,
       digest: entryDigest,
-      attrs: { session_id: sessionId, line_number: lineNumber },
+      attrs: { session_id: sessionId, line_number: lineNumber, format: parsed.formatLabel },
     }, counts);
-    await recordEdge(req.conn, counts, sessionNode, "has_entry", entryNode, recordedAt, source, { line_number: lineNumber, type: entryType });
+    await recordEdge(req.conn, counts, sessionNode, "has_entry", entryNode, recordedAt, source, { line_number: lineNumber, type: entryType, format: parsed.formatLabel });
 
     await recordControlEntry({
       conn: req.conn, counts, sessionId, sessionNode, entryNode, entry, entryType, entryDigest, recordedAt, source, lineNumber,
@@ -495,6 +784,9 @@ export async function ingestSessionJsonl(req: IngestSessionJsonlRequest): Promis
     const provider = stringProp(msg, "provider");
     const model = stringProp(msg, "model");
     const api = stringProp(msg, "api");
+    const phase = stringProp(msg, "phase");
+    const hostTurnId = stringProp(msg, "hostTurnId");
+    const suppliedContextDigest = stringProp(msg, "contextDigest");
     const messageValue = {
       role,
       content_digest: contentDigest,
@@ -502,6 +794,8 @@ export async function ingestSessionJsonl(req: IngestSessionJsonlRequest): Promis
       provider: provider ?? null,
       model: model ?? null,
       api: api ?? null,
+      phase: phase ?? null,
+      host_turn_id: hostTurnId ?? null,
       stop_reason: stringProp(msg, "stopReason") ?? null,
       usage_digest: msg.usage === undefined ? null : digestJson(msg.usage),
       line_number: lineNumber,
@@ -515,7 +809,7 @@ export async function ingestSessionJsonl(req: IngestSessionJsonlRequest): Promis
       recordedAt,
       source,
       digest: contentDigest,
-      attrs: { session_id: sessionId, role, line_number: lineNumber, local_id: mid },
+      attrs: { session_id: sessionId, role, line_number: lineNumber, local_id: mid, phase: phase ?? null, host_turn_id: hostTurnId ?? null },
     }, counts);
     await recordEdge(req.conn, counts, sessionNode, "has_message", msgNode, recordedAt, source, { role, line_number: lineNumber });
     if (parentNode) await recordEdge(req.conn, counts, msgNode, "parent", parentNode, recordedAt, source);
@@ -535,17 +829,17 @@ export async function ingestSessionJsonl(req: IngestSessionJsonlRequest): Promis
           provider: provider ?? null,
           model: model ?? null,
           api: api ?? null,
-          context_digest: digestJson({ parent: parentNode ?? previousUserMessageNode ?? null }),
+          context_digest: suppliedContextDigest ?? digestJson({ parent: parentNode ?? previousUserMessageNode ?? null }),
           output_digest: contentDigest,
           reproducibility: {
             verdict: "audit_replayable_not_content_reproducible",
-            reason: "provider/model call is a live host effect; context can be reconstructed but text is not content-guaranteed",
+            reason: "provider/model call is a live host effect; the persisted transcript supports audit but generated text is not content-guaranteed",
           },
         },
         recordedAt,
         source,
         digest: contentDigest,
-        attrs: { session_id: sessionId, kind: "agent_turn", provider: provider ?? null, model: model ?? null },
+        attrs: { session_id: sessionId, kind: "agent_turn", provider: provider ?? null, model: model ?? null, host_turn_id: hostTurnId ?? null },
       }, counts);
       await recordEdge(req.conn, counts, sessionNode, "has_turn", turnNode, recordedAt, source);
       await recordEdge(req.conn, counts, turnNode, "output", msgNode, recordedAt, source);
@@ -613,22 +907,26 @@ export async function ingestSessionJsonl(req: IngestSessionJsonlRequest): Promis
     }
   }
 
+  // Validate and commit every normalized entry before rooting the raw snapshot. A malformed or invalid entry
+  // therefore cannot pin private transcript bytes through shared-CAS metadata.
+  await flushPending(req.conn, counts);
+
   await record(req.conn, {
     statementKey: `${sessionNode}:raw_jsonl`,
     subjectId: sessionNode,
     predicate: "raw_jsonl",
-    value: { digest: rawDigest, uri: rawCasUri, size_bytes: raw.length, format: "pi-session-jsonl", file: basename(req.sessionPath) },
+    value: { digest: rawDigest, uri: rawCasUri, size_bytes: storedRaw.size, format: parsed.formatLabel, file: basename(req.sessionPath) },
     recordedAt: snapshotRecordedAt,
     source,
     digest: rawDigest,
-    attrs: { session_id: sessionId, source_path: req.sessionPath },
+    attrs: { session_id: sessionId },
   }, counts);
 
   if (inferredParentSessionId) {
     await recordEdge(req.conn, counts, sessionNode, "parent_session", node("session", inferredParentSessionId), snapshotRecordedAt, source, {
       parent_session_id: inferredParentSessionId,
       parent_session_ref: headerParentSession ?? null,
-      parent_session_ref_kind: "explicit_id",
+      parent_session_ref_kind: parentSessionId ? "explicit_id" : "codex_parent_thread_id",
     });
   }
 
@@ -647,14 +945,24 @@ export async function ingestSessionJsonl(req: IngestSessionJsonlRequest): Promis
       artifacts: counts.artifacts,
       parent_session_id: inferredParentSessionId ?? null,
       parent_session_ref: headerParentSession ?? null,
+      format: parsed.formatLabel,
     },
     recordedAt: snapshotRecordedAt,
     source,
     digest: rawDigest,
-    attrs: { session_id: sessionId, format: "pi-session-jsonl" },
+    attrs: { session_id: sessionId, format: parsed.formatLabel },
   }, counts);
 
-  return { sessionId, rawDigest, rawCasUri, entries, messages, turns, toolCalls, artifacts: counts.artifacts, observations: counts.observations };
+  await flushPending(req.conn, counts);
+
+  if (req.casMetadata) {
+    const nowMs = req.casMetadata.nowMs ?? Date.now();
+    await initCasMetadata(req.casMetadata.conn);
+    await recordCasObject(req.casMetadata.conn, storedRaw.address, storedRaw.size, nowMs);
+    await replaceCasRefs(req.casMetadata.conn, sessionNode, "session_raw", [{ address: storedRaw.address }], nowMs);
+  }
+
+  return { sessionId, format: parsed.format, rawDigest, rawCasUri, entries, messages, turns, toolCalls, artifacts: counts.artifacts, observations: counts.observations };
 }
 
 const latestAsOf = (predicate: string, subjectPrefix: string): string =>

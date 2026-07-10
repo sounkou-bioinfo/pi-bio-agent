@@ -40,7 +40,7 @@ declared resource with a receipt, never custom framework code.
 ## Multi-agent by attribution; authorization stays the host's job
 
 The core carries no multi-user authorization model, but it is **not** single-user by design. Every observation in
-the temporal store (`bio_observations`, including the `agent:memory:` namespace) carries an `author`/`source` that
+the temporal store (`bio_observations`, including the `memory:` namespace) carries an `author`/`source` that
 is **part of its identity**, so a shared store stays attributed and time-consistent when many agents write to it,
 and the durable governance/approval loop (submit → validate → test → record → approve → `activate`/`rollback`, with
 park/resume) gates promotion of specs/skills. What stays out of core is **RBAC/policy**: who may read, write, or

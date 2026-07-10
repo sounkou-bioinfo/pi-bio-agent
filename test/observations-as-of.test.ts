@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { duckdbNodeConn } from "../src/duckdb/node-api.js";
 import type { SqlConn } from "../src/core/ports.js";
-import { createBioObservationSchema, recordObservation, recordMonotonicObservation, insertObservationIfSlotMax, observationHistory, observationsAsOf, materializeBioEdgesAsOf, entailedEdgesAsOf } from "../src/duckdb/observations.js";
+import { createBioObservationSchema, recordObservation, recordObservationBatch, recordMonotonicObservation, insertObservationIfSlotMax, observationHistory, observationsAsOf, materializeBioEdgesAsOf, entailedEdgesAsOf } from "../src/duckdb/observations.js";
 
 // Phase 4.0a: the append-only temporal provenance-statement store. The load-bearing property is
 // latest-per-statement_key (NOT per triple) — so supersession works even when the OBJECT or the VALUE changes.
@@ -36,6 +36,31 @@ describe("bio_observations: temporal provenance statements, as-of latest-per-sta
     // and a whole-table as-of scan still works (nothing bad got in)
     await recordObservation(c, { statementKey: "k", subjectId: "x", predicate: "p", value: "ok", recordedAt: "2026-01-01T00:00:00Z" });
     assert.equal((await observationsAsOf(c, "2026-06-01T00:00:00Z")).length, 1);
+  });
+
+  test("bulk append preserves content ids, JSON values, edge rows, idempotence, and DuckDB-native timestamp validation", async () => {
+    const c = await newConn();
+    const batch = [
+      { statementKey: "bulk:value", subjectId: "bulk:a", predicate: "score", value: { n: 2 }, recordedAt: T1, attrs: { source: "fixture" } },
+      { statementKey: "bulk:edge", subjectId: "bulk:a", predicate: "related_to", objectId: "bulk:b", recordedAt: T2, trust: { provenanceClass: "imported" as const, confidence: 0.8 } },
+    ];
+    const ids = await recordObservationBatch(c, batch);
+    assert.equal(ids.length, 2);
+    assert.ok(ids.every((id) => id.startsWith("sha256:")));
+    assert.deepEqual(await recordObservationBatch(c, batch), ids, "the same batch derives the same ids");
+    const rows = await c.all<{ predicate: string; object_id: string | null; value_json: string | null; attrs: string | null; trust: string | null }>(
+      "SELECT predicate, object_id, value_json, attrs, trust FROM bio_observations WHERE subject_id = 'bulk:a' ORDER BY predicate",
+    );
+    assert.equal(rows.length, 2, "exact re-import is idempotent");
+    assert.deepEqual(JSON.parse(rows.find((row) => row.predicate === "score")!.value_json!), { n: 2 });
+    assert.deepEqual(JSON.parse(rows.find((row) => row.predicate === "score")!.attrs!), { source: "fixture" });
+    assert.equal(rows.find((row) => row.predicate === "related_to")!.object_id, "bulk:b");
+    assert.deepEqual(JSON.parse(rows.find((row) => row.predicate === "related_to")!.trust!), { provenanceClass: "imported", confidence: 0.8 });
+    await assert.rejects(
+      () => recordObservationBatch(c, [{ statementKey: "bulk:bad", subjectId: "bulk:x", predicate: "p", recordedAt: "not-a-time" }]),
+      /non-DuckDB-castable TIMESTAMPTZ/,
+    );
+    assert.equal((await c.all<{ n: bigint }>("SELECT count(*) AS n FROM bio_observations WHERE statement_key = 'bulk:bad'"))[0]!.n, 0n);
   });
 
 

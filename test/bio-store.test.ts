@@ -15,7 +15,7 @@ describe("bio-store: ONE store for memory + facts + graph (not a separate memory
   test("memory and facts coexist in one bio_observations; one graph closure crosses namespaces", async () => {
     const store = await openBioStore(await tmp());
     try {
-      await remember(store.conn, note("acmg", "guidance"), T1, "agent:pi"); // agent:memory: namespace
+      await remember(store.conn, note("acmg", "guidance"), T1, "agent:pi"); // memory: namespace
       await recordObservation(store.conn, { statementKey: "fact:1", subjectId: "gene:TP53", predicate: "associated_with", objectId: "disease:LFS", recordedAt: T1, source: "clinvar" }); // a FACT in the SAME store
       await materializeBioEdgesAsOf(store.conn, MEMORY_NOW);
       const edges = await store.conn.all<{ from_id: string; to_id: string }>("SELECT from_id, to_id FROM bio_edges_as_of");

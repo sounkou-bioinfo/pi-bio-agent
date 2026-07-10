@@ -1,5 +1,5 @@
 import { promises as fs } from "node:fs";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 import type { SqlConn } from "../core/ports.js";
 import type { HostCapabilityReceipt } from "../core/reproducibility.js";
 import { runBioOperationFromManifest, runBioQueryFromManifest } from "../hosts/run-store.js";
@@ -11,14 +11,14 @@ import type { DucknngHttpProfileSpec } from "../duckdb/http-profiles.js";
 
 // The `query` / `run` CLI engine — the substrate's actual value at a provider-agnostic entry point (not Pi-only).
 // It wraps the SAME tested host functions the Pi extension uses (runBioQueryFromManifest / runBioOperationFromManifest),
-// so the CLI and the agent share one code path. Effects remain opt-in: `--network fetch`, `--compute local`, and
+// so the CLI and every caller share one code path. Effects remain opt-in: `--network fetch`, `--compute local`, and
 // `--cas-root` compose the existing host ports explicitly; absent flags leave those resolvers unbound.
 //
 //   pi-bio-agent query <manifest.json> --db <path|:memory:> --sql "<read-only SQL>" [--resources a,b] [--run-id id]
 //   pi-bio-agent run   <manifest.json> --db <path|:memory:> --operation <operationId>   [--run-id id]
 //
-// On success it prints the run response (runId/status/rowCount/runDir/artifacts) AND the result rows (result.json)
-// as JSON; on a failed run it prints the error and returns exit code 1. Bindings pass agent params as session vars.
+// On success it prints the run response and result rows as JSON; on a failed run it prints the error and returns
+// exit code 1. Bindings pass caller parameters as session variables.
 
 export interface RunCliDeps {
   cwd: string;
@@ -277,9 +277,6 @@ export async function mainRun(sub: string, argv: string[], deps: RunCliDeps): Pr
     deps.out(JSON.stringify({ ok: false, runId: res.runId, status: res.status, runDir: res.runDir }, null, 2));
     return 1;
   }
-  // CLI runs always serialize their result view. A successful run with a missing/corrupt result file is evidence
-  // corruption, not an empty answer, so let the error surface instead of silently printing `rows: undefined`.
-  const rows = JSON.parse(await fs.readFile(join(res.runDir, "result.json"), "utf8")).rows;
-  deps.out(JSON.stringify({ ok: true, runId: res.runId, status: res.status, rowCount: res.rowCount, artifacts: res.artifacts, runDir: res.runDir, rows }, null, 2));
+  deps.out(JSON.stringify({ ok: true, runId: res.runId, status: res.status, rowCount: res.rowCount, artifacts: res.artifacts, runDir: res.runDir, rows: res.result.rows }, null, 2));
   return 0;
 }

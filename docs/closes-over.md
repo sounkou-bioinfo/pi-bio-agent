@@ -1,13 +1,13 @@
 ---
 type: Reference
 title: What the substrate closes over
-description: "How the manifest/SQL/DuckDB substrate subsumes agent topologies, learned orchestration (Fugu), and REPL-over-context (RLM) — with references."
+description: "How the manifest/SQL/DuckDB substrate supplies a common data plane for agent topologies, machine studying, Fugu, and RLM, and where those systems still require a host control plane."
 tags: [topologies, fugu, rlm, machine-studying, positioning]
 ---
 
 # What the substrate closes over
 
-Several frontier ideas in agent research, learned orchestration, REPL-over-context, multi-agent topologies, and studying-before-the-task are usually shipped as separate systems. In this substrate they are consequences of one property: **addressable data + SQL + DuckDB-native transport**. We do not claim to implement those papers directly; the claim is that the substrate exposes the lower-level machinery they rely on.
+Several frontier ideas in agent research, learned orchestration, REPL-over-context, multi-agent topologies, and studying-before-the-task need the same data-plane properties: **addressable data + SQL + durable evidence + transport**. This repository provides many of those lower-level primitives. It does not thereby implement the papers' model-call loops, learned routing, evaluation procedures, or deployment control planes.
 
 Read this argument in this order:
 
@@ -27,8 +27,9 @@ Here that retention is **study notes projected into the same `bio_edges` / `enta
 ontologies: addressable data the agent queries, distinct from *skills* (activated behavior) and *facts*
 (measured, provenanced). The local exercise points are `src/core/study.ts`, `src/core/study-exec.ts`,
 `src/core/blackboard.ts`, `test/study-scaffold.test.ts`, `test/study-exec.test.ts`, and `test/blackboard.test.ts`.
-They prove hooks as retrieval contracts, access-list DAGs, per-worker isolation, shared note memory, and
-blackboard coordination without needing a live model. See [`machine-studying-lineage`](./machine-studying-lineage.md).
+They prove note validation, access-list mechanics, and in-memory/SQL coordination without needing a live model.
+They do not prove that the resulting notes improve expertise. That requires a real agent, held-out probes, and
+performance-versus-inference-budget measurements. See [`machine-studying-lineage`](./machine-studying-lineage.md).
 
 ## Fugu: learned orchestration
 
@@ -44,14 +45,14 @@ trained orchestrator for model collectives. The important source section for thi
   redundant tool calls and rediscovering the same artifacts.
 
 Fugu resolves that with two mechanisms: **access lists** for current-workflow isolation, and **persistent shared
-memory** across workflows so later agents can observe prior tool calling when useful. That maps directly onto this
+memory** across workflows so later agents can observe prior tool calling when useful. Parts of that map onto this
 substrate:
 
-- `StudyScaffold.accessList` is the access-list contract. Tests prove each worker sees only the upstream notes it
-  was granted, while tree and survey/debate topologies fan in through an aggregator.
-- `bio_observations` plus run facts are the shared memory/tool-call cache. Runs, results, receipts, job status,
-  and memory notes are queryable as-of facts; an agent can ask what already ran before repeating an expensive
-  lookup or compute.
+- `StudyScaffold.accessList` is a static, note-oriented access-list contract. Tests prove that the callback receives
+  only the upstream note outputs named by the step. A host must still isolate each worker's actual model transcript,
+  tools, filesystem, and credentials.
+- `bio_observations` plus run facts can be shared memory when the host records the relevant runs, tool calls, and
+  events. The ledger is not automatically a Fugu-compatible transcript router.
 - `src/core/blackboard.ts` and `src/hosts/sql-blackboard.ts` are the current blackboard shapes;
   `scripts/blackboard-shared.mjs` shows the same publish/await pattern across OS processes through a
   ducknng-served DuckDB table.
@@ -62,8 +63,11 @@ substrate:
 - `scripts/pipeline-fanout.mjs`, `scripts/nng-survey.mjs`, and `scripts/nng-pair.mjs` exercise bounded worker
   pools, survey/quorum, and proposer-verifier communication.
 
-What we deliberately *lack* is the trained orchestrator. The library provides the data plane a Fugu-like
-orchestrator would conduct: manifests, access lists, observations, CAS, jobs, and DuckDB/ducknng transport.
+What we deliberately lack is the defining Fugu control plane: a learned orchestrator that generates workflows,
+assigns worker models, preserves each worker's function-call loop across turns, and routes only the designated
+cross-worker context. The library provides data-plane pieces such a host can use: observations, CAS, durable jobs,
+and DuckDB/ducknng transport. The workbench must prove their composition with real agents before this can be called a
+Fugu-like workflow implementation.
 
 ## RLM: a REPL over context
 
@@ -72,26 +76,29 @@ variable inside a REPL**: the model writes code to slice, search, partition, and
 so prompt size is decoupled from the context window. It is evaluated on order-sensitive long-context tasks like
 the **OOLONG** benchmark, which punishes RAG and approximate attention.
 
-`bio_query` / DuckDB **is** that REPL: and a stronger one for the tasks that matter here:
+`bio_query` / DuckDB supplies one important part of that design: an external symbolic data environment that the
+model can inspect and transform without loading the whole source into its context. For relational reductions it is
+stronger and more exact than asking a model to count rows:
 
 - data lives **addressably outside the prompt** (a table, a CAS handle), so there is no context to rot;
 - an OOLONG-style *count / order / join* is a `GROUP BY` / `ORDER BY` / `JOIN`: **exact and deterministic**,
   where an attention-based reader is only approximate. **Counting beats the model; it doesn't ask it.**
 
-RLM writes Python to navigate text; we write SQL to query data. Same move (a program over external context), but
-ours is a declarative, indexed, provenance-carrying substrate rather than string-slicing.
+That is not a full RLM. RLM's defining additional primitive is **symbolic model recursion**: code inside the
+persistent environment can invoke a model or another RLM over programmatically selected values, retain the returned
+values, and continue the root loop. This repository does not currently expose an `llm_query` equivalent inside
+DuckDB or `compute.run`, nor a persistent root-agent REPL that returns a symbolic final value. A workbench host can
+inject those capabilities, but SQL alone does not close over semantic mapping.
 
 The local dogfood is deliberately honest about map versus reduce:
 
 - `examples/long-context-aggregate/manifest.json` and `test/long-context-aggregate-example.test.ts` exercise the
   deterministic reduce: once labels exist, the distributional question is a bounded `GROUP BY`.
-- `test/map-reduce-labeling.test.ts` and `scripts/rlm-map-reduce.mjs` exercise the missing semantic map shape:
-  partitions are labeled by isolated workers, workers write no shared state, the host merges label artifacts as
-  the single writer, and only then does SQL aggregate. The live model would sit at that labeling boundary; the
-  tests use a rule so the topology is reproducible.
-- `ducknng_run_rpc` / `ducknng_query_rpc` provide the stateful cross-process DuckDB REPL when the host explicitly
-  opts into remote execution. The RLM control plane becomes durable, shared, and inspectable instead of prompt
-  text.
+- `test/map-reduce-labeling.test.ts` and `scripts/rlm-map-reduce.mjs` exercise only a process-isolated map/reduce
+  skeleton. The mapper is a deterministic rule, not a model call; there is no recursive root loop or unbounded
+  context evaluation.
+- `ducknng_run_rpc` / `ducknng_query_rpc` can expose DuckDB state across processes when the host opts into remote
+  execution. They transport state; they do not supply the missing model-recursion control plane.
 
 ## Agent topologies: NNG protocols as agent patterns
 
@@ -187,10 +194,10 @@ application code, not as a new core abstraction.
 
 ## The unifying claim
 
-Learned orchestration, REPL-over-context, every topology, and studying-as-memory all reduce to **addressable data
-+ SQL + DuckDB-native transport**. That is why "a new question is a manifest," "a new format is a DuckDB extension,"
-"a new compute backend is a `JobDispatch`," and "memory, compute, and facts are one temporal ledger" are the same
-sentence.
+Learned orchestration, REPL-over-context, agent topologies, and studying-as-memory can share **addressable data + SQL
++ durable evidence + transport**. That common data plane is the closure claim. Worker selection, model recursion,
+session routing, scheduling, and evaluation remain host/application control-plane concerns until real consumers show
+that a smaller reusable primitive belongs here.
 
 ## Lineage: where the substrate came from
 

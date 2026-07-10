@@ -3,7 +3,7 @@ import { describe, test } from "node:test";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runBioQueryFromManifest, runsRoot } from "../src/hosts/run-store.js";
+import { runBioQueryFromManifest } from "../src/hosts/run-store.js";
 
 // Dogfood + anti-rot gate for the user guide: extract the EXACT manifest + CSV from docs/guide.md and run
 // them end to end. If someone edits the guide's example into something that does not validate or run, this
@@ -36,9 +36,8 @@ describe("user guide example runs end to end (anti-rot gate)", () => {
     assert.equal(res.ok, true);
     if (!res.ok) throw new Error("unreachable");
 
-    const result = JSON.parse(await fs.readFile(join(runsRoot(cwd), "guide-1", "result.json"), "utf8"));
     // the guide's CSV: stop_gained x2, missense x1
-    assert.deepEqual(result.rows.map((r: { consequence: string; n: number }) => [r.consequence, Number(r.n)]), [
+    assert.deepEqual(res.result.rows.map((r) => [r.consequence, Number(r.n)]), [
       ["missense", 1],
       ["stop_gained", 2],
     ]);

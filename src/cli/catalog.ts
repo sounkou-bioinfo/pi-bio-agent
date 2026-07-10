@@ -14,7 +14,7 @@ const defaultRoot = join(packageRoot, "examples");
 
 const USAGE = [
   "usage: pi-bio-agent catalog [--root <dir>] [--query <text>] [--include-invalid true]",
-  "  Lists validated manifest-backed sources/templates. Entries are manifest programs the agent can describe and run.",
+  "  Lists validated manifest-backed sources/templates. Entries are manifest programs a caller can describe and run.",
 ].join("\n");
 
 export async function mainCatalog(argv: string[], deps: CatalogCliDeps): Promise<number> {

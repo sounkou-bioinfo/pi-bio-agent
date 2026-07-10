@@ -9,13 +9,18 @@ import type { StudyScaffold } from "../src/core/study.js";
 
 function piAgent(prompt: string, label: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = spawn("pi", ["--provider", "openai-codex", "--model", "gpt-5.5", "--thinking", "low",
-      "-e", "extensions/pi-coding-agent/index.ts", "-t", "read,grep,find,ls", "-p", prompt], { cwd: process.cwd(), stdio: ["ignore", "pipe", "pipe"] });
+    const model = process.env.PI_BIO_AGENT_MODEL ?? "openai-codex/gpt-5.3-codex";
+    const timeout = Number(process.env.PI_BIO_AGENT_TIMEOUT_MS ?? 120_000);
+    const child = spawn("pi", ["--model", model, "--thinking", "medium", "--no-extensions", "--no-skills",
+      "--no-context-files", "--no-session", "--no-tools", "-p", prompt],
+    { cwd: process.cwd(), stdio: ["ignore", "pipe", "pipe"], timeout });
     console.log(`  [host] spawned pi pid=${child.pid} for '${label}'`);
     let out = "", err = "";
     child.stdout.on("data", (d) => (out += d));
     child.stderr.on("data", (d) => (err += d));
-    child.on("close", (code) => (code === 0 ? resolve(out.trim()) : reject(new Error(`pi ${code} (${label}): ${err.slice(0, 300)}`))));
+    child.on("close", (code, signal) => (code === 0
+      ? resolve(out.trim())
+      : reject(new Error(`pi ${code ?? signal} (${label}): ${err.slice(0, 300)}`))));
   });
 }
 

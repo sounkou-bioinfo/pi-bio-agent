@@ -18,17 +18,17 @@ describe("walkMemoryGraph: study-note memory is a walkable graph", () => {
 
   test("start + depth 1 -> immediate neighborhood only", () => {
     const g = walkMemoryGraph(notes, { start: "a", depth: 1 });
-    assert.deepEqual(g.nodes.map((n) => n.id).sort(), ["agent:memory:a", "agent:memory:b"]);
+    assert.deepEqual(g.nodes.map((n) => n.id).sort(), ["memory:a", "memory:b"]);
   });
 
   test("start + depth 2 -> two hops (a-b-c)", () => {
     const g = walkMemoryGraph(notes, { start: "a", depth: 2 });
-    assert.deepEqual(g.nodes.map((n) => n.id).sort(), ["agent:memory:a", "agent:memory:b", "agent:memory:c"]);
+    assert.deepEqual(g.nodes.map((n) => n.id).sort(), ["memory:a", "memory:b", "memory:c"]);
   });
 
   test("an isolated node walks to just itself", () => {
     const g = walkMemoryGraph(notes, { start: "island", depth: 3 });
-    assert.deepEqual(g.nodes.map((n) => n.id), ["agent:memory:island"]);
+    assert.deepEqual(g.nodes.map((n) => n.id), ["memory:island"]);
   });
 
   test("a NON-EXISTENT start yields an empty snapshot — even when a live note links to that dangling slug (no phantom edge)", () => {

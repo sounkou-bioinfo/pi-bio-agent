@@ -11,6 +11,7 @@ const fleet = [
   { label: "machine-1", port: 8071 },
   { label: "machine-2", port: 8072 },
 ];
+const requestTimeoutMs = Number(process.env.PI_BIO_AGENT_TIMEOUT_MS ?? 120_000) + 5_000;
 
 // start the worker nodes as separate OS processes (here on localhost ports; on a real fleet, real hosts)
 const children = fleet.map((w) =>
@@ -26,8 +27,12 @@ const httpWorker: StudyWorker = async ({ step, notes }) => {
   console.log(`coordinator: dispatch step '${step.id}'  ->  ${w.label} (http://localhost:${w.port}/run)`);
   const resp = await fetch(`http://localhost:${w.port}/run`, {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ step, notes }),
+    signal: AbortSignal.timeout(requestTimeoutMs),
   });
-  const j = (await resp.json()) as { body: string; hook: string; machine: string };
+  const j = (await resp.json()) as { body?: string; hook?: string; machine?: string; error?: string };
+  if (!resp.ok || j.body === undefined || j.hook === undefined || j.machine === undefined) {
+    throw new Error(`worker ${w.label} failed (${resp.status}): ${j.error ?? "invalid response"}`);
+  }
   console.log(`coordinator: step '${step.id}' completed on ${j.machine}`);
   return { body: j.body, hook: j.hook };
 };

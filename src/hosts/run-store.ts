@@ -323,6 +323,7 @@ export interface RunOperationRequest {
   /** Shared-store opt-in: when the host passes its bio_observations connection, the run records a `run:<id>` fact
    *  (status + SQL + digest refs, attributed to `author`) directly into the ONE store — no run.json read-back. */
   store?: SqlConn;
+  /** Opaque actor identity for attribution. Core does not distinguish a human, model, service, or automation. */
   author?: string;
   /** Lean storage: when false, skip writing result/receipts/replay JSON files — their bytes go to CAS (needs a cas) and the run:<id> fact + casRefs reference them by digest; run.json is always written. Default true. */
   serialize?: boolean;
@@ -347,7 +348,7 @@ export interface RunOperationRequest {
   /** Host-owned connection bootstrap SQL (INSTALL/LOAD/SET), run once before resolution — e.g. enabling
    *  httpfs + cache_httpfs so file_scan/sql_materialize remote reads get block caching. NOT agent SQL. */
   duckdbInitSql?: string[];
-  /** Agent params as DuckDB session variables: each becomes `SET VARIABLE name = value`, so a resource url/body composes them with plain SQL (getvariable(name)) and upstream data with subqueries — no bespoke template DSL. */
+  /** Caller params as DuckDB session variables: each becomes `SET VARIABLE name = value`, so a resource url/body composes them with plain SQL (getvariable(name)) and upstream data with subqueries — no bespoke template DSL. */
   bindings?: Record<string, unknown>;
   /** Host-owned protected session variables. Bound like `bindings`, but after them (host wins), not serialized into
    *  replay.json, and guarded from ad-hoc bio_query reads by name. Declared operations may intentionally consume
@@ -382,7 +383,7 @@ export interface RunCasRefs {
 }
 
 export type RunOperationResponse =
-  | { ok: true; runId: string; operationId: string; status: BioRunRecord["status"]; rowCount: number; artifacts: PersistedRun["files"]; casRefs?: RunCasRefs; runDir: string }
+  | { ok: true; runId: string; operationId: string; status: BioRunRecord["status"]; rowCount: number; result: OperationResult; artifacts: PersistedRun["files"]; casRefs?: RunCasRefs; runDir: string }
   | { ok: false; runId: string; operationId: string; status: BioRunRecord["status"]; error: string; casRefs?: RunCasRefs; runDir: string };
 
 export class RunEvidenceRecordingError extends Error {
@@ -952,7 +953,10 @@ async function runAndPersist(
         }
       }
       const casRefs = cas ? { result: resultDigest, receipts: receiptsDigest, replay: replayDigest, runObject: runObjectDigest } : undefined;
-      return { ok: true, runId, operationId: identity, status: run.status, rowCount: result.rows.length, artifacts: persisted.files, casRefs, runDir: persisted.dir };
+      // Match the SDK value to result.json/CAS exactly. DuckDB may return BigInt and other JSON-convertible values;
+      // callers should receive the same lossless JSON-safe representation regardless of serialization mode.
+      const responseResult = JSON.parse(JSON.stringify(result, bigintToJson)) as OperationResult;
+      return { ok: true, runId, operationId: identity, status: run.status, rowCount: responseResult.rows.length, result: responseResult, artifacts: persisted.files, casRefs, runDir: persisted.dir };
     } catch (error) {
       if (!(error instanceof OperationRunError)) {
         try {
@@ -1031,7 +1035,7 @@ async function runAndPersist(
 
 /**
  * Host entry: run a *declared* operation from a manifest and persist the run. A declared operation is a named,
- * tested, pinned query (the special case). For most questions use `runBioQueryFromManifest` — the agent writes
+ * tested, pinned query (the special case). For most questions use `runBioQueryFromManifest` — the caller writes
  * the SQL after schema discovery and the manifest declares only resources.
  */
 export async function runBioOperationFromManifest(req: RunOperationRequest): Promise<RunOperationResponse> {
@@ -1073,7 +1077,7 @@ export interface RunQueryRequest {
   cwd: string;
   dbPath: string;
   manifestPath: string;
-  /** The read-only SQL to run — usually the AGENT's, written after schema discovery over the resolved tables. */
+  /** The read-only SQL to run, written after schema discovery over the resolved tables. */
   sql: string;
   /** Which declared resources to materialize first. When omitted, the host infers the minimal set from SQL table
    *  references and manifest resource params.table values; pass explicitly for unusual SQL shapes. */
@@ -1082,6 +1086,7 @@ export interface RunQueryRequest {
   now?: string;
   /** Shared-store opt-in (see RunOperationRequest.store): record the run as a `run:<id>` fact in the ONE store. */
   store?: SqlConn;
+  /** Opaque actor identity for attribution. Core does not distinguish a human, model, service, or automation. */
   author?: string;
   /** Lean storage: when false, skip writing result/receipts/replay JSON files — their bytes go to CAS (needs a cas) and the run:<id> fact + casRefs reference them by digest; run.json is always written. Default true. */
   serialize?: boolean;
@@ -1102,7 +1107,7 @@ export interface RunQueryRequest {
   casMetadata?: { conn: SqlConn; nowMs?: number };
   /** Host-owned connection bootstrap SQL (INSTALL/LOAD/SET), run once before resolution. NOT agent SQL. */
   duckdbInitSql?: string[];
-  /** Agent params as DuckDB session variables: each becomes `SET VARIABLE name = value`, so a resource url/body composes them with plain SQL (getvariable(name)) and upstream data with subqueries — no bespoke template DSL. */
+  /** Caller params as DuckDB session variables: each becomes `SET VARIABLE name = value`, so a resource url/body composes them with plain SQL (getvariable(name)) and upstream data with subqueries — no bespoke template DSL. */
   bindings?: Record<string, unknown>;
   /** Host-owned protected session variables. Bound after ordinary bindings, not serialized into replay.json, and
    *  blocked from ad-hoc bio_query reads by name. Use this for host-authored credentialed resources/operations, not
@@ -1127,7 +1132,7 @@ export interface RunQueryRequest {
 
 /**
  * Host entry: resolve a manifest's declared resources and run an AD-HOC read-only query over them — the
- * general path. The manifest needs to declare only resources (no operation per question); the agent does
+ * general path. The manifest needs to declare only resources (no operation per question); the caller does
  * schema discovery (e.g. a `SELECT … FROM information_schema.columns` or a `LIMIT` probe through this same
  * entry) and writes the SQL. Persists run/result/receipts exactly like an operation, with the SQL digest
  * pinned in provenance.

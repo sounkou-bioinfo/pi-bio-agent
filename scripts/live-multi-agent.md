@@ -3,7 +3,8 @@
 `scripts/live-multi-agent.ts` is a **dogfood** (not a unit test — non-deterministic, spawns real LLM agents). It
 runs a `StudyScaffold` where **each step's worker is a separate `pi` process**, and the workers communicate
 **only through access-list artifacts the host threads between them** — never by opening a shared DuckDB file, so
-the process-exclusive RW lock is never touched. This is the boundary-correct Fugu run.
+the process-exclusive RW lock is never touched. This is an access-list-shaped Pi harness smoke, not a Fugu
+implementation.
 
 Run it with: `npx tsx scripts/live-multi-agent.ts` (requires the `pi` CLI + a configured provider).
 
@@ -29,5 +30,5 @@ execution order: define-vcf -> followups
 **What it proves:** two *distinct* OS processes ran (`pid=1560667`, `pid=1560731`); the second agent
 (`followups`) consumed the first's produced note via its access list (its questions are grounded in the upstream
 VCF definition); execution was topological; and no shared mutable database was opened by either worker — the
-only shared channel was the content of the access-list artifacts. That is a real Fugu-shaped multi-agent run on
-the boundary-correct architecture (per `docs/refinments.md` and the DuckDB process-boundary analysis).
+only shared channel was the content of the access-list artifacts. It does not exercise learned worker selection,
+long-lived function-call routing, durable resume, or shared inter-workflow tool memory.

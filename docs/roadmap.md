@@ -30,8 +30,8 @@ deployment policy.
 
 ## Falsifiable Success
 
-The project succeeds only if the substrate lets an agent produce better-supported scientific answers with less
-inference/tool budget than a baseline that lacks the manifest/SQL/graph/provenance apparatus.
+The project succeeds only if the substrate lets an actor produce better-supported scientific answers with less
+inference/tool budget or manual effort than a baseline that lacks the manifest/SQL/graph/provenance apparatus.
 
 Every serious run is gated first:
 
@@ -96,6 +96,25 @@ npm run dogfood:substrate-skill
 
 Run `npm run dogfood:pi-session-trace` when Pi/model credentials are configured and a session-level integration
 check is needed.
+
+### Cross-actor conformance
+
+Core behavior must remain legible and executable through the same path for a human CLI/SDK user, a Pi extension
+agent, a skill-only Pi agent, a skill-only non-Pi agent, and deterministic automation. Harness tests should avoid
+task-specific prompting: provide only the installed skill or tool descriptions, the user task, and the host's actual
+capabilities. Record the manifest, schema probes, SQL/operation, result, run id, receipts, and ledger links.
+
+A failure is classified before adding an abstraction:
+
+- a caller cannot discover or understand an existing capability: improve catalog, describe output, errors, or docs;
+- a host cannot inject or govern an effect: refine the relevant port or adapter;
+- multiple consumers repeat awkward composition: promote the smallest SDK helper they actually share;
+- one application needs orchestration, UI, policy, or a report shape: keep it in that application;
+- evidence or replay cannot represent what happened: that is a core gap.
+
+Distributed, machine-studying, Fugu-shaped, and RLM-shaped claims require real harness runs in the workbench. Unit
+tests here may prove data-plane mechanics, but cannot stand in for worker sessions, recursive model calls, restart
+recovery, cancellation, or expertise-versus-budget evaluation.
 
 ## Flagship Role
 

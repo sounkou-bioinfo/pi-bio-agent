@@ -142,12 +142,12 @@ export const STUDY_DEFAULT_LINK_PREDICATE: StudyNoteLinkPredicate = "references"
 const WIKILINK_RE = /\[\[([a-z0-9][a-z0-9-]*)\]\]/g;
 
 /** Knowledge-graph node id for a study note. Rejects non-slug input rather than minting a malformed node id.
- *  Uses the SAME `agent:memory:` namespace the temporal store records edges under (memory-store `MEMORY_NS`), so a
+ *  Uses the SAME `memory:` namespace the temporal store records edges under (memory-store `MEMORY_NS`), so a
  *  node in a `bio_walk_memory` snapshot and the same node in `bio_edges_as_of` are one id — the two views of the
  *  memory graph don't diverge. This string MUST stay in sync with memory-store's `MEMORY_NS`. */
 export function memoryNodeId(slug: string): string {
   if (typeof slug !== "string" || !STUDY_SLUG_RE.test(slug) || slug.length > 64) throw new Error(`invalid memory slug: ${slug}`);
-  return `agent:memory:${slug}`;
+  return `memory:${slug}`;
 }
 
 /**
@@ -175,7 +175,7 @@ export function parseStudyNoteLinks(input: unknown): Required<StudyNoteLink>[] {
   return [...out.values()];
 }
 
-/** Project a note's links into knowledge-graph edges (`agent:memory:<slug>` -> `agent:memory:<to>`). Pure: no I/O, no existence check, so dangling links project too. */
+/** Project a note's links into knowledge-graph edges (`memory:<slug>` -> `memory:<to>`). Pure: no I/O, no existence check, so dangling links project too. */
 export function studyNoteLinkEdges(note: Pick<StudyNote, "slug" | "body" | "links">): BioGraphEdge[] {
   const from = memoryNodeId(note.slug);
   return parseStudyNoteLinks(note).map((link) => ({ from, to: memoryNodeId(link.to), predicate: link.predicate }));
@@ -195,7 +195,7 @@ export function studyNoteNode(note: Pick<StudyNote, "slug" | "kind" | "title" | 
 
 /**
  * Fold a set of notes into a knowledge-graph snapshot: one `memory` node per note plus their link edges.
- * Pure: no I/O. Edges may reference `agent:memory:<to>` ids absent from `nodes` (dangling links by design); a
+ * Pure: no I/O. Edges may reference `memory:<to>` ids absent from `nodes` (dangling links by design); a
  * later effectful KG-ingest adapter decides whether to materialize stub nodes for those targets.
  */
 export function studyNoteGraph(notes: StudyNote[]): BioGraphSnapshot {

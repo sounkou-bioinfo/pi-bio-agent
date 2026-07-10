@@ -6,14 +6,15 @@ description: "Use pi-bio-agent as a host-neutral substrate for agentic bioinform
 # Pi Bio Agent
 
 Pi Bio Agent turns biomedical questions into declared resources, DuckDB SQL, optional process compute, receipts, CAS
-artifacts, and observation-ledger facts. The model may route, inspect schemas, write manifests, compose SQL, and
-explain results. The model is not the source of biomedical facts.
+artifacts, and observation-ledger facts. The caller may be a human, a model-driven harness, or deterministic
+automation; all use the same execution and evidence path. A model may route, inspect schemas, write manifests,
+compose SQL, and explain results. The model is not the source of biomedical facts.
 
 ## What This Is
 
-Pi Bio Agent is a substrate for agent-authored scientific computation:
+Pi Bio Agent is a substrate for caller-authored scientific computation:
 
-- **Manifests + SQL are the program**: the agent can write code/SQL, but facts come from declared resources and
+- **Manifests + SQL are the program**: the caller can write code/SQL, but facts come from declared resources and
   deterministic execution.
 - **DuckDB is the work surface**: files, remote tables, ontology edges, reductions, and many bio formats should become
   queryable relations.
@@ -45,23 +46,29 @@ declared inputs, receipts, and replayable evidence.
 
 ## Minimal Working Loop
 
-1. Verify the CLI:
+1. Verify that the CLI has the commands this skill uses:
 
    ```sh
-   pi-bio-agent --help
+   pi-bio-agent --help | grep -E 'catalog|describe|query|reproduce'
    ```
 
-   If unavailable, use the package directly:
+   If the executable is unavailable or its help lacks those commands, use the current package directly:
 
    ```sh
    npx --yes github:sounkou-bioinfo/pi-bio-agent --help
    ```
+
+   A globally installed `0.1.0` may predate the checkout because pre-1.0 builds currently share that version.
 
 2. Discover existing manifest-backed sources/templates before inventing a task-specific manifest:
 
    ```sh
    pi-bio-agent catalog --query clinvar
    ```
+
+   The catalog may return an absolute manifest path inside an npm or host package cache. Pass that path to later
+   commands, but keep the shell in the user's project directory so `.pi/bio-agent/runs` and an automatic ledger are
+   written with the user's work rather than into the package cache.
 
    Pick one returned `manifestPath`, validate it, and inspect this CLI host's admission before resolving data:
 
@@ -83,11 +90,14 @@ declared inputs, receipts, and replayable evidence.
 
    ```sh
    pi-bio-agent describe manifest.json
-   pi-bio-agent query manifest.json --db :memory: --sql "DESCRIBE table_name"
-   pi-bio-agent query manifest.json --db :memory: --sql "SUMMARIZE table_name"
-   pi-bio-agent query manifest.json --db :memory: --sql "SELECT * FROM table_name LIMIT 5"
-   pi-bio-agent query manifest.json --db :memory: --sql "<WITH/SELECT over declared tables>"
+   pi-bio-agent query manifest.json --db analysis.duckdb --sql "DESCRIBE table_name"
+   pi-bio-agent query manifest.json --db analysis.duckdb --sql "SUMMARIZE table_name"
+   pi-bio-agent query manifest.json --db analysis.duckdb --sql "SELECT * FROM table_name LIMIT 5"
+   pi-bio-agent query manifest.json --db analysis.duckdb --sql "<WITH/SELECT over declared tables>"
    ```
+
+   Each CLI invocation is a new process. A file-backed work database lets an iterative inspection loop reuse
+   materialized remote or compute-backed resources; `:memory:` is appropriate for a one-shot local query.
 
 5. When provenance matters, add `--ledger auto` and inspect the run/graph afterward.
 

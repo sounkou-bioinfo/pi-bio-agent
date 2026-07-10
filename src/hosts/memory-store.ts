@@ -17,13 +17,13 @@ import {
 // latest and picks a strictly-later timestamp); bounded so pathological contention fails loudly, not forever.
 const MEMORY_MAX_ATTEMPTS = 16;
 
-// Memory unified INTO the temporal store: a memory note is observation(s) under the `agent:memory:` namespace, so
-// it gets modification history + as-of + cross-agent sharing for free — the same store as facts/compute, the
+// Memory unified INTO the temporal store: a memory note is observation(s) under the `memory:` namespace, so
+// it gets modification history + as-of + cross-actor sharing for free — the same store as facts/compute, the
 // unified-data-model bet. Content is a scalar observation; each [[to]]/typed link is an EDGE-like observation
-// (object_id set) that materializeBioEdgesAsOf projects into a walkable graph AS OF t. This is also Fugu's
-// "persistent shared memory" (report §3.2.2): a later agent/workflow reads what was already remembered instead of
-// repeating it. Files were last-write-wins with no history; the DB is append-only and never destroys a revision.
-export const MEMORY_NS = "agent:memory:";
+// (object_id set) that materializeBioEdgesAsOf projects into a walkable graph AS OF t. A later human, model session,
+// or automation can read what was already recorded. Files were last-write-wins with no history; the DB is
+// append-only and never destroys a revision.
+export const MEMORY_NS = "memory:";
 const CONTENT = "has_content";
 /** A sentinel far-future instant = "now / latest" for as-of reads (lexicographically sorts after any real ISO). */
 export const MEMORY_NOW = "9999-12-31T23:59:59.999Z";
@@ -116,7 +116,7 @@ export async function remember(conn: SqlConn, note: MemoryContent, wallNow: stri
   await withSlotLock(subject, async () => {
     for (let attempt = 0; attempt < MEMORY_MAX_ATTEMPTS; attempt++) {
       const now = await monotonicNow(conn, subject, wallNow); // strictly after the slug's current revision
-      // `source` = the authoring agent. It is part of observation IDENTITY, so two agents remembering the same slug
+      // `source` is the authoring actor. It is part of observation IDENTITY, so two actors remembering the same slug
       // are two attributed rows (both retained); the latest by recorded_at is "current" — you always know WHO said it.
       const { inserted } = await insertObservationIfSlotMax(conn, {
         statementKey: subject,

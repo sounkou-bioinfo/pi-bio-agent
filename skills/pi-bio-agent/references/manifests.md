@@ -14,6 +14,7 @@ Required top-level shape:
   "id": "task-id",
   "version": "0.1.0",
   "title": "Task title",
+  "description": "What data this manifest declares and what it is for.",
   "provides": {
     "resolvers": [],
     "resources": [],
@@ -39,6 +40,7 @@ Use `duckdb.file_scan` for DuckDB-readable local files.
   "id": "variant-demo",
   "version": "0.1.0",
   "title": "Variant demo",
+  "description": "Expose a local variant table for agent-authored SQL.",
   "provides": {
     "resolvers": [
       {

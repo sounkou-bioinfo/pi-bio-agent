@@ -2,8 +2,8 @@
   "schema": "pi-bio.manifest.v1",
   "id": "long-context-aggregate",
   "version": "0.1.0",
-  "title": "Long-context aggregate (RLM, as SQL)",
-  "description": "Closes over the DETERMINISTIC HALF of RLM (Recursive Language Models, arXiv 2512.24601): once rows are labeled, the distributional query ('among instances for these user IDs, how many are label X') is one GROUP BY — the rows live as a DuckDB table, the agent never sees the whole context (no context rot), and the count is exact where RLM recurses and miscounts at long context. HONEST CAVEAT: the `label` is pre-given in the CSV here; the genuinely hard part RLM recurses on is INFERRING each label from free text — the semantic judgment boundary, shown as a map step in test/map-reduce-labeling.test.ts (worker labels partitions -> host single-writer merge -> aggregate). This manifest shows only the deterministic aggregate.",
+  "title": "Long-context deterministic aggregate",
+  "description": "The relational reduce from an RLM-shaped labeling task: once rows are labeled, the distributional query is one exact GROUP BY and the source rows remain outside model context. Labels are pre-given here. The semantic map, persistent root loop, and recursive model calls that define RLM are not implemented by this manifest.",
   "provides": {
     "resolvers": [
       { "id": "duckdb.file_scan", "version": "0.1.0", "title": "DuckDB file scan", "description": "Read a file into a table.", "output": { "mode": "table" } }

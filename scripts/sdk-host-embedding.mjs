@@ -59,7 +59,7 @@ if (!result.ok) {
   throw new Error(`sdk-host-embedding run failed: ${result.error}`);
 }
 
-const rows = JSON.parse(await fs.readFile(join(result.runDir, "result.json"), "utf8")).rows;
+const rows = result.result.rows;
 const replay = JSON.parse(await fs.readFile(join(result.runDir, "replay.json"), "utf8"));
 const runNode = `run:${result.runId}`;
 const casRefCount = await scalar(store, "SELECT count(*) AS n FROM cas_ref WHERE ref_id = ? AND ref_type = 'run'", [runNode]);

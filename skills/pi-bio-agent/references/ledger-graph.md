@@ -17,6 +17,21 @@ pi-bio-agent query manifest.json \
 The output includes `runId`. The project store is `.pi/bio-agent/store.duckdb` unless the host configured another
 path.
 
+## Import A Persisted Agent Session
+
+Pi's extension syncs Pi sessions automatically. From Codex, Pi skill-only mode, or another host, import a persisted
+Pi session or Codex rollout with the CLI:
+
+```sh
+pi-bio-agent session import <session.jsonl> --format pi
+pi-bio-agent session import <rollout.jsonl> --format codex
+```
+
+Omit `--format` when the first record is the normal Pi `session` or Codex `session_meta` header. Use `--db` and
+`--cas-root` to target non-default stores. The raw private transcript is retained in CAS; queryable ledger rows store
+content and payload digests rather than message text. A complete import has a terminal `session:<id>` / `session`
+fact. Runtime events absent from JSONL cannot be reconstructed by this command.
+
 ## Inspect With DuckDB
 
 When DuckDB CLI is available and the store is not locked:

@@ -109,6 +109,71 @@ export async function recordObservation(conn: SqlConn, obs: BioObservationInput)
   return id;
 }
 
+/** Append many independent observations with the same semantics as `recordObservation`, using two DuckDB calls
+ * per batch (timestamp validation + insert) instead of two calls per row. This is the ingestion path for session
+ * traces and other already-normalized statement streams; callers that need per-slot compare-and-set semantics must
+ * continue to use `recordMonotonicObservation` / `insertObservationIfSlotMax`. */
+export async function recordObservationBatch(conn: SqlConn, observations: readonly BioObservationInput[]): Promise<string[]> {
+  if (observations.length === 0) return [];
+  const rows = observations.map((obs, index) => {
+    if (!obs.statementKey || !obs.subjectId || !obs.predicate || !obs.recordedAt) {
+      throw new Error(`recordObservationBatch: row ${index} requires statementKey, subjectId, predicate, and recordedAt`);
+    }
+    return {
+      observation_id: obs.observationId ?? observationId(obs),
+      statement_key: obs.statementKey,
+      subject_id: obs.subjectId,
+      predicate: obs.predicate,
+      object_id: obs.objectId ?? null,
+      value_json: obs.value === undefined ? null : JSON.stringify(obs.value),
+      recorded_at: obs.recordedAt,
+      valid_from: obs.validFrom ?? null,
+      valid_to: obs.validTo ?? null,
+      source: obs.source ?? null,
+      digest: obs.digest ?? null,
+      attrs_json: obs.attrs ? JSON.stringify(obs.attrs) : null,
+      trust_json: obs.trust ? JSON.stringify(obs.trust) : null,
+    };
+  });
+  const encoded = JSON.stringify(rows);
+  const invalid = await conn.all<{ row_index: string; recorded_at: string | null; valid_from: string | null; valid_to: string | null }>(
+    `SELECT key AS row_index,
+            json_extract_string(value, '$.recorded_at') AS recorded_at,
+            json_extract_string(value, '$.valid_from') AS valid_from,
+            json_extract_string(value, '$.valid_to') AS valid_to
+     FROM json_each(?::JSON)
+     WHERE try_cast(json_extract_string(value, '$.recorded_at') AS TIMESTAMPTZ) IS NULL
+        OR (json_extract_string(value, '$.valid_from') IS NOT NULL AND try_cast(json_extract_string(value, '$.valid_from') AS TIMESTAMPTZ) IS NULL)
+        OR (json_extract_string(value, '$.valid_to') IS NOT NULL AND try_cast(json_extract_string(value, '$.valid_to') AS TIMESTAMPTZ) IS NULL)
+     LIMIT 1`,
+    [encoded],
+  );
+  if (invalid[0]) {
+    const bad = invalid[0];
+    throw new Error(`recordObservationBatch: row ${bad.row_index} has a non-DuckDB-castable TIMESTAMPTZ (recordedAt='${bad.recorded_at ?? ""}', validFrom='${bad.valid_from ?? ""}', validTo='${bad.valid_to ?? ""}')`);
+  }
+  await conn.run(
+    `INSERT INTO ${TABLE} (observation_id, statement_key, subject_id, predicate, object_id, value_json, recorded_at, valid_from, valid_to, source, digest, attrs, trust)
+     SELECT json_extract_string(value, '$.observation_id'),
+            json_extract_string(value, '$.statement_key'),
+            json_extract_string(value, '$.subject_id'),
+            json_extract_string(value, '$.predicate'),
+            json_extract_string(value, '$.object_id'),
+            json_extract_string(value, '$.value_json')::JSON,
+            json_extract_string(value, '$.recorded_at'),
+            json_extract_string(value, '$.valid_from'),
+            json_extract_string(value, '$.valid_to'),
+            json_extract_string(value, '$.source'),
+            json_extract_string(value, '$.digest'),
+            json_extract_string(value, '$.attrs_json')::JSON,
+            json_extract_string(value, '$.trust_json')::JSON
+     FROM json_each(?::JSON)
+     ON CONFLICT (observation_id) DO NOTHING`,
+    [encoded],
+  );
+  return rows.map((row) => row.observation_id);
+}
+
 /** Record a graph edge in the temporal observation ledger. This is only a typed convenience over
  * `recordObservation(... objectId ...)`, but it is the shared primitive for stitching sessions, turns, tool calls,
  * scientific runs, jobs, workflow steps, artifacts, and caller-owned workflow nodes into one trace graph. */

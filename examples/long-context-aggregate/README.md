@@ -1,4 +1,4 @@
-# Example: a long-context aggregate is a `GROUP BY` (closing over RLM)
+# Example: deterministic reduction over long-context rows
 
 [Recursive Language Models](https://alexzhang13.github.io/blog/2025/rlm/) (RLM; Zhang & Khattab,
 [arXiv 2512.24601](https://arxiv.org/abs/2512.24601)) handle unbounded context by storing it as a *variable in a
@@ -19,13 +19,14 @@ GROUP BY label
 ORDER BY label
 ```
 
-The RLM REPL patterns map directly onto SQL, with `bio_query` as the loop:
+DuckDB supplies the external relational environment for inspection and exact reduction. It does not supply RLM's
+programmatic recursive model calls:
 
 | RLM (Python REPL over a string var) | here (`bio_query` over a DuckDB table) |
 |---|---|
 | peek (`ctx[:2000]`) | `SELECT * FROM entries LIMIT 5` |
 | grep (regex narrowing) | `WHERE regexp_matches(instance, 'Calypso')` |
-| partition + map (recursive LM calls) | `GROUP BY` + per-partition sub-operations |
+| partition + semantic map (recursive LM calls) | host-owned model/agent workers; not implemented by this manifest |
 | summarize | SQL aggregates |
 
 ## Honest scope: this manifest is the *reduce*, not the whole loop
@@ -40,7 +41,7 @@ manifest alone would be overclaiming: it elides the hard, semantic **map**.
 
 The map is shown runnably, not asserted:
 
-- **`scripts/rlm-map-reduce.mjs`** (`npm run build && node scripts/rlm-map-reduce.mjs`) — the full shape across
+- **`scripts/rlm-map-reduce.mjs`** (`npm run build && node scripts/rlm-map-reduce.mjs`) — a map/reduce process skeleton
   **processes**: a supervisor splits an *unlabeled* context into partitions and fans them out to worker
   **processes**, each labeling its slice in its **own `:memory:` DuckDB SQL REPL** (the semantic map — a `CASE`
   rule stands in for the LM so it is deterministic and testable); the workers write nothing shared; the **host is
@@ -49,9 +50,9 @@ The map is shown runnably, not asserted:
 - **`test/map-reduce-labeling.test.ts`** — the same partition → parallel-label → host-merge → aggregate shape,
   in-process, asserting the exact counts.
 
-So: the *semantic* labeling is the judgment boundary (an LM live; a rule in these dogfoods); everything
-**distributional** is deterministic SQL. RLM's win is handling unbounded context; the substrate's win is that the
-reduce, once labels exist, is exact — the counting RLM gets wrong at long context.
+So: the *semantic* labeling is the judgment boundary (an LM in a real RLM-style host; a rule in these dogfoods);
+everything **distributional** is deterministic SQL. This example proves the exact reduce after labels exist. It
+does not implement or measure RLM's persistent root loop, recursive model calls, or unbounded semantic map.
 
 `test/long-context-aggregate-example.test.ts` runs *this manifest* (the reduce) end-to-end through the host and
 checks the exact counts (`entity 3, human 1, location 2, number 3` for users 1–3).

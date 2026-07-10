@@ -38,7 +38,8 @@ and `qc` blocked on it), and `classify` published **last** because it blocked on
 with nothing computing a topological order. `qc` (a shorter beat) published before `annotate` even though both
 depend only on `extract`, showing the two truly ran concurrently and the board, not a scheduler, sequenced them.
 This is stigmergic coordination: the order is a *consequence* of the access lists (publish/subscribe over shared
-memory), which is exactly the Fugu "workflow-as-data + shared memory" shape on a decentralized topology. The
+memory). This is a deterministic coordination mechanism that a multi-agent host may use; it is not Fugu's learned
+orchestrator or function-call memory. The
 deterministic mechanics also back the chain/survey dogfoods — same executor, different scaffold.
 
 > Shared-**write** variant: this demo's board is in-process (`memoryBlackboard`). The same `Blackboard` interface

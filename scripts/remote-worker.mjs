@@ -10,12 +10,16 @@ const [port, label] = process.argv.slice(2);
 
 function piAgent(prompt) {
   return new Promise((resolve, reject) => {
-    const c = spawn("pi", ["--provider", "openai-codex", "--model", "gpt-5.5", "--thinking", "low",
-      "-e", "extensions/pi-coding-agent/index.ts", "-t", "read,grep,find,ls", "-p", prompt], { cwd: process.cwd() });
+    const model = process.env.PI_BIO_AGENT_MODEL ?? "openai-codex/gpt-5.3-codex";
+    const timeout = Number(process.env.PI_BIO_AGENT_TIMEOUT_MS ?? 120_000);
+    const c = spawn("pi", ["--model", model, "--thinking", "medium", "--no-extensions", "--no-skills",
+      "--no-context-files", "--no-session", "--no-tools", "-p", prompt], { cwd: process.cwd(), timeout });
     let o = "", e = "";
     c.stdout.on("data", (d) => (o += d));
     c.stderr.on("data", (d) => (e += d));
-    c.on("close", (code) => (code === 0 ? resolve(o.trim()) : reject(new Error(`pi ${code}: ${e.slice(0, 200)}`))));
+    c.on("close", (code, signal) => (code === 0
+      ? resolve(o.trim())
+      : reject(new Error(`pi ${code ?? signal}: ${e.slice(0, 200)}`))));
   });
 }
 

@@ -28,7 +28,7 @@ operations, skills, and study notes compose those primitives for particular work
      async `ComputeRunner`; `compute.run` is the current manifest resolver that materializes a compute value back
      into DuckDB tables/artifacts over Arrow/file boundaries. Local child processes, NNG workers, schedulers,
      durable queues, and stateful sessions are implementations of one `submit/status/collect/cancel` lifecycle.
-   - **Knowledge + memory**: ontologies and our own KG share one shape (`bio_edges` + `entailed_edge` closure, from SemanticSQL); grounding is deterministic-SQL-first with fail-closed model fallback. **Memory is machine studying**: the agent studies a corpus before a task is known and retains expertise as *study notes* projected into the KG: data it queries, distinct from *skills* (activated behavior) and *facts* (measured, tool-derived).
+   - **Knowledge + memory**: ontologies and our own KG share one shape (`bio_edges` + `entailed_edge` closure, from SemanticSQL); grounding is deterministic-SQL-first with fail-closed model fallback. Study notes projected into the KG are a candidate machine-studying mechanism: data the agent queries, distinct from *skills* (activated behavior) and *facts* (measured, tool-derived). They count as expertise only after a real budgeted evaluation shows a gain.
 
 3. **The discipline that keeps the bet honest.** Interfaces are the contract for in-process code; DI injects host
    **effects** (SQL conn, fetch, ComputeRunner, CAS), which **fail closed** when unbound. Identity is a **digest**;
@@ -629,9 +629,9 @@ Artifacts are resources. A report, JSON evidence pack, SQL result, plot, or adde
 ### 7. Agent sessions and turns
 
 Agent/user chat sessions are part of the audit substrate, not UI transcript storage. There is no cross-agent session
-standard mature enough to own this boundary; the concrete source format is Pi's project-local JSONL session log
-(`~/.pi/agent/sessions/...`). Public or redacted datasets such as `pi-share-hf` are derived JSONL views that can be
-ingested later, not the private source of truth. The canonical substrate shape is still `bio_observations`, not new
+standard mature enough to own this boundary, so thin adapters currently read Pi's project-local session JSONL and
+Codex rollout JSONL while retaining the source format. Public or redacted datasets such as `pi-share-hf` are derived
+views, not the private source of truth. The canonical substrate shape is still `bio_observations`, not new
 `session_*` base tables:
 
 ```text
@@ -676,20 +676,24 @@ session snapshot digest and small lifecycle fields in the payload. The training 
 receipts without exporting raw host payloads. That is runtime control evidence, not another transcript
 representation.
 
-Pi JSONL ingestion is an adapter, not the workflow model. The local extension default writes to the project-local
+Pi/Codex JSONL ingestion is an adapter, not the workflow model. `ingestSessionJsonl` streams the original file into
+CAS and normalizes from that immutable snapshot; bounded content-addressed batches make a retry idempotent, and the
+terminal `session` fact marks a complete snapshot. `pi-bio-agent session import` exposes this path to non-Pi hosts,
+while the Pi extension syncs the active Pi session automatically. The local extension default writes to the project-local
 store and CAS for single-machine use. Distributed resume, fork trees, fugu-style swarms, and service-mediated agents
 must inject the shared store and shared CAS together; otherwise the ledger would contain references to bytes that
 exist only on one machine. Shared workflows use ordinary edge-like observations to caller-owned nodes: a host may
 assert `part_of`, `runs_step`, `has_member`, or a domain predicate between `session:`, `turn:`, `run:`, `job:`,
 `step:`, and `workflow:` nodes. Parentage is a `parent_session` edge only when the host supplies a stable parent id
-or the Pi adapter can read one from the parent file's JSON header. Host-local file paths remain provenance metadata,
-never the session identity.
+or Codex persists `parent_thread_id`; Pi parent paths remain metadata unless the host supplies a stable parent id.
+Host-local source paths remain inside the private raw snapshot rather than being copied into shared ledger attrs.
 
 An assistant turn has run anatomy, but it is not a deterministic scientific operation run. It is an audit-replayable
 turn node: it records the prior context digest, model/provider/config digest, tool registry digest, produced message
 digest, child tool calls, child scientific runs, artifacts, graphics, memory writes, and review labels. The
-reproducibility verdict is live-source-like: the context can be reconstructed, but a provider/model call is not
-content-guaranteed to emit the same text. Do not force model/provider calls through `runBioQueryFromManifest` or
+reproducibility verdict is live-source-like: the persisted transcript and context digest support audit, but neither
+proves the exact provider request nor guarantees the provider/model will emit the same text. Do not force
+model/provider calls through `runBioQueryFromManifest` or
 `runBioOperationFromManifest`; those remain the deterministic SQL/operation lanes. A turn that calls a scientific
 query or compute operation links to the normal `run:<id>` fact for that child run. The generic helper
 `recordObservationLink` is the trace-stitching primitive: Pi's bio tools record `toolcall:<id> executes run:<id>` and

@@ -47,10 +47,12 @@ describe("run-store BigInt serialization: lossless, no silent >2^53 corruption",
       sql: "SELECT 9223372036854775807::BIGINT AS big, 42::BIGINT AS small", store, author: "agent:A", cas,
     });
     assert.equal(res.ok, true);
+    if (!res.ok) throw new Error("unreachable");
     const parsed = JSON.parse(await fsp.readFile(join(res.runDir, "result.json"), "utf8"));
     const row = parsed.rows[0];
     assert.equal(row.big, "9223372036854775807", "a >2^53 value is a lossless string, not a rounded Number");
     assert.equal(row.small, 42, "a small value stays a natural JSON number");
+    assert.deepEqual(res.result.rows[0], row, "the SDK result matches the persisted JSON-safe representation");
   });
 });
 

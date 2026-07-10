@@ -133,7 +133,7 @@ The minimum primitives that make many bio workflows simple are:
    and trust/provenance on every row.
 5. DuckDB substrate: stable SQL over files, extensions, parquet/lake tables, and catalogs; `ducknng` extends
    it to network (`ncurl_table`), cross-process shared-DB RPC, and NNG topologies: network/multi-agent as SQL.
-6. Memory notes: indexed expertise memory in the append-only `bio_observations` store (`agent:memory:`
+6. Memory notes: indexed expertise memory in the append-only `bio_observations` store (`memory:`
    namespace): append-only, as-of-recallable, tombstone-retractable, per-observation `author`: distinct from
    skills, not a mutable file store.
 7. The registry (`createBioRegistry`): the runtime boundary where a manifest's serializable spec

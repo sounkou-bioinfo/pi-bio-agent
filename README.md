@@ -79,7 +79,7 @@ WITH distinct_calls AS (
     ALT,
     significance
   FROM clinvar,
-    UNNEST(INFO_CLNSIG) AS u(significance)
+       UNNEST(INFO_CLNSIG) AS u(significance)
   WHERE significance IS NOT NULL
 )
 SELECT
@@ -244,6 +244,13 @@ pi-bio-agent reproduce .pi/bio-agent/runs/readme-variant-counts/replay.json
   ],
   "missing": [],
   "extra": [],
+  "outcomeMatched": true,
+  "expectedOutcome": {
+    "status": "succeeded"
+  },
+  "producedOutcome": {
+    "status": "succeeded"
+  },
   "runDir": ".pi/bio-agent/runs/reproduce-readme-variant-counts-<run>"
 }
 ```
@@ -358,11 +365,25 @@ silently converted into success. `pi-bio-agent reproduce` and
 `bio_reproduce_run` re-execute `replay.json` against a fresh database
 and report source, output, or environment drift.
 
-Pi session JSONL is ingested as `session:`, `turn:`, `msg:`,
-`toolcall:`, and `cas:` observations. Bio tools record controlled run
-links at tool execution time, from Pi’s real tool-call id and only after
-the target run fact exists. The ingester does not scan transcript text
-for run-looking strings.
+Persisted Pi session JSONL and Codex rollout JSONL are ingested as
+`session:`, `turn:`, `msg:`, `toolcall:`, and `cas:` observations
+through the same ledger contract. Pi’s extension syncs its active
+session; any host can use the CLI importer:
+
+``` sh
+pi-bio-agent session import <session.jsonl> --format pi
+pi-bio-agent session import <rollout.jsonl> --format codex
+```
+
+The original JSONL is streamed into CAS and normalization reads that
+immutable snapshot, so a live file growing during import cannot disagree
+with its digest. Large traces commit bounded, idempotent batches; the
+terminal `session` fact is the completion marker and a retry does not
+duplicate prior statements. Persisted transcripts recover messages, tool
+trajectories, compaction, and parentage. Runtime-only delivery/interrupt
+signals still need a host hook. Bio tools record controlled run links at
+execution time; the ingester never scans transcript text for run-looking
+strings.
 
 Window an edge-shaped graph table without loading the whole
 neighborhood:
@@ -712,8 +733,10 @@ Prior art and lineage:
   <https://jacobxli.com/blog/2026/machine-studying/>
 - **Sakana Fugu** (learned orchestration over shared memory and access
   lists): <https://sakana.ai/fugu/>
-- **Recursive Language Models / RLM** (REPL-over-context; `bio_query` is
-  the SQL REPL): <https://arxiv.org/abs/2512.24601>
+- **Recursive Language Models / RLM** (symbolic code and recursive model
+  calls over external context; `bio_query` supplies the relational
+  data-plane part, not the recursive model loop):
+  <https://arxiv.org/abs/2512.24601>
 - **ducknng**, an Arrow-native DuckDB extension for NNG/HTTP/RPC
   transport, in the lineage of R’s `nanonext` + `mirai`:
   <https://github.com/sounkou-bioinfo/ducknng> ·

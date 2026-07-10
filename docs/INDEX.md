@@ -22,7 +22,7 @@
 - [Ontologies and knowledge graphs](ontology-and-knowledge-graphs.md) — Read before modeling ontologies, KG nodes/edges, or the graph-as-substrate bet. _(ontology, knowledge-graph, graph-bet, provenance)_
 - [Resources and resolvers](resources-and-tool-specs.md) — Read before defining resources, resolvers, or operation contracts. _(resources, cas, resolvers, operation-spec)_
 - [Roadmap, success, and testing contract](roadmap.md) — Read before planning roadmap, success metrics, tests, or flagship work; current core closure and consumer-pulled lanes. _(roadmap, testing, success, flagship)_
-- [What the substrate closes over](closes-over.md) — How the manifest/SQL/DuckDB substrate subsumes agent topologies, learned orchestration (Fugu), and REPL-over-context (RLM) — with references. _(topologies, fugu, rlm, machine-studying, positioning)_
+- [What the substrate closes over](closes-over.md) — How the manifest/SQL/DuckDB substrate supplies a common data plane for agent topologies, machine studying, Fugu, and RLM, and where those systems still require a host control plane. _(topologies, fugu, rlm, machine-studying, positioning)_
 
 ## Worklog
 

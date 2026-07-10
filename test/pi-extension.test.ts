@@ -608,7 +608,7 @@ describe("Pi coding-agent extension", () => {
     await assert.rejects(() => byName.get("bio_list_memory")!.execute("id", { limit: 1.5 }, undefined, undefined, ctx), /non-negative integer/);
     await assert.rejects(() => byName.get("bio_graph_window")!.execute("id", {
       table: "entailed_edge_as_of",
-      startId: "agent:memory:opentargets-identifiers",
+      startId: "memory:opentargets-identifiers",
     }, undefined, undefined, ctx), /transitivePredicates is required/);
 
     const wrote = await byName.get("bio_remember")!.execute("id", {
@@ -627,20 +627,20 @@ describe("Pi coding-agent extension", () => {
     }, undefined, undefined, ctx);
     assert.equal(wrote.details.note.slug, "opentargets-identifiers");
     // written to the ONE store (attributed) AND materialized as a legible file view
-    assert.equal(wrote.details.stored, "agent:memory:opentargets-identifiers");
+    assert.equal(wrote.details.stored, "memory:opentargets-identifiers");
     assert.match(await readFile(wrote.details.materialized, "utf8"), /opentargets-identifiers/);
     const listed = await byName.get("bio_list_memory")!.execute("id", { query: "graphql" }, undefined, undefined, ctx);
     assert.equal(listed.details.notes[0].slug, wrote.details.note.slug);
     const read = await byName.get("bio_recall")!.execute("id", { id: "opentargets-identifiers" }, undefined, undefined, ctx);
     assert.equal(read.details.title, "OpenTargets identifiers");
     const graphWindow = await byName.get("bio_graph_window")!.execute("id", {
-      startId: "agent:memory:opentargets-identifiers",
+      startId: "memory:opentargets-identifiers",
       direction: "out",
       predicates: ["references"],
       limit: 10,
     }, undefined, undefined, ctx);
     assert.equal(graphWindow.details.rows.length, 1);
-    assert.equal(graphWindow.details.rows[0].to_id, "agent:memory:opentargets-target-node");
+    assert.equal(graphWindow.details.rows[0].to_id, "memory:opentargets-target-node");
 
     // forget = temporal retraction: gone from recall(now), but the store keeps the history
     const forgotten = await byName.get("bio_forget")!.execute("id", { slug: "opentargets-identifiers" }, undefined, undefined, ctx);

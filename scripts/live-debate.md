@@ -1,6 +1,6 @@
 # Live survey/debate topology — evidence
 
-`scripts/live-debate.ts` is a **dogfood** running the **survey/respondent** (nng) pattern as a Fugu best-of-N
+`scripts/live-debate.ts` is a live Pi harness smoke running an access-list best-of-N shape:
 debate: two respondent agents answer the *same* question **independently** (isolated from each other via the
 access-list), and an aggregator agent **surveys both and synthesizes**. Same proven executor + direct-spawn
 worker as `live-multi-agent.ts` — only the scaffold *topology* changes (fan-in, not a chain).
@@ -31,5 +31,6 @@ order: respondent-a -> respondent-b -> aggregator
 input was the only shared channel — neither respondent saw the other); the aggregator genuinely **reconciled**
 them — `a` contributed allele-frequency/call-rate, `b` contributed missingness/HWE, and the synthesis is the
 de-duplicated union, not a copy of either. This is the survey/respondent topology (best-of-N + aggregation),
-live, on the same executor as the chain run — confirming the **topology is a scaffold choice, not an executor
-change**. The deterministic mechanics are proven in `test/study-exec.test.ts` (the SURVEY/DEBATE test).
+live, on the same executor as the chain run. It does not prove learned orchestration, persistent per-worker tool-call
+sessions, durable resume, or Fugu's inter-workflow memory. The deterministic access-list mechanics are covered by
+`test/study-exec.test.ts`.

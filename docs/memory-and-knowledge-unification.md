@@ -24,10 +24,10 @@ Memory is **the same temporal store as facts**, append-only, as-of, attributed, 
 unified-data-model bet instead of sitting beside it as flat last-write-wins files.
 
 **Temporal, non-destructive, attributed.** A memory note is observation(s) in `bio_observations` under the
-`agent:memory:<slug>` namespace (`src/hosts/memory-store.ts`):
+`memory:<slug>` namespace (`src/hosts/memory-store.ts`):
 - `remember(conn, note, now, author)` appends a content observation (a re-write **supersedes** by
   subject+predicate; prior revisions are retained). `author` is stamped as `source`, which is **part of
-  observation identity**, so two agents writing one slug are two attributed rows, never a clobber.
+  observation identity**, so two actors writing one slug are two attributed rows, never a clobber.
 - `recall(conn, slug, asOf?)` reads the content **as of** a time (default now), carrying its `author`.
 - `memoryHistory(conn, slug)` is the change trail: *what changed, when, by whom*.
 - `forget(conn, slug, now, author)` is a **temporal retraction**: a tombstone (null content) so `recall(now)` is
@@ -49,19 +49,20 @@ projection.)
 
 **Sharing is a host-chosen boundary** (`openBioStore` is the seam: the library records; the host decides where
 the store lives). Because every memory row carries its **author** (`source`) and an **as-of** time, a *shared*
-store stays attributed and time-consistent. (One caveat: monotonic "latest wins" per slot is serialized
-same-process and across separate processes on a local file store. DuckDB's cross-process exclusive-writer lock, but not yet across concurrent clients of a shared server-backed store, where two clients can still collide on the
-read-then-write; that needs a server-side atomic advance+insert / serializable txn, see `monotonicRecordedAt`.)
+store stays attributed and time-consistent. Same-slot writes are linearized in-process and on a ducknng server using
+its default serialized execution lane plus `insertObservationIfSlotMax`; a concurrent connection-pool mode is not a
+supported same-slot deployment because separate snapshots could defeat that precondition.
 
 | Scope | Mechanism | Semantics |
 |---|---|---|
 | Runs of one project | project-local `store.duckdb` (default) | runs open→write→**close** in sequence; memory/facts accumulate. Proven: a later run reads the earlier run's *authored* memory. |
 | Across projects / users | `openBioStore(cwd, { path })` → a shared path | same file, wider audience |
-| Concurrent / cross-host / cross-agent | a **DuckDB server**: ducknng `run_rpc` (exec opt-in; a host may also bring its own server conn) | one writer, many concurrent clients: lifts the process-exclusive-writer lock (not serialize-forever) |
+| Concurrent / cross-host / cross-actor | a host-supplied database service or serialized ducknng RPC server | one writer authority, many clients; the repo does not yet ship a production parameterized remote `SqlConn` adapter |
 | Immutable snapshots / archival | **CAS** by digest | shareable, content-addressed |
 
-Access stays host-gated (ducknng mTLS / peer-allowlists / exec opt-in). This is **Fugu's inter-workflow shared
-memory** (report §3.2.2) made literal: the same transport story the substrate already had, not a new invention.
+Access stays host-gated (ducknng mTLS / peer-allowlists / exec opt-in). The temporal store has the attribution and
+as-of semantics needed by inter-workflow shared memory, but a Fugu-like host must still decide what prior tool state
+each worker may see.
 
 **Tool wire-up + rename.** The agent tools now use the store, not files: `bio_remember` =
 `remember(author)` + a legible file view; `bio_recall`/`bio_list_memory` = `recall`/`listMemory` with an `asOf`
@@ -72,6 +73,15 @@ run receipts/replay bytes and result rows live in CAS (referenced by digest) and
 with no `cas` those bytes stay in the run's JSON files instead. Recall is memoized by input digest (the ActionCache)
 only for a **hermetic** run, one that is CAS-backed, store-logged, and content-pinned: no live/un-snapshotted source
 and no ambient reads (a `:memory:` db, no inline file/remote reads), so a memo hit can never serve a stale result.
+
+**Persisted host sessions use one import contract.** `ingestSessionJsonl` accepts Pi session JSONL and Codex rollout
+JSONL; `pi-bio-agent session import` exposes the same adapter outside Pi. The source file is streamed into CAS first,
+then parsed from that immutable path so an active log cannot change between digesting and normalization. Messages,
+assistant emissions, tool calls/results, compactions, lifecycle entries, and stable parent ids become the same
+observation/edge shape while the source format remains recorded. Hidden reasoning text is not copied into queryable
+facts. Imports flush bounded idempotent batches and write the `session` fact last as a completion marker, so a retry
+after a malformed later line completes without duplicating earlier statements. A post-hoc importer cannot recover
+runtime signals the host never persisted; those still require a live host hook.
 
 ## Where this comes from
 
@@ -150,7 +160,7 @@ hook and no provenance; neither projects into the KG the repo already designed.
 
 5. **Memory notes ARE temporal: they live in the same append-only ledger as facts.**
    (This reverses an earlier draft that argued notes should stay plain-mutable with git as
-   their only history.) A note is a `bio_observations` observation in the `agent:memory:`
+   their only history.) A note is a `bio_observations` observation in the `memory:`
    namespace: `remember` appends a revision that SUPERSEDES the slot (a re-write never
    destroys the prior text), `forget` tombstones it, `recall(slug, asOf)` reads it as of any
    time, and `memoryHistory` returns the full trail: the same as-of / history / retraction
@@ -241,7 +251,7 @@ commit to the full `KnowledgeUnit`:
 - **Links → graph edges (step 3).** An optional `StudyNote.links` field plus `[[slug]]`
   body links, both collected by the pure `parseStudyNoteLinks` (dedup by `(to, predicate)`,
   dangling-tolerant) and projected by the pure `studyNoteLinkEdges` into `BioGraphEdge`
-  records (`agent:memory:<slug>` → `agent:memory:<to>`, default predicate `references`): `src/core/study.ts`. Predicates are a **narrow, closed note-navigation set**
+  records (`memory:<slug>` → `memory:<to>`, default predicate `references`): `src/core/study.ts`. Predicates are a **narrow, closed note-navigation set**
   (`StudyNoteLinkPredicate`: `references | see_also | depends_on | contrasts_with`),
   deliberately excluding KG evidence/provenance predicates: note links are a
   note-reference surface, **not** a general KG edge-authoring API, and carry no
@@ -256,7 +266,7 @@ commit to the full `KnowledgeUnit`:
   content by the `bio_walk_memory` Pi tool (see "Memory → graph projection" below).
 
 `studyNoteIndex` now includes `slug`, and `bio_remember` takes an optional `slug`;
-it returns the stored subject id (`agent:memory:<slug>`), the `author`, the `materialized`
+it returns the stored subject id (`memory:<slug>`), the `author`, the `materialized`
 file path, and a `note` summary (slug/kind/title/hook/tags).
 
 ## Memory → graph projection
@@ -283,7 +293,7 @@ compiled via `src/cli/bin.ts` to the `pi-bio-agent` bin.
 ## Non-goals
 
 - Not a new storage engine: this rides the existing DuckDB store in `design.md`. The
-  append-only `bio_observations` ledger (the `agent:memory:` namespace) is the SOURCE OF
+  append-only `bio_observations` ledger (the `memory:` namespace) is the SOURCE OF
   TRUTH: `bio_remember`/`recall`/`pi-bio-agent memory list` read it, not files. Any note JSON
   files are an optional legible EXPORT/view, not authoritative: deleting `store.duckdb` and
   keeping only files loses the memory (there is no re-index-from-files path); editing a file

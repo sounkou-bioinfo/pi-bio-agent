@@ -3,7 +3,7 @@ import { openBioStore } from "../hosts/bio-store.js";
 import { listMemory, memoryHistory, recall, normalizeAsOf, MEMORY_NOW } from "../hosts/memory-store.js";
 import { normalizeStudySlug } from "../core/study.js";
 
-// The `memory` CLI: read the ONE temporal store (memory is append-only observations under agent:memory:<slug>).
+// The `memory` CLI: read the ONE temporal store (memory is append-only observations under memory:<slug>).
 // list/show/history are all AS-OF (time-travel); history shows supersession + authorship. Provider-agnostic — no Pi needed.
 export interface MemoryCliDeps {
   cwd: string;

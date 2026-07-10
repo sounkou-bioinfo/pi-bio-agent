@@ -183,7 +183,7 @@
       "path": "docs/closes-over.md",
       "type": "Reference",
       "title": "What the substrate closes over",
-      "description": "How the manifest/SQL/DuckDB substrate subsumes agent topologies, learned orchestration (Fugu), and REPL-over-context (RLM) — with references.",
+      "description": "How the manifest/SQL/DuckDB substrate supplies a common data plane for agent topologies, machine studying, Fugu, and RLM, and where those systems still require a host control plane.",
       "tags": [
         "topologies",
         "fugu",

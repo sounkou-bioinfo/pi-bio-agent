@@ -63,7 +63,8 @@ await runBioQueryFromManifest({ cwd: process.cwd(), dbPath: ":memory:", manifest
 // 2. the actual question, written from the discovered columns
 const res = await runBioQueryFromManifest({ cwd: process.cwd(), dbPath: ":memory:", manifestPath: "manifest.json",
   sql: "SELECT consequence, count(*) AS n, avg(allele_frequency) AS avg_af FROM variants GROUP BY consequence ORDER BY consequence" });
-// res: { ok: true, runId, status: "succeeded", rowCount, artifacts, runDir }
+if (res.ok) console.table(res.result.rows);
+// res: { ok: true, runId, status: "succeeded", rowCount, result, artifacts, runDir }
 ```
 
 Each run is written under `.pi/bio-agent/runs/<runId>/`:
@@ -71,6 +72,10 @@ Each run is written under `.pi/bio-agent/runs/<runId>/`:
 - `result.json`: the answer; `result.rows` is exactly what your SQL returned (there is no separate report).
 - `run.json`: the run record (status, events, a digest of the SQL that ran).
 - `receipts.json`: one resolution receipt per resolved resource (resolver version, params digest, source snapshot).
+
+The SDK returns the same typed operation result directly as `res.result`; an embedding host does not need to reopen
+`result.json`. That result is the complete SQL result already materialized by the runner. A UI or model adapter owns
+how many rows it presents; it must not silently confuse presentation truncation with the persisted scientific result.
 
 A query that fails at runtime (e.g. a missing column) returns `{ ok: false, error, runDir }` and still persists
 `run.json` + `receipts.json`: the failure is auditable.
@@ -221,7 +226,7 @@ is reproducible and every answer has a source path.
 ## 7. Memory (the CLI)
 
 Memory (notes and skills) is append-only, as-of, attributed observations in the ONE temporal store
-(`.pi/bio-agent/store.duckdb`, `agent:memory:<slug>` / `skill:<name>`). Read it provider-agnostically:
+(`.pi/bio-agent/store.duckdb`, `memory:<slug>` / `skill:<name>`). Read it provider-agnostically:
 
 ```sh
 pi-bio-agent memory list                                      # current notes (as of now)

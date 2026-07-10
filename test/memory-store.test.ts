@@ -118,7 +118,7 @@ describe("temporal memory over bio_observations", () => {
     const c = await conn();
     await remember(c, note("foo", "hi [[bar]]"), T1); // a memory wikilink edge foo|<pred>|bar
     const subject = memorySubjectId("foo");
-    // another subsystem records an UNRELATED edge fact out of the same agent:memory:foo subject (its OWN statement_key)
+    // another subsystem records an UNRELATED edge fact out of the same memory:foo subject (its OWN statement_key)
     await recordObservation(c, { statementKey: `fact:supports:foo:disease:X`, subjectId: subject, predicate: "supports", objectId: "disease:X", recordedAt: T1 });
     // rewrite the note dropping [[bar]] — the memory edge is retracted, but the foreign 'supports' fact must NOT be
     await remember(c, note("foo", "no links now"), T2);
@@ -173,16 +173,16 @@ describe("temporal memory over bio_observations", () => {
     assert.deepEqual((await memoryHistory(c, "flip")).map((r) => r.content?.body ?? "∅"), ["content", "∅", "back"]);
   });
 
-  test("shared memory is attributed: two agents on one slug -> both retained, current shows the latest author", async () => {
+  test("shared memory is actor-neutral and attributed: human and automation revisions are both retained", async () => {
     const c = await conn();
-    await remember(c, note("risk", "A's view"), T1, "agent:A");
-    await remember(c, note("risk", "B's view"), T2, "agent:B");
+    await remember(c, note("risk", "analyst view"), T1, "human:analyst-1");
+    await remember(c, note("risk", "pipeline view"), T2, "automation:nightly-qc");
     const now = await recall(c, "risk");
-    assert.equal(now?.body, "B's view");
-    assert.equal(now?.author, "agent:B"); // latest revision's author
-    assert.equal((await recall(c, "risk", T1))?.author, "agent:A"); // as-of earlier -> the other author
+    assert.equal(now?.body, "pipeline view");
+    assert.equal(now?.author, "automation:nightly-qc");
+    assert.equal((await recall(c, "risk", T1))?.author, "human:analyst-1");
     const hist = await memoryHistory(c, "risk");
-    assert.deepEqual(hist.map((h) => h.author), ["agent:A", "agent:B"]); // both attributions retained
+    assert.deepEqual(hist.map((h) => h.author), ["human:analyst-1", "automation:nightly-qc"]);
   });
 
   test("a [[link]] becomes a walkable memory-graph edge (as-of), via the SAME projection as facts", async () => {
