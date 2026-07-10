@@ -103,12 +103,14 @@ describe("queue-job-worker: production queue worker lifecycle", () => {
     await enqueueJob(conn, { runId: "jk-loop", replay: replay("jk-loop"), now: clock() });
 
     let aborted = false;
+    const executorStarted = deferred<void>();
     const worker = createQueueJobWorker(conn, {
       clock,
       workerId: "w-loop",
       leaseSeconds: 20,
       heartbeatMs: 1000,
       executor: async (_replay, signal) => {
+        executorStarted.resolve();
         await new Promise<void>((resolve) => {
           signal.addEventListener("abort", () => {
             aborted = true;
@@ -122,7 +124,7 @@ describe("queue-job-worker: production queue worker lifecycle", () => {
     const stop = new AbortController();
     const loop = worker.runLoop({ signal: stop.signal, idleMs: 2000 });
 
-    await waitUntil(async () => (await readJobQueueRecord(conn, "jk-loop"))?.phase === "running");
+    await executorStarted.promise;
 
     const start = Date.now();
     stop.abort();

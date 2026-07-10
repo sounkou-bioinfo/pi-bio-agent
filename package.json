@@ -88,6 +88,7 @@
     "dogfood:bring-it-home": "npm run build && node scripts/bring-it-home-dogfood.mjs",
     "dogfood:ducknng-upload": "node scripts/ducknng-upload-dogfood.mjs",
     "dogfood:nng-job-runner": "npm run build && node scripts/nng-job-runner.mjs",
+    "dogfood:ssh-remote-worker": "npm run build && node scripts/dogfood-ssh-remote-worker.mjs",
     "dogfood:sdk-host-embedding": "npm run build && node scripts/sdk-host-embedding.mjs",
     "build": "rm -rf dist && node ./node_modules/typescript/bin/tsc -p tsconfig.build.json && chmod +x dist/cli/bin.js",
     "prepare": "node scripts/build-if-available.mjs",

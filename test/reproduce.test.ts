@@ -164,6 +164,8 @@ describe("C2: reproduce() compares deterministic receipt content, not wall-clock
     assert.equal(base.matched, true);
     assert.equal(base.environmentMatched, undefined, "no env pin -> no env check, matched stands on receipts+result");
     assert.equal(base.environmentComparisons, undefined);
+    assert.equal("environmentMatched" in base, false, "optional verdicts are omitted so the result is durable JSON");
+    assert.equal("environmentComparisons" in base, false);
   });
 
   test("checks every compute resource: drift in the second environment cannot falsely match", async () => {

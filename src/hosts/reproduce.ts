@@ -247,7 +247,9 @@ export async function reproduceRun(req: ReproduceRequest): Promise<ReproduceResu
   if (expectedResultDigest === undefined && hasLiveSource) {
     return {
       runId: replay.runId, reproductionRunId: res.runId, kind: replay.kind, reproduced: outcomeMatched, matched: false,
-      expected, produced, missing, extra, environmentMatched, environmentComparisons,
+      expected, produced, missing, extra,
+      ...(environmentMatched !== undefined ? { environmentMatched } : {}),
+      ...(environmentComparisons !== undefined ? { environmentComparisons } : {}),
       outcomeMatched, expectedOutcome, producedOutcome, runDir: res.runDir, ...(!res.ok ? { error: res.error } : {}),
       notReproducible: "an un-snapshotted live source (a sourceSnapshot with no version, e.g. duckdb.sql_materialize over read_csv_auto) is not content-verified and no resultDigest pins the output — re-run with a `cas` to pin output content",
     };
@@ -255,8 +257,13 @@ export async function reproduceRun(req: ReproduceRequest): Promise<ReproduceResu
   return {
     runId: replay.runId, reproductionRunId: res.runId, kind: replay.kind, reproduced: outcomeMatched,
     matched: outcomeMatched && receiptsMatched && (resultMatched ?? true) && (environmentMatched ?? true),
-    expected, produced, missing, extra, resultMatched, expectedResultDigest, producedResultDigest,
-    environmentMatched, environmentComparisons, outcomeMatched, expectedOutcome, producedOutcome,
+    expected, produced, missing, extra,
+    ...(resultMatched !== undefined ? { resultMatched } : {}),
+    ...(expectedResultDigest !== undefined ? { expectedResultDigest } : {}),
+    ...(producedResultDigest !== undefined ? { producedResultDigest } : {}),
+    ...(environmentMatched !== undefined ? { environmentMatched } : {}),
+    ...(environmentComparisons !== undefined ? { environmentComparisons } : {}),
+    outcomeMatched, expectedOutcome, producedOutcome,
     runDir: res.runDir, ...(!res.ok ? { error: res.error } : {}),
   };
 }
