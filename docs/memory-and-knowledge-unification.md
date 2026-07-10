@@ -57,7 +57,7 @@ supported same-slot deployment because separate snapshots could defeat that prec
 |---|---|---|
 | Runs of one project | project-local `store.duckdb` (default) | runs open→write→**close** in sequence; memory/facts accumulate. Proven: a later run reads the earlier run's *authored* memory. |
 | Across projects / users | `openBioStore(cwd, { path })` → a shared path | same file, wider audience |
-| Concurrent / cross-host / cross-actor | a host-supplied database service reached through the parameterized HTTP `SqlConn` reference or serialized ducknng RPC | one writer authority, many clients; the host supplies TLS, identity, and lifecycle |
+| Concurrent / cross-host / cross-actor | a database service reached through the parameterized HTTP `SqlConn` reference or serialized ducknng RPC | one writer authority, many clients; HTTP needs deployment TLS termination, while ducknng supplies in-memory/file-backed TLS/mTLS handles; the host selects identity policy and operates the service |
 | Immutable snapshots / archival | **CAS** by digest | shareable, content-addressed |
 
 Access stays host-gated (ducknng mTLS / peer-allowlists / exec opt-in). The temporal store has the attribution and

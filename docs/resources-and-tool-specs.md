@@ -44,5 +44,6 @@ the temporal store (`bio_observations`, including the `memory:` namespace) carri
 is **part of its identity**, so a shared store stays attributed and time-consistent when many agents write to it,
 and the durable governance/approval loop (submit → validate → test → record → approve → `activate`/`rollback`, with
 park/resume) gates promotion of specs/skills. What stays out of core is **RBAC/policy**: who may read, write, or
-approve: a sensitive deployment adds that in the host/adapters and in the transport (ducknng mTLS / peer-allowlists
-/ exec-gating). The primitive contracts are unchanged whether one agent or many share the store.
+approve: a sensitive deployment adds that in the host/adapters and transport. Ducknng itself provides generated or
+PEM-backed in-memory TLS/mTLS handles, peer-identity allowlists, and exec gating; the host chooses the identities and
+policy. The primitive contracts are unchanged whether one agent or many share the store.

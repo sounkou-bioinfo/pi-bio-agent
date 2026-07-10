@@ -57,8 +57,9 @@ function ducknngConn(local, url) {              // `local` = a throwaway :memory
 Current ducknng RPC sends a SQL string, so the older dogfood above inlines a deliberately narrow set of validated
 values; it is not the general adapter. The package-level HTTP transport sends SQL and parameters separately through
 the exact `SqlValue` tuple codec, requires a bearer token or authorization hook, bounds request/response bodies, and
-serializes calls into the owning connection. Hosts still supply TLS, service lifecycle, and admission policy.
-Ducknng deployments separately use exec opt-in plus mTLS / peer allowlists (see
+serializes calls into the owning connection; deployments of that HTTP reference provide TLS termination. Ducknng
+provides its own TLS/mTLS handles from generated self-signed material, in-memory PEM, or files, plus peer-identity
+allowlists; hosts select the handle and admission policy when starting the service (see
 [`resources-and-tool-specs.md`](./resources-and-tool-specs.md#multi-agent-by-attribution-authorization-stays-the-hosts-job)).
 
 Because every row carries its **author** (`source`, part of observation identity) and an **as-of** time, a shared
@@ -96,5 +97,6 @@ The transport is dogfooded end to end:
 
 The local file is the default for one project. Cross-process scripts prove that a serialized ducknng server can own
 the mutable DuckDB state while separate processes communicate over RPC. The HTTP reference and SSH dogfood prove
-parameterized cross-host queue/ledger composition. A production workbench still supplies TLS, worker lifecycle,
-input staging, CAS placement, credentials, and deployment policy.
+parameterized cross-host queue/ledger composition. A production workbench still operates worker lifecycle, input
+staging, CAS placement, credentials, and deployment policy. It terminates TLS for the HTTP reference or configures
+ducknng's native in-memory/file-backed TLS handle for an NNG deployment.

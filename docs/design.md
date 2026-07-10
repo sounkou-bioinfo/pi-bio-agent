@@ -828,7 +828,7 @@ known to the host-capability digest path, so a supplied receipt must be exactly 
 canonicalized as sorted unique sets before registration so a profile policy is not sensitive to caller order or
 duplicates. Profile refresh uses the same ducknng upsert path through `refreshDucknngHttpProfile`, returning
 previous/current redacted receipts while leaving token refresh/storage with the host. The local ducknng runtime
-fixture now covers `tls+tcp://` RPC with a host-provisioned self-signed TLS handle, mTLS client-certificate
+fixture now covers `tls+tcp://` RPC with a ducknng-generated in-memory self-signed TLS handle, mTLS client-certificate
 rejection, and exact peer-identity allow-list admission/denial. The `ducknng` runtime now carries execution subjects
 through service dispatch, HTTP route handling, and connection-id bindings. Subject-restricted profiles keep working
 across DuckDB worker-thread execution; SQL cannot set that subject. The remaining gaps are `wss`/server-push app

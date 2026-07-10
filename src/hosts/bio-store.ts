@@ -27,8 +27,8 @@ export function bioStorePath(cwd: string): string {
  *   a ducknng-served DuckDB (`ducknng_run_rpc`, exec opt-in) or a duckdb quack server — one writer that many
  *   clients read/write through concurrently; or share immutable snapshots by digest via CAS. Because every memory
  *   row carries its author (`source`) and an as-of time, a shared live store stays trustworthy and consistent;
- *   access stays host-gated (ducknng mTLS / peer-allowlists / exec opt-in). This `conn` is the seam: the host
- *   injects a local file today or a server-backed connection when it wants a shared live store.
+ *   access is gated by ducknng's in-memory/file-backed mTLS, peer allowlists, and exec opt-in. This `conn` is the
+ *   seam: the host injects a local file today or a server-backed connection when it wants a shared live store.
  */
 export interface BioStore {
   conn: SqlConn;
