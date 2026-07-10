@@ -1,6 +1,6 @@
 import { createServer, validateHeaderValue, type IncomingMessage, type ServerResponse } from "node:http";
 import { randomUUID, timingSafeEqual } from "node:crypto";
-import type { SqlConn, SqlConnPolicy } from "../core/ports.js";
+import type { SqlConn, SqlConnPolicy, SqlValue } from "../core/ports.js";
 import { wrapSqlConn } from "../core/ports.js";
 
 export const SQL_CONN_WIRE_SCHEMA = "pi-bio.sql_conn_wire.v1";
@@ -12,15 +12,7 @@ const MAX_REQUEST_ID_BYTES = 128;
 
 export type SqlConnMethod = "all" | "run";
 
-export type SqlConnValue =
-  | null
-  | boolean
-  | number
-  | string
-  | bigint
-  | Uint8Array
-  | SqlConnValue[]
-  | { [key: string]: SqlConnValue };
+export type SqlConnValue = SqlValue;
 
 type WireNumberSpecial = "NaN" | "Infinity" | "-Infinity" | "-0";
 

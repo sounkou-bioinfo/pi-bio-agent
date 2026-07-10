@@ -37,14 +37,21 @@ describe("run-store lean mode: run.json never points at an unwritten file", () =
   });
 });
 
-describe("run-store BigInt serialization: lossless, no silent >2^53 corruption", () => {
-  test("a BIGINT beyond 2^53 persists as a lossless decimal string; a small one stays a number", async () => {
+describe("run-store SQL value serialization is lossless where JSON has no native value", () => {
+  test("large integers and special floating-point values persist explicitly", async () => {
     const store = await conn();
     const cas = fsCasStore(await fsp.mkdtemp(join(tmpdir(), "cas-")));
     const cwd = await fsp.mkdtemp(join(tmpdir(), "bigint-run-"));
     const res = await runBioQueryFromManifest({
       cwd, dbPath: ":memory:", manifestPath: join(process.cwd(), "examples/variant-counts/manifest.json"),
-      sql: "SELECT 9223372036854775807::BIGINT AS big, 42::BIGINT AS small", store, author: "agent:A", cas,
+      sql: `SELECT
+        9223372036854775807::BIGINT AS big,
+        42::BIGINT AS small,
+        'NaN'::DOUBLE AS nan,
+        'Infinity'::DOUBLE AS inf,
+        '-Infinity'::DOUBLE AS neg_inf,
+        -0.0::DOUBLE AS neg_zero`,
+      store, author: "agent:A", cas,
     });
     assert.equal(res.ok, true);
     if (!res.ok) throw new Error("unreachable");
@@ -52,6 +59,10 @@ describe("run-store BigInt serialization: lossless, no silent >2^53 corruption",
     const row = parsed.rows[0];
     assert.equal(row.big, "9223372036854775807", "a >2^53 value is a lossless string, not a rounded Number");
     assert.equal(row.small, 42, "a small value stays a natural JSON number");
+    assert.equal(row.nan, "NaN");
+    assert.equal(row.inf, "Infinity");
+    assert.equal(row.neg_inf, "-Infinity");
+    assert.equal(row.neg_zero, "-0");
     assert.deepEqual(res.result.rows[0], row, "the SDK result matches the persisted JSON-safe representation");
   });
 });

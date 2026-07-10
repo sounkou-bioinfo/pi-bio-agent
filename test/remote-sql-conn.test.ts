@@ -98,6 +98,26 @@ describe("remote SQL connection transport", () => {
     }
   });
 
+  test("round-trips special-number parameters through both wire directions", async () => {
+    const conn = makeConn({ all: async (_sql, params) => [{ values: [...params] }] });
+    const server = await createSqlConnHttpServer({ conn: conn.conn, bearerToken });
+    try {
+      const values = [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, -0];
+      const rows = await createSqlConnHttpClient({ endpoint: server.url, bearerToken }).all<{ values: number[] }>(
+        "SELECT special values",
+        values,
+      );
+      assert.ok(Number.isNaN(rows[0]!.values[0]));
+      assert.equal(rows[0]!.values[1], Number.POSITIVE_INFINITY);
+      assert.equal(rows[0]!.values[2], Number.NEGATIVE_INFINITY);
+      assert.ok(Object.is(rows[0]!.values[3], -0));
+      assert.ok(Number.isNaN(conn.calls[0]!.params[0]));
+      assert.ok(Object.is(conn.calls[0]!.params[3], -0));
+    } finally {
+      await server.close();
+    }
+  });
+
   test("serializes all calls and enforces strict request-id checks", async () => {
     let active = 0;
     let peak = 0;

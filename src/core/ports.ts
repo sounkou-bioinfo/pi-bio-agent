@@ -38,8 +38,14 @@ import type { EnvDescriptor } from "./reproducibility.js";
  * A DuckDB connection is structurally one. Used identically by the operation runner, schema discovery, and
  * the temporal observation/graph store, so a fake in-memory port exercises all three in tests.
  */
+export type SqlValue = null | boolean | number | string | bigint | Uint8Array | SqlValue[] | {
+  [key: string]: SqlValue;
+};
+
+export type SqlRow = { [key: string]: SqlValue };
+
 export interface SqlConn {
-  all<T = Record<string, unknown>>(sql: string, params?: readonly unknown[]): Promise<T[]>;
+  all<T = SqlRow>(sql: string, params?: readonly unknown[]): Promise<T[]>;
   run(sql: string, params?: readonly unknown[]): Promise<void>;
 }
 

@@ -240,10 +240,17 @@ export interface PersistedRun {
 // The result IS the report and must be JSON, so a naive `count(*) AS n` must persist without the user casting.
 // LOSSLESS: a value within ±2^53 becomes a Number (bio counts/positions/frequencies live here — natural JSON);
 // anything beyond becomes a decimal STRING rather than a silently-rounded Number, so a >2^53 id/HUGEINT is never
-// corrupted (and the receipt digest stays faithful). Consumers read a number normally; a string flags "too big".
+// corrupted (and the receipt digest stays faithful). JSON also collapses NaN/infinities to null and negative zero
+// to zero, so those four values use explicit strings. Ordinary finite numbers remain numbers.
 const MAX_SAFE = 9007199254740991n;
-const bigintToJson = (_key: string, value: unknown): unknown =>
-  typeof value !== "bigint" ? value : value >= -MAX_SAFE && value <= MAX_SAFE ? Number(value) : value.toString();
+const sqlValueToJson = (_key: string, value: unknown): unknown => {
+  if (typeof value === "bigint") return value >= -MAX_SAFE && value <= MAX_SAFE ? Number(value) : value.toString();
+  if (typeof value !== "number") return value;
+  if (Number.isNaN(value)) return "NaN";
+  if (value === Number.POSITIVE_INFINITY) return "Infinity";
+  if (value === Number.NEGATIVE_INFINITY) return "-Infinity";
+  return Object.is(value, -0) ? "-0" : value;
+};
 
 // In lean mode (serialize:false) result.json is NOT written — the result bytes live in CAS. Retarget the run
 // record's output artifact from the (unwritten) `runs/<id>/result.json` path to its `cas:sha256:…` URI, so the
@@ -265,7 +272,7 @@ async function writeRunFile(dir: string, name: string, data: unknown): Promise<s
   // and on a crash/ENOSPC mid-write the previous file is left intact rather than truncated — so a reused runId dir
   // can't end up with a fresh run.json paired with a half-written result.json.
   const tmp = `${path}.tmp-${process.pid}-${randomUUID()}`;
-  await fs.writeFile(tmp, `${JSON.stringify(data, bigintToJson, 2)}\n`, "utf8");
+  await fs.writeFile(tmp, `${JSON.stringify(data, sqlValueToJson, 2)}\n`, "utf8");
   await fs.rename(tmp, path);
   return path;
 }
@@ -775,7 +782,7 @@ async function runAndPersist(
   // Put a JSON blob in CAS (bytes OUTSIDE the DB) and return its content address, or undefined when no CAS.
   const putCas = async (obj: unknown): Promise<string | undefined> => {
     if (!cas) return undefined;
-    const bytes = Buffer.from(JSON.stringify(obj, bigintToJson), "utf8");
+    const bytes = Buffer.from(JSON.stringify(obj, sqlValueToJson), "utf8");
     const digest = createHash("sha256").update(bytes).digest("hex");
     await cas.put({ algorithm: "sha256", digest }, bytes); // immutable + idempotent
     if (casMetadata) await recordCasObject(casMetadata.conn, { algorithm: "sha256", digest }, bytes.length, casMetadataNowMs());
@@ -961,7 +968,7 @@ async function runAndPersist(
       const casRefs = cas ? { result: resultDigest, receipts: receiptsDigest, replay: replayDigest, runObject: runObjectDigest } : undefined;
       // Match the SDK value to result.json/CAS exactly. DuckDB may return BigInt and other JSON-convertible values;
       // callers should receive the same lossless JSON-safe representation regardless of serialization mode.
-      const responseResult = JSON.parse(JSON.stringify(result, bigintToJson)) as OperationResult;
+      const responseResult = JSON.parse(JSON.stringify(result, sqlValueToJson)) as OperationResult;
       return { ok: true, runId, operationId: identity, status: run.status, rowCount: responseResult.rows.length, result: responseResult, artifacts: persisted.files, casRefs, runDir: persisted.dir };
     } catch (error) {
       if (!(error instanceof OperationRunError)) {

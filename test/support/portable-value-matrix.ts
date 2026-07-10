@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { DuckDBTimestampValue } from "@duckdb/node-api";
 import type { SqlConn } from "../../src/core/ports.js";
 
 export const PORTABLE_VALUE_MATRIX_SQL = `
@@ -25,13 +24,9 @@ export const PORTABLE_VALUE_MATRIX_SQL = `
     CAST(0.0/0.0 AS DOUBLE) AS nan_value,
     CAST(1.0/0.0 AS DOUBLE) AS inf_value,
     CAST(-1.0/0.0 AS DOUBLE) AS neg_inf_value,
-    CAST(-0.0 AS DOUBLE) AS negative_zero_value,
+    -0.0::DOUBLE AS negative_zero_value,
     CAST('123e4567-e89b-12d3-a456-426614174000' AS UUID) AS uuid_value
 `;
-
-function expectedTimestamptzValue(utcMicros: bigint): string {
-  return `${new DuckDBTimestampValue(utcMicros).toString()}+00`;
-}
 
 export async function readPortableValueMatrix(conn: SqlConn): Promise<Record<string, unknown>> {
   await conn.run("SET TimeZone='UTC'");
@@ -68,7 +63,7 @@ export function assertPortableValueMatrix(row: Record<string, unknown>): void {
   assert.equal(row.timestamp_value, "2026-01-02 03:04:05.678901");
 
   assert.equal(typeof row.timestamptz_value, "string");
-  assert.equal(row.timestamptz_value, expectedTimestamptzValue(1_767_323_045_678_901n));
+  assert.equal(row.timestamptz_value, "2026-01-02 03:04:05.678901+00");
 
   assert.ok(row.blob_value instanceof Uint8Array);
   assert.deepEqual(Buffer.from(row.blob_value), Buffer.from([97, 98, 99]));

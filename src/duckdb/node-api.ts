@@ -20,17 +20,13 @@ import {
   DuckDBTimestampTZValue,
   DuckDBTimestampValue,
 } from "@duckdb/node-api";
-import type { SqlConn } from "../core/ports.js";
+import type { SqlConn, SqlValue } from "../core/ports.js";
 
-type PortableSqlValue = null | boolean | number | string | bigint | Uint8Array | PortableSqlValue[] | {
-  [key: string]: PortableSqlValue;
-};
-
-const unsupportedPortableConversion: DuckDBValueConverter<PortableSqlValue> = (_value, type) => {
+const unsupportedPortableConversion: DuckDBValueConverter<SqlValue> = (_value, type) => {
   throw new Error(`Unsupported DuckDB value type for SQL transport: ${type.typeId} (${type.toString()})`);
 };
 
-const toFiniteTimestampTzValue: DuckDBValueConverter<PortableSqlValue> = (value, type) => {
+const canonicalTimestampTzValue: DuckDBValueConverter<SqlValue> = (value, type) => {
   if (value instanceof DuckDBTimestampTZValue) {
     if (value.isFinite) {
       return `${new DuckDBTimestampValue(value.micros).toString()}+00`;
@@ -40,7 +36,7 @@ const toFiniteTimestampTzValue: DuckDBValueConverter<PortableSqlValue> = (value,
   throw new Error(`Expected DuckDBTimestampTZValue for type ${type}`);
 };
 
-const portableSqlValueConverter = createDuckDBValueConverter<PortableSqlValue>({
+const portableSqlValueConverter = createDuckDBValueConverter<SqlValue>({
   [DuckDBTypeId.INVALID]: unsupportedPortableConversion,
   [DuckDBTypeId.BOOLEAN]: booleanFromValue,
   [DuckDBTypeId.TINYINT]: numberFromValue,
@@ -74,7 +70,7 @@ const portableSqlValueConverter = createDuckDBValueConverter<PortableSqlValue>({
   [DuckDBTypeId.UNION]: objectFromUnionValue,
   [DuckDBTypeId.BIT]: bytesFromBitValue,
   [DuckDBTypeId.TIME_TZ]: stringFromValue,
-  [DuckDBTypeId.TIMESTAMP_TZ]: toFiniteTimestampTzValue,
+  [DuckDBTypeId.TIMESTAMP_TZ]: canonicalTimestampTzValue,
   [DuckDBTypeId.ANY]: unsupportedPortableConversion,
   [DuckDBTypeId.BIGNUM]: bigintFromBigIntValue,
   [DuckDBTypeId.SQLNULL]: nullConverter,
