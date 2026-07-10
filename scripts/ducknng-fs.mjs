@@ -3,6 +3,9 @@ import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DuckDBInstance } from "@duckdb/node-api";
+import { duckdbNodeConn } from "../dist/duckdb/node-api.js";
+import { createDucknngSqlConn } from "../dist/hosts/ducknng-sql-conn.js";
+import { resolveDucknngRuntime } from "./ducknng-runtime.mjs";
 
 // DOGFOOD (ridiculous-but-cool): a content-addressed distributed FILE SYSTEM as a COMPOSITION of pieces we
 // already have — the metadata tree is a DuckDB table behind a server-backed SqlConn (ducknng RPC here: mutable
@@ -16,7 +19,7 @@ import { DuckDBInstance } from "@duckdb/node-api";
 // Run:  npm run build && node scripts/ducknng-fs.mjs
 
 const CAS = join(tmpdir(), `ducknng-fs-cas-${process.pid}`);
-const esc = (s) => String(s).replace(/'/g, "''");
+const { instanceConfig, loadSql } = await resolveDucknngRuntime();
 
 // --- CAS: write-once content store (the "object bytes" layer) ---
 async function casPut(buf) {
@@ -31,9 +34,9 @@ const casCount = async () => (await fs.readdir(CAS).catch(() => [])).length;
 
 async function main() {
   // --- metadata server: a ducknng-served DuckDB owns the directory tree ---
-  const sInst = await DuckDBInstance.create(":memory:");
+  const sInst = await DuckDBInstance.create(":memory:", instanceConfig);
   const S = await sInst.connect();
-  await S.run("LOAD ducknng");
+  await S.run(loadSql);
   await S.run("CREATE SEQUENCE fs_seq START 2");
   await S.run("CREATE TABLE fs_node (id BIGINT PRIMARY KEY, parent_id BIGINT, name TEXT, kind TEXT, digest TEXT, size BIGINT)");
   await S.run("INSERT INTO fs_node VALUES (1, NULL, '/', 'dir', NULL, NULL)"); // root inode
@@ -42,38 +45,62 @@ async function main() {
   const url = String((await S.runAndReadAll("SELECT listen FROM ducknng_list_servers() WHERE name='fs'")).getRows()[0][0]);
 
   // --- a client: every FS op is a SQL statement RPC'd to the metadata server (+ CAS for bytes) ---
-  const cInst = await DuckDBInstance.create(":memory:");
+  const cInst = await DuckDBInstance.create(":memory:", instanceConfig);
   const C = await cInst.connect();
-  await C.run("LOAD ducknng");
-  const exec = (sql) => C.runAndReadAll(`SELECT * FROM ducknng_run_rpc('${url}', ?, 0::UBIGINT)`, [sql]);
-  const query = async (sql) => (await C.runAndReadAll(`SELECT * FROM ducknng_query_rpc('${url}', ?, 0::UBIGINT)`, [sql])).getRowObjects();
+  await C.run(loadSql);
+  const remote = createDucknngSqlConn({ client: duckdbNodeConn(C), url });
 
   const splitp = (path) => { const parts = path.split("/").filter(Boolean); return { parts, parent: "/" + parts.slice(0, -1).join("/"), name: parts.at(-1) }; };
   const resolve = async (path) => {
     let id = 1;
     for (const part of path.split("/").filter(Boolean)) {
-      const r = await query(`SELECT id FROM fs_node WHERE parent_id=${id} AND name='${esc(part)}'`);
+      const r = await remote.all("SELECT id FROM fs_node WHERE parent_id = ? AND name = ?", [id, part]);
       if (!r.length) throw new Error(`no such path: ${path} (at '${part}')`);
       id = Number(r[0].id);
     }
     return id;
   };
-  const mkdir = async (path) => { const { parent, name } = splitp(path); const pid = await resolve(parent); await exec(`INSERT INTO fs_node SELECT nextval('fs_seq'), ${pid}, '${esc(name)}', 'dir', NULL, NULL`); };
+  const mkdir = async (path) => {
+    const { parent, name } = splitp(path);
+    const pid = await resolve(parent);
+    await remote.run("INSERT INTO fs_node SELECT nextval('fs_seq'), ?, ?, 'dir', NULL, NULL", [pid, name]);
+  };
   const writeFile = async (path, content) => {
     const { digest, size } = await casPut(Buffer.from(content));
     const { parent, name } = splitp(path); const pid = await resolve(parent);
-    await exec(`DELETE FROM fs_node WHERE parent_id=${pid} AND name='${esc(name)}'`); // upsert
-    await exec(`INSERT INTO fs_node SELECT nextval('fs_seq'), ${pid}, '${esc(name)}', 'file', '${digest}', ${size}`);
+    await remote.run("DELETE FROM fs_node WHERE parent_id = ? AND name = ?", [pid, name]); // upsert
+    await remote.run(
+      "INSERT INTO fs_node SELECT nextval('fs_seq'), ?, ?, 'file', ?, ?",
+      [pid, name, digest, size],
+    );
   };
-  const readFile = async (path) => { const id = await resolve(path); const r = await query(`SELECT digest FROM fs_node WHERE id=${id}`); return (await casGet(r[0].digest)).toString(); };
-  const mv = async (src, dst) => { const sid = await resolve(src); const { parent, name } = splitp(dst); const pid = await resolve(parent); await exec(`UPDATE fs_node SET parent_id=${pid}, name='${esc(name)}' WHERE id=${sid}`); };
-  const rmR = async (path) => { const id = await resolve(path); await exec(`DELETE FROM fs_node WHERE id IN (WITH RECURSIVE sub(id) AS (SELECT ${id} UNION ALL SELECT n.id FROM fs_node n JOIN sub s ON n.parent_id=s.id) SELECT id FROM sub)`); };
+  const readFile = async (path) => {
+    const id = await resolve(path);
+    const r = await remote.all("SELECT digest FROM fs_node WHERE id = ?", [id]);
+    return (await casGet(r[0].digest)).toString();
+  };
+  const mv = async (src, dst) => {
+    const sid = await resolve(src);
+    const { parent, name } = splitp(dst);
+    const pid = await resolve(parent);
+    await remote.run("UPDATE fs_node SET parent_id = ?, name = ? WHERE id = ?", [pid, name, sid]);
+  };
+  const rmR = async (path) => {
+    const id = await resolve(path);
+    await remote.run(
+      "DELETE FROM fs_node WHERE id IN (WITH RECURSIVE sub(id) AS (" +
+        "SELECT ?::BIGINT UNION ALL SELECT n.id FROM fs_node n JOIN sub s ON n.parent_id = s.id" +
+        ") SELECT id FROM sub)",
+      [id],
+    );
+  };
   const lsR = async (path) => {
     const rootId = await resolve(path);
-    return query(`WITH RECURSIVE walk(id, p, kind, digest, size) AS (
-        SELECT id, '', kind, digest, size FROM fs_node WHERE id=${rootId}
+    return remote.all(`WITH RECURSIVE walk(id, p, kind, digest, size) AS (
+        SELECT id, '', kind, digest, size FROM fs_node WHERE id = ?
         UNION ALL SELECT n.id, w.p||'/'||n.name, n.kind, n.digest, n.size FROM fs_node n JOIN walk w ON n.parent_id=w.id)
-      SELECT p AS path, kind, coalesce(digest,'') AS digest, coalesce(size,0) AS size FROM walk WHERE id<>${rootId} ORDER BY path`);
+      SELECT p AS path, kind, coalesce(digest,'') AS digest, coalesce(size,0) AS size FROM walk WHERE id <> ? ORDER BY path`,
+      [rootId, rootId]);
   };
 
   const tree = async (label) => {

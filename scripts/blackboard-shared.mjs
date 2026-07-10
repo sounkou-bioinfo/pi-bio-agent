@@ -1,11 +1,14 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { DuckDBInstance } from "@duckdb/node-api";
+import { duckdbNodeConn } from "../dist/duckdb/node-api.js";
+import { createDucknngSqlConn } from "../dist/hosts/ducknng-sql-conn.js";
+import { resolveDucknngRuntime } from "./ducknng-runtime.mjs";
 
 // DOGFOOD: topology x shared-writes — the decentralized BLACKBOARD (pub/sub) running ACROSS PROCESSES over
 // ducknng RPC (quack is dropped for this mutable shared-state path). Each agent is a SEPARATE OS process that coordinates ONLY
-// through a shared blackboard table on a ducknng server: publish = ducknng_run_rpc(INSERT), await = poll
-// ducknng_query_rpc(SELECT) until the row appears. No coordinator, no client opens the db file, exec opt-in.
+// through a shared blackboard table on a ducknng server: the typed SqlConn maps publish to remote INSERT and await
+// to a polled remote SELECT. No coordinator, no client opens the db file, exec opt-in.
 // (Append-only publish — first-writer-wins — is all a blackboard needs; for mutate-in-place see
 // ducknng-rpc-mutate.md.) Closes the topology matrix: chain / survey / pub-sub / push-pull / shared-write.
 //
@@ -14,11 +17,12 @@ import { DuckDBInstance } from "@duckdb/node-api";
 const SELF = fileURLToPath(import.meta.url);
 const URL = "tcp://127.0.0.1:9880";
 const note = (slug, deps) => JSON.stringify({ schema: "pi-bio.study_note.v1", slug, body: `${slug}(${deps.join("+") || "root"})` });
+const { instanceConfig, loadSql } = await resolveDucknngRuntime();
 
 async function serve() {
-  const inst = await DuckDBInstance.create(":memory:");
+  const inst = await DuckDBInstance.create(":memory:", instanceConfig);
   const c = await inst.connect();
-  await c.run("LOAD ducknng");
+  await c.run(loadSql);
   await c.run("CREATE TABLE board (slug TEXT PRIMARY KEY, note TEXT)");
   await c.run(`SELECT ducknng_start_server('bb', '${URL}', 4, 134217728, 300000, 0::UBIGINT)`);
   await c.run("SELECT ducknng_register_exec_method(false)"); // exec opt-in (publish); reads need no extra method
@@ -26,17 +30,18 @@ async function serve() {
   await new Promise((r) => setTimeout(r, 7000));
   const rows = (await c.runAndReadAll("SELECT slug FROM board ORDER BY rowid")).getRows();
   console.log(`  [server] FINAL board (rows written by SEPARATE client processes): ${rows.map((r) => r[0]).join(", ")}`);
+  await c.run("SELECT ducknng_stop_server('bb')");
   c.closeSync(); inst.closeSync();
 }
 
 async function client(slug, deps) {
-  const inst = await DuckDBInstance.create(":memory:"); // owns NO shared state — only talks RPC
+  const inst = await DuckDBInstance.create(":memory:", instanceConfig); // owns NO shared state — only talks RPC
   const c = await inst.connect();
-  await c.run("LOAD ducknng");
-  const present = async (s) => (await c.runAndReadAll(`SELECT * FROM ducknng_query_rpc('${URL}', ?, 0::UBIGINT)`, [`SELECT 1 AS x FROM board WHERE slug='${s}'`])).getRows().length > 0;
+  await c.run(loadSql);
+  const remote = createDucknngSqlConn({ client: duckdbNodeConn(c), url: URL });
+  const present = async (s) => (await remote.all("SELECT 1 AS x FROM board WHERE slug = ?", [s])).length > 0;
   for (const d of deps) { while (!(await present(d))) await new Promise((r) => setTimeout(r, 40)); } // await = poll the shared board
-  const sql = `INSERT INTO board VALUES ('${slug}', '${note(slug, deps).replace(/'/g, "''")}')`;
-  await c.runAndReadAll(`SELECT * FROM ducknng_run_rpc('${URL}', ?, 0::UBIGINT)`, [sql]); // publish = INSERT
+  await remote.run("INSERT INTO board VALUES (?, ?)", [slug, note(slug, deps)]); // publish = INSERT
   console.log(`  [agent ${slug} pid ${process.pid}] published${deps.length ? ` after [${deps.join(", ")}]` : " (root)"}`);
   c.closeSync(); inst.closeSync();
 }

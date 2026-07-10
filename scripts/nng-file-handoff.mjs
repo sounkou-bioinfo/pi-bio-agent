@@ -6,8 +6,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { duckdbNodeConn } from "../dist/duckdb/node-api.js";
-import { createBioObservationSchema } from "../dist/duckdb/observations.js";
+import { createBioObservationSchema, recordObservation } from "../dist/duckdb/observations.js";
 import { fsCasStore } from "../dist/hosts/fs-cas.js";
+import { createDucknngSqlConn } from "../dist/hosts/ducknng-sql-conn.js";
+import { resolveDucknngRuntime } from "./ducknng-runtime.mjs";
 
 // DOGFOOD: distributed FILE I/O over the ledger + CAS. One agent PRODUCES a file (an R plot); a SEPARATE agent
 // READS it back. The only thing that crosses the wire is the DIGEST: the coordinator's shared job ledger carries
@@ -23,17 +25,18 @@ const ADDR = process.env.HANDOFF_ADDR ?? "tcp://127.0.0.1:9882";
 const CAS_ROOT = process.env.HANDOFF_CAS ?? join(tmpdir(), `pi-bio-handoff-cas-${process.pid}`); // a CAS both agents reach
 const RUN_ID = "chr22-coverage-plot";
 const SLOT = `job:${RUN_ID}:output`;
-const esc = (s) => s.replace(/'/g, "''");
+const { instanceConfig, loadSql } = await resolveDucknngRuntime();
 
 async function serve() {
-  const inst = await DuckDBInstance.create(":memory:");
+  const inst = await DuckDBInstance.create(":memory:", instanceConfig);
   const raw = await inst.connect();
-  await raw.run("LOAD ducknng");
+  await raw.run(loadSql);
   await createBioObservationSchema(duckdbNodeConn(raw)); // the shared job ledger
   await raw.run(`SELECT ducknng_start_server('handoff', '${ADDR}', 1, 134217728, 300000, 0::UBIGINT)`);
   await raw.run("SELECT ducknng_register_exec_method(false)"); // exec opt-in: the host security boundary
   console.log(`  [coordinator pid ${process.pid}] job ledger + ducknng server up; shared CAS at ${CAS_ROOT}`);
   await new Promise((r) => setTimeout(r, 8000)); // let the producer + reader run
+  await raw.run("SELECT ducknng_stop_server('handoff')");
   raw.closeSync(); inst.closeSync();
 }
 
@@ -50,25 +53,37 @@ async function produce() {
   await cas.put({ algorithm: "sha256", digest, sizeBytes: bytes.length, mediaType: "image/png" }, bytes); // FILE bytes -> CAS
   await fs.rm(out, { force: true });
   // record the OUTPUT (its digest, NOT its bytes) into the shared ledger over ducknng RPC
-  const meta = JSON.stringify({ digest, name: "coverage.png", size: bytes.length, mediaType: "image/png" });
-  const c = await (await DuckDBInstance.create(":memory:")).connect();
-  await c.run("LOAD ducknng");
-  const sql =
-    `INSERT INTO bio_observations (observation_id, statement_key, subject_id, predicate, value_json, recorded_at, source) ` +
-    `VALUES ('${randomUUID()}', '${SLOT}', 'job:${RUN_ID}', 'job_output', '${esc(meta)}', '${new Date().toISOString()}', 'agent:producer')`;
-  await c.runAndReadAll(`SELECT * FROM ducknng_run_rpc('${ADDR}', ?, 0::UBIGINT)`, [sql]);
+  const meta = { digest, name: "coverage.png", size: bytes.length, mediaType: "image/png" };
+  const clientInstance = await DuckDBInstance.create(":memory:", instanceConfig);
+  const c = await clientInstance.connect();
+  await c.run(loadSql);
+  const remote = createDucknngSqlConn({ client: duckdbNodeConn(c), url: ADDR });
+  await recordObservation(remote, {
+    statementKey: SLOT,
+    subjectId: `job:${RUN_ID}`,
+    predicate: "job_output",
+    value: meta,
+    recordedAt: new Date().toISOString(),
+    source: "agent:producer",
+  });
   c.closeSync();
+  clientInstance.closeSync();
   console.log(`  [agent:producer pid ${process.pid}] plotted coverage.png (${bytes.length} B) -> CAS sha256:${digest.slice(0, 12)}…; recorded the digest in the ledger`);
 }
 
 async function read() {
   const cas = fsCasStore(CAS_ROOT);
-  const c = await (await DuckDBInstance.create(":memory:")).connect();
-  await c.run("LOAD ducknng");
+  const clientInstance = await DuckDBInstance.create(":memory:", instanceConfig);
+  const c = await clientInstance.connect();
+  await c.run(loadSql);
+  const remote = createDucknngSqlConn({ client: duckdbNodeConn(c), url: ADDR });
   // read the output DIGEST from the shared ledger over ducknng RPC (never the bytes)
-  const rows = (await c.runAndReadAll(`SELECT * FROM ducknng_query_rpc('${ADDR}', ?, 0::UBIGINT)`,
-    [`SELECT value_json FROM bio_observations WHERE statement_key = '${SLOT}' ORDER BY recorded_at DESC LIMIT 1`])).getRowObjects();
+  const rows = await remote.all(
+    "SELECT value_json FROM bio_observations WHERE statement_key = ? ORDER BY recorded_at DESC LIMIT 1",
+    [SLOT],
+  );
   c.closeSync();
+  clientInstance.closeSync();
   const meta = JSON.parse(String(rows[0].value_json)); // {digest,name,size,mediaType}
   // fetch the FILE BYTES from CAS by digest
   const bytes = await fs.readFile(cas.pathFor({ algorithm: "sha256", digest: meta.digest }));

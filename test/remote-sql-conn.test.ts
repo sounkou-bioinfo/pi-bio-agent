@@ -312,6 +312,19 @@ describe("remote SQL connection transport", () => {
         const client = createSqlConnHttpClient({ endpoint: server.url, bearerToken });
         const row = await readPortableValueMatrix(client);
         assertPortableValueMatrix(row);
+        const bytes = new Uint8Array([0, 1, 127, 255]);
+        const [bound] = await client.all<{
+          bytes: Uint8Array;
+          values: (number | null)[];
+          record: { gene: string; score: number };
+        }>(
+          "SELECT ?::BLOB AS bytes, ?::INTEGER[] AS values, ?::STRUCT(gene VARCHAR, score DOUBLE) AS record",
+          [bytes, [1, null, 3], { gene: "BRCA2", score: 0.75 }],
+        );
+        assert.deepEqual(Array.from(bound!.bytes), Array.from(bytes));
+        assert.deepEqual(bound!.values, [1, null, 3]);
+        assert.equal(bound!.record.gene, "BRCA2");
+        assert.equal(bound!.record.score, 0.75);
       } finally {
         await server.close();
       }

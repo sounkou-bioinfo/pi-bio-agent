@@ -3,7 +3,7 @@
 `scripts/blackboard-shared.mjs` is a **dogfood** composing two others: the decentralized **blackboard** (pub/sub)
 topology of `blackboard-run.md` and **cross-process shared state** over **ducknng RPC** (quack is dropped for the
 mutable shared-state demos). Each agent is a **separate OS process** that coordinates *only* through one shared blackboard table on a
-ducknng server — publish = `ducknng_run_rpc(INSERT)`, await = poll `ducknng_query_rpc(SELECT)` until the row
+ducknng server through `createDucknngSqlConn` — publish = remote `INSERT`, await = poll remote `SELECT` until the row
 appears. No coordinator, no client opens the db file, exec opt-in.
 
 This closes the last cell of the topology matrix: **chain** (`live-multi-agent`) / **survey** (`live-debate`) /

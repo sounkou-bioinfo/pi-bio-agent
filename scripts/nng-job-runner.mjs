@@ -7,12 +7,14 @@ import { join } from "node:path";
 import { rm } from "node:fs/promises";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { duckdbNodeConn } from "../dist/duckdb/node-api.js";
-import { createBioObservationSchema, observationAsOfKey } from "../dist/duckdb/observations.js";
+import { createBioObservationSchema, observationAsOfKey, recordObservation } from "../dist/duckdb/observations.js";
+import { createDucknngSqlConn } from "../dist/hosts/ducknng-sql-conn.js";
+import { resolveDucknngRuntime } from "./ducknng-runtime.mjs";
 
 // Dogfood: distributed compute as a topology over the job ledger. A long-running job's status flows back over
 // ducknng RPC into the same `job:<runId>:status` observation slot the job-store polls. The coordinator owns a
-// shared DuckDB ledger; a separate worker process reports each phase by executing recordObservation-shaped SQL over
-// `ducknng_run_rpc` against that shared DB. The job-store code does not change. Only dispatch and the worker are
+// shared DuckDB ledger; a separate worker process reports each phase with the unchanged `recordObservation` API
+// over `createDucknngSqlConn`. The job-store code does not change. Only dispatch and the worker are
 // new, and the worker can be any language that speaks NNG (Node here, R via nanonext/mirai, Python, ...).
 //
 // Run:  npm run build && node scripts/nng-job-runner.mjs
@@ -22,50 +24,15 @@ const RUN_ID = "wgs-annotate-chr22";
 const SLOT = `job:${RUN_ID}:status`;
 const DIGEST = "sha256:" + "a".repeat(64); // stands in for the job's replaySpecDigest
 const FUTURE = "9999-12-31T23:59:59Z";
-
-const sqlString = (value) => `'${String(value).replace(/'/g, "''")}'`;
-
-function remoteStatusInsertSql({ phase, at, source }) {
-  assert.match(phase, /^(running|succeeded)$/);
-  assert.match(at, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
-  assert.match(source, /^[A-Za-z0-9._:-]{1,128}$/);
-  const payload = JSON.stringify({
-    statement_key: SLOT,
-    subject_id: `job:${RUN_ID}`,
-    predicate: "job_status",
-    value: phase,
-    recorded_at: at,
-    source,
-    digest: DIGEST,
-  });
-  return `WITH payload AS (
-      SELECT CAST(${sqlString(payload)} AS JSON) AS j
-    ),
-    checked AS (
-      SELECT
-        json_extract_string(j, '$.statement_key') AS statement_key,
-        json_extract_string(j, '$.subject_id') AS subject_id,
-        json_extract_string(j, '$.predicate') AS predicate,
-        CAST(json_extract(j, '$.value') AS JSON) AS value_json,
-        json_extract_string(j, '$.recorded_at') AS recorded_at_text,
-        CAST(json_extract_string(j, '$.recorded_at') AS TIMESTAMPTZ) AS recorded_at,
-        json_extract_string(j, '$.source') AS source,
-        json_extract_string(j, '$.digest') AS digest
-      FROM payload
-    )
-    INSERT INTO bio_observations (observation_id, statement_key, subject_id, predicate, value_json, recorded_at, source, digest)
-    SELECT 'rpc:' || CAST(uuid() AS VARCHAR), statement_key, subject_id, predicate, value_json, recorded_at_text, source, digest
-    FROM checked
-    WHERE recorded_at IS NOT NULL`;
-}
+const { instanceConfig, loadSql } = await resolveDucknngRuntime();
 
 async function serve(url) {
-  const inst = await DuckDBInstance.create(":memory:");
+  const inst = await DuckDBInstance.create(":memory:", instanceConfig);
   const raw = await inst.connect();
   let serverStarted = false;
   let bodyError;
   try {
-    await raw.run("LOAD ducknng");
+    await raw.run(loadSql);
     const conn = duckdbNodeConn(raw);
     await createBioObservationSchema(conn);                        // the job ledger (bio_observations)
     // the coordinator records the job QUEUED in its own ledger (the submit step)
@@ -74,7 +41,10 @@ async function serve(url) {
        VALUES (?, ?, ?, 'job_status', '"queued"', ?, 'job-store', ?)`,
       [randomUUID(), SLOT, `job:${RUN_ID}`, "2026-07-01T00:00:01Z", DIGEST],
     );
-    await raw.run(`SELECT ducknng_start_server('jobs', ${sqlString(url)}, 1, 134217728, 300000, 0::UBIGINT)`);
+    await conn.run(
+      "SELECT ducknng_start_server('jobs', ?, 1, 134217728, 300000, 0::UBIGINT)",
+      [url],
+    );
     serverStarted = true;
     await raw.run("SELECT ducknng_register_exec_method(false)"); // EXEC OPT-IN: the host security boundary
     console.log(`  [coordinator pid ${process.pid}] job ledger up at ${url}; '${RUN_ID}' recorded as queued`);
@@ -109,14 +79,22 @@ async function serve(url) {
 }
 
 async function worker(label, url) {
-  const inst = await DuckDBInstance.create(":memory:"); // owns NO ledger, only talks RPC
+  const inst = await DuckDBInstance.create(":memory:", instanceConfig); // owns NO ledger, only talks RPC
   const raw = await inst.connect();
   try {
-    await raw.run("LOAD ducknng");
+    await raw.run(loadSql);
+    const remote = createDucknngSqlConn({ client: duckdbNodeConn(raw), url });
     const report = async (phase, at) => {
-      const sql = remoteStatusInsertSql({ phase, at, source: label });
-      const row = (await raw.runAndReadAll("SELECT * FROM ducknng_run_rpc(?, ?, 0::UBIGINT)", [url, sql])).getRowObjects()[0] ?? {};
-      assert.equal(row.ok, true, row.error ?? "ducknng_run_rpc failed");
+      assert.ok(phase === "running" || phase === "succeeded");
+      await recordObservation(remote, {
+        statementKey: SLOT,
+        subjectId: `job:${RUN_ID}`,
+        predicate: "job_status",
+        value: phase,
+        recordedAt: at,
+        source: label,
+        digest: DIGEST,
+      });
       console.log(`  [worker ${label} pid ${process.pid}] reported '${phase}' over ducknng RPC`);
     };
     await report("running", "2026-07-01T00:00:02Z");

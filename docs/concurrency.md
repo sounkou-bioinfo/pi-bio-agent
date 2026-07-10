@@ -34,9 +34,10 @@ createBioExtension({ author: "agent:worker-3", openStore: myServerStore });
 
 `openStore(cwd)` returns a `BioStore` = `{ conn: SqlConn, close() }`. Because every memory op (`remember`,
 `recall`, `listMemory`, …) and every run recorder is written against the `SqlConn` port (`all` / `run`), a
-server-backed `conn` is structurally a drop-in. A prototype can route `run(sql)` and `all(sql)` through **ducknng** RPC
-(`ducknng_run_rpc` / `ducknng_query_rpc`) to a `ducknng_start_server`, or through another host-supplied service. The
-client opens only a throwaway `:memory:` DuckDB to reach the RPC functions: it owns **no** shared state, holds
+server-backed `conn` is structurally a drop-in. `createDucknngSqlConn` routes `run(sql, params)` and
+`all(sql, params)` through ducknng's typed Arrow-parameter RPC helpers to a `ducknng_start_server`; another host
+may inject a different service. The client opens only a throwaway `:memory:` DuckDB to reach the RPC functions: it
+owns **no** shared state, holds
 **no** file lock; the *server* is the single writer.
 
 **This mode is a RUNNABLE example: [`scripts/memory-over-ducknng.mjs`](../scripts/memory-over-ducknng.mjs)**
@@ -45,21 +46,23 @@ server owning the store and spawns **two separate agent processes**; `agent:A` `
 distinct OS process) `recall`s it: `"null variant in a LoF gene" by agent:A`, attributed, **no file lock**. The
 memory-store functions are reused unchanged: they take a `SqlConn`, and there the conn routes over RPC:
 
-```js
-function ducknngConn(local, url) {              // `local` = a throwaway :memory: DuckDB with ducknng loaded
-  return {
-    run: async (sql, params) => { await local.runAndReadAll(`SELECT * FROM ducknng_run_rpc('${url}', ?, 0::UBIGINT)`, [inline(sql, params)]); },
-    all: async (sql, params) => (await local.runAndReadAll(`SELECT * FROM ducknng_query_rpc('${url}', ?, 0::UBIGINT)`, [inline(sql, params)])).getRowObjects(),
-  };
-}
+```ts
+const conn = createDucknngSqlConn({
+  client: duckdbNodeConn(throwawayClient),
+  url,
+  tlsConfigId,
+});
 ```
 
-Current ducknng RPC sends a SQL string, so the older dogfood above inlines a deliberately narrow set of validated
-values; it is not the general adapter. The package-level HTTP transport sends SQL and parameters separately through
-the exact `SqlValue` tuple codec, requires a bearer token or authorization hook, bounds request/response bodies, and
-serializes calls into the owning connection; deployments of that HTTP reference provide TLS termination. Ducknng
-provides its own TLS/mTLS handles from generated self-signed material, in-memory PEM, or files, plus peer-identity
-allowlists; hosts select the handle and admission policy when starting the service (see
+Values are carried as one typed Arrow `STRUCT`; quotes and `?` characters remain values, not SQL text. The adapter
+uses the same canonical input mapping as `duckdbNodeConn`: JavaScript numbers are `DOUBLE`, 64-bit bigints are
+`BIGINT`, larger bigints are `HUGEINT`, and bytes/lists/records are typed recursively. Heterogeneous lists and
+empty records have no single inferable DuckDB input type and fail before transport. The package-level HTTP transport
+remains the JSON-wire reference with bounded request/response bodies
+and required bearer or authorization policy. Ducknng provides native TLS/mTLS handles from generated self-signed
+material, in-memory PEM, or files, plus peer-identity allowlists. Query sessions can execute mutating SQL, so a host
+must authorize `query_open` as deliberately as unary `exec`; disabling `exec` alone is not a read-only policy.
+Hosts select the handle and admission policy when starting the service (see
 [`resources-and-tool-specs.md`](./resources-and-tool-specs.md#multi-agent-by-attribution-authorization-stays-the-hosts-job)).
 
 Because every row carries its **author** (`source`, part of observation identity) and an **as-of** time, a shared

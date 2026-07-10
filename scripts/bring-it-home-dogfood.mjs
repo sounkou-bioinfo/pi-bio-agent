@@ -160,6 +160,7 @@ import {
   refreshDucknngHttpProfile,
 } from "pi-bio-agent/duckdb";
 import {
+  createDucknngSqlConn,
   fsCasStore,
   nodeComputeRunner,
   runJobStepsWithCheckpoints,
@@ -203,6 +204,7 @@ void exportTrainingCorpusParquet;
 void duckdbNodeConn;
 void materializeGraphProjectionProfile;
 void refreshDucknngHttpProfile;
+void createDucknngSqlConn;
 void fsCasStore;
 void nodeComputeRunner;
 void runJobStepsWithCheckpoints;
@@ -218,7 +220,7 @@ type _Conn = SqlConn;
 import { runBioQueryFromManifest, recordHostEvent, ingestSessionJsonl, exportTrainingCorpusParquet } from "pi-bio-agent";
 import { validateBioManifest } from "pi-bio-agent/core";
 import { duckdbNodeConn, materializeGraphProjectionProfile, refreshDucknngHttpProfile } from "pi-bio-agent/duckdb";
-import { fsCasStore, runJobStepsWithCheckpoints, withObservedEnvironment } from "pi-bio-agent/hosts";
+import { createDucknngSqlConn, fsCasStore, runJobStepsWithCheckpoints, withObservedEnvironment } from "pi-bio-agent/hosts";
 
 for (const [name, value] of Object.entries({
   runBioQueryFromManifest,
@@ -229,6 +231,7 @@ for (const [name, value] of Object.entries({
   duckdbNodeConn,
   materializeGraphProjectionProfile,
   refreshDucknngHttpProfile,
+  createDucknngSqlConn,
   fsCasStore,
   runJobStepsWithCheckpoints,
   withObservedEnvironment,

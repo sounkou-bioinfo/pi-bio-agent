@@ -87,7 +87,8 @@ the related code.
   `src/duckdb/ncurl-fanout.ts`, `src/duckdb/ncurl-retry.ts`, `test/ncurl-fanout.test.ts`, and
   `examples/wgs-chr22-annotation/README.md`.
 - **RPC shared state means a single writer owns the DB.** Clients should hold only throwaway `:memory:` DuckDB
-  connections that call `ducknng_run_rpc` / `ducknng_query_rpc`. Same-slot memory writes rely on the server's
+  connections and use `createDucknngSqlConn`; its Arrow parameter tuple keeps values out of SQL text. Same-slot
+  memory writes rely on the server's
   serialized execution and `insertObservationIfSlotMax`; do not silently swap in a concurrent pool. See
   `docs/concurrency.md`, `src/duckdb/observations.ts`, `scripts/memory-over-ducknng.mjs`, and
   `scripts/blackboard-shared.mjs`.

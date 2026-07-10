@@ -95,6 +95,7 @@ jobs:
           dist-test/test/ducknng-http-profiles.test.js
           dist-test/test/ducknng-upload-shared-data.test.js
           dist-test/test/ducknng-tls-auth.test.js
+          dist-test/test/ducknng-sql-conn.test.js
           dist-test/test/ducknng-rpc-mutate.test.js
           dist-test/test/ducknng-rpc-blackboard.test.js
           dist-test/test/ducknng-socket-reachability.test.js

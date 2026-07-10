@@ -15,7 +15,7 @@ set -euo pipefail
 # Env:    DUCKNNG_DIR (checkout to build from), DUCKNNG_EXT_PREBUILT (skip to verify), DUCKNNG_OUT (output dir).
 
 REPO="sounkou-bioinfo/ducknng"
-DUCKNNG_COMMIT="${DUCKNNG_COMMIT:-395ed5cc88a90e2e6a6d1cd58d9943e0be85374c}"
+DUCKNNG_COMMIT="${DUCKNNG_COMMIT:-f5c08738477a6785c8b22c9f90b534ba59b35f5d}"
 FORCE=0; [ "${1:-}" = "--force" ] && FORCE=1
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 OUT_DIR="${DUCKNNG_OUT:-$HERE/.pi/ducknng}"
@@ -70,16 +70,16 @@ verify() {
     import { DuckDBInstance } from '@duckdb/node-api';
     const c = await (await DuckDBInstance.create(':memory:', { allow_unsigned_extensions: 'true' })).connect();
     await c.run(\"LOAD '${EXT_OUT}'\");
-    const sql = \"SELECT function_name, stability, array_length(parameter_types) AS arity FROM duckdb_functions() WHERE function_name IN ('ducknng__ncurl_row','ducknng_register_http_profile','ducknng_upload_table','ducknng_self_signed_tls_config','ducknng_start_server','ducknng_query_rpc','ducknng_get_rpc_manifest','ducknng_set_service_peer_allowlist')\";
+    const sql = \"SELECT function_name, stability, array_length(parameter_types) AS arity FROM duckdb_functions() WHERE function_name IN ('ducknng__ncurl_row','ducknng_register_http_profile','ducknng_upload_table','ducknng_self_signed_tls_config','ducknng_start_server','ducknng_query_rpc','ducknng_query_rpc_params','ducknng_run_rpc_params','ducknng_get_rpc_manifest','ducknng_set_service_peer_allowlist')\";
     const rows = (await c.runAndReadAll(sql)).getRowObjects();
     const names = new Set(rows.map((row) => String(row.function_name)));
     const retry = rows.find((row) => row.function_name === 'ducknng__ncurl_row');
     if (!retry || retry.stability !== 'VOLATILE') { console.error('!! ducknng__ncurl_row not VOLATILE — this build lacks the retry backport'); process.exit(1); }
     if (!rows.some((row) => row.function_name === 'ducknng_register_http_profile' && Number(row.arity) === 11)) { console.error('!! ducknng HTTP profiles lack the allow-subjects overload'); process.exit(1); }
-    const required = ['ducknng_upload_table','ducknng_self_signed_tls_config','ducknng_start_server','ducknng_query_rpc','ducknng_get_rpc_manifest','ducknng_set_service_peer_allowlist'];
+    const required = ['ducknng_upload_table','ducknng_self_signed_tls_config','ducknng_start_server','ducknng_query_rpc','ducknng_query_rpc_params','ducknng_run_rpc_params','ducknng_get_rpc_manifest','ducknng_set_service_peer_allowlist'];
     const missing = required.filter((name) => !names.has(name));
     if (missing.length) { console.error('!! owned ducknng build lacks required functions:', missing.join(', ')); process.exit(1); }
-    console.log('==> OK: retry, subject-scoped HTTP profiles, upload, TLS, and RPC functions are present');
+    console.log('==> OK: retry, subject-scoped HTTP profiles, upload, TLS, and typed RPC functions are present');
   "
 }
 

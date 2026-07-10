@@ -1,12 +1,11 @@
 // RUNNABLE smoke test: cross-process SHARED memory over a ducknng RPC server (the inter-process/agent/machine mode
 // from docs/concurrency.md). A server process owns the ONE `bio_observations` store; two SEPARATE agent processes
-// remember/recall through it over `ducknng_run_rpc` / `ducknng_query_rpc`, SEQUENTIALLY (A writes, then B reads).
+// remember/recall through it over the typed ducknng `SqlConn`, SEQUENTIALLY (A writes, then B reads).
 // No agent opens the store file, so the process-exclusive-writer lock that stops concurrent FILE access never
 // applies — agent:B (a different OS process) reads agent:A's memory, attributed. NOTE: this proves separate-process
 // RPC *sharing*, NOT concurrent same-slug writes (those need server-side per-statement_key serialization — see
 // docs/concurrency.md), nor persistent/inter-machine behavior (the server DB here is `:memory:`). The memory-store
-// functions are reused UNCHANGED: they take a `SqlConn` that here routes over RPC. (Params are inlined into the RPC
-// SQL string with escaping — the robust version is host code; this is a dogfood.)
+// functions are reused UNCHANGED: they take a `SqlConn` that here routes over typed RPC parameters.
 // PREREQUISITE: ducknng must be installed — `npm run provision:ducknng-owned` if the community build is not enough
 // (else `LOAD ducknng` below fails on a clean host).
 // Run: `npm run provision:ducknng-owned && npm run build && node scripts/memory-over-ducknng.mjs`  (imports ../dist)
@@ -14,30 +13,21 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { duckdbNodeConn } from "../dist/duckdb/node-api.js";
+import { createDucknngSqlConn } from "../dist/hosts/ducknng-sql-conn.js";
 import { createBioObservationSchema } from "../dist/duckdb/observations.js";
 import { remember, recall, listMemory } from "../dist/hosts/memory-store.js";
+import { resolveDucknngRuntime } from "./ducknng-runtime.mjs";
 
 // Unique-per-run address (avoids a fixed-port conflict): the supervisor derives it from its own pid and exports it
 // so the spawned server + agent children inherit the SAME value via env. Falls back to a pid-derived port.
 const ADDR = process.env.PI_BIO_MEM_ADDR ?? `tcp://127.0.0.1:${10000 + (process.pid % 50000)}`;
 const T = "2026-07-02T00:00:00Z";
-
-// inline SqlConn params into a plain SQL string (ducknng RPC sends a string, not bound params).
-const lit = (v) => (v === null || v === undefined ? "NULL" : typeof v === "number" || typeof v === "bigint" ? String(v) : `'${String(v).replace(/'/g, "''")}'`);
-const inline = (sql, params = []) => { let i = 0; return sql.replace(/\?/g, () => lit(params[i++])); };
-
-// a SqlConn whose run/all route through the ducknng server — the client owns NO shared state, holds NO file lock.
-function ducknngConn(local, url) {
-  return {
-    run: async (sql, params) => { await local.runAndReadAll(`SELECT * FROM ducknng_run_rpc('${url}', ?, 0::UBIGINT)`, [inline(sql, params)]); },
-    all: async (sql, params) => (await local.runAndReadAll(`SELECT * FROM ducknng_query_rpc('${url}', ?, 0::UBIGINT)`, [inline(sql, params)])).getRowObjects(),
-  };
-}
+const { instanceConfig, loadSql } = await resolveDucknngRuntime();
 
 async function serve() {
-  const inst = await DuckDBInstance.create(":memory:");
+  const inst = await DuckDBInstance.create(":memory:", instanceConfig);
   const c = await inst.connect();
-  await c.run("LOAD ducknng");
+  await c.run(loadSql);
   await createBioObservationSchema(duckdbNodeConn(c)); // the ONE store lives on the server
   await c.run(`SELECT ducknng_start_server('mem', '${ADDR}', 4, 134217728, 300000, 0::UBIGINT)`);
   await c.run("SELECT ducknng_register_exec_method(false)"); // exec opt-in — writes (remember) allowed, host boundary
@@ -47,10 +37,10 @@ async function serve() {
 }
 
 async function agent(role, action) {
-  const inst = await DuckDBInstance.create(":memory:"); // RPC-only; no shared file, no lock
+  const inst = await DuckDBInstance.create(":memory:", instanceConfig); // RPC-only; no shared file, no lock
   const c = await inst.connect();
-  await c.run("LOAD ducknng");
-  const conn = ducknngConn(c, ADDR);
+  await c.run(loadSql);
+  const conn = createDucknngSqlConn({ client: duckdbNodeConn(c), url: ADDR });
   if (action === "remember") {
     await remember(conn, { slug: "acmg-pvs1", kind: "memory_note", title: "PVS1", hook: "when classifying LoF", body: "null variant in a LoF gene", tags: [] }, T, role);
     console.log(`  [${role} pid ${process.pid}] REMEMBERED 'acmg-pvs1' through the server (no file opened)`);
