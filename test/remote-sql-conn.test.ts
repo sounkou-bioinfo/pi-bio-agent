@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { DuckDBInstance } from "@duckdb/node-api";
+import { duckdbNodeConn } from "../src/duckdb/node-api.js";
 import type { SqlConn } from "../src/core/ports.js";
 import {
   SQL_CONN_HTTP_PATH,
@@ -10,6 +12,7 @@ import {
 } from "../src/hosts/remote-sql-conn.js";
 import type { SqlConnWireTransport } from "../src/hosts/remote-sql-conn.js";
 import * as hosts from "../src/hosts/index.js";
+import { assertPortableValueMatrix, readPortableValueMatrix } from "./support/portable-value-matrix.js";
 
 type SqlCall = { method: "all" | "run"; sql: string; params: readonly unknown[] };
 
@@ -156,6 +159,21 @@ describe("remote SQL connection transport", () => {
       });
       assert.equal((await badString.json()).error?.code, "invalid_request");
 
+      const badSpecial = makeSqlConnClient(
+        {
+          async request() {
+            return JSON.stringify({
+              schema: SQL_CONN_WIRE_SCHEMA,
+              requestId: "fixed",
+              method: "all",
+              rows: [["special_number", "not-a-number"]],
+            });
+          },
+        },
+        { requestId: () => "fixed" },
+      );
+      await assert.rejects(() => badSpecial.all("SELECT 1"), /invalid special_number tuple/);
+
       const badPath = await fetch(`${server.url}/bad`, {
         method: "POST",
         headers: { authorization: `Bearer ${bearerToken}`, "content-type": "application/json" },
@@ -260,6 +278,25 @@ describe("remote SQL connection transport", () => {
       await leaking.close();
     } finally {
       await server.close();
+    }
+  });
+
+  test("transports exact SQL-domain values from a real DuckDB connection", async () => {
+    const raw = await (await DuckDBInstance.create(":memory:")).connect();
+    try {
+      const server = await createSqlConnHttpServer({
+        conn: duckdbNodeConn(raw),
+        bearerToken,
+      });
+      try {
+        const client = createSqlConnHttpClient({ endpoint: server.url, bearerToken });
+        const row = await readPortableValueMatrix(client);
+        assertPortableValueMatrix(row);
+      } finally {
+        await server.close();
+      }
+    } finally {
+      raw.disconnectSync();
     }
   });
 

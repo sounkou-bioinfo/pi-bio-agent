@@ -22,10 +22,13 @@ export type SqlConnValue =
   | SqlConnValue[]
   | { [key: string]: SqlConnValue };
 
+type WireNumberSpecial = "NaN" | "Infinity" | "-Infinity" | "-0";
+
 type WireTuple =
   | ["null"]
   | ["boolean", boolean]
   | ["number", number]
+  | ["special_number", WireNumberSpecial]
   | ["string", string]
   | ["bigint", string]
   | ["bytes", string]
@@ -211,7 +214,18 @@ function encodeSqlConnValue(value: unknown, path: string, seen: Set<object>): Wi
   if (typeof value === "boolean") return ["boolean", value];
 
   if (typeof value === "number") {
-    if (!Number.isFinite(value)) throw new Error(`non-finite number at ${path}`);
+    if (Number.isNaN(value)) {
+      return ["special_number", "NaN"];
+    }
+    if (value === Number.POSITIVE_INFINITY) {
+      return ["special_number", "Infinity"];
+    }
+    if (value === Number.NEGATIVE_INFINITY) {
+      return ["special_number", "-Infinity"];
+    }
+    if (Object.is(value, -0)) {
+      return ["special_number", "-0"];
+    }
     return ["number", value];
   }
 
@@ -279,6 +293,23 @@ function decodeSqlConnValue(value: unknown, path: string): SqlConnValue {
         throw protocolError("response_parse_error", `invalid number tuple at ${path}`);
       }
       return payload[0];
+    }
+    case "special_number": {
+      if (payload.length !== 1 || typeof payload[0] !== "string") {
+        throw protocolError("response_parse_error", `invalid special_number tuple at ${path}`);
+      }
+      switch (payload[0]) {
+        case "NaN":
+          return Number.NaN;
+        case "Infinity":
+          return Number.POSITIVE_INFINITY;
+        case "-Infinity":
+          return Number.NEGATIVE_INFINITY;
+        case "-0":
+          return -0;
+        default:
+          throw protocolError("response_parse_error", `invalid special_number tuple at ${path}`);
+      }
     }
     case "string": {
       if (payload.length !== 1 || typeof payload[0] !== "string") {
