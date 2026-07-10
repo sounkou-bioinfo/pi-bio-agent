@@ -11,21 +11,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout workbench
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: pi-bio-workbench
 
       - name: Checkout substrate
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: sounkou-bioinfo/pi-bio-agent
           ref: 0bdc88ffe6c9756914879263ac571ef576789878
           path: pi-bio-agent
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 24
+          package-manager-cache: false
 
       - name: Build substrate
         working-directory: pi-bio-agent
