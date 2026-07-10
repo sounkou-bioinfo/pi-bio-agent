@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isAbsolute, resolve } from "node:path";
 import { systemClock } from "../../core/clock.js";
 import { readFileSync, statSync } from "node:fs";
 import type { BioResolverImpl } from "../../core/ports.js";
@@ -14,6 +15,12 @@ import type { BioResolverImpl } from "../../core/ports.js";
 
 const IDENT_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
+
+function resolveManifestPath(path: string, manifestBaseDir?: string): string {
+  if (path.includes("://") || isAbsolute(path) || !manifestBaseDir) return path;
+  return resolve(manifestBaseDir, path);
+}
+
 // Normalize a region to an htslib region string. htslib regions are 1-based, closed intervals — the manifest
 // author supplies coordinates in that convention (BED's 0-based half-open must be converted by the author).
 function regionString(region: unknown): string | undefined {
@@ -28,6 +35,8 @@ function regionString(region: unknown): string | undefined {
 
 export const duckhtsReadBcfResolver: BioResolverImpl = async (resource, ctx) => {
   const { path, table = "vcf_raw" } = resource.params as { path: string; table?: string };
+  const sourcePath = path;
+  const resolvedPath = resolveManifestPath(path, ctx.manifestBaseDir);
   if (typeof path !== "string" || !path.trim()) throw new Error("duckhts.read_bcf: 'path' (string) is required");
   if (!IDENT_RE.test(table)) throw new Error("duckhts.read_bcf: 'table' must be a SQL identifier");
   const region = regionString((resource.params as { region?: unknown }).region);
@@ -60,13 +69,13 @@ export const duckhtsReadBcfResolver: BioResolverImpl = async (resource, ctx) => 
     // remote slice should pin the source's ETag/digest at the host.)
     let indexDigest: string | undefined;
     for (const ext of [".tbi", ".csi"]) {
-      try { indexDigest = `index-sha256:${createHash("sha256").update(readFileSync(path + ext)).digest("hex")}`; break; } catch { /* try next / best effort */ }
+      try { indexDigest = `index-sha256:${createHash("sha256").update(readFileSync(resolvedPath + ext)).digest("hex")}`; break; } catch { /* try next / best effort */ }
     }
     let dataIdentity: string | undefined;
-    try { const st = statSync(path); dataIdentity = `data-size:${st.size};data-mtime:${Math.round(st.mtimeMs)}`; } catch { /* remote/unreadable: best effort */ }
+    try { const st = statSync(resolvedPath); dataIdentity = `data-size:${st.size};data-mtime:${Math.round(st.mtimeMs)}`; } catch { /* remote/unreadable: best effort */ }
     inputDigest = [indexDigest, dataIdentity].filter(Boolean).join(";") || undefined;
   } else {
-    try { inputDigest = `sha256:${createHash("sha256").update(readFileSync(path)).digest("hex")}`; } catch { /* non-local/unreadable: read_bcf fails closed below */ }
+    try { inputDigest = `sha256:${createHash("sha256").update(readFileSync(resolvedPath)).digest("hex")}`; } catch { /* non-local/unreadable: read_bcf fails closed below */ }
   }
 
   // Raw read only: SELECT * preserves the tidy columns (CHROM, POS, REF, ALT, INFO_*). Mapping is the
@@ -75,18 +84,18 @@ export const duckhtsReadBcfResolver: BioResolverImpl = async (resource, ctx) => 
   const sql = region
     ? `CREATE OR REPLACE TABLE ${table} AS SELECT * FROM read_bcf(?, region := ?, tidy_format := true)`
     : `CREATE OR REPLACE TABLE ${table} AS SELECT * FROM read_bcf(?, tidy_format := true)`;
-  await ctx.conn.run(sql, region ? [path, region] : [path]);
+  await ctx.conn.run(sql, region ? [resolvedPath, region] : [resolvedPath]);
 
   // TOCTOU (whole-file read only — a region read is already live_source): the sha256 was taken BEFORE read_bcf
   // scanned the file, so a change in between would falsely pin the OLD bytes against the NEW data. Re-hash after the
   // scan; on a mismatch (or now-unreadable) drop the pin (undefined -> live_source) so a hit can't serve stale.
   if (!region && inputDigest !== undefined) {
     let after: string | undefined;
-    try { after = `sha256:${createHash("sha256").update(readFileSync(path)).digest("hex")}`; } catch { after = undefined; }
+    try { after = `sha256:${createHash("sha256").update(readFileSync(resolvedPath)).digest("hex")}`; } catch { after = undefined; }
     if (after !== inputDigest) inputDigest = undefined;
   }
 
-  const sourceUri = path.includes("://") ? path : `file:${path}`; // a remote input is its own URI, not file:
+  const sourceUri = sourcePath.includes("://") ? sourcePath : `file:${sourcePath}`; // a remote input is its own URI, not file:
   return {
     result: { mode: "reference", name: table, pointer: { uri: `table:${table}`, format: "table" } },
     sourceSnapshots: [

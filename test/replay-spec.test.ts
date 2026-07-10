@@ -2,15 +2,14 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve, isAbsolute } from "node:path";
+import { join, resolve } from "node:path";
 import { runBioQueryFromManifest } from "../src/hosts/run-store.js";
 import { nodeComputeRunner } from "../src/process/node-compute-runner.js";
 import { fsCasStore } from "../src/hosts/fs-cas.js";
 import type { RunReplaySpec } from "../src/core/reproducibility.js";
 
 // C1b-ii: every run seeds replay.json — the ACTUAL replay inputs C2's reproduce() will re-execute (not just
-// digests). For compute ops it captures BOTH the authored manifest snapshot (portable, relative ./render.sh) and
-// the resolved execution facts (this host's absolute command path).
+// digests). For compute ops it captures the authored manifest snapshot and compute facts from that same snapshot.
 const FILES_ONLY = resolve(process.cwd(), "examples", "compute-files-only", "manifest.json");
 
 async function readReplay(runDir: string): Promise<RunReplaySpec> {
@@ -39,14 +38,12 @@ describe("C1b-ii: replay.json seed", () => {
     const authored = replay.manifest!.snapshot as { provides: { resources: Array<{ params: { command: string[] } }> } };
     assert.deepEqual(authored.provides.resources[0].params.command, ["sh", "./render.sh"], "authored command stays relative (portable)");
 
-    // resolved compute facts carry THIS host's absolute path (what actually ran) — both are stored
+    // compute facts retain authored command arguments from snapshot for portability
     assert.equal(replay.computeResources?.length, 1);
     const compute = replay.computeResources![0]!;
     assert.equal(compute.resourceId, "tracks");
     assert.equal(compute.resultTable, "artifacts");
-    assert.equal(compute.command![0], "sh");
-    assert.ok(isAbsolute(compute.command![1] as string), "resolved command path is absolute (execution fact)");
-    assert.equal(compute.command![1], resolve(process.cwd(), "examples", "compute-files-only", "render.sh"));
+    assert.deepEqual(compute.command, ["sh", "./render.sh"], "compute command is retained as authored");
 
     // C1b-iii enrichment: receipts exist now, so replay is pinned to their digests + carries the env summary
     assert.ok(Array.isArray(replay.sourceReceiptDigests) && replay.sourceReceiptDigests.length > 0, "receipt digests pinned");

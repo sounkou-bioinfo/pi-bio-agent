@@ -35,6 +35,93 @@ describe("C2: reproduce() compares deterministic receipt content, not wall-clock
     assert.deepEqual(rep.extra, []);
   });
 
+  test("manifest digest is canonical across equivalent JSON serialization", async () => {
+    const source = await fs.mkdtemp(join(tmpdir(), "pi-bio-repro-manifest-whitespace-"));
+    const manifestDir = resolve(process.cwd(), "examples", "variant-counts");
+    await fs.cp(manifestDir, source, { recursive: true });
+    const manifestPath = "manifest.json";
+    const out = await runBioQueryFromManifest({
+      cwd: source, dbPath: ":memory:", manifestPath,
+      sql: SQL,
+      runId: "manifest-whitespace", now: "2026-07-01T00:00:00Z",
+    });
+    assert.equal(out.ok, true, out.ok ? "" : `run failed: ${(out as { error?: unknown }).error}`);
+    const firstReplay = JSON.parse(await fs.readFile(join((out as { runDir: string }).runDir, "replay.json"), "utf8")) as RunReplaySpec;
+
+    const manifestText = JSON.parse(await fs.readFile(join(source, "manifest.json"), "utf8"));
+    await fs.writeFile(join(source, "manifest.json"), JSON.stringify(manifestText, null, 4) + "\n", "utf8");
+
+    const reformatted = await runBioQueryFromManifest({
+      cwd: source, dbPath: ":memory:", manifestPath,
+      sql: SQL,
+      runId: "manifest-reformatted", now: "2026-07-01T00:00:01Z",
+    });
+    assert.equal(reformatted.ok, true, reformatted.ok ? "" : `run failed: ${(reformatted as { error?: unknown }).error}`);
+    const secondReplay = JSON.parse(await fs.readFile(join((reformatted as { runDir: string }).runDir, "replay.json"), "utf8")) as RunReplaySpec;
+    assert.equal(secondReplay.manifest?.digest, firstReplay.manifest?.digest);
+  });
+
+  test("cross-checkout replay uses manifest snapshot with explicit manifestBaseDir and still matches", async () => {
+    const source = await fs.mkdtemp(join(tmpdir(), "pi-bio-repro-src-"));
+    const manifestDir = resolve(process.cwd(), "examples", "variant-counts");
+    await fs.mkdir(source, { recursive: true });
+    await fs.cp(manifestDir, source, { recursive: true });
+    const manifestPath = "manifest.json";
+    const out = await runBioQueryFromManifest({
+      cwd: source, dbPath: ":memory:", manifestPath,
+      sql: SQL,
+      runId: "cross-src", now: "2026-07-01T00:00:00Z",
+    });
+    assert.equal(out.ok, true, out.ok ? "" : `replay source run failed: ${(out as { error?: unknown }).error}`);
+    const replay = JSON.parse(await fs.readFile(join((out as { runDir: string }).runDir, "replay.json"), "utf8")) as RunReplaySpec;
+
+    const checkout = await fs.mkdtemp(join(tmpdir(), "pi-bio-repro-checkout-"));
+    await fs.cp(source, checkout, { recursive: true });
+
+    const rep = await reproduceRun({ cwd: checkout, replay, manifestBaseDir: checkout });
+    assert.equal(rep.matched, true, `unexpected drift after copy: missing=${JSON.stringify(rep.missing)} extra=${JSON.stringify(rep.extra)}`);
+
+    const variantsPath = join(checkout, "data", "variants.csv");
+    const current = await fs.readFile(variantsPath, "utf8");
+    const lines = current.trimEnd().split("\n");
+    let changed = false;
+    for (let i = 1; i < lines.length && !changed; i++) {
+      if (lines[i].includes("missense")) {
+        lines[i] = lines[i].replace("missense", "synonymous");
+        changed = true;
+      }
+    }
+    if (!changed) lines.push("7:7000:G:T,synonymous,0.5");
+    await fs.writeFile(variantsPath, `${lines.join("\n")}\n`, "utf8");
+    const drift = await reproduceRun({ cwd: checkout, replay, manifestBaseDir: checkout });
+    assert.equal(drift.matched, false, "changed copied data should drift when rerunning from the same manifest snapshot");
+  });
+  test("cross-checkout compute replay resolves relative commands from manifestBaseDir", async () => {
+    const source = await fs.mkdtemp(join(tmpdir(), "pi-bio-repro-compute-src-"));
+    const manifestDir = resolve(process.cwd(), "examples", "compute-files-only");
+    await fs.cp(manifestDir, source, { recursive: true });
+    const manifestPath = "manifest.json";
+    const cas = fsCasStore(await fs.mkdtemp(join(tmpdir(), "pi-bio-cas-")));
+    const out = await runBioQueryFromManifest({
+      cwd: source, dbPath: ":memory:", manifestPath, compute: { runner: nodeComputeRunner() }, cas,
+      sql: "SELECT name FROM tracks ORDER BY name", runId: "compute-cross", now: "2026-07-01T00:00:00Z",
+    });
+    assert.equal(out.ok, true, out.ok ? "" : `compute replay source run failed: ${(out as { error?: unknown }).error}`);
+    const replay = JSON.parse(await fs.readFile(join((out as { runDir: string }).runDir, "replay.json"), "utf8")) as RunReplaySpec;
+
+    const checkout = await fs.mkdtemp(join(tmpdir(), "pi-bio-repro-compute-checkout-"));
+    await fs.cp(source, checkout, { recursive: true });
+
+    const rep = await reproduceRun({
+      cwd: checkout,
+      replay,
+      manifestBaseDir: checkout,
+      cas,
+      compute: { runner: nodeComputeRunner() },
+    });
+    assert.equal(rep.matched, true, `compute replay should match after checkout copy: missing=${JSON.stringify(rep.missing)} extra=${JSON.stringify(rep.extra)}`);
+  });
+
   test("a tampered pin is honest drift (missing the expected, extra the produced)", async () => {
     const { cwd, replay } = await runOnce();
     const tampered: RunReplaySpec = { ...replay, sourceReceiptDigests: ["sha256:" + "0".repeat(64)] };
@@ -422,22 +509,40 @@ describe("C2: reproduce() compares deterministic receipt content, not wall-clock
     assert.equal(rep.matched, true, "the run reproduces despite a long original runId (derived id was bounded, not rejected)");
   });
 
-  test("fail closed: reproduce rejects when the manifest FILE changed since the run (would run different logic)", async () => {
+  test("replay remains portable when the original manifest is edited or deleted after snapshotting", async () => {
     const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-repro-drift-"));
-    const cas = fsCasStore(await fs.mkdtemp(join(tmpdir(), "pi-bio-cas-")));
-    const mpath = join(cwd, "manifest.json");
-    await fs.writeFile(mpath, JSON.stringify({ schema: "pi-bio.manifest.v1", id: "m", version: "0.1.0", title: "m", description: "m", provides: {} }));
-    const out = await runBioQueryFromManifest({ cwd, dbPath: ":memory:", manifestPath: mpath, sql: "SELECT 1 AS x", cas, runId: "drift1", now: "2026-07-01T00:00:00Z" });
+    const source = join(process.cwd(), "examples", "variant-counts");
+    await fs.cp(source, cwd, { recursive: true });
+    const manifestPath = "manifest.json";
+    const out = await runBioQueryFromManifest({
+      cwd, dbPath: ":memory:", manifestPath, sql: SQL,
+      runId: "drift1", now: "2026-07-01T00:00:00Z",
+    });
     assert.equal(out.ok, true);
     const replay = JSON.parse(await fs.readFile(join((out as { runDir: string }).runDir, "replay.json"), "utf8")) as RunReplaySpec;
-    // an EDIT to the manifest after the run — reproduce must refuse (its digest no longer matches the pin)
-    await fs.writeFile(mpath, JSON.stringify({ schema: "pi-bio.manifest.v1", id: "m", version: "0.1.0", title: "CHANGED", description: "m", provides: {} }));
-    await assert.rejects(() => reproduceRun({ cwd, replay, cas }), /manifest .* has CHANGED/);
+
+    await fs.writeFile(join(cwd, "manifest.json"), JSON.stringify({ schema: "pi-bio.manifest.v1", id: "variant-counts", version: "0.0.1", title: "CHANGED", description: "tampered", provides: {} }));
+    await assert.doesNotReject(() => reproduceRun({ cwd, replay, manifestBaseDir: cwd }), "reproduce should not depend on the current manifest file");
+    await fs.rm(join(cwd, "manifest.json"));
+    const stillReplays = await reproduceRun({ cwd, replay, manifestBaseDir: cwd });
+    assert.equal(stillReplays.matched, true, `deleted manifest file did not break snapshot replay: missing=${JSON.stringify(stillReplays.missing)} extra=${JSON.stringify(stillReplays.extra)}`);
   });
 
-  test("fail closed: a replay with no pinned digests, or no manifest path, refuses (no hollow match)", async () => {
+  test("tampered manifest snapshot fails replay verification", async () => {
+    const { cwd, replay } = await runOnce();
+    const tampered: RunReplaySpec = {
+      ...replay,
+      manifest: {
+        ...(replay.manifest as NonNullable<RunReplaySpec["manifest"]>),
+        snapshot: { ...(replay.manifest!.snapshot as Record<string, unknown>), title: "tampered" },
+      },
+    };
+    await assert.rejects(() => reproduceRun({ cwd, replay: tampered }), /snapshot does not match replay\.manifest\.digest/);
+  });
+
+  test("fail closed: a replay with no pinned digests, or no manifest snapshot, refuses (no hollow match)", async () => {
     const { cwd, replay } = await runOnce();
     await assert.rejects(() => reproduceRun({ cwd, replay: { ...replay, sourceReceiptDigests: [], resultDigest: undefined } }), /pins neither sourceReceiptDigests, a resultDigest, nor a terminal failure/);
-    await assert.rejects(() => reproduceRun({ cwd, replay: { ...replay, manifest: undefined } }), /no manifest to re-run/);
+    await assert.rejects(() => reproduceRun({ cwd, replay: { ...replay, manifest: undefined } }), /replay has no manifest snapshot to re-run/);
   });
 });

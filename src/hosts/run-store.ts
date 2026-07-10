@@ -47,36 +47,41 @@ const COMPUTE_RESOLVER = "compute.run";
 const PENDING_RUN_CAS_REF_TTL_MS = 24 * 60 * 60 * 1000;
 const RUN_ARTIFACT_SLOT_FUTURE = "9999-12-31T23:59:59.999Z";
 
-// Built-in resolvers whose params.path is a file location to resolve relative to the manifest's directory.
-const FILE_PATH_RESOLVERS = new Set(["duckdb.file_scan", "duckhts.read_bcf"]);
+interface ManifestLoadRequest {
+  cwd: string;
+  manifestPath?: string;
+  manifestSnapshot?: BioManifest;
+  manifestBaseDir?: string;
+}
 
-/**
- * Make relative local resource paths absolute, anchored to the MANIFEST's directory (not the Node process
- * cwd). Absolute paths and remote URIs (http(s)/s3/...) are left untouched. Host-level — core never touches
- * resolver params. Done before registration so the registry (and the receipt's paramsDigest) see the real path.
- */
-function resolveResourcePaths(manifest: BioManifest, manifestDir: string): BioManifest {
-  // A non-ARRAY `resources` (e.g. `{}`) must NOT TypeError here on `.map()` — this runs BEFORE registerManifest's
-  // validation, so leave a malformed shape untouched and let validateBioManifest report it as a clean fail-closed
-  // error (`provides.resources must be an array`), the same way bio_describe_model does.
-  if (!Array.isArray(manifest.provides?.resources)) return manifest;
-  const resources = manifest.provides.resources.map((res) => {
-    if (!res || typeof res !== "object") return res; // non-object element — leave it for validateBioManifest to reject cleanly (don't TypeError here)
-    if (!res.params || typeof res.params !== "object") return res; // missing/malformed params — validation rejects it; don't TypeError on res.params.command/.path
-    // compute.run: a script SHIPS WITH the manifest, referenced "./compute.R" — resolve such relative
-    // command entries against the manifest dir (absolute paths and bare executable names are left untouched).
-    if (res.resolver === COMPUTE_RESOLVER) {
-      const cmd = (res.params as { command?: unknown }).command;
-      if (!Array.isArray(cmd)) return res;
-      const command = cmd.map((c) => (typeof c === "string" && (c.startsWith("./") || c.startsWith("../"))) ? resolve(manifestDir, c) : c);
-      return { ...res, params: { ...res.params, command } };
-    }
-    if (!FILE_PATH_RESOLVERS.has(res.resolver)) return res;
-    const path = (res.params as { path?: unknown }).path;
-    if (typeof path !== "string" || isAbsolute(path) || path.includes("://")) return res;
-    return { ...res, params: { ...res.params, path: resolve(manifestDir, path) } };
-  });
-  return { ...manifest, provides: { ...manifest.provides, resources } };
+interface LoadedManifest {
+  manifest: BioManifest;
+  manifestDigest: `sha256:${string}`;
+  manifestBaseDir: string;
+}
+
+async function loadManifestSource(req: ManifestLoadRequest): Promise<LoadedManifest> {
+  if (req.manifestSnapshot !== undefined) {
+    const manifestBaseDir = req.manifestBaseDir
+      ? resolve(req.cwd, req.manifestBaseDir)
+      : req.manifestPath
+        ? dirname(resolveInCwd(req.cwd, req.manifestPath))
+        : req.cwd;
+    return {
+      manifest: req.manifestSnapshot,
+      manifestBaseDir,
+      manifestDigest: canonicalDigest(req.manifestSnapshot),
+    };
+  }
+  if (!req.manifestPath) throw new Error("manifestPath or manifestSnapshot is required");
+  const manifestPath = resolveInCwd(req.cwd, req.manifestPath);
+  const text = await fs.readFile(manifestPath, "utf8");
+  const manifest = JSON.parse(text) as BioManifest;
+  return {
+    manifest,
+    manifestBaseDir: dirname(manifestPath),
+    manifestDigest: canonicalDigest(manifest),
+  };
 }
 
 export function runsRoot(cwd: string): string {
@@ -316,7 +321,12 @@ export async function persistFailedRun(cwd: string, runId: string, payload: { ru
 export interface RunOperationRequest {
   cwd: string;
   dbPath: string; // explicit; ":memory:" or a path
-  manifestPath: string;
+  /** Path to a manifest to load and validate (resolved relative to cwd). */
+  manifestPath?: string;
+  /** In-memory manifest snapshot for portable replay (overrides `manifestPath` when both are present). */
+  manifestSnapshot?: BioManifest;
+  /** Base dir for resolving relative paths in the in-memory manifest snapshot. */
+  manifestBaseDir?: string;
   operationId: string;
   runId?: string;
   now?: string;
@@ -428,12 +438,8 @@ function resolveInCwd(cwd: string, p: string): string {
 
 /** Load + validate + register a manifest and bind the built-in resolver impls it declares. Shared by the
  *  operation and the ad-hoc query entry points. */
-async function prepareRegistry(req: { cwd: string; manifestPath: string; network?: { fetch: FetchLike }; compute?: { runner: ComputeRunner } }): Promise<{ registry: BioRegistry; manifest: BioManifest; raw: BioManifest; manifestDigest: string }> {
-  const manifestPath = resolveInCwd(req.cwd, req.manifestPath);
-  const text = await fs.readFile(manifestPath, "utf8");
-  const raw = JSON.parse(text) as BioManifest; // the AUTHORED manifest — portable replay intent (relative paths intact)
-  const manifestDigest = `sha256:${createHash("sha256").update(text).digest("hex")}`;
-  const manifest = resolveResourcePaths(raw, dirname(manifestPath)); // relative resource paths -> manifest dir (resolved execution facts)
+async function prepareRegistry(req: { cwd: string; manifestPath?: string; manifestSnapshot?: BioManifest; manifestBaseDir?: string; network?: { fetch: FetchLike }; compute?: { runner: ComputeRunner } }): Promise<{ registry: BioRegistry; manifest: BioManifest; raw: BioManifest; manifestDigest: string; manifestBaseDir: string }> {
+  const { manifest, manifestDigest, manifestBaseDir } = await loadManifestSource(req);
   const registry = createBioRegistry();
   registry.registerManifest(manifest); // throws on an invalid manifest (fail closed)
   // Host-injected capability resolvers — present only when the host GRANTS them by composition; absent => the
@@ -446,7 +452,7 @@ async function prepareRegistry(req: { cwd: string; manifestPath: string; network
     const impl = BUILTIN_RESOLVERS[r.id] ?? injected[r.id];
     if (impl) registry.bindResolverImpl(r.id, impl);
   }
-  return { registry, manifest, raw, manifestDigest };
+  return { registry, manifest, raw: manifest, manifestDigest, manifestBaseDir };
 }
 
 async function inferQueryResourcesFromManifest(manifest: BioManifest, sql: string): Promise<string[]> {
@@ -1046,7 +1052,7 @@ export async function runBioOperationFromManifest(req: RunOperationRequest): Pro
   assertJsonSafeBindings(req.protectedSessionBindings, "protected session binding", "protected session bindings must be JSON-serializable so their digest is stable across reproduce/recall keys");
   const hostCapabilityRefs = hostCapabilityReceiptRefs(req.hostCapabilityReceipts);
   const protectedNamesDigest = protectedSessionVariablesDigest(req.protectedSessionVariables);
-  const { registry, raw, manifest, manifestDigest } = await prepareRegistry(req);
+  const { registry, raw, manifest, manifestDigest, manifestBaseDir } = await prepareRegistry(req);
   const op = registry.getOperation(req.operationId);
   if (!op) throw new Error(`operation '${req.operationId}' is not declared in the manifest`);
   if (op.transport !== "duckdb.sql" || !op.sql) throw new Error(`operation '${req.operationId}' is not a duckdb.sql operation`);
@@ -1070,13 +1076,18 @@ export async function runBioOperationFromManifest(req: RunOperationRequest): Pro
     ...(hostCapabilityRefs.length ? { hostReceiptDigests: hostCapabilityRefs.map((r) => r.digest) } : {}),
     ...(computeResources ? { computeResources } : {}),
   };
-  return runAndPersist(req.cwd, req.dbPath, runId, req.operationId, "operation", (conn) => runOperation(registry, conn, { operationId: req.operationId, runId, now, signal: req.signal, cas: req.cas, remoteCacheScope: req.remoteCacheScope }), req.now, req.duckdbInitSql, req.bindings, req.protectedSessionBindings, req.protectedSessionVariables, req.duckdbConfig, req.sqlPolicy, replay, hostCapabilityRefs, req.ducknngHttpProfiles, req.store ? { store: req.store, author: req.author } : undefined, req.cas, req.casMetadata, req.serialize);
+  return runAndPersist(req.cwd, req.dbPath, runId, req.operationId, "operation", (conn) => runOperation(registry, conn, { operationId: req.operationId, runId, now, signal: req.signal, cas: req.cas, remoteCacheScope: req.remoteCacheScope, manifestBaseDir }), req.now, req.duckdbInitSql, req.bindings, req.protectedSessionBindings, req.protectedSessionVariables, req.duckdbConfig, req.sqlPolicy, replay, hostCapabilityRefs, req.ducknngHttpProfiles, req.store ? { store: req.store, author: req.author } : undefined, req.cas, req.casMetadata, req.serialize);
 }
 
 export interface RunQueryRequest {
   cwd: string;
   dbPath: string;
-  manifestPath: string;
+  /** Path to a manifest to load and validate (resolved relative to cwd). */
+  manifestPath?: string;
+  /** In-memory manifest snapshot for portable replay (overrides `manifestPath` when both are present). */
+  manifestSnapshot?: BioManifest;
+  /** Base dir for resolving relative paths in the in-memory manifest snapshot. */
+  manifestBaseDir?: string;
   /** The read-only SQL to run, written after schema discovery over the resolved tables. */
   sql: string;
   /** Which declared resources to materialize first. When omitted, the host infers the minimal set from SQL table
@@ -1145,7 +1156,7 @@ export async function runBioQueryFromManifest(req: RunQueryRequest): Promise<Run
   assertJsonSafeBindings(req.protectedSessionBindings, "protected session binding", "protected session bindings must be JSON-serializable so their digest is stable across reproduce/recall keys");
   const hostCapabilityRefs = hostCapabilityReceiptRefs(req.hostCapabilityReceipts);
   const protectedNamesDigest = protectedSessionVariablesDigest(req.protectedSessionVariables);
-  const { registry, manifest, raw, manifestDigest } = await prepareRegistry(req);
+  const { registry, manifest, raw, manifestDigest, manifestBaseDir } = await prepareRegistry(req);
   const resources = req.resources ?? await inferQueryResourcesFromManifest(manifest, req.sql);
   const now = req.now ?? systemClock();
   const runId = req.runId ?? `query-${Date.now()}-${randomUUID().slice(0, 8)}`; // globally unique: see runBioOperationFromManifest
@@ -1161,5 +1172,5 @@ export async function runBioQueryFromManifest(req: RunQueryRequest): Promise<Run
     ...(hostCapabilityRefs.length ? { hostReceiptDigests: hostCapabilityRefs.map((r) => r.digest) } : {}),
     ...(computeResources ? { computeResources } : {}),
   };
-  return runAndPersist(req.cwd, req.dbPath, runId, "ad-hoc.query", "query", (conn, protectedSessionVariables) => runQuery(registry, conn, { sql: req.sql, resources, runId, now, signal: req.signal, cas: req.cas, remoteCacheScope: req.remoteCacheScope, protectedSessionVariables }), req.now, req.duckdbInitSql, req.bindings, req.protectedSessionBindings, req.protectedSessionVariables, req.duckdbConfig, req.sqlPolicy, replay, hostCapabilityRefs, req.ducknngHttpProfiles, req.store ? { store: req.store, author: req.author } : undefined, req.cas, req.casMetadata, req.serialize);
+  return runAndPersist(req.cwd, req.dbPath, runId, "ad-hoc.query", "query", (conn, protectedSessionVariables) => runQuery(registry, conn, { sql: req.sql, resources, runId, now, signal: req.signal, cas: req.cas, remoteCacheScope: req.remoteCacheScope, manifestBaseDir, protectedSessionVariables }), req.now, req.duckdbInitSql, req.bindings, req.protectedSessionBindings, req.protectedSessionVariables, req.duckdbConfig, req.sqlPolicy, replay, hostCapabilityRefs, req.ducknngHttpProfiles, req.store ? { store: req.store, author: req.author } : undefined, req.cas, req.casMetadata, req.serialize);
 }

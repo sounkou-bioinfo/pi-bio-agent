@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isAbsolute, resolve } from "node:path";
 import { systemClock } from "../../core/clock.js";
 import { readFileSync } from "node:fs";
 import type { BioResolverImpl, ResolverOutput } from "../../core/ports.js";
@@ -11,6 +12,12 @@ import { memoLookup, memoStore } from "../resolution-memo.js";
 // it regardless of where the rows came from.
 
 const IDENT_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+
+function resolveManifestPath(path: string, manifestBaseDir?: string): string {
+  if (path.includes("://") || isAbsolute(path) || !manifestBaseDir) return path;
+  return resolve(manifestBaseDir, path);
+}
 
 // Native DuckDB table functions only (no extension required). Add xlsx/excel here once that extension is
 // provisioned by the host, the same way duckhts handles HTS formats.
@@ -38,7 +45,9 @@ export const duckdbFileScanResolver: BioResolverImpl = async (resource, ctx) => 
   const { path, reader, table = "data" } = resource.params as { path: string; reader?: string; table?: string };
   if (typeof path !== "string" || !path.trim()) throw new Error("duckdb.file_scan: 'path' (string) is required");
   if (!IDENT_RE.test(table)) throw new Error("duckdb.file_scan: 'table' must be a SQL identifier");
-  const fn = readerFor(path, reader);
+  const sourcePath = path;
+  const resolvedPath = resolveManifestPath(path, ctx.manifestBaseDir);
+  const fn = readerFor(sourcePath, reader);
   const now = ctx.now ?? systemClock();
 
   // Memoization key = the file's CONTENT digest (not mtime+size, which false-hits on a same-size change with a
@@ -48,17 +57,17 @@ export const duckdbFileScanResolver: BioResolverImpl = async (resource, ctx) => 
   // no digest -> no memo (always re-resolve), the safe default; the reader fails closed below if truly missing.
   let inputDigest: string | undefined;
   try {
-    inputDigest = `sha256:${createHash("sha256").update(readFileSync(path)).digest("hex")}`;
+    inputDigest = `sha256:${createHash("sha256").update(readFileSync(resolvedPath)).digest("hex")}`;
   } catch {
     /* non-local or unreadable path -> no content digest, no memo */
   }
-  const freshness = inputDigest === undefined ? undefined : `file_scan:${fn}:${path}:${inputDigest}`;
+  const freshness = inputDigest === undefined ? undefined : `file_scan:${fn}:${resolvedPath}:${inputDigest}`;
   if (freshness !== undefined) {
     const hit = await memoLookup(ctx.conn, table, freshness);
     if (hit) return hit; // identical content + table present: replay the receipt, skip the DuckDB load
   }
 
-  await ctx.conn.run(`CREATE OR REPLACE TABLE ${table} AS SELECT * FROM ${fn}(?)`, [path]);
+  await ctx.conn.run(`CREATE OR REPLACE TABLE ${table} AS SELECT * FROM ${fn}(?)`, [resolvedPath]);
 
   // TOCTOU: the digest was computed BEFORE the scan, so a file changed between hash and scan would falsely pin the
   // OLD content while the table holds the NEW data — an unsafe reproduce "match" / ActionCache key. Re-hash AFTER the
@@ -66,11 +75,11 @@ export const duckdbFileScanResolver: BioResolverImpl = async (resource, ctx) => 
   // DROP the pin (undefined -> live_source, no memo) so a hit can never serve stale.
   if (inputDigest !== undefined) {
     let afterDigest: string | undefined;
-    try { afterDigest = `sha256:${createHash("sha256").update(readFileSync(path)).digest("hex")}`; } catch { afterDigest = undefined; }
+    try { afterDigest = `sha256:${createHash("sha256").update(readFileSync(resolvedPath)).digest("hex")}`; } catch { afterDigest = undefined; }
     if (afterDigest !== inputDigest) inputDigest = undefined;
   }
 
-  const sourceUri = path.includes("://") ? path : `file:${path}`; // a remote input is its own URI, not file:
+  const sourceUri = sourcePath.includes("://") ? sourcePath : `file:${sourcePath}`; // a remote input is its own URI, not file:
   const output: ResolverOutput = {
     result: { mode: "reference", name: table, pointer: { uri: `table:${table}`, format: "table" } },
     sourceSnapshots: [

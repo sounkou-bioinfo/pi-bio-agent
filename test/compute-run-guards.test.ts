@@ -24,6 +24,47 @@ describe("SECURITY: spawned children do not inherit host secrets, and CAS/run pa
     assert.equal(ok.ok, true, "a namespaced runId with ':' runs and persists through run-store");
   });
 
+
+  test("compute command arg resolution only applies to ./ and ../ script argv, not shell -c command strings", async () => {
+    const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-cmdpath-"));
+    const scriptsDir = join(cwd, "scripts");
+    await fs.mkdir(scriptsDir, { recursive: true });
+    await fs.writeFile(join(scriptsDir, "render.sh"), "#!/bin/sh\nprintf ok > out.txt\n");
+    const manifest = {
+      ...BASE,
+      provides: {
+        ...BASE.provides,
+        resources: [{
+          id: "tracks",
+          title: "Tracks",
+          kind: "virtual",
+          resolver: "compute.run",
+          params: {
+            table: "tracks",
+            command: ["sh", "-c", "scripts/render.sh"],
+            resultTable: "artifacts",
+            outputs: [{ name: "render", path: "out.txt", kind: "file" }],
+          },
+        }],
+      },
+    };
+    await fs.writeFile(join(cwd, "manifest.json"), JSON.stringify(manifest));
+    const cas = fsCasStore(await fs.mkdtemp(join(tmpdir(), "pi-bio-cmdpath-cas-")));
+    const out = await runBioQueryFromManifest({
+      cwd,
+      dbPath: ":memory:",
+      manifestPath: "manifest.json",
+      manifestBaseDir: cwd,
+      sql: "SELECT * FROM tracks",
+      compute: { runner: nodeComputeRunner() },
+      cas,
+      runId: "cmdpath1",
+      now: "T1",
+    });
+    assert.equal(out.ok, false, "non-dot-relative command strings should not be resolved to host manifest files");
+    assert.match(String((out as { error?: unknown }).error ?? ""), /scripts\/render\.sh/);
+  });
+
   test("a spawned child does NOT see host process.env secrets, but DOES get explicit spec.env + a resolvable PATH", async () => {
     process.env.PI_BIO_FAKE_SECRET = "topsecret-do-not-leak";
     try {

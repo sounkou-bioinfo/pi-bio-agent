@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
-import { createHash } from "node:crypto";
-import { join, resolve, isAbsolute } from "node:path";
+import { dirname, join, resolve, isAbsolute } from "node:path";
 import { RUN_REPLAY_SPEC_SCHEMA, receiptContentDigest, canonicalDigest, hostCapabilityReceiptDigests, type EnvAttestationSummary, type HostCapabilityReceipt, type RunReplayOutcome, type RunReplaySpec } from "../core/reproducibility.js";
+import type { BioManifest } from "../core/manifest.js";
 import type { CasStore } from "../core/cas.js";
 import type { ComputeRunner, SqlConn } from "../core/ports.js";
 import type { FetchLike } from "../duckdb/resolvers/http-table-scan.js";
@@ -80,6 +80,9 @@ export interface ReproduceRequest {
   /** the host re-supplies the connection-init SQL (it may bear secrets, so it is NOT stored in the replay — only
    *  its digest is). reproduce re-applies it and verifies it matches the pinned `duckdbInitSqlDigest`, failing closed. */
   duckdbInitSql?: string[];
+  /** Base directory for portable manifest snapshot replay. When provided, relative paths in replay.manifest.snapshot
+   *  (file/duckhts paths, compute command paths) resolve against this directory instead of replay.manifest.path. */
+  manifestBaseDir?: string;
   /** Host-owned protected session bindings. Values are not stored in replay; a pinned digest must be re-supplied. */
   protectedSessionBindings?: Record<string, unknown>;
   /** Additional host-declared protected session variable names, e.g. for variables set by duckdbInitSql. */
@@ -94,8 +97,12 @@ export interface ReproduceRequest {
 
 function assertReproducible(replay: RunReplaySpec): void {
   if (!replay || replay.schema !== RUN_REPLAY_SPEC_SCHEMA) throw new Error("reproduce: not a valid RunReplaySpec (fail closed)");
-  if (!replay.manifest?.path && !replay.manifest?.snapshot) throw new Error("reproduce: replay has no manifest to re-run (fail closed)");
-  if (!replay.manifest?.path) throw new Error("reproduce: this slice re-runs from replay.manifest.path (same-host); a snapshot-only replay is not yet supported");
+  if (!replay.manifest?.snapshot) throw new Error("reproduce: replay has no manifest snapshot to re-run (fail closed)");
+  if (typeof replay.manifest.snapshot !== "object" || replay.manifest.snapshot === null || Array.isArray(replay.manifest.snapshot)) throw new Error("reproduce: replay.manifest.snapshot must be an object (fail closed)");
+  if (!/^sha256:[0-9a-f]{64}$/i.test(replay.manifest.digest ?? "")) throw new Error("reproduce: replay.manifest.digest must be a sha256 digest (fail closed)");
+  if (canonicalDigest(replay.manifest.snapshot) !== replay.manifest.digest) {
+    throw new Error("reproduce: replay.manifest.snapshot does not match replay.manifest.digest (fail closed)");
+  }
   if (!replay.outcome) throw new Error("reproduce: replay has no terminal outcome pin (fail closed)");
   if (!["succeeded", "failed", "cancelled"].includes(replay.outcome.status)) throw new Error("reproduce: replay has an invalid terminal outcome status (fail closed)");
   if (replay.outcome.status === "succeeded" && replay.outcome.errorDigest !== undefined) {
@@ -181,19 +188,6 @@ export async function reproduceRun(req: ReproduceRequest): Promise<ReproduceResu
     if (supplied.length === 0) throw new Error("reproduce: this run pinned hostReceiptDigests — re-supply the same hostCapabilityReceipts to reproduce it faithfully (fail closed)");
     if (JSON.stringify(supplied) !== JSON.stringify(replay.hostReceiptDigests)) throw new Error("reproduce: the supplied hostCapabilityReceipts do not match the pinned hostReceiptDigests (would not be a faithful reproduction)");
   }
-  // VERIFY the manifest hasn't changed: reproduce re-runs from replay.manifest.path (by operationId or sql), so a
-  // manifest edited since the original run would execute DIFFERENT logic yet could still 'match' if receipts happen
-  // to align. Compare the CURRENT file's digest to the pinned one and fail closed on drift. (manifestDigest =
-  // sha256 of the file text, matching prepareRegistry.)
-  if (replay.manifest!.digest) {
-    // Resolve the (possibly-relative) manifest path against req.cwd — the SAME base the re-run uses
-    // (prepareRegistry: resolveInCwd(req.cwd, path)). Reading it against the process cwd would verify the digest of
-    // a DIFFERENT (or missing) file than the one actually re-run, making same-host replay cwd-sensitive.
-    const manifestFile = isAbsolute(replay.manifest!.path!) ? replay.manifest!.path! : resolve(req.cwd, replay.manifest!.path!);
-    const currentText = await fs.readFile(manifestFile, "utf8");
-    const currentDigest = `sha256:${createHash("sha256").update(currentText).digest("hex")}`;
-    if (currentDigest !== replay.manifest!.digest) throw new Error(`reproduce: manifest at ${manifestFile} has CHANGED since the run (${currentDigest} != pinned ${replay.manifest!.digest}) — reproduction would run different logic (fail closed)`);
-  }
   // The reproduction run id must stay within the run-dir id limit (128 chars, RUN_DIR_ID_RE) — otherwise an ORIGINAL
   // runId near that max would, with the `reproduce-…-<epoch>` wrapping, overflow and be rejected before reproduction,
   // making a valid persisted run unreproducible. Truncate the original portion to fit (it's an internal temp-run id;
@@ -201,8 +195,16 @@ export async function reproduceRun(req: ReproduceRequest): Promise<ReproduceResu
   const suffix = `-${Date.now()}`;
   const budget = 128 - "reproduce-".length - suffix.length;
   const shortId = replay.runId.slice(0, Math.max(1, budget));
+  const manifestBaseDir = req.manifestBaseDir
+    ?? (replay.manifest?.path
+      ? dirname(isAbsolute(replay.manifest.path) ? replay.manifest.path : resolve(req.cwd, replay.manifest.path))
+      : req.cwd);
+  const manifestSnapshot = replay.manifest!.snapshot as BioManifest;
   const base = {
-    cwd: req.cwd, dbPath: req.dbPath ?? ":memory:", manifestPath: replay.manifest!.path!,
+    cwd: req.cwd, dbPath: req.dbPath ?? ":memory:",
+    manifestSnapshot,
+    manifestPath: replay.manifest?.path,
+    manifestBaseDir,
     bindings: replay.bindings, duckdbInitSql: req.duckdbInitSql, protectedSessionBindings: req.protectedSessionBindings, protectedSessionVariables: req.protectedSessionVariables, duckdbConfig: req.duckdbConfig, hostCapabilityReceipts: req.hostCapabilityReceipts,
     network: req.network, compute: req.compute, signal: req.signal, cas: req.cas, remoteCacheScope: req.remoteCacheScope,
     store: req.store, author: req.author,

@@ -97,6 +97,8 @@ export interface ResolutionContext {
    *  uses one constant scope (e.g. "public") for genuinely un-authenticated content to get full cross-db reuse.
    *  Absent → the shared index is skipped entirely (the per-db memo still works); no cross-scope leak is possible. */
   remoteCacheScope?: string;
+  /** Host-declared manifest directory for resolving authored relative paths. */
+  manifestBaseDir?: string;
 }
 
 /**

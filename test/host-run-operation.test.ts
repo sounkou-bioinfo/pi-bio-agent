@@ -85,8 +85,8 @@ describe("host: bio_run_operation end-to-end", () => {
     assert.equal(Number(included.n), 1); // ClawBio rhi_01 ground truth, via the host — counts come from SQL
     const avReceipt = receipts.find((r: { resourceId: string }) => r.resourceId === "annotated_variants");
     assert.equal(avReceipt.resolverId, "duckdb.file_scan");
-    // the relative manifest path was resolved to an absolute file under the project, not the process cwd
-    assert.ok(avReceipt.sourceSnapshots.some((s: { source: string }) => s.source === `file:${join(cwd, "data", "annotated_variants.csv")}`));
+    // the source URI in receipts preserves authored path form from the manifest (portable across checkouts)
+    assert.ok(avReceipt.sourceSnapshots.some((s: { source: string }) => s.source === `file:data/annotated_variants.csv`));
 
     // the receipts ARE the provenance footprint: exactly the operation's requiredResources, no more, no less
     const receiptIds = receipts.map((r: { resourceId: string }) => r.resourceId).sort();

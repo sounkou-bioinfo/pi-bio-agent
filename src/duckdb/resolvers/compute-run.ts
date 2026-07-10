@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, isAbsolute, join, resolve, sep } from "node:path";
+import { basename, isAbsolute, join, resolve } from "node:path";
 import { systemClock } from "../../core/clock.js";
 import { validateReadOnlySelect } from "../../core/sql-guard.js";
 import { captureDeclaredOutputsToCas } from "../artifact-capture.js";
@@ -61,6 +61,14 @@ import { attestEnvironment, validateEnvDescriptor, ENV_ATTESTATION_SCHEMA, type 
 
 const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
+function resolveCommandPath(path: string, manifestBaseDir?: string): string {
+  if (path.startsWith("./") || path.startsWith("../")) {
+    if (!manifestBaseDir) return path;
+    return resolve(manifestBaseDir, path);
+  }
+  return path;
+}
+
 export function computeRunResolver(runner: ComputeRunner): BioResolverImpl {
   return async (resource, ctx) => {
     const p = resource.params as { table?: unknown; inputSql?: unknown; command?: unknown; env?: unknown; timeoutMs?: unknown; extensions?: unknown; outputs?: unknown; resultTable?: unknown; environment?: unknown; maxOutputBytes?: unknown };
@@ -77,6 +85,7 @@ export function computeRunResolver(runner: ComputeRunner): BioResolverImpl {
       throw new Error("compute.run requires params.command to be a non-empty array of strings (argv, not a shell string)");
     }
     const command = p.command as string[];
+    const resolvedCommand = command.map((entry) => resolveCommandPath(entry, ctx.manifestBaseDir));
     // A non-positive timeoutMs (0 / negative) must NOT silently disable the timeout (0 is falsy -> the runner
     // would arm no timer -> an unbounded child). Reject it; absent falls back to the 120s default.
     if (p.timeoutMs !== undefined && (typeof p.timeoutMs !== "number" || !Number.isFinite(p.timeoutMs) || p.timeoutMs <= 0)) {
@@ -181,7 +190,7 @@ export function computeRunResolver(runner: ComputeRunner): BioResolverImpl {
       if (inner) argvExtra.push(inFile);
       if (resultTable === "arrow") argvExtra.push(outFile);
       const result = await collectComputeTask(runner, {
-        command: [...command, ...argvExtra],
+        command: [...resolvedCommand, ...argvExtra],
         env,
         cwd: dir, // the WORK DIR — declared output paths are relative to it (the Nextflow model)
         timeoutMs,
@@ -225,7 +234,7 @@ export function computeRunResolver(runner: ComputeRunner): BioResolverImpl {
       // real compute knob) is folded in. The in/out Arrow paths (argv) are deliberately absent (machine-specific temp paths
       // added only at spawn) — excluding them keeps the digest portable.
       const parts: string[] = [];
-      for (const c of command) {
+      for (const c of resolvedCommand) {
         let entry = `arg:${c}`;
         try {
           const st = await fs.stat(c);
@@ -244,7 +253,7 @@ export function computeRunResolver(runner: ComputeRunner): BioResolverImpl {
       let observedEnv: EnvDescriptor | undefined;
       const envNotes: string[] = [];
       if (runner.describeEnvironment) {
-        try { observedEnv = await runner.describeEnvironment({ command, env, cwd: dir, timeoutMs, signal: ctx.signal }); }
+        try { observedEnv = await runner.describeEnvironment({ command: resolvedCommand, env, cwd: dir, timeoutMs, signal: ctx.signal }); }
         catch (e) { envNotes.push(`env probe failed: ${e instanceof Error ? e.message : String(e)}`); }
       }
       const envAttestation = attestEnvironment(
