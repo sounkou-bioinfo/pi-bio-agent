@@ -15,6 +15,7 @@ export * from "./in-memory-job-runner.js";
 export * from "./reproduce.js";
 export * from "./ledger-job-runner.js";
 export * from "./job-queue.js";
+export * from "./queue-job-worker.js";
 export * from "./queue-job-runner.js";
 export * from "./session-ingest.js";
 export * from "./host-events.js";

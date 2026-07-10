@@ -13,9 +13,44 @@ import { replaySpecDigest } from "../core/reproducibility.js";
 const TABLE = "pi_bio_job_queue";
 const PHASES = new Set<JobPhase>(["queued", "running", "waiting", "succeeded", "failed", "cancelled"]);
 const TERMINAL_PHASES = new Set<JobPhase>(["succeeded", "failed", "cancelled"]);
-const WORKER_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$/;
+const MAX_WORKER_ID_BYTES = 128;
 
 export type JobTerminalPhase = "succeeded" | "failed" | "cancelled";
+
+export type JobClaimLostOperation = "heartbeat" | "park" | "finish" | "record-observation";
+
+export interface JobClaimLostErrorInfo {
+  operation: JobClaimLostOperation;
+  runId: string;
+  workerId: string;
+}
+
+export class JobClaimLostError extends Error {
+  readonly operation: JobClaimLostOperation;
+  readonly runId: string;
+  readonly workerId: string;
+
+  constructor(operation: JobClaimLostOperation, runId: string, workerId: string);
+  constructor(info: JobClaimLostErrorInfo);
+  constructor(opOrInfo: JobClaimLostOperation | JobClaimLostErrorInfo, runId?: string, workerId?: string) {
+    const details: JobClaimLostErrorInfo =
+      typeof opOrInfo === "string"
+        ? {
+            operation: opOrInfo,
+            runId: runId ?? (() => {
+              throw new Error("job-queue: JobClaimLostError requires runId and workerId");
+            })(),
+            workerId: workerId ?? (() => {
+              throw new Error("job-queue: JobClaimLostError requires runId and workerId");
+            })(),
+          }
+        : opOrInfo;    super(`job-queue: job '${details.runId}' is not held by worker '${details.workerId}' (operation=${details.operation})`);
+    this.name = "JobClaimLostError";
+    this.operation = details.operation;
+    this.runId = details.runId;
+    this.workerId = details.workerId;
+  }
+}
 
 export interface JobQueueRecord {
   runId: string;
@@ -138,7 +173,9 @@ export async function heartbeatJobClaim(conn: SqlConn, req: HeartbeatJobClaimReq
      RETURNING run_id, replay_json, replay_digest, phase, attempt, available_at, claimed_by, claim_expires_at, created_at, updated_at`,
     [req.now, req.leaseSeconds, req.now, req.runId, req.workerId, req.now],
   );
-  if (!rows[0]) throw new Error(`job-queue: job '${req.runId}' is not held by worker '${req.workerId}' with a live lease`);
+  if (!rows[0]) {
+    throw new JobClaimLostError("heartbeat", req.runId, req.workerId);
+  }
   return rowToClaim(rows[0]);
 }
 
@@ -166,7 +203,9 @@ export async function parkJobClaim(conn: SqlConn, req: ParkJobClaimRequest): Pro
      RETURNING run_id, replay_json, replay_digest, phase, attempt, available_at, claimed_by, claim_expires_at, created_at, updated_at`,
     [req.availableAt, req.now, req.runId, req.workerId, req.now],
   );
-  if (!rows[0]) throw new Error(`job-queue: job '${req.runId}' is not held by worker '${req.workerId}' with a live lease`);
+  if (!rows[0]) {
+    throw new JobClaimLostError("park", req.runId, req.workerId);
+  }
   return rowToRecord(rows[0]);
 }
 
@@ -194,7 +233,9 @@ export async function finishJobClaim(conn: SqlConn, req: FinishJobClaimRequest):
      RETURNING run_id, replay_json, replay_digest, phase, attempt, available_at, claimed_by, claim_expires_at, created_at, updated_at`,
     [req.phase, req.now, req.now, req.runId, req.workerId, req.now],
   );
-  if (!rows[0]) throw new Error(`job-queue: job '${req.runId}' is not held by worker '${req.workerId}' with a live lease`);
+  if (!rows[0]) {
+    throw new JobClaimLostError("finish", req.runId, req.workerId);
+  }
   return rowToRecord(rows[0]);
 }
 
@@ -339,9 +380,10 @@ async function insertObservationForLiveClaim(conn: SqlConn, req: LiveJobClaimReq
   if (rows[0]) return rows[0].observation_id;
   const existing = await conn.all<{ observation_id: string }>("SELECT observation_id FROM bio_observations WHERE observation_id = ?", [id]);
   if (existing[0]) return id;
-  const rec = await readJobQueueRecord(conn, req.runId);
-  const state = rec ? `${rec.phase}${rec.claimedBy ? ` held by ${rec.claimedBy}` : ""}${rec.attempt ? ` attempt ${rec.attempt}` : ""}` : "missing";
-  throw new Error(`job-queue: job '${req.runId}' is not held by worker '${req.workerId}' on live attempt ${req.attempt} at ${req.recordedAt} (queue state: ${state})`);
+  if (!(await readJobQueueRecord(conn, req.runId))) {
+    throw new JobClaimLostError("record-observation", req.runId, req.workerId);
+  }
+  throw new JobClaimLostError("record-observation", req.runId, req.workerId);
 }
 
 function observationId(obs: ClaimGatedObservation & { recordedAt: string }): `sha256:${string}` {
@@ -403,8 +445,8 @@ async function assertTimestamp(conn: SqlConn, label: string, value: string): Pro
 }
 
 function assertWorkerId(workerId: string): void {
-  if (typeof workerId !== "string" || !WORKER_ID_RE.test(workerId)) {
-    throw new Error(`job-queue: workerId '${workerId}' must be a non-empty worker token`);
+  if (typeof workerId !== "string" || workerId.length === 0 || workerId.trim() !== workerId || Buffer.byteLength(workerId, "utf8") > MAX_WORKER_ID_BYTES) {
+    throw new Error(`job-queue: workerId '${workerId}' must be a non-empty trimmed string no longer than ${MAX_WORKER_ID_BYTES} UTF-8 bytes`);
   }
 }
 

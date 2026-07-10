@@ -14,6 +14,7 @@ import {
   readJobQueueRecord,
   recordJobClaimResult,
   recordJobClaimStatus,
+  JobClaimLostError,
 } from "../src/hosts/job-queue.js";
 import type { RunReplaySpec } from "../src/core/reproducibility.js";
 
@@ -108,6 +109,68 @@ describe("job queue: durable worker coordination", () => {
     await assert.rejects(
       () => finishJobClaim(conn, { runId: "stale", workerId: "old", now: "2026-07-01T00:00:13Z", phase: "failed" }),
       /not held by worker 'old'/,
+    );
+  });
+
+  test("claim-lost operations throw compact JobClaimLostError", async () => {
+    const conn = await setup();
+    await enqueueJob(conn, { runId: "gate", replay: replay("gate"), now: "2026-07-01T00:00:00Z" });
+
+    await claimJob(conn, { workerId: "old", now: "2026-07-01T00:00:01Z", leaseSeconds: 10 });
+    await conn.run("UPDATE pi_bio_job_queue SET claim_expires_at = '2026-07-01T00:00:01.500Z' WHERE run_id = 'gate'");
+    const second = await claimJob(conn, { workerId: "new", now: "2026-07-01T00:00:11Z", leaseSeconds: 30 });
+    assert.equal(second?.attempt, 2);
+
+    let lostHeartbeat: JobClaimLostError | undefined;
+    await assert.rejects(
+      heartbeatJobClaim(conn, {
+        runId: "gate",
+        workerId: "old",
+        now: "2026-07-01T00:00:12Z",
+        leaseSeconds: 30,
+      }),
+      (error): error is JobClaimLostError => {
+        lostHeartbeat = error as JobClaimLostError;
+        return error instanceof JobClaimLostError;
+      },
+    );
+    assert.ok(lostHeartbeat !== undefined);
+    assert.equal(lostHeartbeat.runId, "gate");
+    assert.equal(lostHeartbeat.workerId, "old");
+    assert.equal(lostHeartbeat.operation, "heartbeat");
+    assert.equal(
+      Reflect.ownKeys(lostHeartbeat).filter((key) => {
+        const k = String(key);
+        return !["stack", "message", "name", "operation", "runId", "workerId"].includes(k);
+      }).length,
+      0,
+    );
+
+    let lostWrite: JobClaimLostError | undefined;
+    await assert.rejects(
+      recordJobClaimResult(conn, {
+        runId: "gate",
+        workerId: "old",
+        attempt: 1,
+        replayDigest: second!.replayDigest,
+        recordedAt: "2026-07-01T00:00:13Z",
+        result: { stale: true },
+      }),
+      (error): error is JobClaimLostError => {
+        lostWrite = error as JobClaimLostError;
+        return error instanceof JobClaimLostError;
+      },
+    );
+    assert.ok(lostWrite !== undefined);
+    assert.equal(lostWrite.operation, "record-observation");
+    assert.equal(lostWrite.runId, "gate");
+    assert.equal(lostWrite.workerId, "old");
+    assert.equal(
+      Reflect.ownKeys(lostWrite).filter((key) => {
+        const k = String(key);
+        return !["stack", "message", "name", "operation", "runId", "workerId"].includes(k);
+      }).length,
+      0,
     );
   });
 
