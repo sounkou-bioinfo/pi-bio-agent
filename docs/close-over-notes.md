@@ -5,13 +5,16 @@ primitive is warranted only when the application cannot express a concrete workf
 
 ## Clinical binding
 
-The clinical example is one evidence task with three durable steps:
+The clinical example is one evidence task with four durable steps:
 
-1. `clinical.case_evidence` resolves raw tables and declared SQL relations, then returns bounded review evidence
+1. Phenotype grounding resolves the immutable narrative and HPO candidates through recorded manifest queries,
+   runs host-injected augmentation/proposal/review ports, and stores the complete result in CAS.
+2. `clinical.case_evidence` materializes accepted observations from a replay-pinned JSON binding, resolves the other
+   declared SQL relations, and returns bounded review evidence
    from direct and inverted traversal.
-2. `clinical.reanalysis_diff` compares the same variant-assessment semantics with declared prior state and status
+3. `clinical.reanalysis_diff` compares the same variant-assessment semantics with declared prior state and status
    order.
-3. The application builds one evidence packet, writes it to CAS, and links the case, analysis, packet, and scientific
+4. The application builds one evidence packet, writes it to CAS, and links the case, analysis, packet, and scientific
    runs in the observation ledger.
 
 The relations carry the domain logic:
@@ -24,10 +27,12 @@ The relations carry the domain logic:
 ## Substrate used as-is
 
 - `runBioOperationFromManifest` for scientific execution and run evidence.
+- `runBioQueryFromManifest` for narrative and ontology candidate retrieval authored as SQL rather than direct file
+  parsing.
 - `runJobStepsWithCheckpoints` for prefix resume under one replay digest.
 - `openBioStore` and observation links for application state and provenance.
 - `CasStore` / `fsCasStore` for immutable run objects and the evidence packet.
-- `duckdb.sql_materialize` for intermediate relations; no clinical parser or query helper was added to TypeScript.
+- `duckdb.sql_materialize` for intermediate relations, including accepted phenotype observations.
 
 The application consumes `response.result.rows` directly and runs with `serialize: false`. It does not read exported
 `result.json` files as an internal transport.
@@ -46,3 +51,14 @@ bounded to review evidence and content references.
 
 No new core primitive was required for this slice. The first concrete pressure is remote artifact retrieval, not a
 new workflow engine or a generic workbench action registry.
+
+## Repository topology
+
+Keep the substrate and workbench in separate repositories while the workbench is proving the public consumer
+surface. The sibling file dependency and pinned two-repository CI provide fast local development without hiding an
+accidental internal API. Reconsider a monorepo only when ordinary features repeatedly require atomic commits and
+lockstep releases across both repositories; this grounding slice required no core code change.
+
+Execution policy remains host-owned. Trusted local scientific work can use the unrestricted host ports directly.
+Gondolin or another isolation backend is an optional `ComputeRunner`/host composition for untrusted generated code,
+sensitive credentials, or multi-tenant deployment, not a core or workbench dependency.

@@ -7,9 +7,11 @@ import {
   fsCasStore,
   openBioStore,
   readJobStepCheckpoint,
+  recordArtifactReference,
   recordObservation,
   recordObservationLink,
   runBioOperationFromManifest,
+  runBioQueryFromManifest,
   runJobStepsWithCheckpoints,
   validateContentAddress,
   type BioManifest,
@@ -19,12 +21,20 @@ import {
   type RunCasRefs,
   type SqlConn,
 } from "pi-bio-agent";
+import {
+  narrativeDigest,
+  runPhenotypeGrounding,
+  type GroundingMode,
+  type GroundingRuntime,
+  type OntologyCandidate,
+  type PhenotypeGroundingResult,
+} from "./phenotype-grounding.js";
 
 export const EVIDENCE_PACKET_SCHEMA = "pi-bio.workbench.evidence_packet.v1" as const;
 export const CLINICAL_ANALYSIS_SCHEMA = "pi-bio.workbench.clinical_analysis.v1" as const;
 
 const SOURCE = "pi-bio-workbench:clinical-genomics";
-const WORKFLOW_VERSION = "clinical-evidence-workflow.v1";
+const WORKFLOW_VERSION = "clinical-evidence-workflow.v2";
 const PACKET_MEDIA_TYPE = "application/vnd.pi-bio.workbench.evidence+json";
 const PACKET_STEP = "packet";
 
@@ -37,6 +47,8 @@ export interface RunClinicalGenomicsRequest {
   /** Reuse this id to resume the same task. A new id starts a fresh analysis. */
   analysisId?: string;
   now?: string;
+  /** Host-owned model/human composition. The application does not import a model SDK. */
+  grounding: GroundingRuntime;
 }
 
 export type OperationRows = {
@@ -61,6 +73,15 @@ export type EvidencePacket = {
     direct: OperationRows;
     inverted: OperationRows;
     reanalysis: OperationRows;
+  };
+  grounding: {
+    groundingId: string;
+    mode: GroundingMode;
+    resultDigest: string;
+    resultUri: string;
+    sourceDigest: string;
+    acceptedCount: number;
+    rejectedCount: number;
   };
   summary: {
     directCandidates: number;
@@ -92,6 +113,25 @@ type OperationCheckpoint = {
   runId: string;
   resultDigest: string;
   casRefs: RunCasRefs;
+};
+
+type GroundingCheckpoint = {
+  schema: "pi-bio.workbench.grounding_checkpoint.v1";
+  groundingId: string;
+  resultDigest: string;
+  resultUri: string;
+  acceptedCount: number;
+  rejectedCount: number;
+  mode: GroundingMode;
+  sourceDigest: string;
+  queryRunIds: string[];
+};
+
+type GroundingArtifact = {
+  schema: "pi-bio.workbench.grounding_artifact.v1";
+  contractDigest: string;
+  narrativeQuery: { runId: string; resultDigest: string };
+  result: PhenotypeGroundingResult;
 };
 
 export interface RunClinicalGenomicsResult extends EvidencePacketRef {
@@ -210,6 +250,7 @@ function buildPacket(args: {
   analysisId: string;
   caseId: string;
   generatedAt: string;
+  grounding: GroundingCheckpoint;
   evidence: OperationRows;
   reanalysis: OperationRows;
 }): EvidencePacket {
@@ -222,6 +263,15 @@ function buildPacket(args: {
     caseId: args.caseId,
     generatedAt: args.generatedAt,
     lanes: { direct, inverted, reanalysis: args.reanalysis },
+    grounding: {
+      groundingId: args.grounding.groundingId,
+      mode: args.grounding.mode,
+      resultDigest: args.grounding.resultDigest,
+      resultUri: args.grounding.resultUri,
+      sourceDigest: args.grounding.sourceDigest,
+      acceptedCount: args.grounding.acceptedCount,
+      rejectedCount: args.grounding.rejectedCount,
+    },
     summary: {
       directCandidates: direct.rows.filter((row) => row.variant_bucket === "candidate").length,
       directAbstentions: direct.rows.filter((row) => asString(row.variant_bucket).startsWith("abstain_")).length,
@@ -235,7 +285,201 @@ function buildPacket(args: {
       reviewQueue,
       kernelScope: "evidence routing only; not a complete clinical classification kernel",
     },
-    provenance: { runIds: [args.evidence.runId, args.reanalysis.runId] },
+    provenance: {
+      runIds: [...args.grounding.queryRunIds, args.evidence.runId, args.reanalysis.runId],
+    },
+  };
+}
+
+const PHENOTYPE_CANDIDATE_SQL = `WITH documents AS (
+  SELECT lower(json_extract_string(value, '$.text')) AS text
+  FROM json_each(CAST(getvariable('retrieval_documents_json') AS JSON))
+), term_text AS (
+  SELECT hpo_id, label, synonym, ontology_source, ontology_version, ontology_digest, label AS matched_text
+  FROM hpo_terms
+  UNION ALL
+  SELECT hpo_id, label, synonym, ontology_source, ontology_version, ontology_digest, synonym AS matched_text
+  FROM hpo_terms
+  WHERE synonym IS NOT NULL
+)
+SELECT DISTINCT hpo_id, label, ontology_source, ontology_version, ontology_digest, matched_text
+FROM term_text, documents
+WHERE strpos(text, lower(matched_text)) > 0
+ORDER BY hpo_id, matched_text`;
+
+async function runGroundingQuery(args: {
+  exampleDir: string;
+  analysisDbPath: string;
+  ledger: SqlConn;
+  cas: CasStore;
+  runId: string;
+  now: string;
+  sql: string;
+  resources: string[];
+  bindings: Record<string, unknown>;
+}): Promise<{ rows: JsonRecord[]; runId: string; resultDigest: string }> {
+  const response = await runBioQueryFromManifest({
+    cwd: args.exampleDir,
+    dbPath: args.analysisDbPath,
+    manifestPath: "manifest.json",
+    sql: args.sql,
+    resources: args.resources,
+    runId: args.runId,
+    now: args.now,
+    store: args.ledger,
+    author: SOURCE,
+    cas: args.cas,
+    casMetadata: { conn: args.ledger },
+    serialize: false,
+    bindings: args.bindings,
+  });
+  if (!response.ok) throw new Error(`grounding query '${args.runId}' failed: ${response.error}`);
+  if (!response.casRefs?.result) throw new Error(`grounding query '${args.runId}' completed without a CAS result digest`);
+  return { rows: asRows(response.result.rows), runId: response.runId, resultDigest: response.casRefs.result };
+}
+
+function ontologyCandidates(rows: JsonRecord[]): OntologyCandidate[] {
+  const byId = new Map<string, OntologyCandidate>();
+  for (const row of rows) {
+    const id = asString(row.hpo_id);
+    const label = asString(row.label);
+    const matchedText = asString(row.matched_text);
+    const ontologyDigest = asString(row.ontology_digest);
+    if (!id || !label || !matchedText || !ontologyDigest) throw new Error("candidate query returned an incomplete ontology row");
+    const existing = byId.get(id);
+    if (existing) {
+      if (existing.label !== label || existing.ontologyDigest !== ontologyDigest) throw new Error(`inconsistent ontology rows for '${id}'`);
+      if (!existing.matchedTexts.includes(matchedText)) existing.matchedTexts.push(matchedText);
+      continue;
+    }
+    byId.set(id, {
+      id,
+      label,
+      matchedTexts: [matchedText],
+      ontologySource: asString(row.ontology_source),
+      ontologyVersion: asString(row.ontology_version),
+      ontologyDigest,
+    });
+  }
+  return [...byId.values()];
+}
+
+async function runGrounding(args: {
+  exampleDir: string;
+  analysisDbPath: string;
+  ledger: SqlConn;
+  cas: CasStore;
+  caseId: string;
+  analysisId: string;
+  now: string;
+  composition: GroundingRuntime;
+}): Promise<GroundingCheckpoint> {
+  const narrativeQuery = await runGroundingQuery({
+    ...args,
+    runId: `${args.analysisId}.grounding.narrative`,
+    sql: "SELECT narrative FROM case_narratives WHERE case_id = getvariable('case_id')",
+    resources: ["case_narratives"],
+    bindings: { case_id: args.caseId },
+  });
+  if (narrativeQuery.rows.length !== 1) throw new Error(`expected one immutable narrative for case '${args.caseId}'`);
+  const narrative = asString(narrativeQuery.rows[0]?.narrative);
+  if (!narrative) throw new Error(`case '${args.caseId}' has an empty narrative`);
+  const retrievalQueryRunIds: string[] = [];
+  const result = await runPhenotypeGrounding({
+    narrative: { caseId: args.caseId, text: narrative, sourceDigest: narrativeDigest(narrative) },
+    mode: args.composition.mode,
+    retriever: {
+      async retrieve(input) {
+        const query = await runGroundingQuery({
+          ...args,
+          runId: `${args.analysisId}.grounding.retrieve-${input.pass}`,
+          sql: PHENOTYPE_CANDIDATE_SQL,
+          resources: ["hpo_terms"],
+          bindings: { retrieval_documents_json: JSON.stringify(input.documents) },
+        });
+        retrievalQueryRunIds.push(query.runId);
+        return { candidates: ontologyCandidates(query.rows), runId: query.runId, resultDigest: query.resultDigest };
+      },
+    },
+    agent: args.composition.agent,
+    reviewer: args.composition.reviewer,
+    ...(args.composition.augmenter ? { augmenter: args.composition.augmenter } : {}),
+  });
+  const artifact: GroundingArtifact = {
+    schema: "pi-bio.workbench.grounding_artifact.v1",
+    contractDigest: args.composition.contractDigest,
+    narrativeQuery: { runId: narrativeQuery.runId, resultDigest: narrativeQuery.resultDigest },
+    result,
+  };
+  const bytes = encodeJson(artifact);
+  const hash = createHash("sha256").update(bytes).digest("hex");
+  const resultDigest = `sha256:${hash}`;
+  const resultUri = `cas:${resultDigest}`;
+  await args.cas.put({ algorithm: "sha256", digest: hash, sizeBytes: bytes.length, mediaType: "application/vnd.pi-bio.workbench.phenotype-grounding+json" }, bytes);
+  const groundingId = `grounding:${args.analysisId}`;
+  await recordObservation(args.ledger, {
+    statementKey: groundingId,
+    subjectId: groundingId,
+    predicate: "grounding",
+    value: {
+      schema: "pi-bio.workbench.grounding.v1",
+      status: "succeeded",
+      case_id: args.caseId,
+      mode: result.mode,
+      narrative_digest: result.sourceDigest,
+      ontology_digests: [...new Set(result.candidates.map((candidate) => candidate.ontologyDigest))],
+      result_digest: resultDigest,
+      accepted_count: result.accepted.length,
+      rejected_count: result.rejected.length,
+    },
+    recordedAt: args.now,
+    source: SOURCE,
+    digest: resultDigest,
+  });
+  await recordArtifactReference(args.ledger, {
+    artifact: {
+      digest: resultDigest as `sha256:${string}`,
+      mediaType: "application/vnd.pi-bio.workbench.phenotype-grounding+json",
+      semanticRole: "phenotype_grounding",
+      sizeBytes: bytes.length,
+      attrs: { case_id: args.caseId, analysis_id: args.analysisId },
+    },
+    subjectId: groundingId,
+    predicate: "produces",
+    recordedAt: args.now,
+    source: SOURCE,
+    digest: resultDigest,
+    casMetadata: { conn: args.ledger, refId: groundingId, refType: "artifact" },
+  });
+  await recordObservationLink(args.ledger, {
+    subjectId: `case:${args.caseId}`,
+    predicate: "has_grounding",
+    objectId: groundingId,
+    recordedAt: args.now,
+    source: SOURCE,
+    digest: resultDigest,
+  });
+  const queryRunIds = [narrativeQuery.runId, ...retrievalQueryRunIds];
+  for (const queryRunId of queryRunIds) {
+    await recordObservationLink(args.ledger, {
+      subjectId: groundingId,
+      predicate: "uses_run",
+      objectId: `run:${queryRunId}`,
+      recordedAt: args.now,
+      source: SOURCE,
+      digest: resultDigest,
+    });
+  }
+  return {
+    schema: "pi-bio.workbench.grounding_checkpoint.v1",
+    groundingId,
+    resultDigest,
+    resultUri,
+    acceptedCount: result.accepted.length,
+    rejectedCount: result.rejected.length,
+    mode: result.mode,
+    sourceDigest: result.sourceDigest,
+    queryRunIds,
   };
 }
 
@@ -248,6 +492,8 @@ async function runOperation(args: {
   runId: string;
   now: string;
   dbPath: string;
+  bindings?: Record<string, unknown>;
+  protectedBindings?: Record<string, unknown>;
 }): Promise<OperationCheckpoint> {
   const response = await runBioOperationFromManifest({
     cwd: args.exampleDir,
@@ -261,7 +507,11 @@ async function runOperation(args: {
     cas: args.cas,
     casMetadata: { conn: args.conn },
     serialize: false,
-    bindings: { case_id: args.caseId },
+    bindings: { case_id: args.caseId, ...args.bindings },
+    ...(args.protectedBindings ? {
+      protectedSessionBindings: args.protectedBindings,
+      protectedSessionVariables: Object.keys(args.protectedBindings),
+    } : {}),
   });
   if (!response.ok) throw new Error(`${args.operationId} failed: ${response.error}`);
   if (!response.casRefs?.result) throw new Error(`${args.operationId} completed without a CAS result digest`);
@@ -346,6 +596,22 @@ async function recordPacket(args: {
     digest: packetDigest,
     attrs: { semantic_role: "evidence_packet" },
   });
+  await recordObservationLink(args.conn, {
+    subjectId: analysisNode,
+    predicate: "uses_grounding",
+    objectId: args.packet.grounding.groundingId,
+    recordedAt: args.recordedAt,
+    source: SOURCE,
+    digest: packetDigest,
+  });
+  await recordObservationLink(args.conn, {
+    subjectId: packetUri,
+    predicate: "derived_from",
+    objectId: args.packet.grounding.resultUri,
+    recordedAt: args.recordedAt,
+    source: SOURCE,
+    digest: packetDigest,
+  });
   for (const runId of args.packet.provenance.runIds) {
     await recordObservationLink(args.conn, {
       subjectId: analysisNode,
@@ -367,7 +633,7 @@ async function recordPacket(args: {
   return { schema: "pi-bio.workbench.packet_checkpoint.v1", packetDigest, packetUri };
 }
 
-async function workflowReplayDigest(exampleDir: string, caseId: string): Promise<string> {
+async function workflowReplayDigest(exampleDir: string, caseId: string, grounding: GroundingRuntime): Promise<string> {
   const manifest = JSON.parse(await fs.readFile(join(exampleDir, "manifest.json"), "utf8")) as BioManifest;
   const inputs: Array<{ resourceId: string; digest: string }> = [];
   for (const resource of manifest.provides?.resources ?? []) {
@@ -377,13 +643,27 @@ async function workflowReplayDigest(exampleDir: string, caseId: string): Promise
     inputs.push({ resourceId: resource.id, digest: `sha256:${hash.digest("hex")}` });
   }
   inputs.sort((left, right) => left.resourceId < right.resourceId ? -1 : left.resourceId > right.resourceId ? 1 : 0);
-  return canonicalDigest({ schema: WORKFLOW_VERSION, caseId, manifest, inputs });
+  return canonicalDigest({
+    schema: WORKFLOW_VERSION,
+    caseId,
+    manifest,
+    inputs,
+    grounding: {
+      mode: grounding.mode,
+      contractDigest: grounding.contractDigest,
+      agent: grounding.agent.identity,
+      reviewer: grounding.reviewer.identity,
+      augmenter: grounding.augmenter?.identity ?? null,
+    },
+  });
 }
 
 export async function runClinicalGenomicsWorkbench(req: RunClinicalGenomicsRequest): Promise<RunClinicalGenomicsResult> {
   const now = req.now ?? new Date().toISOString();
   const analysisId = req.analysisId ?? `clinical-${randomUUID()}`;
-  const replayDigest = await workflowReplayDigest(req.exampleDir, req.caseId);
+  if (!req.grounding.contractDigest) throw new Error("grounding composition requires a contractDigest");
+  const composition = req.grounding;
+  const replayDigest = await workflowReplayDigest(req.exampleDir, req.caseId, composition);
   const analysisDbDir = join(req.exampleDir, ".pi", "bio-agent", "analyses");
   const analysisDbPath = join(analysisDbDir, `${createHash("sha256").update(analysisId).digest("hex")}.duckdb`);
   await fs.mkdir(analysisDbDir, { recursive: true });
@@ -397,17 +677,36 @@ export async function runClinicalGenomicsWorkbench(req: RunClinicalGenomicsReque
       source: SOURCE,
       steps: [
         {
-          stepId: "case-evidence",
-          run: async () => toJsonValue(await runOperation({
+          stepId: "phenotype-grounding",
+          run: async () => toJsonValue(await runGrounding({
             exampleDir: req.exampleDir,
-            conn: store.conn,
+            analysisDbPath,
+            ledger: store.conn,
             cas,
             caseId: req.caseId,
-            operationId: "clinical.case_evidence",
-            runId: `${analysisId}.evidence`,
+            analysisId,
             now,
-            dbPath: analysisDbPath,
+            composition,
           })),
+        },
+        {
+          stepId: "case-evidence",
+          run: async ({ valueOf }) => {
+            const groundingCheckpoint = valueOf<JsonValue>("phenotype-grounding") as unknown as GroundingCheckpoint;
+            const groundingArtifact = await readCasJson(cas, groundingCheckpoint.resultDigest) as unknown as GroundingArtifact;
+            if (groundingArtifact.schema !== "pi-bio.workbench.grounding_artifact.v1") throw new Error("unsupported grounding artifact schema");
+            return toJsonValue(await runOperation({
+              exampleDir: req.exampleDir,
+              conn: store.conn,
+              cas,
+              caseId: req.caseId,
+              operationId: "clinical.case_evidence",
+              runId: `${analysisId}.evidence`,
+              now,
+              dbPath: analysisDbPath,
+              protectedBindings: { grounded_phenotypes_json: JSON.stringify(groundingArtifact.result.accepted) },
+            }));
+          },
         },
         {
           stepId: "reanalysis",
@@ -425,11 +724,12 @@ export async function runClinicalGenomicsWorkbench(req: RunClinicalGenomicsReque
         {
           stepId: PACKET_STEP,
           run: async ({ valueOf }) => {
+            const groundingCheckpoint = valueOf<JsonValue>("phenotype-grounding") as unknown as GroundingCheckpoint;
             const evidenceCheckpoint = valueOf<JsonValue>("case-evidence") as unknown as OperationCheckpoint;
             const reanalysisCheckpoint = valueOf<JsonValue>("reanalysis") as unknown as OperationCheckpoint;
             const evidence = await readOperationRows(cas, evidenceCheckpoint);
             const reanalysis = await readOperationRows(cas, reanalysisCheckpoint);
-            const packet = buildPacket({ analysisId, caseId: req.caseId, generatedAt: now, evidence, reanalysis });
+            const packet = buildPacket({ analysisId, caseId: req.caseId, generatedAt: now, grounding: groundingCheckpoint, evidence, reanalysis });
             return toJsonValue(await recordPacket({ conn: store.conn, cas, packet, recordedAt: now }));
           },
         },

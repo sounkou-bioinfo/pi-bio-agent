@@ -8,8 +8,8 @@ The first binding is clinical genomics. It exercises two rare-disease traversal 
 case data:
 
 - **Direct:** assess observed variants, retaining candidates, abstentions, and evidence conflicts.
-- **Inverted:** start from observed HPO terms, derive gene/disease hypotheses, and inspect all case variants in each
-  supported gene without collapsing them to one arbitrary row.
+- **Inverted:** ground an immutable case narrative to reviewed HPO assertions, derive gene/disease hypotheses, and
+  inspect all case variants in each supported gene without collapsing them to one arbitrary row.
 
 Both lanes close into the `case_evidence` relation. Reanalysis compares the shared `variant_assessment` relation
 with prior state. The evidence packet contains review-bearing rows rather than every routine exclusion; the complete
@@ -27,23 +27,47 @@ npm run check
 npm run demo:clinical
 ```
 
-One analysis executes two recorded scientific operations and a packet step. Reusing its analysis id resumes from
-the durable step checkpoints:
+One analysis checkpoints phenotype grounding, the reconciled evidence operation, reanalysis, and packet assembly.
+Grounding resolves the narrative and ontology candidates through recorded manifest queries; agent augmentation,
+term proposals, and review are host-injected ports. The packaged CLI uses an explicit recorded fixture, while a live
+host supplies its own model or human implementations. Reusing an analysis id resumes from the durable checkpoints:
 
 ```sh
 node dist/cli.js run examples/clinical-genomics CASE-RD-001 analysis-demo
 node dist/cli.js run examples/clinical-genomics CASE-RD-001 analysis-demo
 ```
 
-The second invocation reports zero executed steps and three reused steps. Scientific result, receipt, replay, and
+The second invocation reports zero executed steps and four reused steps. Scientific result, receipt, replay, and
 run-object bytes live in CAS; checkpoints carry only their references. Reusing an analysis id after a declared input
-file changes fails closed because the task replay digest pins those input bytes.
+file or grounding composition changes fails closed because the task replay digest pins both.
+
+Pass a host module as the final argument to replace the recorded fixture. The module exports a default function or
+`createGroundingRuntime({ workspace })` returning the same host-injected augmenter, proposal, and reviewer ports used
+by the SDK:
+
+```sh
+node dist/cli.js run examples/clinical-genomics CASE-RD-001 analysis-live ./grounding-host.mjs
+```
+
+Compare lexical retrieval with pre-retrieval, post-initial-retrieval, and combined agent augmentation:
+
+```sh
+npm run benchmark:grounding
+```
+
+This is retrieval-contract dogfood, not a model-quality claim: recorded proposals and reviews isolate whether each
+mode admits the right candidates without leaking gold to the ports. The immutable case reaches 0.75 structured-
+assertion recall with lexical retrieval; each augmentation mode reaches precision and recall 1.0. The report includes
+proposals, original-text spans, augmentation receipts, review decisions, per-case metrics, micro metrics, and the
+recorded bootstrap run.
 
 ## Run the API
 
 ```sh
 npm run serve -- examples/clinical-genomics 8787
 ```
+
+An optional third argument supplies the same grounding host module to the HTTP server.
 
 ```sh
 curl -sS http://localhost:8787/v1/clinical-analyses \

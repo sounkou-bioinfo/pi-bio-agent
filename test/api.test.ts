@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createWorkbenchApi } from "../src/api/app.js";
+import { loadRecordedGroundingRuntime } from "../src/recorded-grounding.js";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const fixtureRoot = join(repoRoot, "examples", "clinical-genomics");
@@ -13,7 +14,11 @@ async function appFixture() {
   const workspace = await fs.mkdtemp(join(tmpdir(), "pi-bio-workbench-api-"));
   await fs.cp(fixtureRoot, workspace, { recursive: true });
   await fs.rm(join(workspace, ".pi"), { recursive: true, force: true });
-  return createWorkbenchApi({ clinicalWorkspace: workspace, clock: () => "2026-07-05T12:00:00Z" });
+  return createWorkbenchApi({
+    clinicalWorkspace: workspace,
+    grounding: await loadRecordedGroundingRuntime(join(workspace, "data", "grounding_proposals.json")),
+    clock: () => "2026-07-05T12:00:00Z",
+  });
 }
 
 test("OpenAPI and runtime validation share the clinical analysis schemas", async () => {

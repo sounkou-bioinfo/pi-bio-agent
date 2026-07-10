@@ -100,6 +100,15 @@ export const EvidencePacketSchema = z.object({
     inverted: CaseEvidenceOperationSchema,
     reanalysis: ReanalysisOperationSchema,
   }).strict(),
+  grounding: z.object({
+    groundingId: z.string(),
+    mode: z.enum(["none", "pre-retrieval", "post-initial-retrieval", "pre+post"]),
+    resultDigest: z.string(),
+    resultUri: z.string(),
+    sourceDigest: z.string(),
+    acceptedCount: z.number().int().nonnegative(),
+    rejectedCount: z.number().int().nonnegative(),
+  }).strict(),
   summary: z.object({
     directCandidates: z.number().int().nonnegative(),
     directAbstentions: z.number().int().nonnegative(),

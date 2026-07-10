@@ -1,0 +1,42 @@
+{
+  "schema": "pi-bio.manifest.v1",
+  "id": "clinical-genomics-grounding-benchmark",
+  "version": "0.1.0",
+  "title": "Clinical genomics phenotype grounding benchmark",
+  "description": "Evaluation-only narrative, HPO vocabulary, and gold assertions for comparing retrieval augmentation modes.",
+  "provides": {
+    "resolvers": [
+      {
+        "id": "duckdb.file_scan",
+        "version": "0.1.0",
+        "title": "DuckDB file scan",
+        "description": "Read a local file into a DuckDB table.",
+        "output": { "mode": "table" }
+      }
+    ],
+    "resources": [
+      {
+        "id": "case_narratives",
+        "title": "Immutable source case narratives",
+        "kind": "virtual",
+        "resolver": "duckdb.file_scan",
+        "params": { "path": "data/case_narratives.csv", "table": "case_narratives" }
+      },
+      {
+        "id": "hpo_terms",
+        "title": "Declared HPO label and synonym rows",
+        "kind": "virtual",
+        "resolver": "duckdb.file_scan",
+        "params": { "path": "data/hpo_terms.csv", "table": "hpo_terms" }
+      },
+      {
+        "id": "grounding_gold",
+        "title": "Phenotype grounding gold",
+        "kind": "virtual",
+        "resolver": "duckdb.file_scan",
+        "params": { "path": "data/grounding_gold.csv", "table": "grounding_gold" }
+      }
+    ],
+    "operations": []
+  }
+}

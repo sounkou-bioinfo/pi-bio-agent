@@ -4,6 +4,7 @@ import {
   getClinicalAnalysis,
   runClinicalGenomicsWorkbench,
 } from "../clinical-genomics.js";
+import type { GroundingRuntime } from "../phenotype-grounding.js";
 import {
   AnalysisPathSchema,
   ClinicalAnalysisResponseSchema,
@@ -15,6 +16,7 @@ import {
 
 export interface WorkbenchApiOptions {
   clinicalWorkspace: string;
+  grounding: GroundingRuntime;
   clock?: () => string;
 }
 
@@ -79,6 +81,7 @@ export function createWorkbenchApi(options: WorkbenchApiOptions): OpenAPIHono {
       const result = await runClinicalGenomicsWorkbench({
         exampleDir: options.clinicalWorkspace,
         caseId: request.caseId,
+        grounding: options.grounding,
         now: options.clock?.(),
       });
       const { storePath: _storePath, analysisDbPath: _analysisDbPath, ...publicResult } = result;

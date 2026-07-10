@@ -1,8 +1,10 @@
 WITH observed AS (
   SELECT case_id, hpo_id
-  FROM case_hpo
+  FROM grounded_phenotype_observations
   WHERE case_id = getvariable('case_id')
-    AND status = 'observed'
+    AND assertion_context = 'present'
+    AND subject_context = 'proband'
+    AND acceptance_state = 'accepted'
 ),
 matched AS (
   SELECT

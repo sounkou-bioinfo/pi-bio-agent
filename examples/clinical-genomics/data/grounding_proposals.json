@@ -1,0 +1,34 @@
+{
+  "schema": "pi-bio.workbench.recorded_grounding.v1",
+  "agent": { "id": "recorded-grounding-agent", "version": "1", "provider": "fixture", "model": "recorded-proposals" },
+  "reviewer": { "id": "recorded-grounding-review", "version": "1", "provider": "fixture", "model": "recorded-review" },
+  "augmenter": { "id": "recorded-retrieval-augmentation", "version": "1", "provider": "fixture", "model": "recorded-augmentation" },
+  "cases": {
+    "CASE-RD-001": {
+      "augmentations": {
+        "pre-retrieval": {
+          "retrievalText": "developmental delay",
+          "retrievalPhrases": ["developmental delay"],
+          "rationale": "The original phrase describes delayed developmental milestones; add a retrieval phrase without changing the source narrative."
+        },
+        "post-initial-retrieval": {
+          "retrievalText": "developmental delay",
+          "retrievalPhrases": ["developmental delay"],
+          "rationale": "The initial candidates do not cover the milestone-delay phrase; expand retrieval while preserving the original text as evidence."
+        }
+      },
+      "proposals": [
+        { "proposalId": "p1", "chosen": "HP:0001263", "assertionContext": "present", "subjectContext": "proband", "evidenceText": "late to sit and walk", "startOffset": 16, "endOffset": 36, "confidence": 1, "rationale": "The source span states delayed developmental milestones." },
+        { "proposalId": "p2", "chosen": "HP:0001252", "assertionContext": "present", "subjectContext": "proband", "evidenceText": "hypotonia", "startOffset": 45, "endOffset": 54, "confidence": 1, "rationale": "The source span explicitly names hypotonia." },
+        { "proposalId": "p3", "chosen": "HP:0001250", "assertionContext": "absent", "subjectContext": "family", "subjectId": "mother", "evidenceText": "seizures", "startOffset": 74, "endOffset": 82, "confidence": 1, "rationale": "The source explicitly negates seizures for the mother, not the proband." },
+        { "proposalId": "p4", "chosen": "HP:0001251", "assertionContext": "uncertain", "subjectContext": "proband", "evidenceText": "ataxia", "startOffset": 93, "endOffset": 99, "confidence": 1, "rationale": "The source marks ataxia as possible and uncertain." }
+      ],
+      "reviews": [
+        { "proposalId": "p1", "decision": "approved", "rationale": "The term and context are supported by the original span." },
+        { "proposalId": "p2", "decision": "approved", "rationale": "The term and context are supported by the original span." },
+        { "proposalId": "p3", "decision": "approved", "rationale": "The family subject and absent context are explicit." },
+        { "proposalId": "p4", "decision": "approved", "rationale": "The uncertain context is explicit." }
+      ]
+    }
+  }
+}
