@@ -141,7 +141,7 @@ function isApplicationJson(contentType: unknown): boolean {
   return false;
 }
 
-function isSafeRequestId(value: string): boolean {
+function isValidRequestId(value: string): boolean {
   if (value.length === 0 || value.trim() !== value || Buffer.byteLength(value, "utf8") > MAX_REQUEST_ID_BYTES) return false;
   try {
     validateHeaderValue("x-request-id", value);
@@ -152,8 +152,8 @@ function isSafeRequestId(value: string): boolean {
 }
 
 function parseRequestId(raw: unknown): string {
-  if (typeof raw !== "string" || !isSafeRequestId(raw)) {
-    throw protocolError("invalid_request", "requestId is not safe");
+  if (typeof raw !== "string" || !isValidRequestId(raw)) {
+    throw protocolError("invalid_request", "requestId is not a valid bounded HTTP correlation value");
   }
   return raw;
 }
@@ -163,7 +163,7 @@ function parseRequestIdHeader(raw: string | string[] | undefined): string | unde
   const header = Array.isArray(raw) ? (raw.length === 1 ? raw[0] : undefined) : raw;
   if (header == null) throw protocolError("invalid_request", "invalid x-request-id header");
   const parsed = header.trim();
-  if (!isSafeRequestId(parsed)) throw protocolError("invalid_request", "invalid x-request-id header");
+  if (!isValidRequestId(parsed)) throw protocolError("invalid_request", "invalid x-request-id header");
   return parsed;
 }
 

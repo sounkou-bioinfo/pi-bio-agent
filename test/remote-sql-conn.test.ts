@@ -203,7 +203,7 @@ describe("remote SQL connection transport", () => {
     }
   });
 
-  test("makeSqlConnClient enforces response/request caps and request-id safety", async () => {
+  test("makeSqlConnClient enforces response/request caps and request-id validity", async () => {
     const transport: SqlConnWireTransport = {
       async request() {
         return JSON.stringify({ schema: SQL_CONN_WIRE_SCHEMA, requestId: "ok", method: "all", rows: [["string", "ok"]] });
@@ -214,7 +214,7 @@ describe("remote SQL connection transport", () => {
     await assert.rejects(() => capped.all("SELECT 1"), /response body exceeded 8 bytes/);
 
     const bad = makeSqlConnClient(transport, { requestId: () => "bad\nid" });
-    await assert.rejects(() => bad.run("SELECT 1"), /requestId is not safe/);
+    await assert.rejects(() => bad.run("SELECT 1"), /requestId is not a valid bounded HTTP correlation value/);
   });
 
   test("hides sql failure by default and exposes mapper output", async () => {

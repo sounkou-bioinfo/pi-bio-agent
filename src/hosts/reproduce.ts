@@ -11,18 +11,10 @@ import { runBioOperationFromManifest, runBioQueryFromManifest, computeEnvironmen
 // FRESH db and compare the produced receipts' DETERMINISTIC content digests to the spec's sourceReceiptDigests.
 // A faithful re-run of the same inputs yields the same content digests (receiptContentDigest excludes wall-clock),
 // so a mismatch is REAL drift — a changed resolver, params, source version, or resolved result — not a clock diff.
-// Fail closed: a replay without a manifest or without pinned sourceReceiptDigests cannot be verified, so it throws
-// rather than reporting a hollow "match". (Portable snapshot->temp-manifest staging and compute.run env
-// re-pinning are later refinements; this slice reproduces same-host query/operation runs.)
-//
-// PATH-PORTABILITY LIMITATION (fails SAFE): a file-backed resource's paramsDigest includes the ABSOLUTE path that
-// resolveResourcePaths derived (resolve(manifestDir, "./x")), so the SAME manifest+content checked out at a
-// DIFFERENT absolute path (CI /tmp/repo vs dev /home/a/repo) produces DIFFERENT sourceReceiptDigests. Cross-checkout
-// reproduce therefore reports DRIFT (matched:false) and the cross-machine action-cache MISSES — a false NEGATIVE,
-// never a false match/stale serve. Same-checkout reproduce (the supported slice) is unaffected. Making the
-// per-resource digest path-independent (digest the authored relative form) is a deliberate later refinement; the
-// portable AUTHORED manifest is already pinned via replay.manifest.digest, and a CAS resultDigest still verifies
-// OUTPUT content regardless of path.
+// Fail closed: the immutable manifest snapshot must match its digest, and the replay must pin source receipts,
+// output content, or an expected terminal failure. Authored relative resource/command paths stay in the snapshot;
+// the executing host stages those inputs and supplies `manifestBaseDir`. The original manifest path is only a
+// same-workspace default for that base, never the replay program or an identity-bearing absolute path.
 
 export interface ReproduceResult {
   runId: string;

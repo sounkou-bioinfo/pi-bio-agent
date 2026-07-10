@@ -35,10 +35,10 @@ function regionString(region: unknown): string | undefined {
 
 export const duckhtsReadBcfResolver: BioResolverImpl = async (resource, ctx) => {
   const { path, table = "vcf_raw" } = resource.params as { path: string; table?: string };
-  const sourcePath = path;
-  const resolvedPath = resolveManifestPath(path, ctx.manifestBaseDir);
   if (typeof path !== "string" || !path.trim()) throw new Error("duckhts.read_bcf: 'path' (string) is required");
   if (!IDENT_RE.test(table)) throw new Error("duckhts.read_bcf: 'table' must be a SQL identifier");
+  const sourcePath = path;
+  const resolvedPath = resolveManifestPath(path, ctx.manifestBaseDir);
   const region = regionString((resource.params as { region?: unknown }).region);
   const now = ctx.now ?? systemClock();
 
