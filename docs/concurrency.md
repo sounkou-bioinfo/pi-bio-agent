@@ -41,7 +41,7 @@ owns **no** shared state, holds
 **no** file lock; the *server* is the single writer.
 
 **This mode is a RUNNABLE example: [`scripts/memory-over-ducknng.mjs`](../scripts/memory-over-ducknng.mjs)**
-(`node scripts/memory-over-ducknng.mjs`, [evidence](../examples/patterns/memory-over-ducknng.md)). It starts a ducknng
+(`npm run pattern:memory-over-ducknng`, [evidence](../examples/patterns/memory-over-ducknng.qmd)). It starts a ducknng
 server owning the store and spawns **two separate agent processes**; `agent:A` `remember`s and `agent:B` (a
 distinct OS process) `recall`s it: `"null variant in a LoF gene" by agent:A`, attributed, **no file lock**. The
 memory-store functions are reused unchanged: they take a `SqlConn`, and there the conn routes over RPC:
@@ -89,7 +89,7 @@ The transport is pattern-driven end to end:
 
 - `scripts/blackboard-shared.mjs`: **four distinct OS processes** coordinate a diamond DAG through **one shared
   table on a ducknng server**; no process opens the db file, no coordinator, and the pub/sub order emerges from the
-  shared writes. (Run: `node scripts/blackboard-shared.mjs`.)
+  shared writes. (Run: `npm run pattern:blackboard-shared`.)
 - `scripts/ducknng-rpc-mutate.mjs`: `UPDATE` / `DELETE` / `ON CONFLICT` upsert run on the **server's native
   DuckDB** (mutate-in-place shared state: exactly what supersession/tombstones need), exec opt-in.
 - `scripts/nng-job-runner.mjs`: a separate worker process writes a `job:<id>:status` observation over RPC that

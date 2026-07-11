@@ -42,13 +42,13 @@ orchestrator (piece 1); the agent conducts.
 |---|---|
 | `test/study-scaffold.test.ts` | `StudyScaffold` = a DAG of `(subtask, produces, accessList)`; fail-closed validation (access refs only to earlier steps → acyclic); Kahn topo-order |
 | `test/study-exec.test.ts` | the **executor** runs workers in topo order with per-step **access-list isolation** + downstream **shared memory**; includes a **TREE** and a **SURVEY/DEBATE** topology (N isolated respondents + an aggregator that fans them in — Fugu's signature) |
-| **live:** [`scripts/live-multi-agent.ts`](patterns/live-multi-agent.md) | **real multi-agent run** (chain): each step spawns a *separate `pi` process*; they communicate only via access-list artifacts the host threads — no shared db, so the process lock is never touched. `npx tsx scripts/live-multi-agent.ts` |
-| **live:** [`scripts/live-debate.ts`](patterns/live-debate.md) | **real best-of-N debate** (survey topology): two agents answer the same question independently, an aggregator synthesizes both. `npx tsx scripts/live-debate.ts` |
-| **pattern:** [`scripts/blackboard-run.mjs`](patterns/blackboard-run.md) | **generic topology:** decentralized pub/sub blackboard (req/rep-free) with no external coordinator. `npm run pattern:blackboard-run` |
-| **pattern:** [`scripts/pipeline-fanout.mjs`](patterns/pipeline-fanout.md) | **generic topology:** bounded `push`/`pull` worker pool (load-balanced tasks, bounded concurrency). `npm run pattern:pipeline-fanout` |
-| **pattern:** [`scripts/nng-pair.mjs`](patterns/nng-pair.md) | **generic topology:** `1:1` pair/debate loop (proposer↔verifier) with separate OS processes. `npm run pattern:nng-pair` |
-| **pattern:** [`scripts/nng-survey.mjs`](patterns/nng-survey.md) | **generic topology:** `1:N` survey/jury loop (multiple providers + quorum) with abstain-safe aggregation. `npm run pattern:nng-survey` |
-| **pattern:** [`scripts/nng-job-runner.mjs`](patterns/nng-job-runner.md) | **generic topology:** req/rep status shape over ducknng (`job:id:status` pattern). `npm run pattern:nng-job-runner` |
+| **live:** [pattern: `live-multi-agent`](patterns/live-multi-agent.qmd) | **real multi-agent run** (chain): each step spawns a *separate `pi` process*; they communicate only via access-list artifacts the host threads — no shared db, so the process lock is never touched. `npm run pattern:live-multi-agent` |
+| **live:** [pattern: `live-debate`](patterns/live-debate.qmd) | **real best-of-N debate** (survey topology): two agents answer the same question independently, an aggregator synthesizes both. `npm run pattern:live-debate` |
+| **pattern:** [pattern: `blackboard-run`](patterns/blackboard-run.qmd) | **generic topology:** decentralized pub/sub blackboard (req/rep-free) with no external coordinator. `npm run pattern:blackboard-run` |
+| **pattern:** [pattern: `pipeline-fanout`](patterns/pipeline-fanout.qmd) | **generic topology:** bounded `push`/`pull` worker pool (load-balanced tasks, bounded concurrency). `npm run pattern:pipeline-fanout` |
+| **pattern:** [pattern: `nng-pair`](patterns/nng-pair.qmd) | **generic topology:** `1:1` pair/debate loop (proposer↔verifier) with separate OS processes. `npm run pattern:nng-pair` |
+| **pattern:** [pattern: `nng-survey`](patterns/nng-survey.qmd) | **generic topology:** `1:N` survey/jury loop (multiple providers + quorum) with abstain-safe aggregation. `npm run pattern:nng-survey` |
+| **pattern:** [pattern: `nng-job-runner`](patterns/nng-job-runner.qmd) | **generic topology:** req/rep status shape over ducknng (`job:id:status` pattern). `npm run pattern:nng-job-runner` |
 | `test/blackboard.test.ts` | **pub/sub blackboard** (`src/core/blackboard.ts`): DECENTRALIZED — steps launched concurrently, each awaits its deps from a shared blackboard and publishes its note; order emerges from data deps, **no coordinator** (stigmergy) |
 | `test/pipeline.test.ts` | **push/pull pipeline** (`src/core/pipeline.ts`): N-worker load-balanced pool — the RLM labeling map as a self-balancing queue |
 
@@ -67,8 +67,8 @@ boundary analysis in [`docs/refinments.md`](../docs/refinments.md).
 |---|---|
 | `test/http-cas-reuse.test.ts` | **CAS** — a second db with an empty memo 304s from the shared content store and materializes with **no re-download** (immutable cross-db reuse) |
 | `test/run-store-init-sql.test.ts` | the host **connection-init hook** (`duckdbInitSql`) — where the **host** (never the agent) runs `INSTALL/LOAD` extensions before resolution; it is host-owned and not exposed through any agent tool |
-| **live:** [`scripts/ducknng-rpc-mutate.mjs`](patterns/ducknng-rpc-mutate.md) | **ducknng RPC** — separate processes **mutate** one shared table in place (`UPDATE`/`DELETE`/upsert) via `ducknng_run_rpc` against a server running native DuckDB, exec opt-in. The mutate-in-place quack can't do; a fact-superseding KG needs it. `npm run pattern:ducknng-rpc-mutate` |
-| **live:** [`scripts/blackboard-shared.mjs`](patterns/blackboard-shared.md) | **ducknng RPC blackboard** — a decentralized pub/sub diamond DAG across separate processes (publish = `run_rpc` INSERT, await = poll `query_rpc`); order emerges from shared writes, no coordinator. Run with `npm run pattern:blackboard-shared`. |
+| **live:** [pattern: `ducknng-rpc-mutate`](patterns/ducknng-rpc-mutate.qmd) | **ducknng RPC** — separate processes **mutate** one shared table in place (`UPDATE`/`DELETE`/upsert) via `ducknng_run_rpc` against a server running native DuckDB, exec opt-in. The mutate-in-place quack can't do; a fact-superseding KG needs it. `npm run pattern:ducknng-rpc-mutate` |
+| **live:** [pattern: `blackboard-shared`](patterns/blackboard-shared.qmd) | **ducknng RPC blackboard** — a decentralized pub/sub diamond DAG across separate processes (publish = `run_rpc` INSERT, await = poll `query_rpc`); order emerges from shared writes, no coordinator. `npm run pattern:blackboard-shared` |
 
 ## 5. The COMPUTE pillar & the two-pillar flagship
 SQL is poor at some things (an `lm()` fit, a Bayesian colocalization); those run **out-of-process** over Arrow IPC,
@@ -83,4 +83,4 @@ with the DATA contract staying SQL/Arrow.
 
 ---
 Run all deterministic examples: `npm test`. The **live** patterns need the `pi` CLI (multi-agent) / a free
-local port (ducknng) and are run by hand; their recorded outputs are in the linked `.md` files.
+local port (ducknng) and are run by hand; their recorded outputs are in the linked `.qmd` pattern files.
