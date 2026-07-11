@@ -4,7 +4,7 @@ WITH current_and_prior AS (
     coalesce(current.variant_key, prior.variant_key) AS variant_key,
     prior.prior_status,
     current.variant_status AS current_status
-  FROM variant_assessment current
+  FROM (SELECT * FROM variant_assessment WHERE variant_source = 'direct') current
   FULL OUTER JOIN prior_assessment prior USING (case_id, variant_key)
   WHERE coalesce(current.case_id, prior.case_id) = getvariable('case_id')
 )

@@ -9,7 +9,7 @@ case data:
 
 - **Direct:** assess observed variants, retaining candidates, abstentions, and evidence conflicts.
 - **Inverted:** ground an immutable case narrative to reviewed HPO assertions, derive gene/disease hypotheses, and
-  inspect all case variants in each supported gene without collapsing them to one arbitrary row.
+  resolve those genes to assembly-pinned intervals, then read only those intervals from an indexed case VCF.
 
 Both lanes close into the `case_evidence` relation. Reanalysis compares the shared `variant_assessment` relation
 with prior state. The evidence packet contains review-bearing rows rather than every routine exclusion; the complete
@@ -18,7 +18,8 @@ inspection; the HTTP contract does not expose it.
 
 The inverted lane also carries variant-search coverage. A phenotype-supported gene with no supporting row is
 `hypothesis_not_searched` until an assembly-pinned search records completed coverage; only then can it become
-`hypothesis_without_supporting_variant`.
+`hypothesis_without_supporting_variant`. Overlapping interval reads are deduplicated per selected gene and allele,
+while multiallelic VCF fields remain aligned by ALT ordinal.
 
 This is evidence routing, not a complete clinical classification kernel. It does not claim ACMG/AMP classification,
 causal diagnosis, or clinical validity beyond the declared fixture data.
@@ -27,12 +28,13 @@ causal diagnosis, or clinical validity beyond the declared fixture data.
 
 ```sh
 npm install
+npm run provision:duckhts
 npm run check
 npm run demo:clinical
 ```
 
-One analysis checkpoints phenotype grounding, graph-backed phenotype hypotheses, the reconciled evidence operation,
-reanalysis, and packet assembly.
+One analysis checkpoints phenotype grounding, graph-backed phenotype hypotheses, candidate-gene intervals, indexed
+variant search, direct reanalysis, reconciled evidence, and packet assembly.
 Grounding resolves the narrative and ontology candidates through recorded manifest queries; agent augmentation,
 term proposals, and review are host-injected ports. The packaged CLI uses an explicit recorded fixture, while a live
 host supplies its own model or human implementations. Reusing an analysis id resumes from the durable checkpoints:
@@ -42,10 +44,15 @@ node dist/cli.js run examples/clinical-genomics CASE-RD-001 analysis-demo
 node dist/cli.js run examples/clinical-genomics CASE-RD-001 analysis-demo
 ```
 
-The second invocation reports zero executed steps and five reused steps. Scientific result, receipt, replay, and
+The second invocation reports zero executed steps and seven reused steps. Scientific result, receipt, replay, and
 run-object bytes live in CAS; checkpoints carry only their references. Reusing an analysis id after a declared input
-file, grounding composition, graph manifest, graph fixture, or host attachment changes fails closed because the task
-replay digest pins them.
+file, grounding composition, graph manifest, graph fixture, interval snapshot, indexed VCF identity, or host
+attachment changes fails closed because the task replay digest pins them.
+
+The hermetic VCF fixture already carries allele-specific gene, consequence, frequency, ClinVar, zygosity, and
+inheritance fields so the complete relation can be tested without network access. A production inverted traversal
+still needs the next declared stage: bounded Ensembl VEP `/region` fanout, or an admitted local VEP provider, over
+the selected alleles before clinical assessment. Fixture annotation is not evidence that this live stage exists.
 
 Pass a host module as the final argument to replace the recorded fixture. The module exports a default function or
 `createGroundingRuntime({ workspace })` returning the same host-injected augmenter, proposal, and reviewer ports used

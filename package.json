@@ -20,6 +20,7 @@
     "demo:clinical": "npm run build && node dist/cli.js run",
     "dogfood:monarch": "npm run build && node scripts/run-monarch-inverted-dogfood.mjs",
     "benchmark:grounding": "npm run build && node scripts/run-phenotype-grounding-benchmark.mjs",
+    "provision:duckhts": "node --input-type=module -e \"import {DuckDBInstance} from '@duckdb/node-api'; const c=await(await DuckDBInstance.create(':memory:')).connect(); await c.run('INSTALL duckhts FROM community;'); await c.run('LOAD duckhts;'); console.log('duckhts installed + loaded');\"",
     "serve": "npm run build && node dist/server.js"
   },
   "dependencies": {

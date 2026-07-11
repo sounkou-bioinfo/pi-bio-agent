@@ -14,6 +14,7 @@ direct AS (
     NULL::VARCHAR AS disease_id,
     NULL::VARCHAR AS disease_label,
     va.variant_key,
+    va.annotated_gene,
     va.consequence,
     va.allele_frequency,
     va.clinical_significance,
@@ -42,6 +43,7 @@ direct AS (
     va.review_kind,
     'variant:' || va.variant_key AS review_target
   FROM evidence_bearing_variant va
+  WHERE va.variant_source = 'direct'
 ),
 inverted_with_variant AS (
   SELECT
@@ -53,6 +55,7 @@ inverted_with_variant AS (
     ph.disease_id,
     ph.disease_label,
     va.variant_key,
+    va.annotated_gene,
     va.consequence,
     va.allele_frequency,
     va.clinical_significance,
@@ -89,11 +92,14 @@ inverted_with_variant AS (
     'hypothesis:' || ph.disease_id || ':' || ph.gene AS review_target
   FROM phenotype_hypothesis ph
   JOIN evidence_bearing_variant va
-    ON va.case_id = ph.case_id
-   AND va.gene = ph.gene
+    ON va.variant_source = 'inverted'
+   AND va.case_id = ph.case_id
+   AND va.selection_gene_id = ph.gene_id
+   AND list_contains(va.selection_disease_ids, ph.disease_id)
   LEFT JOIN variant_search_coverage coverage
     ON coverage.case_id = ph.case_id
-   AND coverage.gene = ph.gene
+   AND coverage.gene_id = ph.gene_id
+   AND list_contains(coverage.disease_ids, ph.disease_id)
 ),
 inverted_without_support AS (
   SELECT
@@ -105,6 +111,7 @@ inverted_without_support AS (
     ph.disease_id,
     ph.disease_label,
     NULL::VARCHAR AS variant_key,
+    NULL::VARCHAR AS annotated_gene,
     NULL::VARCHAR AS consequence,
     NULL::DOUBLE AS allele_frequency,
     NULL::VARCHAR AS clinical_significance,
@@ -144,12 +151,15 @@ inverted_without_support AS (
   FROM phenotype_hypothesis ph
   LEFT JOIN variant_search_coverage coverage
     ON coverage.case_id = ph.case_id
-   AND coverage.gene = ph.gene
+   AND coverage.gene_id = ph.gene_id
+   AND list_contains(coverage.disease_ids, ph.disease_id)
   WHERE NOT EXISTS (
     SELECT 1
     FROM evidence_bearing_variant va
-    WHERE va.case_id = ph.case_id
-      AND va.gene = ph.gene
+    WHERE va.variant_source = 'inverted'
+      AND va.case_id = ph.case_id
+      AND va.selection_gene_id = ph.gene_id
+      AND list_contains(va.selection_disease_ids, ph.disease_id)
   )
 )
 SELECT * FROM direct

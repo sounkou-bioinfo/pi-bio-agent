@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { fsCasStore, openBioStore } from "pi-bio-agent";
 import {
@@ -12,26 +12,30 @@ import {
 } from "../src/clinical-genomics.js";
 import { loadRecordedGroundingRuntime } from "../src/recorded-grounding.js";
 import { localMonarchFixtureRuntime } from "../src/monarch-host.js";
+import { localCandidateVariantSearchRuntime } from "../src/candidate-variant-search.js";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const fixtureRoot = join(repoRoot, "examples", "clinical-genomics");
 
 async function copyFixture(): Promise<string> {
   const dir = await fs.mkdtemp(join(tmpdir(), "pi-bio-workbench-clinical-"));
-  await fs.cp(fixtureRoot, dir, { recursive: true });
-  await fs.rm(join(dir, ".pi"), { recursive: true, force: true });
+  await fs.cp(fixtureRoot, dir, {
+    recursive: true,
+    filter: (source) => relative(fixtureRoot, source).split(sep)[0] !== ".pi",
+  });
   return dir;
 }
 
 async function runFixture(
   exampleDir: string,
-  request: Omit<Parameters<typeof runClinicalGenomicsWorkbench>[0], "exampleDir" | "grounding" | "hypotheses">,
+    request: Omit<Parameters<typeof runClinicalGenomicsWorkbench>[0], "exampleDir" | "grounding" | "hypotheses" | "variantSearch">,
 ) {
   return runClinicalGenomicsWorkbench({
     ...request,
     exampleDir,
     grounding: await loadRecordedGroundingRuntime(join(exampleDir, "data", "grounding_proposals.json")),
     hypotheses: localMonarchFixtureRuntime(exampleDir),
+    variantSearch: localCandidateVariantSearchRuntime(exampleDir),
   });
 }
 
@@ -43,13 +47,18 @@ test("clinical workbench reconciles direct and inverted traversal into one evide
     now: "2026-07-05T12:00:00Z",
   });
 
-  assert.equal(out.workflow.executedSteps, 5);
+  assert.equal(out.workflow.executedSteps, 7);
   assert.equal(out.workflow.reusedSteps, 0);
   assert.equal(out.packet.schema, "pi-bio.workbench.evidence_packet.v1");
   assert.equal(out.packet.summary.kernelScope, "evidence routing only; not a complete clinical classification kernel");
   assert.equal(out.packet.summary.directCandidates, 1);
   assert.equal(out.packet.summary.directAbstentions, 1);
-  assert.equal(out.packet.summary.phenotypeHypotheses, out.packet.lanes.hypotheses.rows.length);
+  assert.equal(out.packet.summary.phenotypeHypotheses, out.packet.stages.hypotheses.rows.length);
+  assert.equal(out.packet.summary.resolvedCandidateGenes, 2);
+  assert.equal(out.packet.summary.unresolvedCandidateGenes, 0);
+  assert.equal(out.packet.summary.searchedCandidateGenes, 2);
+  assert.equal(out.packet.summary.unsearchedCandidateGenes, 0);
+  assert.equal(out.packet.summary.selectedAlleles, 3);
   assert.equal(out.packet.summary.invertedSupportedHypotheses, 1);
   assert.equal(out.packet.summary.invertedGaps, 1);
   assert.equal(out.packet.summary.invertedUnsearched, 0);
@@ -84,32 +93,41 @@ test("SDK entry resolves a relative workspace exactly once", async () => {
     now: "2026-07-05T12:00:00Z",
     grounding: await loadRecordedGroundingRuntime(join(exampleDir, "data", "grounding_proposals.json")),
     hypotheses: localMonarchFixtureRuntime(exampleDir),
+    variantSearch: localCandidateVariantSearchRuntime(exampleDir),
   });
   assert.ok(out.analysisDbPath.startsWith(resolve(exampleDir)));
-  assert.equal(out.workflow.executedSteps, 5);
+  assert.equal(out.workflow.executedSteps, 7);
 });
 
-test("inverted traversal retains every case variant for a phenotype-supported gene", async () => {
+test("indexed inverted traversal preserves multiallelic allele alignment before evidence reduction", async () => {
   const exampleDir = await copyFixture();
-  await fs.appendFile(
-    join(exampleDir, "data", "case_variants.csv"),
-    "CASE-RD-001,17-43093465-G-A,GENEB,stop_gained,0.0001,Uncertain significance,het,inherited\n",
-  );
   const out = await runFixture(exampleDir, {
     caseId: "CASE-RD-001",
     analysisId: "analysis-multiple-variants",
     now: "2026-07-05T12:00:00Z",
   });
+  const selected = out.packet.stages.variantSearch.rows.filter((row) => row.record_kind === "variant");
+  assert.deepEqual(
+    selected.map((row) => row.variant_key).sort(),
+    ["17-43093464-A-T", "17-43093470-C-G", "17-43093470-C-T"],
+  );
+  assert.deepEqual(
+    selected.filter((row) => row.pos === 43093470).map((row) => [row.alt, row.consequence, row.allele_frequency]),
+    [
+      ["G", "missense_variant", 0.0003000000142492354],
+      ["T", "stop_gained", 0.019999999552965164],
+    ],
+  );
   const geneB = out.packet.lanes.inverted.rows.filter((row) => row.gene === "GENEB");
-  assert.deepEqual(geneB.map((row) => row.variant_key).sort(), ["17-43093464-A-T", "17-43093465-G-A"]);
+  assert.deepEqual(geneB.map((row) => row.variant_key).sort(), ["17-43093464-A-T", "17-43093470-C-T"]);
   assert.equal(out.packet.summary.invertedSupportedHypotheses, 1, "variant rows do not inflate hypothesis cardinality");
 });
 
 test("a phenotype hypothesis is not called missing genotype support without completed search coverage", async () => {
   const exampleDir = await copyFixture();
-  const coveragePath = join(exampleDir, "data", "variant_search_coverage.csv");
-  const coverage = await fs.readFile(coveragePath, "utf8");
-  await fs.writeFile(coveragePath, coverage.split("\n").filter((line) => !line.includes(",GENEH,")).join("\n"));
+  const intervalPath = join(exampleDir, "data", "gene_intervals.csv");
+  const intervals = await fs.readFile(intervalPath, "utf8");
+  await fs.writeFile(intervalPath, intervals.split("\n").filter((line) => !line.startsWith("HGNC:GENEH,")).join("\n"));
   const out = await runFixture(exampleDir, {
     caseId: "CASE-RD-001",
     analysisId: "analysis-unsearched-hypothesis",
@@ -121,6 +139,8 @@ test("a phenotype hypothesis is not called missing genotype support without comp
   assert.equal(geneH?.review_kind, null);
   assert.equal(out.packet.summary.invertedGaps, 0);
   assert.equal(out.packet.summary.invertedUnsearched, 1);
+  assert.equal(out.packet.summary.unresolvedCandidateGenes, 1);
+  assert.equal(out.packet.summary.unsearchedCandidateGenes, 1);
 });
 
 test("an unranked status abstains even when prior and current labels are equal", async () => {
@@ -135,7 +155,7 @@ test("an unranked status abstains even when prior and current labels are equal",
     now: "2026-07-05T12:00:00Z",
   });
   assert.equal(
-    out.packet.lanes.reanalysis.rows.find((row) => row.variant_key === "7-100-A-G")?.change_status,
+    out.packet.stages.reanalysis.rows.find((row) => row.variant_key === "7-100-A-G")?.change_status,
     "abstain_unknown_status",
   );
 });
@@ -179,6 +199,21 @@ test("checkpoint replay digest rejects changed declared input bytes", async () =
   );
 });
 
+test("checkpoint replay digest rejects a changed indexed case-VCF identity", async () => {
+  const exampleDir = await copyFixture();
+  await runFixture(exampleDir, {
+    caseId: "CASE-RD-001",
+    analysisId: "analysis-vcf-index-change",
+    now: "2026-07-05T12:00:00Z",
+  });
+  await fs.appendFile(join(exampleDir, "data", "case_variants.vcf.gz.tbi"), Buffer.from([0]));
+  await assert.rejects(() => runFixture(exampleDir, {
+    caseId: "CASE-RD-001",
+    analysisId: "analysis-vcf-index-change",
+    now: "2026-07-05T12:05:00Z",
+  }), /replay digest does not match/);
+});
+
 test("changed grounding composition invalidates checkpoint replay", async () => {
   const exampleDir = await copyFixture();
   await runFixture(exampleDir, {
@@ -197,7 +232,7 @@ test("changed grounding composition invalidates checkpoint replay", async () => 
   }), /replay digest does not match/);
 });
 
-test("same analysis id resumes from all five durable checkpoints", async () => {
+test("same analysis id resumes from all seven durable checkpoints", async () => {
   const exampleDir = await copyFixture();
   const first = await runFixture(exampleDir, {
     caseId: "CASE-RD-001",
@@ -210,9 +245,9 @@ test("same analysis id resumes from all five durable checkpoints", async () => {
     now: "2026-07-05T12:05:00Z",
   });
 
-  assert.equal(first.workflow.executedSteps, 5);
+  assert.equal(first.workflow.executedSteps, 7);
   assert.equal(resumed.workflow.executedSteps, 0);
-  assert.equal(resumed.workflow.reusedSteps, 5);
+  assert.equal(resumed.workflow.reusedSteps, 7);
   assert.equal(resumed.packetDigest, first.packetDigest);
   assert.equal(resumed.packet.generatedAt, "2026-07-05T12:00:00Z");
 
@@ -221,7 +256,7 @@ test("same analysis id resumes from all five durable checkpoints", async () => {
     const rows = await store.conn.all<{ n: bigint }>(
       "SELECT count(*) AS n FROM bio_observations WHERE predicate = 'run' AND starts_with(subject_id, 'run:analysis-resume.')",
     );
-    assert.equal(Number(rows[0]?.n), 6);
+    assert.equal(Number(rows[0]?.n), 8);
   } finally {
     store.close();
   }
@@ -244,7 +279,7 @@ test("packet and scientific runs are CAS-backed and connected in the ledger", as
     packetUri: out.packetUri,
   });
 
-  const receiptsAddress = out.packet.lanes.hypotheses.casRefs?.receipts;
+  const receiptsAddress = out.packet.stages.hypotheses.casRefs?.receipts;
   assert.match(receiptsAddress ?? "", /^sha256:/);
   const cas = fsCasStore(join(exampleDir, ".pi", "bio-agent", "cas"));
   const receipts = JSON.parse(await fs.readFile(
@@ -255,6 +290,29 @@ test("packet and scientific runs are CAS-backed and connected in the ledger", as
   assert.ok(graphSources.includes("file:data/monarch_edges.csv"));
   assert.ok(graphSources.includes("file:data/monarch_nodes.csv"));
   assert.ok(graphSources.includes("file:data/monarch_closure.csv"));
+
+  const variantReceiptAddress = out.packet.stages.variantSearch.casRefs?.receipts;
+  const variantReplayAddress = out.packet.stages.variantSearch.casRefs?.replay;
+  assert.match(variantReceiptAddress ?? "", /^sha256:/);
+  assert.match(variantReplayAddress ?? "", /^sha256:/);
+  const variantReceipts = JSON.parse(await fs.readFile(
+    cas.pathFor({ algorithm: "sha256", digest: variantReceiptAddress!.slice(7) }),
+    "utf8",
+  )) as Array<{
+    sourceSnapshots?: Array<{ source: string; version?: string }>;
+    provenance?: Array<{ notes?: string[] }>;
+  }>;
+  assert.ok(variantReceipts.flatMap((receipt) => receipt.sourceSnapshots ?? [])
+    .some((source) => source.source === "file:data/case_variants.vcf.gz" && source.version?.includes("index-sha256:")));
+  assert.ok(variantReceipts.flatMap((receipt) => receipt.provenance ?? []).flatMap((entry) => entry.notes ?? [])
+    .includes("region:17:43090000-43100000,5:1000-2000"));
+  const variantReplay = JSON.parse(await fs.readFile(
+    cas.pathFor({ algorithm: "sha256", digest: variantReplayAddress!.slice(7) }),
+    "utf8",
+  )) as { manifest: { snapshot: { provides: { resources: Array<{ id: string; params: Record<string, unknown> }> } } } };
+  const replayVcf = variantReplay.manifest.snapshot.provides.resources.find((resource) => resource.id === "case_vcf_raw");
+  assert.equal(replayVcf?.params.region, "17:43090000-43100000,5:1000-2000");
+  assert.equal(replayVcf?.params.sourceVersion, localCandidateVariantSearchRuntime(exampleDir).sourceVersion);
 
   const analysisDb = await openBioStore(exampleDir, { path: out.analysisDbPath });
   try {
@@ -268,7 +326,7 @@ test("packet and scientific runs are CAS-backed and connected in the ledger", as
     assert.deepEqual({
       assessed: Number(rows[0]?.assessed), packetRows: Number(rows[0]?.packet_rows),
       ranked: Number(rows[0]?.ranked), hypotheses: Number(rows[0]?.hypotheses),
-    }, { assessed: 5, packetRows: 5, ranked: 2, hypotheses: 2 });
+    }, { assessed: 8, packetRows: 6, ranked: 2, hypotheses: 2 });
   } finally {
     analysisDb.close();
   }
@@ -284,7 +342,7 @@ test("packet and scientific runs are CAS-backed and connected in the ledger", as
       "SELECT value_json FROM bio_observations WHERE subject_id = ? AND predicate = 'job_step_checkpoint' ORDER BY statement_key",
       [`job:${out.analysisId}`],
     );
-    assert.equal(checkpoints.length, 5);
+    assert.equal(checkpoints.length, 7);
     assert.ok(checkpoints.every((row) => {
       const envelope = JSON.parse(row.value_json) as { value: Record<string, unknown> };
       return !("rows" in envelope.value) && !("packet" in envelope.value);
@@ -307,7 +365,18 @@ test("packet and scientific runs are CAS-backed and connected in the ledger", as
       "SELECT predicate, object_id FROM bio_observations WHERE subject_id = ? ORDER BY predicate, object_id",
       [`run:${out.packet.lanes.inverted.runId}`],
     );
-    assert.ok(runLinks.some((row) => row.predicate === "uses_run" && row.object_id === `run:${out.packet.lanes.hypotheses.runId}`));
+    assert.ok(runLinks.some((row) => row.predicate === "uses_run" && row.object_id === `run:${out.packet.stages.hypotheses.runId}`));
+    assert.ok(runLinks.some((row) => row.predicate === "uses_run" && row.object_id === `run:${out.packet.stages.variantSearch.runId}`));
+    const intervalLinks = await store.conn.all<{ predicate: string; object_id: string | null }>(
+      "SELECT predicate, object_id FROM bio_observations WHERE subject_id = ? ORDER BY predicate, object_id",
+      [`run:${out.packet.stages.intervals.runId}`],
+    );
+    assert.ok(intervalLinks.some((row) => row.predicate === "uses_run" && row.object_id === `run:${out.packet.stages.hypotheses.runId}`));
+    const searchLinks = await store.conn.all<{ predicate: string; object_id: string | null }>(
+      "SELECT predicate, object_id FROM bio_observations WHERE subject_id = ? ORDER BY predicate, object_id",
+      [`run:${out.packet.stages.variantSearch.runId}`],
+    );
+    assert.ok(searchLinks.some((row) => row.predicate === "uses_run" && row.object_id === `run:${out.packet.stages.intervals.runId}`));
     const groundingRoots = await store.conn.all<{ digest: string }>(
       "SELECT digest FROM cas_ref WHERE ref_id = ? AND ref_type = 'artifact'",
       [out.packet.grounding.groundingId],

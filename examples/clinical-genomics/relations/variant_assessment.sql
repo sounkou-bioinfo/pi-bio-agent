@@ -1,7 +1,12 @@
 SELECT
+  v.variant_source,
   v.case_id,
+  v.selection_gene_id,
+  v.selection_disease_ids,
+  v.hypothesis_rank,
   v.variant_key,
   v.gene,
+  v.annotated_gene,
   v.consequence,
   TRY_CAST(v.allele_frequency AS DOUBLE) AS allele_frequency,
   v.clinical_significance,
@@ -39,7 +44,7 @@ SELECT
     WHEN lower(v.clinical_significance) IN ('pathogenic', 'likely pathogenic') THEN 'confirm_candidate'
     ELSE 'adjudicate_candidate'
   END AS review_kind
-FROM case_variants v
+FROM variant_inputs v
 LEFT JOIN so_loss_of_function lof
   ON lof.id = v.consequence
 WHERE v.case_id = getvariable('case_id')

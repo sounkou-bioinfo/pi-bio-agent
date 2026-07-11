@@ -1,0 +1,4 @@
+gene_id,gene,assembly,chrom,start_1based,end_1based,interval_source,interval_version
+HGNC:GENEB,GENEB,GRCh38,17,43090000,43100000,fixture:gene-intervals,fixture-1
+HGNC:GENEH,GENEH,GRCh38,5,1000,2000,fixture:gene-intervals,fixture-1
+HGNC:GENEZ,GENEZ,GRCh38,2,47630000,47650000,fixture:gene-intervals,fixture-1

@@ -1,4 +1,5 @@
 export * from "./clinical-genomics.js";
+export * from "./candidate-variant-search.js";
 export * from "./phenotype-grounding.js";
 export * from "./phenotype-benchmark.js";
 export * from "./recorded-grounding.js";

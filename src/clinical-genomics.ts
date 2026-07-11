@@ -30,12 +30,17 @@ import {
   type PhenotypeGroundingResult,
 } from "./phenotype-grounding.js";
 import type { PhenotypeHypothesisRuntime } from "./monarch-host.js";
+import {
+  buildCandidateVariantSearchManifest,
+  type CandidateIntervalRow,
+  type CandidateVariantSearchRuntime,
+} from "./candidate-variant-search.js";
 
 export const EVIDENCE_PACKET_SCHEMA = "pi-bio.workbench.evidence_packet.v1" as const;
 export const CLINICAL_ANALYSIS_SCHEMA = "pi-bio.workbench.clinical_analysis.v1" as const;
 
 const SOURCE = "pi-bio-workbench:clinical-genomics";
-const WORKFLOW_VERSION = "clinical-evidence-workflow.v3";
+const WORKFLOW_VERSION = "clinical-evidence-workflow.v4";
 const PACKET_MEDIA_TYPE = "application/vnd.pi-bio.workbench.evidence+json";
 const PACKET_STEP = "packet";
 
@@ -52,6 +57,8 @@ export interface RunClinicalGenomicsRequest {
   grounding: GroundingRuntime;
   /** Host-owned graph attachment and manifest composition for phenotype-to-gene hypotheses. */
   hypotheses: PhenotypeHypothesisRuntime;
+  /** Host-owned assembly, interval snapshot, indexed case VCF, and DuckHTS provisioning. */
+  variantSearch: CandidateVariantSearchRuntime;
 }
 
 export type OperationRows = {
@@ -72,11 +79,15 @@ export type EvidencePacket = {
   analysisId: string;
   caseId: string;
   generatedAt: string;
-  lanes: {
+  stages: {
     hypotheses: OperationRows;
+    intervals: OperationRows;
+    variantSearch: OperationRows;
+    reanalysis: OperationRows;
+  };
+  lanes: {
     direct: OperationRows;
     inverted: OperationRows;
-    reanalysis: OperationRows;
   };
   grounding: {
     groundingId: string;
@@ -91,6 +102,11 @@ export type EvidencePacket = {
     directCandidates: number;
     directAbstentions: number;
     phenotypeHypotheses: number;
+    resolvedCandidateGenes: number;
+    unresolvedCandidateGenes: number;
+    searchedCandidateGenes: number;
+    unsearchedCandidateGenes: number;
+    selectedAlleles: number;
     invertedSupportedHypotheses: number;
     invertedGaps: number;
     invertedUnsearched: number;
@@ -252,12 +268,18 @@ function distinctCount(rows: JsonRecord[], status: string): number {
   ).size;
 }
 
+function distinctFieldCount(rows: JsonRecord[], field: string): number {
+  return new Set(rows.map((row) => asString(row[field])).filter(Boolean)).size;
+}
+
 function buildPacket(args: {
   analysisId: string;
   caseId: string;
   generatedAt: string;
   grounding: GroundingCheckpoint;
   hypotheses: OperationRows;
+  intervals: OperationRows;
+  variantSearch: OperationRows;
   evidence: OperationRows;
   reanalysis: OperationRows;
 }): EvidencePacket {
@@ -269,7 +291,13 @@ function buildPacket(args: {
     analysisId: args.analysisId,
     caseId: args.caseId,
     generatedAt: args.generatedAt,
-    lanes: { hypotheses: args.hypotheses, direct, inverted, reanalysis: args.reanalysis },
+    stages: {
+      hypotheses: args.hypotheses,
+      intervals: args.intervals,
+      variantSearch: args.variantSearch,
+      reanalysis: args.reanalysis,
+    },
+    lanes: { direct, inverted },
     grounding: {
       groundingId: args.grounding.groundingId,
       mode: args.grounding.mode,
@@ -283,6 +311,11 @@ function buildPacket(args: {
       directCandidates: direct.rows.filter((row) => row.variant_bucket === "candidate").length,
       directAbstentions: direct.rows.filter((row) => asString(row.variant_bucket).startsWith("abstain_")).length,
       phenotypeHypotheses: args.hypotheses.rows.length,
+      resolvedCandidateGenes: distinctFieldCount(args.intervals.rows.filter((row) => row.interval_status === "resolved"), "gene_id"),
+      unresolvedCandidateGenes: distinctFieldCount(args.intervals.rows.filter((row) => row.interval_status !== "resolved"), "gene_id"),
+      searchedCandidateGenes: distinctFieldCount(args.variantSearch.rows.filter((row) => row.record_kind === "coverage" && row.search_status === "completed"), "gene_id"),
+      unsearchedCandidateGenes: distinctFieldCount(args.variantSearch.rows.filter((row) => row.record_kind === "coverage" && row.search_status !== "completed"), "gene_id"),
+      selectedAlleles: distinctFieldCount(args.variantSearch.rows.filter((row) => row.record_kind === "variant"), "variant_key"),
       invertedSupportedHypotheses: distinctCount(inverted.rows, "genotype_supports_hypothesis"),
       invertedGaps: distinctCount(inverted.rows, "hypothesis_without_supporting_variant"),
       invertedUnsearched: distinctCount(inverted.rows, "hypothesis_not_searched"),
@@ -295,7 +328,14 @@ function buildPacket(args: {
       kernelScope: "evidence routing only; not a complete clinical classification kernel",
     },
     provenance: {
-      runIds: [...args.grounding.queryRunIds, args.hypotheses.runId, args.evidence.runId, args.reanalysis.runId],
+      runIds: [
+        ...args.grounding.queryRunIds,
+        args.hypotheses.runId,
+        args.intervals.runId,
+        args.variantSearch.runId,
+        args.evidence.runId,
+        args.reanalysis.runId,
+      ],
     },
   };
 }
@@ -495,6 +535,8 @@ async function runGrounding(args: {
 async function runOperation(args: {
   exampleDir: string;
   manifestPath?: string;
+  manifestSnapshot?: BioManifest;
+  manifestBaseDir?: string;
   conn: SqlConn;
   cas: CasStore;
   caseId: string;
@@ -509,7 +551,9 @@ async function runOperation(args: {
   const response = await runBioOperationFromManifest({
     cwd: args.exampleDir,
     dbPath: args.dbPath,
-    manifestPath: args.manifestPath ?? "manifest.json",
+    ...(args.manifestSnapshot
+      ? { manifestSnapshot: args.manifestSnapshot, manifestBaseDir: args.manifestBaseDir ?? args.exampleDir }
+      : { manifestPath: args.manifestPath ?? "manifest.json" }),
     operationId: args.operationId,
     runId: args.runId,
     now: args.now,
@@ -656,12 +700,21 @@ async function workflowReplayDigest(
   caseId: string,
   grounding: GroundingRuntime,
   hypotheses: PhenotypeHypothesisRuntime,
+  variantSearch: CandidateVariantSearchRuntime,
 ): Promise<string> {
   const manifest = JSON.parse(await fs.readFile(join(exampleDir, "manifest.json"), "utf8")) as BioManifest;
   const hypothesisManifestPath = isAbsolute(hypotheses.manifestPath)
     ? hypotheses.manifestPath
     : resolve(exampleDir, hypotheses.manifestPath);
   const hypothesisManifest = JSON.parse(await fs.readFile(hypothesisManifestPath, "utf8")) as BioManifest;
+  const intervalManifestPath = isAbsolute(variantSearch.intervalManifestPath)
+    ? variantSearch.intervalManifestPath
+    : resolve(variantSearch.manifestBaseDir, variantSearch.intervalManifestPath);
+  const intervalManifest = JSON.parse(await fs.readFile(intervalManifestPath, "utf8")) as BioManifest;
+  const variantSearchManifestPath = isAbsolute(variantSearch.variantSearchManifestPath)
+    ? variantSearch.variantSearchManifestPath
+    : resolve(variantSearch.manifestBaseDir, variantSearch.variantSearchManifestPath);
+  const variantSearchManifest = JSON.parse(await fs.readFile(variantSearchManifestPath, "utf8")) as BioManifest;
   const inputPaths = new Map<string, string>();
   for (const resource of manifest.provides?.resources ?? []) {
     if (resource.resolver === "duckdb.file_scan" && typeof resource.params.path === "string") {
@@ -674,6 +727,11 @@ async function workflowReplayDigest(
       if (typeof source !== "string" || !source.startsWith("file:")) continue;
       const path = source.slice("file:".length);
       inputPaths.set(`hypotheses:${source}`, isAbsolute(path) ? path : resolve(dirname(hypothesisManifestPath), path));
+    }
+  }
+  for (const resource of intervalManifest.provides?.resources ?? []) {
+    if (resource.resolver === "duckdb.file_scan" && typeof resource.params.path === "string") {
+      inputPaths.set(`intervals:${resource.id}`, resolve(dirname(intervalManifestPath), resource.params.path));
     }
   }
   const inputs = await Promise.all([...inputPaths].map(async ([resourceId, path]) => ({ resourceId, digest: await digestFile(path) })));
@@ -696,6 +754,15 @@ async function workflowReplayDigest(
       limit: hypotheses.limit,
       duckdbInitSqlDigest: canonicalDigest(hypotheses.duckdbInitSql),
     },
+    variantSearch: {
+      assembly: variantSearch.assembly,
+      intervalManifest,
+      intervalOperationId: variantSearch.intervalOperationId,
+      manifest: variantSearchManifest,
+      operationId: variantSearch.variantSearchOperationId,
+      sourceVersion: variantSearch.sourceVersion,
+      duckdbInitSqlDigest: canonicalDigest(variantSearch.duckdbInitSql),
+    },
   });
 }
 
@@ -707,8 +774,19 @@ export async function runClinicalGenomicsWorkbench(req: RunClinicalGenomicsReque
   if (!req.hypotheses?.manifestPath || !req.hypotheses.duckdbInitSql.length || !Number.isInteger(req.hypotheses.limit) || req.hypotheses.limit < 1) {
     throw new Error("phenotype hypothesis composition requires a manifest, DuckDB initialization, and a positive integer limit");
   }
+  if (
+    !req.variantSearch?.assembly
+    || !req.variantSearch.intervalManifestPath
+    || !req.variantSearch.variantSearchManifestPath
+    || !req.variantSearch.manifestBaseDir
+    || !req.variantSearch.vcfPath
+    || !req.variantSearch.sourceVersion
+    || !req.variantSearch.duckdbInitSql.length
+  ) {
+    throw new Error("candidate variant-search composition requires an assembly, manifests, source identity, indexed VCF, and DuckDB initialization");
+  }
   const composition = req.grounding;
-  const replayDigest = await workflowReplayDigest(exampleDir, req.caseId, composition, req.hypotheses);
+  const replayDigest = await workflowReplayDigest(exampleDir, req.caseId, composition, req.hypotheses, req.variantSearch);
   const analysisDbDir = join(exampleDir, ".pi", "bio-agent", "analyses");
   const analysisDbPath = join(analysisDbDir, `${createHash("sha256").update(analysisId).digest("hex")}.duckdb`);
   await fs.mkdir(analysisDbDir, { recursive: true });
@@ -759,30 +837,76 @@ export async function runClinicalGenomicsWorkbench(req: RunClinicalGenomicsReque
           },
         },
         {
-          stepId: "case-evidence",
+          stepId: "candidate-gene-intervals",
           run: async ({ valueOf }) => {
             const hypothesisCheckpoint = valueOf<JsonValue>("phenotype-hypotheses") as unknown as OperationCheckpoint;
             const hypotheses = await readOperationRows(cas, hypothesisCheckpoint);
-            const evidence = await runOperation({
+            const intervals = await runOperation({
               exampleDir,
+              manifestPath: req.variantSearch.intervalManifestPath,
               conn: store.conn,
               cas,
               caseId: req.caseId,
-              operationId: "clinical.case_evidence",
-              runId: `${analysisId}.evidence`,
+              operationId: req.variantSearch.intervalOperationId,
+              runId: `${analysisId}.intervals`,
               now,
               dbPath: analysisDbPath,
-              protectedBindings: { phenotype_hypotheses_json: JSON.stringify(hypotheses.rows) },
+              bindings: { assembly: req.variantSearch.assembly },
+              protectedBindings: { hypotheses_json: JSON.stringify(hypotheses.rows) },
             });
             await recordObservationLink(store.conn, {
-              subjectId: `run:${evidence.runId}`,
+              subjectId: `run:${intervals.runId}`,
               predicate: "uses_run",
               objectId: `run:${hypothesisCheckpoint.runId}`,
               recordedAt: now,
               source: SOURCE,
-              digest: evidence.resultDigest,
+              digest: intervals.resultDigest,
             });
-            return toJsonValue(evidence);
+            return toJsonValue(intervals);
+          },
+        },
+        {
+          stepId: "candidate-variant-search",
+          run: async ({ valueOf }) => {
+            const intervalCheckpoint = valueOf<JsonValue>("candidate-gene-intervals") as unknown as OperationCheckpoint;
+            const intervals = await readOperationRows(cas, intervalCheckpoint);
+            const templatePath = isAbsolute(req.variantSearch.variantSearchManifestPath)
+              ? req.variantSearch.variantSearchManifestPath
+              : resolve(req.variantSearch.manifestBaseDir, req.variantSearch.variantSearchManifestPath);
+            const template = JSON.parse(await fs.readFile(templatePath, "utf8")) as BioManifest;
+            const dynamic = buildCandidateVariantSearchManifest(
+              template,
+              intervals.rows as unknown as CandidateIntervalRow[],
+              req.variantSearch,
+            );
+            const search = await runOperation({
+              exampleDir,
+              manifestSnapshot: dynamic.manifest,
+              manifestBaseDir: req.variantSearch.manifestBaseDir,
+              conn: store.conn,
+              cas,
+              caseId: req.caseId,
+              operationId: req.variantSearch.variantSearchOperationId,
+              runId: `${analysisId}.variant-search`,
+              now,
+              dbPath: analysisDbPath,
+              ...(dynamic.regions.length ? { duckdbInitSql: req.variantSearch.duckdbInitSql } : {}),
+              protectedBindings: {
+                intervals_json: JSON.stringify(intervals.rows),
+                case_vcf_path: req.variantSearch.vcfPath.includes("://") || isAbsolute(req.variantSearch.vcfPath)
+                  ? req.variantSearch.vcfPath
+                  : resolve(req.variantSearch.manifestBaseDir, req.variantSearch.vcfPath),
+              },
+            });
+            await recordObservationLink(store.conn, {
+              subjectId: `run:${search.runId}`,
+              predicate: "uses_run",
+              objectId: `run:${intervalCheckpoint.runId}`,
+              recordedAt: now,
+              source: SOURCE,
+              digest: search.resultDigest,
+            });
+            return toJsonValue(search);
           },
         },
         {
@@ -796,19 +920,74 @@ export async function runClinicalGenomicsWorkbench(req: RunClinicalGenomicsReque
             runId: `${analysisId}.reanalysis`,
             now,
             dbPath: analysisDbPath,
+            protectedBindings: { candidate_variant_search_json: "[]" },
           })),
+        },
+        {
+          stepId: "case-evidence",
+          run: async ({ valueOf }) => {
+            const hypothesisCheckpoint = valueOf<JsonValue>("phenotype-hypotheses") as unknown as OperationCheckpoint;
+            const variantSearchCheckpoint = valueOf<JsonValue>("candidate-variant-search") as unknown as OperationCheckpoint;
+            const hypotheses = await readOperationRows(cas, hypothesisCheckpoint);
+            const variantSearch = await readOperationRows(cas, variantSearchCheckpoint);
+            const evidence = await runOperation({
+              exampleDir,
+              conn: store.conn,
+              cas,
+              caseId: req.caseId,
+              operationId: "clinical.case_evidence",
+              runId: `${analysisId}.evidence`,
+              now,
+              dbPath: analysisDbPath,
+              protectedBindings: {
+                phenotype_hypotheses_json: JSON.stringify(hypotheses.rows),
+                candidate_variant_search_json: JSON.stringify(variantSearch.rows),
+              },
+            });
+            await recordObservationLink(store.conn, {
+              subjectId: `run:${evidence.runId}`,
+              predicate: "uses_run",
+              objectId: `run:${hypothesisCheckpoint.runId}`,
+              recordedAt: now,
+              source: SOURCE,
+              digest: evidence.resultDigest,
+            });
+            await recordObservationLink(store.conn, {
+              subjectId: `run:${evidence.runId}`,
+              predicate: "uses_run",
+              objectId: `run:${variantSearchCheckpoint.runId}`,
+              recordedAt: now,
+              source: SOURCE,
+              digest: evidence.resultDigest,
+            });
+            return toJsonValue(evidence);
+          },
         },
         {
           stepId: PACKET_STEP,
           run: async ({ valueOf }) => {
             const groundingCheckpoint = valueOf<JsonValue>("phenotype-grounding") as unknown as GroundingCheckpoint;
             const hypothesisCheckpoint = valueOf<JsonValue>("phenotype-hypotheses") as unknown as OperationCheckpoint;
+            const intervalCheckpoint = valueOf<JsonValue>("candidate-gene-intervals") as unknown as OperationCheckpoint;
+            const variantSearchCheckpoint = valueOf<JsonValue>("candidate-variant-search") as unknown as OperationCheckpoint;
             const evidenceCheckpoint = valueOf<JsonValue>("case-evidence") as unknown as OperationCheckpoint;
             const reanalysisCheckpoint = valueOf<JsonValue>("reanalysis") as unknown as OperationCheckpoint;
             const hypotheses = await readOperationRows(cas, hypothesisCheckpoint);
+            const intervals = await readOperationRows(cas, intervalCheckpoint);
+            const variantSearch = await readOperationRows(cas, variantSearchCheckpoint);
             const evidence = await readOperationRows(cas, evidenceCheckpoint);
             const reanalysis = await readOperationRows(cas, reanalysisCheckpoint);
-            const packet = buildPacket({ analysisId, caseId: req.caseId, generatedAt: now, grounding: groundingCheckpoint, hypotheses, evidence, reanalysis });
+            const packet = buildPacket({
+              analysisId,
+              caseId: req.caseId,
+              generatedAt: now,
+              grounding: groundingCheckpoint,
+              hypotheses,
+              intervals,
+              variantSearch,
+              evidence,
+              reanalysis,
+            });
             return toJsonValue(await recordPacket({ conn: store.conn, cas, packet, recordedAt: now }));
           },
         },

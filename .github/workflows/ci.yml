@@ -36,6 +36,10 @@ jobs:
         working-directory: pi-bio-workbench
         run: npm ci --no-audit --no-fund
 
+      - name: Provision DuckHTS
+        working-directory: pi-bio-workbench
+        run: npm run provision:duckhts
+
       - name: Check workbench
         working-directory: pi-bio-workbench
         run: npm run check

@@ -2,23 +2,27 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createWorkbenchApi } from "../src/api/app.js";
 import { loadRecordedGroundingRuntime } from "../src/recorded-grounding.js";
 import { localMonarchFixtureRuntime } from "../src/monarch-host.js";
+import { localCandidateVariantSearchRuntime } from "../src/candidate-variant-search.js";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const fixtureRoot = join(repoRoot, "examples", "clinical-genomics");
 
 async function appFixture() {
   const workspace = await fs.mkdtemp(join(tmpdir(), "pi-bio-workbench-api-"));
-  await fs.cp(fixtureRoot, workspace, { recursive: true });
-  await fs.rm(join(workspace, ".pi"), { recursive: true, force: true });
+  await fs.cp(fixtureRoot, workspace, {
+    recursive: true,
+    filter: (source) => relative(fixtureRoot, source).split(sep)[0] !== ".pi",
+  });
   return createWorkbenchApi({
     clinicalWorkspace: workspace,
     grounding: await loadRecordedGroundingRuntime(join(workspace, "data", "grounding_proposals.json")),
     hypotheses: localMonarchFixtureRuntime(workspace),
+    variantSearch: localCandidateVariantSearchRuntime(workspace),
     clock: () => "2026-07-05T12:00:00Z",
   });
 }

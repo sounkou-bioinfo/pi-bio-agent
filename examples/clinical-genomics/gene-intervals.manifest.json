@@ -1,0 +1,87 @@
+{
+  "schema": "pi-bio.manifest.v1",
+  "id": "clinical-genomics-gene-intervals",
+  "version": "0.1.0",
+  "title": "Assembly-pinned candidate gene intervals",
+  "description": "Resolve ranked gene hypotheses to one assembly-specific genomic span per gene while retaining missing and ambiguous interval states. A known gene available only on another assembly fails the operation.",
+  "provides": {
+    "resolvers": [
+      {
+        "id": "duckdb.file_scan",
+        "version": "0.1.0",
+        "title": "DuckDB file scan",
+        "description": "Read a local interval snapshot into a DuckDB table.",
+        "output": {
+          "mode": "table"
+        }
+      },
+      {
+        "id": "duckdb.sql_materialize",
+        "version": "0.1.0",
+        "title": "DuckDB SQL materialization",
+        "description": "Materialize a declared read-only SQL relation.",
+        "output": {
+          "mode": "table"
+        }
+      }
+    ],
+    "resources": [
+      {
+        "id": "gene_intervals",
+        "title": "Assembly-pinned gene intervals",
+        "kind": "virtual",
+        "resolver": "duckdb.file_scan",
+        "params": {
+          "path": "data/gene_intervals.csv",
+          "table": "gene_intervals"
+        }
+      },
+      {
+        "id": "candidate_gene_intervals",
+        "title": "Candidate gene interval resolution",
+        "kind": "virtual",
+        "resolver": "duckdb.sql_materialize",
+        "params": {
+          "table": "candidate_gene_intervals",
+          "sql": "WITH hypotheses AS (\n  SELECT\n    json_extract_string(value, '$.gene_id') AS gene_id,\n    json_extract_string(value, '$.gene') AS gene,\n    json_extract_string(value, '$.disease_id') AS disease_id,\n    try_cast(json_extract(value, '$.hypothesis_rank') AS INTEGER) AS hypothesis_rank\n  FROM json_each(CAST(getvariable('hypotheses_json') AS JSON))\n), matching_assembly AS (\n  SELECT\n    h.gene_id,\n    h.gene,\n    h.disease_id,\n    h.hypothesis_rank,\n    COUNT(DISTINCT i.chrom)::INTEGER AS chromosome_count,\n    any_value(i.chrom) AS chrom,\n    MIN(try_cast(i.start_1based AS BIGINT)) AS start_1based,\n    MAX(try_cast(i.end_1based AS BIGINT)) AS end_1based,\n    list_sort(list_distinct(list(i.interval_source))) AS interval_sources,\n    list_sort(list_distinct(list(i.interval_version))) AS interval_versions\n  FROM hypotheses h\n  JOIN gene_intervals i\n    ON i.gene_id = h.gene_id\n   AND i.assembly = getvariable('assembly')\n  GROUP BY h.gene_id, h.gene, h.disease_id, h.hypothesis_rank\n), known_gene AS (\n  SELECT DISTINCT gene_id\n  FROM gene_intervals\n)\nSELECT\n  getvariable('case_id')::VARCHAR AS case_id,\n  h.gene_id,\n  h.gene,\n  h.disease_id,\n  h.hypothesis_rank,\n  getvariable('assembly')::VARCHAR AS assembly,\n  cast(m.chrom AS VARCHAR) AS chrom,\n  m.start_1based,\n  m.end_1based,\n  m.interval_sources,\n  m.interval_versions,\n  CASE\n    WHEN m.chromosome_count = 1 AND m.start_1based IS NOT NULL AND m.end_1based >= m.start_1based THEN 'resolved'\n    WHEN m.chromosome_count > 1 THEN 'ambiguous_locus'\n    WHEN known.gene_id IS NOT NULL THEN error(\n      'candidate gene interval assembly mismatch for ' || h.gene_id || ': no interval on ' || getvariable('assembly')\n    )\n    ELSE 'missing_gene_interval'\n  END AS interval_status\nFROM hypotheses h\nLEFT JOIN matching_assembly m USING (gene_id, gene, disease_id, hypothesis_rank)\nLEFT JOIN known_gene known USING (gene_id)\nORDER BY h.hypothesis_rank, h.gene, h.disease_id"
+        }
+      }
+    ],
+    "operations": [
+      {
+        "id": "clinical.candidate_gene_intervals",
+        "version": "0.1.0",
+        "title": "Resolve candidate genes to assembly-pinned intervals",
+        "description": "Resolve every ranked hypothesis to a genomic span or an explicit missing or ambiguous-locus state; fail on an assembly mismatch.",
+        "transport": "duckdb.sql",
+        "inputSchema": {
+          "type": "object",
+          "required": [
+            "case_id",
+            "assembly",
+            "hypotheses_json"
+          ],
+          "properties": {
+            "case_id": {
+              "type": "string"
+            },
+            "assembly": {
+              "type": "string"
+            },
+            "hypotheses_json": {
+              "type": "string"
+            }
+          }
+        },
+        "sql": {
+          "readOnly": true,
+          "requiredResources": [
+            "gene_intervals",
+            "candidate_gene_intervals"
+          ],
+          "sqlTemplate": "SELECT *\nFROM candidate_gene_intervals\nORDER BY hypothesis_rank, gene, disease_id"
+        }
+      }
+    ]
+  }
+}

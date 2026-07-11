@@ -83,6 +83,12 @@ private prose state. One durable annotation step owns network batching so parall
 - The workflow now invokes the same canonical graph operation against either a hermetic graph fixture or the pinned
   Monarch snapshot. Its exact/ancestor match counts and annotation-frequency score are explicit, but they are not a
   clinically validated semantic-similarity method.
+- Ranked hypotheses now resolve through an assembly-pinned interval snapshot and indexed DuckHTS reads. The search
+  validates requested contigs and available VCF assembly metadata through `read_hts_header`, deduplicates overlapping
+  region output per selected gene and allele, and records zero-result coverage explicitly.
+- The hermetic indexed VCF carries allele-specific annotation fields so CI can exercise the complete relation. Live
+  bounded VEP `/region` fanout, response materialization, and its admitted local fallback remain application work;
+  do not describe fixture annotations as that production stage.
 - A phenotype-supported gene with no selected supporting variant is recorded as missing genotype support within the
   search scope; it is not treated as evidence against the hypothesis.
 - Keep hermetic CI fixtures, but generate or validate them against recorded real-source dogfood. Do not cite fixture

@@ -1,0 +1,20 @@
+##fileformat=VCFv4.3
+##contig=<ID=2,length=242193529,assembly=GRCh38>
+##contig=<ID=3,length=198295559,assembly=GRCh38>
+##contig=<ID=5,length=181538259,assembly=GRCh38>
+##contig=<ID=7,length=159345973,assembly=GRCh38>
+##contig=<ID=11,length=135086622,assembly=GRCh38>
+##contig=<ID=17,length=83257441,assembly=GRCh38>
+##INFO=<ID=GENE,Number=A,Type=String,Description="Gene symbol assigned to each alternate allele">
+##INFO=<ID=CSQ,Number=A,Type=String,Description="Sequence Ontology consequence assigned to each alternate allele">
+##INFO=<ID=AF,Number=A,Type=Float,Description="Population allele frequency assigned to each alternate allele">
+##INFO=<ID=CLNSIG,Number=A,Type=String,Description="Curated clinical significance assigned to each alternate allele">
+##INFO=<ID=ZYGOSITY,Number=A,Type=String,Description="Case zygosity assigned to each alternate allele">
+##INFO=<ID=INHERITANCE,Number=A,Type=String,Description="Case inheritance observation assigned to each alternate allele">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO
+2	47637258	.	C	CT	.	PASS	GENE=GENEZ;CSQ=frameshift_variant;AF=.;CLNSIG=Uncertain_significance;ZYGOSITY=het;INHERITANCE=inherited
+3	300	.	C	T	.	PASS	GENE=GENEF;CSQ=stop_gained;AF=0.0001;CLNSIG=Benign;ZYGOSITY=het;INHERITANCE=inherited
+7	100	.	A	G	.	PASS	GENE=GENEC;CSQ=missense_variant;AF=0.0001;CLNSIG=Uncertain_significance;ZYGOSITY=het;INHERITANCE=inherited
+11	200	.	G	A	.	PASS	GENE=GENED;CSQ=stop_gained;AF=0.02;CLNSIG=Uncertain_significance;ZYGOSITY=het;INHERITANCE=inherited
+17	43093464	.	A	T	.	PASS	GENE=GENEB;CSQ=stop_gained;AF=0.0002;CLNSIG=Pathogenic;ZYGOSITY=het;INHERITANCE=de_novo
+17	43093470	.	C	G,T	.	PASS	GENE=GENEB,GENEB;CSQ=missense_variant,stop_gained;AF=0.0003,0.02;CLNSIG=Uncertain_significance,Benign;ZYGOSITY=het,het;INHERITANCE=inherited,inherited

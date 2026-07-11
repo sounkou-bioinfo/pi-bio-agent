@@ -51,6 +51,7 @@ export const CaseEvidenceRowSchema = z.object({
   disease_id: z.string().nullable(),
   disease_label: z.string().nullable(),
   variant_key: z.string().nullable(),
+  annotated_gene: z.string().nullable(),
   consequence: z.string().nullable(),
   allele_frequency: z.number().nullable(),
   clinical_significance: z.string().nullable(),
@@ -98,6 +99,47 @@ export const PhenotypeHypothesisRowSchema = z.object({
   hypothesis_rank: z.number().int(),
 }).strict().openapi("PhenotypeHypothesisRow");
 
+export const CandidateGeneIntervalRowSchema = z.object({
+  case_id: z.string(),
+  gene_id: z.string(),
+  gene: z.string(),
+  disease_id: z.string(),
+  hypothesis_rank: z.number().int(),
+  assembly: z.string(),
+  chrom: z.string().nullable(),
+  start_1based: z.number().int().nullable(),
+  end_1based: z.number().int().nullable(),
+  interval_sources: z.array(z.string()).nullable(),
+  interval_versions: z.array(z.string()).nullable(),
+  interval_status: z.enum(["resolved", "ambiguous_locus", "missing_gene_interval"]),
+}).strict().openapi("CandidateGeneIntervalRow");
+
+export const CandidateVariantSearchRowSchema = z.object({
+  record_kind: z.enum(["coverage", "variant"]),
+  case_id: z.string(),
+  gene_id: z.string(),
+  gene: z.string(),
+  disease_ids: z.array(z.string()),
+  hypothesis_rank: z.number().int(),
+  assembly: z.string(),
+  chrom: z.string().nullable(),
+  start_1based: z.number().int().nullable(),
+  end_1based: z.number().int().nullable(),
+  search_status: z.enum(["completed", "ambiguous_locus", "missing_gene_interval"]),
+  search_scope: z.string().nullable(),
+  searched_variant_count: z.number().int().nonnegative(),
+  variant_key: z.string().nullable(),
+  pos: z.number().int().nullable(),
+  ref: z.string().nullable(),
+  alt: z.string().nullable(),
+  annotated_gene: z.string().nullable(),
+  consequence: z.string().nullable(),
+  allele_frequency: z.number().nullable(),
+  clinical_significance: z.string().nullable(),
+  zygosity: z.string().nullable(),
+  inheritance: z.string().nullable(),
+}).strict().openapi("CandidateVariantSearchRow");
+
 export const ReanalysisRowSchema = z.object({
   case_id: z.string(),
   variant_key: z.string(),
@@ -117,6 +159,8 @@ function operationRowsSchema<T extends z.ZodType>(name: string, rows: T) {
 
 const CaseEvidenceOperationSchema = operationRowsSchema("CaseEvidenceOperation", CaseEvidenceRowSchema);
 const PhenotypeHypothesisOperationSchema = operationRowsSchema("PhenotypeHypothesisOperation", PhenotypeHypothesisRowSchema);
+const CandidateGeneIntervalOperationSchema = operationRowsSchema("CandidateGeneIntervalOperation", CandidateGeneIntervalRowSchema);
+const CandidateVariantSearchOperationSchema = operationRowsSchema("CandidateVariantSearchOperation", CandidateVariantSearchRowSchema);
 const ReanalysisOperationSchema = operationRowsSchema("ReanalysisOperation", ReanalysisRowSchema);
 
 export const ReviewItemSchema = z.object({
@@ -130,11 +174,15 @@ export const EvidencePacketSchema = z.object({
   analysisId: z.string(),
   caseId: z.string(),
   generatedAt: z.iso.datetime(),
-  lanes: z.object({
+  stages: z.object({
     hypotheses: PhenotypeHypothesisOperationSchema,
+    intervals: CandidateGeneIntervalOperationSchema,
+    variantSearch: CandidateVariantSearchOperationSchema,
+    reanalysis: ReanalysisOperationSchema,
+  }).strict(),
+  lanes: z.object({
     direct: CaseEvidenceOperationSchema,
     inverted: CaseEvidenceOperationSchema,
-    reanalysis: ReanalysisOperationSchema,
   }).strict(),
   grounding: z.object({
     groundingId: z.string(),
@@ -149,6 +197,11 @@ export const EvidencePacketSchema = z.object({
     directCandidates: z.number().int().nonnegative(),
     directAbstentions: z.number().int().nonnegative(),
     phenotypeHypotheses: z.number().int().nonnegative(),
+    resolvedCandidateGenes: z.number().int().nonnegative(),
+    unresolvedCandidateGenes: z.number().int().nonnegative(),
+    searchedCandidateGenes: z.number().int().nonnegative(),
+    unsearchedCandidateGenes: z.number().int().nonnegative(),
+    selectedAlleles: z.number().int().nonnegative(),
     invertedSupportedHypotheses: z.number().int().nonnegative(),
     invertedGaps: z.number().int().nonnegative(),
     invertedUnsearched: z.number().int().nonnegative(),

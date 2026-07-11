@@ -1,0 +1,70 @@
+{
+  "schema": "pi-bio.manifest.v1",
+  "id": "clinical-genomics-candidate-variant-search",
+  "version": "0.1.0",
+  "title": "Indexed candidate-gene variant search",
+  "description": "Read only assembly-pinned candidate intervals from the indexed annotated-VCF fixture, validate contig and available assembly metadata, deduplicate overlapping region results per selected gene and allele, and emit both variant and coverage rows. Live VEP annotation is a subsequent provider, not implied by this fixture binding.",
+  "provides": {
+    "resolvers": [
+      {
+        "id": "duckhts.read_bcf",
+        "version": "0.1.0",
+        "title": "DuckHTS indexed VCF/BCF read",
+        "description": "Materialize raw VCF/BCF rows from an htslib region string.",
+        "output": { "mode": "table" }
+      },
+      {
+        "id": "duckdb.sql_materialize",
+        "version": "0.1.0",
+        "title": "DuckDB SQL materialization",
+        "description": "Materialize an empty typed relation when no candidate interval is resolvable.",
+        "output": { "mode": "table" }
+      }
+    ],
+    "resources": [
+      {
+        "id": "case_vcf_raw",
+        "title": "Candidate-region VCF records",
+        "kind": "virtual",
+        "resolver": "duckdb.sql_materialize",
+        "params": {
+          "table": "case_vcf_raw",
+          "sql": "SELECT NULL::VARCHAR AS CHROM, NULL::BIGINT AS POS, NULL::VARCHAR AS REF, NULL::VARCHAR[] AS ALT, NULL::VARCHAR[] AS INFO_GENE, NULL::VARCHAR[] AS INFO_CSQ, NULL::FLOAT[] AS INFO_AF, NULL::VARCHAR[] AS INFO_CLNSIG, NULL::VARCHAR[] AS INFO_ZYGOSITY, NULL::VARCHAR[] AS INFO_INHERITANCE WHERE FALSE"
+        }
+      },
+      {
+        "id": "case_vcf_contigs",
+        "title": "Case VCF contigs and assembly metadata",
+        "kind": "virtual",
+        "resolver": "duckdb.sql_materialize",
+        "params": {
+          "table": "case_vcf_contigs",
+          "sql": "SELECT NULL::VARCHAR AS chrom, NULL::BIGINT AS length, NULL::VARCHAR AS assembly WHERE FALSE"
+        }
+      }
+    ],
+    "operations": [
+      {
+        "id": "clinical.candidate_variant_search",
+        "version": "0.1.0",
+        "title": "Search candidate gene intervals in the case VCF",
+        "description": "Return allele-level candidate rows with the fixture's declared INFO annotations plus one coverage row per hypothesis gene. Overlapping region duplicates are collapsed per selected gene and allele.",
+        "transport": "duckdb.sql",
+        "inputSchema": {
+          "type": "object",
+          "required": ["case_id", "intervals_json", "case_vcf_path"],
+          "properties": {
+            "case_id": { "type": "string" },
+            "intervals_json": { "type": "string" },
+            "case_vcf_path": { "type": "string" }
+          }
+        },
+        "sql": {
+          "readOnly": true,
+          "requiredResources": ["case_vcf_raw", "case_vcf_contigs"],
+          "sqlFile": "operations/candidate_variant_search.sql"
+        }
+      }
+    ]
+  }
+}

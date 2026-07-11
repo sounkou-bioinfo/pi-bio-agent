@@ -9,6 +9,8 @@ const manifests = [
   { templateName: "manifest.template.json", manifestName: "manifest.json" },
   { templateName: "monarch.manifest.template.json", manifestName: "monarch.manifest.json" },
   { templateName: "monarch.manifest.template.json", manifestName: "monarch.fixture.manifest.json", fixture: true },
+  { templateName: "gene-intervals.manifest.template.json", manifestName: "gene-intervals.manifest.json" },
+  { templateName: "variant-search.manifest.template.json", manifestName: "variant-search.manifest.json" },
 ];
 
 const fixtureSources = {

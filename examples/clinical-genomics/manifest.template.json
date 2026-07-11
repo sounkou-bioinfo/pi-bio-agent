@@ -37,13 +37,6 @@
         "params": { "path": "data/so_loss_of_function.csv", "table": "so_loss_of_function" }
       },
       {
-        "id": "variant_search_coverage",
-        "title": "Recorded variant search coverage",
-        "kind": "virtual",
-        "resolver": "duckdb.file_scan",
-        "params": { "path": "data/variant_search_coverage.csv", "table": "variant_search_coverage" }
-      },
-      {
         "id": "case_narratives",
         "title": "Immutable source case narratives",
         "kind": "virtual",
@@ -70,6 +63,20 @@
         "kind": "virtual",
         "resolver": "duckdb.file_scan",
         "params": { "path": "data/assessment_status_order.csv", "table": "assessment_status_order" }
+      },
+      {
+        "id": "variant_inputs",
+        "title": "Direct and indexed-search variant inputs",
+        "kind": "virtual",
+        "resolver": "duckdb.sql_materialize",
+        "params": { "table": "variant_inputs", "sqlFile": "relations/variant_inputs.sql" }
+      },
+      {
+        "id": "variant_search_coverage",
+        "title": "Indexed candidate-gene search coverage",
+        "kind": "virtual",
+        "resolver": "duckdb.sql_materialize",
+        "params": { "table": "variant_search_coverage", "sqlFile": "relations/variant_search_coverage.sql" }
       },
       {
         "id": "variant_assessment",
@@ -114,9 +121,13 @@
             "phenotype_hypotheses_json": {
               "type": "string",
               "description": "Host-protected JSON array from the checkpointed phenotype-hypothesis operation."
+            },
+            "candidate_variant_search_json": {
+              "type": "string",
+              "description": "Host-protected JSON array from the checkpointed indexed variant-search operation."
             }
           },
-          "required": ["case_id", "phenotype_hypotheses_json"]
+          "required": ["case_id", "phenotype_hypotheses_json", "candidate_variant_search_json"]
         },
         "notes": [
           "Direct starts from observed variants; inverted consumes the recorded phenotype-to-disease-to-gene hypothesis relation produced from accepted grounding assertions.",
@@ -130,6 +141,7 @@
           "requiredResources": [
             "case_variants",
             "so_loss_of_function",
+            "variant_inputs",
             "variant_search_coverage",
             "variant_assessment",
             "phenotype_hypothesis",
@@ -157,6 +169,7 @@
           "requiredResources": [
             "case_variants",
             "so_loss_of_function",
+            "variant_inputs",
             "prior_assessment",
             "assessment_status_order",
             "variant_assessment",
