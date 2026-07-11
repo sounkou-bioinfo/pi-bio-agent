@@ -28,7 +28,7 @@
     "@hono/node-server": "^2.0.8",
     "@hono/zod-openapi": "^1.4.0",
     "hono": "^4.12.28",
-    "pi-bio-agent": "git+https://github.com/sounkou-bioinfo/pi-bio-agent.git#11ba17dffbd8cda3a85b1d56f586e56247a09400",
+    "pi-bio-agent": "git+https://github.com/sounkou-bioinfo/pi-bio-agent.git#982dd46",
     "zod": "^4.4.3"
   },
   "devDependencies": {
