@@ -3,7 +3,7 @@
   "id": "quarto-engine-variants",
   "version": "0.1.0",
   "title": "Quarto engine variants",
-  "description": "Small declared resource used by the Quarto engine SDK dogfood.",
+  "description": "Small declared resource used by the Quarto engine SDK pattern.",
   "provides": {
     "resolvers": [
       {

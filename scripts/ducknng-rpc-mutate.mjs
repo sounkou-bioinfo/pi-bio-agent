@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { DuckDBInstance } from "@duckdb/node-api";
 
-// DOGFOOD: cross-process shared MUTABLE state over ducknng RPC — the replacement for the quack demo, and it does
+// PATTERN: cross-process shared MUTABLE state over ducknng RPC — the replacement for the quack demo, and it does
 // what quack CANNOT. quack makes a remote table a LOCAL CATALOG ENTRY, so DuckDB calls GetStorageInfo/PlanUpdate/
 // PlanDelete on quack's shim (unimplemented at HEAD) => quack remote writes are APPEND-ONLY. ducknng_run_rpc(url,
 // sql, tls) instead sends a SQL STRING to a server running NATIVE DuckDB (no shim), so UPDATE / DELETE / ON

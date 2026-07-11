@@ -2,7 +2,7 @@
 
 # Cross-process shared MUTABLE state over ducknng RPC — evidence
 
-`scripts/ducknng-rpc-mutate.mjs` is a **dogfood** and the **replacement
+`scripts/ducknng-rpc-mutate.mjs` is a **pattern** and the **replacement
 for the old quack demo** — and it does what quack *cannot*. Separate
 agent **processes** mutate one shared table **in place** (`UPDATE` /
 `DELETE` / `ON CONFLICT` upsert) over `ducknng_run_rpc(url, sql, tls)`.
@@ -18,7 +18,7 @@ is **opt-in**: the server must
 `ducknng_register_exec_method(false|true)` (the host security boundary,
 vs quack’s open-by-ATTACH).
 
-Run: `npm run dogfood:ducknng-rpc-mutate`
+Run: `npm run pattern:ducknng-rpc-mutate`
 
 ## Recorded run (2026-06-30)
 

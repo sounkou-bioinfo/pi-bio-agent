@@ -21,7 +21,7 @@ try {
   const runId = `monarch-hypotheses-${Date.now()}`;
   const response = await runBioOperationFromManifest({
     cwd: repoRoot,
-    dbPath: join(stateDir, "monarch-dogfood.duckdb"),
+    dbPath: join(stateDir, "monarch-pattern.duckdb"),
     manifestPath: "examples/clinical-genomics/monarch.manifest.json",
     operationId: "clinical.monarch_phenotype_hypotheses",
     runId,
@@ -31,7 +31,7 @@ try {
       `ATTACH '${monarchUrl}' AS monarch (READ_ONLY)`,
     ],
     store: store.conn,
-    author: "pi-bio-workbench:monarch-dogfood",
+    author: "pi-bio-workbench:monarch-pattern",
     cas,
     casMetadata: { conn: store.conn },
     serialize: false,

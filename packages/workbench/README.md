@@ -71,7 +71,7 @@ Compare lexical retrieval with pre-retrieval, post-initial-retrieval, and combin
 npm run benchmark:grounding
 ```
 
-This is retrieval-contract dogfood, not a model-quality claim: recorded proposals and reviews isolate whether each
+This is retrieval-contract pattern, not a model-quality claim: recorded proposals and reviews isolate whether each
 mode admits the right candidates without leaking gold to the ports. The immutable case reaches 0.75 structured-
 assertion recall with lexical retrieval; each augmentation mode reaches precision and recall 1.0. The report includes
 proposals, original-text spans, augmentation receipts, review decisions, per-case metrics, micro metrics, and the
@@ -85,7 +85,7 @@ its canonical `edges`, `nodes`, and ontology `closure` tables. No Monarch-specif
 table is involved.
 
 ```sh
-npm run dogfood:monarch
+npm run pattern:monarch
 ```
 
 The checked-in query starts from four accepted HPO identifiers and returns phenotype-supported disease and gene

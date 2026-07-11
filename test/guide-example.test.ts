@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runBioQueryFromManifest } from "../src/hosts/run-store.js";
 
-// Dogfood + anti-rot gate for the user guide: extract the EXACT manifest + CSV from docs/guide.md and run
+// Pattern + anti-rot gate for the user guide: extract the EXACT manifest + CSV from docs/guide.md and run
 // them end to end. If someone edits the guide's example into something that does not validate or run, this
 // fails — the published walkthrough cannot rot, the same contract as the docs-index / README gates.
 

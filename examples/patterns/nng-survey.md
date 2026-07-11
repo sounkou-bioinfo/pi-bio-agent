@@ -2,7 +2,7 @@
 
 # NNG survey topology — multi-provider jury (evidence)
 
-`scripts/nng-survey.mjs` is a **dogfood** — the **survey** NNG topology
+`scripts/nng-survey.mjs` is a **pattern** — the **survey** NNG topology
 (surveyor/respondent) as a *multi-provider jury* (a **generic** reusable
 pattern). One surveyor process broadcasts a question (“classify this
 variant”) to N respondent processes — each a distinct “provider” (a
@@ -15,7 +15,7 @@ Over ducknng’s SQL socket layer: `open_socket('surveyor'|'respondent')`
 → `listen`/`dial_socket` → `send_socket_raw` / `recv_socket_raw_aio` +
 `aio_collect`.
 
-Run: `npm run dogfood:nng-survey`
+Run: `npm run pattern:nng-survey`
 
 ## Recorded run (2026-07-02, stable across repeats)
 

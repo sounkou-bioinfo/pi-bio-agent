@@ -138,12 +138,12 @@ the related code.
   digests, and `bio_observations` prove what happened. `createQueueJobWorker` is the lease-owning host adapter;
   `createSqlConnHttpClient` / `createSqlConnHttpServer` give it a parameterized shared coordination connection.
   Scientific execution remains local to the worker, which stages inputs and calls `reproduceRun` against the
-  replay's canonical manifest snapshot and explicit base directory. The SSH dogfood proves this across different
+  replay's canonical manifest snapshot and explicit base directory. The SSH pattern proves this across different
   filesystems without the original manifest. See `src/core/ports.ts`,
   `src/core/jobs.ts`,
   `src/hosts/job-queue.ts`, `src/hosts/queue-job-worker.ts`, `src/hosts/remote-sql-conn.ts`,
-  `src/hosts/job-store.ts`, `test/absurd-queue-push-dogfood.test.ts`,
-  `scripts/dogfood-ssh-remote-worker.mjs`,
+  `src/hosts/job-store.ts`, `test/absurd-queue-push-pattern.test.ts`,
+  `scripts/pattern-ssh-remote-worker.mjs`,
   `src/duckdb/resolvers/compute-run.ts`,
   `examples/compute-run/`, and `examples/compute-artifacts/`.
 
@@ -184,7 +184,7 @@ question-level builders in core.)
 Application code has the same obligation. Downstream connectors or case workflows that fetch, normalize, or
 score data beside the substrate are integration debt unless they are deliberately proving a missing primitive. The
 default path is application manifest or operation spec -> resolver/adapter -> DuckDB table -> recorded run. If
-application code keeps running around that path, the framework is not dogfooding itself.
+application code keeps running around that path, the framework does not define the pattern itself.
 
 **Real abstraction, not idealist abstraction** (this sharpens "until a real consumer demands it", which is too
 crude). An abstraction may be built *ahead of any downstream consumer* when it is **immanent in the concrete**: the expressed essence of ≥2–3 things already built and nameable. `duckdb.sql_materialize` qualified: it was

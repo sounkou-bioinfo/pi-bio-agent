@@ -2,7 +2,7 @@
 
 # A content-addressed FS as SQL-over-ducknng + CAS — evidence
 
-`scripts/ducknng-fs.mjs` is a **dogfood** (ridiculous-but-cool): a
+`scripts/ducknng-fs.mjs` is a **pattern** (ridiculous-but-cool): a
 POSIX-shaped distributed file system built as a **composition of
 existing, tested primitives** — no new substrate. Same split as [Latch
 Data](https://blog.latch.bio/p/latch-data-a-distributed-file-system)
@@ -18,13 +18,13 @@ Data](https://blog.latch.bio/p/latch-data-a-distributed-file-system)
 to the metadata server (+ CAS for bytes): `mkdir`/`mv`/`rm` are
 `INSERT`/`UPDATE`/`DELETE`; `ls -R` is a recursive CTE; bytes are
 content-addressed. **Dedup, snapshots, and provenance fall out for
-free.** This original dogfood uses ducknng `exec` because it proves
+free.** This original pattern uses ducknng `exec` because it proves
 mutable shared state directly. The more general target is any
 server-backed `SqlConn`: ducknng for NNG topologies and push wakeups,
 DuckDB Quack for attached remote catalogs / query pushdown /
 DuckDB-secret-backed auth where that server surface is available.
 
-Run: `npm run dogfood:ducknng-fs`
+Run: `npm run pattern:ducknng-fs`
 
 ## Recorded run (2026-06-30)
 

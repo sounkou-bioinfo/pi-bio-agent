@@ -75,7 +75,7 @@ Use this as the deployment checklist before claiming a deployment-level behavior
 | **Shared state topology (`SqlConn` / `openStore`)** | All ledger, memory, job, and run writes use injected SQL ports. The package ships a parameterized HTTP client/server and a typed Arrow/ducknng client adapter. HTTP requires bearer or authorization policy; ducknng supplies generated/in-memory/file-backed TLS and mTLS handles plus service admission. The default local store remains process-exclusive. | Terminate TLS for the HTTP reference, or configure ducknng's native TLS handle, peer policy, and SQL authorizer. Preserve serialized writes, or equivalent transaction semantics, for same-slot observation updates. |
 | **Distributed run execution** | `createQueueJobWorker` claims leased replay jobs, heartbeats, rejects stale writes, records durable status/results, and recovers a terminal result without rerunning. The executing worker opens its own scientific DuckDB and calls `reproduceRun`; shared `SqlConn` is the coordination/evidence plane, not a bulk-result tunnel. | Stage declared inputs at the chosen manifest base, inject compute/network/secret policy and CAS, operate workers, and choose retry/shutdown policy. A deployment that wants the scientific database itself to be remote needs a host adapter beyond this worker composition. |
 | **Live-source replay evidence** | Resolvers that cannot content-pin outputs annotate provenance as `live_source` (`duckdb.sql_materialize`, non-deterministic/uncertain `compute.run` paths). Reproduction with no output `resultDigest` does not produce `matched: true`; it reports `notReproducible`. Live-source runs are also excluded from ActionCache. | Hosts wanting deterministic replay on these sources must pass CAS and run in a mode where outputs are pinned. If CAS is absent, consume `notReproducible` as the stable truth and avoid treating the run as equality across time. |
-| **Cross-machine replay portability** | Replay carries a canonical manifest snapshot and digest. Authored relative resource/compute paths remain relative in identity and resolve from an explicit `manifestBaseDir`; snapshot tampering and source/result/environment drift fail closed. Cross-checkout tests and the SSH worker dogfood execute without the original manifest. | Stage the same input bytes under the selected base and re-supply protected config, capability receipts, compute environment, and CAS. Live sources remain subject to the evidence rule above. |
+| **Cross-machine replay portability** | Replay carries a canonical manifest snapshot and digest. Authored relative resource/compute paths remain relative in identity and resolve from an explicit `manifestBaseDir`; snapshot tampering and source/result/environment drift fail closed. Cross-checkout tests and the SSH worker pattern execute without the original manifest. | Stage the same input bytes under the selected base and re-supply protected config, capability receipts, compute environment, and CAS. Live sources remain subject to the evidence rule above. |
 
 Cross-cutting constraints from this table are currently enforced by tests in:
 
@@ -83,7 +83,7 @@ Cross-cutting constraints from this table are currently enforced by tests in:
 - [run-store.ts](../src/hosts/run-store.ts), especially `serialize:false` CAS-rooting and live-source cache-skips
 - [extensions/pi-coding-agent/index.ts](../extensions/pi-coding-agent/index.ts), `openStore` and session-sync guardrails
 - [concurrency.md](./concurrency.md), [remote-sql-conn.ts](../src/hosts/remote-sql-conn.ts), and
-  [dogfood-ssh-remote-worker.mjs](../scripts/dogfood-ssh-remote-worker.mjs)
+  [pattern-ssh-remote-worker.mjs](../scripts/pattern-ssh-remote-worker.mjs)
 
 ## Consumer-pulled adapters
 
@@ -116,6 +116,6 @@ Do not reopen these without contradictory evidence:
 - open host events and digest-first training-corpus projection;
 - graph projection profiles and the pinned SemanticSQL concrete-view compatibility contract;
 - host-neutral skill installation and executable conformance checks;
-- packed SDK consumer dogfood and owned-extension CI lanes.
+- packed SDK consumer pattern and owned-extension CI lanes.
 
 The proof map and next application move are in [bring-it-home-plan.md](bring-it-home-plan.md).

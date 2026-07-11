@@ -2,7 +2,7 @@
 
 # Blackboard (pub/sub) topology — evidence
 
-`scripts/blackboard-run.mjs` is a **dogfood** of the **blackboard** (nng
+`scripts/blackboard-run.mjs` is a **pattern** of the **blackboard** (nng
 pub/sub) topology — **decentralized, no coordinator**.
 `runScaffoldOnBlackboard` launches *every* step at the same time
 (`Promise.all` over all steps); a step that names upstream notes in its
@@ -10,7 +10,7 @@ access list **blocks on `awaitNote(slug)`** until those are published,
 then runs and publishes its own (publish = post to the board, await =
 subscribe). So the execution order is **not computed by a scheduler — it
 emerges from the data dependencies**. Same `StudyWorker` contract as the
-chain (`live-multi-agent`) and survey (`live-debate`) dogfoods; only the
+chain (`live-multi-agent`) and survey (`live-debate`) patterns; only the
 topology differs. It is deterministic (canned workers, no LLM) so the
 emergence is reproducible.
 
@@ -19,7 +19,7 @@ The DAG is a diamond: `extract -> {annotate, qc} -> classify`.
 **both**. No code anywhere computes that order — it falls out of the
 access lists.
 
-Run: `npm run dogfood:blackboard-run`
+Run: `npm run pattern:blackboard-run`
 
 ## Recorded run (2026-06-30)
 
@@ -50,7 +50,7 @@ a *consequence* of the access lists (publish/subscribe over shared
 memory). This is a deterministic coordination mechanism that a
 multi-agent host may use; it is not Fugu’s learned orchestrator or
 function-call memory. The deterministic mechanics also back the
-chain/survey dogfoods — same executor, different scaffold.
+chain/survey patterns — same executor, different scaffold.
 
 > Shared-**write** variant: this demo’s board is in-process
 > (`memoryBlackboard`). The same `Blackboard` interface backs a SQL

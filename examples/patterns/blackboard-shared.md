@@ -2,7 +2,7 @@
 
 # Shared-write blackboard (pub/sub × shared writes, cross-process) — evidence
 
-`scripts/blackboard-shared.mjs` is a **dogfood** composing two others:
+`scripts/blackboard-shared.mjs` is a **pattern** composing two others:
 the decentralized **blackboard** (pub/sub) topology of
 `blackboard-run.md` and **cross-process shared state** over **ducknng
 RPC** (quack is dropped for the mutable shared-state demos). Each agent
@@ -16,7 +16,7 @@ This closes the last cell of the topology matrix: **chain**
 (`blackboard-run`) / **push-pull** (`pipeline-fanout`) /
 **shared-write** (this).
 
-Run: `npm run dogfood:blackboard-shared`
+Run: `npm run pattern:blackboard-shared`
 
 ## Recorded run (2026-06-30)
 

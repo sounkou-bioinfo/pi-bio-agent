@@ -5,7 +5,7 @@ import { duckdbNodeConn } from "../dist/duckdb/node-api.js";
 import { createDucknngSqlConn } from "../dist/hosts/ducknng-sql-conn.js";
 import { resolveDucknngRuntime } from "./ducknng-runtime.mjs";
 
-// DOGFOOD: topology x shared-writes — the decentralized BLACKBOARD (pub/sub) running ACROSS PROCESSES over
+// PATTERN: topology x shared-writes — the decentralized BLACKBOARD (pub/sub) running ACROSS PROCESSES over
 // ducknng RPC (quack is dropped for this mutable shared-state path). Each agent is a SEPARATE OS process that coordinates ONLY
 // through a shared blackboard table on a ducknng server: the typed SqlConn maps publish to remote INSERT and await
 // to a polled remote SELECT. No coordinator, no client opens the db file, exec opt-in.

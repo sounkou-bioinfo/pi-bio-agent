@@ -91,7 +91,7 @@ const run = await runCli(workdir, [
   "--db", ":memory:",
   "--operation", "rare_high_impact.report",
   "--ledger", "auto",
-  "--author", "substrate-skill-dogfood",
+  "--author", "substrate-skill-pattern",
 ]);
 assert.equal(run.ok, true);
 const buckets = new Map(run.rows.map((row) => [row.bucket, Number(row.n)]));
@@ -105,7 +105,7 @@ const runFactCount = await scalar(
   "SELECT count(*) AS n FROM bio_observations WHERE subject_id = ? AND predicate = 'run'",
   [`run:${run.runId}`],
 );
-assert.equal(runFactCount, 1, "CLI dogfood run is recorded as a run:<id> ledger fact");
+assert.equal(runFactCount, 1, "CLI pattern run is recorded as a run:<id> ledger fact");
 
 const reproduction = await runCli(workdir, ["reproduce", join(run.runDir, "replay.json")]);
 assert.equal(reproduction.reproduced, true);
@@ -143,7 +143,7 @@ assert.equal(graphWindowNext.rows.length, 2);
 assert.equal(graphWindowNext.omittedCount, 0);
 
 console.log(JSON.stringify({
-  dogfood: "substrate-skill",
+  pattern: "substrate-skill",
   ok: true,
   integrationPoint: "package skill -> non-Pi host -> catalog/describe -> pi-bio-agent CLI -> manifest SQL + graph-window paging + observation ledger",
   skill: installedSkill,

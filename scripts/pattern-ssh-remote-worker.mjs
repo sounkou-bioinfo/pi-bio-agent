@@ -23,7 +23,7 @@ const npmCmd = process.platform === "win32" ? "npm.cmd" : "npm";
 const PROJECT_ROOT = process.cwd();
 const MANIFEST_PATH = "examples/variant-counts/manifest.json";
 const QUERY_SQL = "SELECT COUNT(*) AS variant_count FROM variants";
-const RUN_ID = "dogfood-ssh-remote-worker";
+const RUN_ID = "pattern-ssh-remote-worker";
 const DEFAULT_REMOTE_HOST = "rig";
 const DEFAULT_REMOTE_PORT = 42023;
 const LOCAL_BIND_HOST = "127.0.0.1";
@@ -158,7 +158,7 @@ async function main() {
   let primaryError;
 
   try {
-    localCasDir = await mkdtemp(join(tmpdir(), "pi-bio-dogfood-cas-"));
+    localCasDir = await mkdtemp(join(tmpdir(), "pi-bio-pattern-cas-"));
     const runResponse = await runBioQueryFromManifest({
       cwd: PROJECT_ROOT,
       dbPath: ":memory:",
@@ -190,7 +190,7 @@ async function main() {
       now: "2026-07-01T00:00:00.000Z",
     });
 
-    localPackDir = await mkdtemp(join(tmpdir(), "pi-bio-dogfood-pack-"));
+    localPackDir = await mkdtemp(join(tmpdir(), "pi-bio-pattern-pack-"));
     const pack = await execFileAsync(npmCmd, ["pack", "--json", "--ignore-scripts", "--pack-destination", localPackDir], { cwd: PROJECT_ROOT });
     const packItems = JSON.parse(pack.stdout);
     const packItem = Array.isArray(packItems) ? packItems[0] : packItems;
@@ -198,7 +198,7 @@ async function main() {
     if (!tarballName) throw new Error("npm pack did not report a tarball filename");
     const tarballPath = resolve(localPackDir, tarballName);
 
-    const remoteRootText = await runSsh(host, "mktemp -d /tmp/pi-bio-remote-dogfood-XXXXXX");
+    const remoteRootText = await runSsh(host, "mktemp -d /tmp/pi-bio-remote-pattern-XXXXXX");
     remoteRoot = remoteRootText.stdout.trim();
     if (!remoteRoot) throw new Error("failed to allocate remote temp directory");
 
@@ -213,7 +213,7 @@ async function main() {
     const remoteCommand = [
       `cd ${shellQuote(remoteAppDir)}`,
       `npm install --ignore-scripts --no-audit --no-fund --package-lock=false ${shellQuote(tarballName)}`,
-      `node node_modules/pi-bio-agent/scripts/dogfood-remote-worker-helper.mjs`,
+      `node node_modules/pi-bio-agent/scripts/pattern-remote-worker-helper.mjs`,
     ].join(" && ");
 
     const remoteConfig = {

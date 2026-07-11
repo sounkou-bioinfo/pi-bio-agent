@@ -107,7 +107,7 @@ the adapter again.
 The runnable host-embedding check is:
 
 ```sh
-npm run dogfood:sdk-host-embedding
+npm run pattern:sdk-host-embedding
 ```
 
 It imports from `pi-bio-agent`, injects a DuckDB `SqlConn`, `CasStore`, `ComputeRunner`, SQL policy, host capability

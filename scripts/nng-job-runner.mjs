@@ -11,7 +11,7 @@ import { createBioObservationSchema, observationAsOfKey, recordObservation } fro
 import { createDucknngSqlConn } from "../dist/hosts/ducknng-sql-conn.js";
 import { resolveDucknngRuntime } from "./ducknng-runtime.mjs";
 
-// Dogfood: distributed compute as a topology over the job ledger. A long-running job's status flows back over
+// Pattern: distributed compute as a topology over the job ledger. A long-running job's status flows back over
 // ducknng RPC into the same `job:<runId>:status` observation slot the job-store polls. The coordinator owns a
 // shared DuckDB ledger; a separate worker process reports each phase with the unchanged `recordObservation` API
 // over `createDucknngSqlConn`. The job-store code does not change. Only dispatch and the worker are

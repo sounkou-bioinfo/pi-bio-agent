@@ -50,7 +50,7 @@ The map is shown runnably, not asserted:
 - **`test/map-reduce-labeling.test.ts`** — the same partition → parallel-label → host-merge → aggregate shape,
   in-process, asserting the exact counts.
 
-So: the *semantic* labeling is the judgment boundary (an LM in a real RLM-style host; a rule in these dogfoods);
+So: the *semantic* labeling is the judgment boundary (an LM in a real RLM-style host; a rule in these patterns);
 everything **distributional** is deterministic SQL. This example proves the exact reduce after labels exist. It
 does not implement or measure RLM's persistent root loop, recursive model calls, or unbounded semantic map.
 

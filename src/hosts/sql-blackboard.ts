@@ -6,7 +6,7 @@ import type { StudyNote } from "../core/study.js";
 // INSERT, awaitNote = poll SELECT until the row appears. This is the SINGLE-DB transport (the deterministic unit
 // test). The CROSS-PROCESS decentralized blackboard runs over ducknng RPC instead (publish = ducknng_run_rpc
 // INSERT, await = poll ducknng_query_rpc SELECT against a server that owns the table) — see
-// scripts/blackboard-shared.mjs; that path is RPC, not a local SqlConn, so it lives in the dogfood, not here.
+// scripts/blackboard-shared.mjs; that path is RPC, not a local SqlConn, so it lives in the pattern, not here.
 // Publish is idempotent (a slug's note is content-stable), so re-publish is a no-op — safe under retries.
 //
 // Publish is a CHECK-THEN-PLAIN-INSERT, not `INSERT ... ON CONFLICT` — portable across remote-SQL backends that

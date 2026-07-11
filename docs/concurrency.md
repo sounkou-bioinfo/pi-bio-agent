@@ -85,7 +85,7 @@ clobber. A model host decides which revisions enter a worker's context.
 
 ## What is proven
 
-The transport is dogfooded end to end:
+The transport is pattern-driven end to end:
 
 - `scripts/blackboard-shared.mjs`: **four distinct OS processes** coordinate a diamond DAG through **one shared
   table on a ducknng server**; no process opens the db file, no coordinator, and the pub/sub order emerges from the
@@ -94,12 +94,12 @@ The transport is dogfooded end to end:
   DuckDB** (mutate-in-place shared state: exactly what supersession/tombstones need), exec opt-in.
 - `scripts/nng-job-runner.mjs`: a separate worker process writes a `job:<id>:status` observation over RPC that
   the coordinator reads back with the same `observationAsOfKey`: a language-agnostic distributed backend.
-- `npm run dogfood:ssh-remote-worker`: packs the library, installs it in a fresh directory on an SSH host, sends an
+- `npm run pattern:ssh-remote-worker`: packs the library, installs it in a fresh directory on an SSH host, sends an
   authenticated remote `SqlConn` through a reverse tunnel, claims a durable job, and reproduces a CAS-backed run
   from its manifest snapshot plus staged data. The original manifest is absent; receipt and result digests match.
 
 The local file is the default for one project. Cross-process scripts prove that a serialized ducknng server can own
-the mutable DuckDB state while separate processes communicate over RPC. The HTTP reference and SSH dogfood prove
+the mutable DuckDB state while separate processes communicate over RPC. The HTTP reference and SSH pattern prove
 parameterized cross-host queue/ledger composition. A production workbench still operates worker lifecycle, input
 staging, CAS placement, credentials, and deployment policy. It terminates TLS for the HTTP reference or configures
 ducknng's native in-memory/file-backed TLS handle for an NNG deployment.

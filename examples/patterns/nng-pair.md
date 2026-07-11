@@ -2,7 +2,7 @@
 
 # NNG pair topology — proposer↔verifier duo (evidence)
 
-`scripts/nng-pair.mjs` is a **dogfood** — the **pair** NNG topology (1:1
+`scripts/nng-pair.mjs` is a **pattern** — the **pair** NNG topology (1:1
 bidirectional) as a reusable *proposer↔verifier* **generic** pattern.
 Two **separate OS processes** each hold a pair socket over ipc; the
 proposer offers a variant pathogenicity call and the verifier (an
@@ -15,7 +15,7 @@ It runs over ducknng’s SQL socket layer — `open_socket('pair')` →
 `aio_collect` — the same convention as ducknng’s own
 `ducknng_socket_protocols.test`.
 
-Run: `npm run dogfood:nng-pair`
+Run: `npm run pattern:nng-pair`
 
 ## Recorded run (2026-07-02)
 

@@ -2,7 +2,7 @@
 
 <!-- README.md is generated from README.qmd — please edit this file, then `npm run readme:qmd`. -->
 
-<!-- The `pi`, `dogfood`, and `biocli` chunks run real commands. Rendering needs a built `dist/`, Pi, and model credentials. -->
+<!-- The `pi`, `pattern`, and `biocli` chunks run real commands. Rendering needs a built `dist/`, Pi, and model credentials. -->
 
 # pi-bio-agent
 
@@ -707,7 +707,7 @@ local `duckhts.read_bcf` tests. `npm run provision:ducknng-owned`
 verifies the owned retry/auth/upload/TLS/RPC surface. Runtime Pi APIs
 are peer dependencies supplied by Pi itself.
 
-### Maintainer proof (dogfood)
+### Maintainer proof (pattern)
 
 This is executable maintainer evidence, not a product workflow or a
 biomedical answer source. It runs one compact composition of the shipped
@@ -718,14 +718,14 @@ prose. Its proof JSON is collapsed in the rendered README.
 Run it from the repository root:
 
 ``` sh
-npm run dogfood:bring-it-home
+npm run pattern:bring-it-home
 ```
 
 <details>
 
 <summary>
 
-Dogfood proof JSON
+Pattern proof JSON
 </summary>
 
 ``` json
@@ -770,13 +770,13 @@ Dogfood proof JSON
     "parquetReadbackRows": 1,
     "artifactRoles": [
       {
-        "sourceNode": "run:dogfood-host-capability",
+        "sourceNode": "run:pattern-host-capability",
         "mediaType": "image/svg+xml",
         "semanticRole": "figure",
         "plottingSystem": "inline-svg"
       },
       {
-        "sourceNode": "run:dogfood-host-capability",
+        "sourceNode": "run:pattern-host-capability",
         "mediaType": "text/html",
         "semanticRole": "report"
       }
@@ -821,11 +821,11 @@ compatibility is pinned to the concrete generated-view names at upstream
 commit `83503077e867419c18a211d97105d8ead554e947`; it is not a claim of
 equivalence with every future generator.
 
-Run the Pi session trace dogfood after installing the extension and
+Run the Pi session trace pattern after installing the extension and
 configuring an image-capable model:
 
 ``` sh
-npm run dogfood:pi-session-trace
+npm run pattern:pi-session-trace
 ```
 
 It drives a real Pi session through image read, successful shell call,

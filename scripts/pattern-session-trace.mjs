@@ -8,9 +8,9 @@ import { fileURLToPath } from "node:url";
 import { DuckDBInstance } from "@duckdb/node-api";
 
 const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const model = process.env.PI_BIO_DOGFOOD_MODEL ?? "openai-codex/gpt-5.5";
+const model = process.env.PI_BIO_PATTERN_MODEL ?? "openai-codex/gpt-5.5";
 const providerArgs = model.includes("/") ? ["--model", model] : ["--provider", "openai-codex", "--model", model];
-const sessionId = `pi-bio-dogfood-${Date.now().toString(36)}`;
+const sessionId = `pi-bio-pattern-${Date.now().toString(36)}`;
 const workdir = await mkdtemp(join(tmpdir(), "pi-bio-session-trace-"));
 
 function run(cmd, args, opts = {}) {
@@ -48,10 +48,10 @@ async function writeFixtureProject(dir) {
   ].join("\n") + "\n");
   await writeFile(join(dir, "manifest.json"), JSON.stringify({
     schema: "pi-bio.manifest.v1",
-    id: "session-trace-dogfood",
+    id: "session-trace-pattern",
     version: "0.1.0",
-    title: "Session trace dogfood",
-    description: "Tiny manifest used by scripts/pi-session-trace-dogfood.mjs.",
+    title: "Session trace pattern",
+    description: "Tiny manifest used by scripts/pi-session-trace-pattern.mjs.",
     provides: {
       resolvers: [
         {
@@ -116,7 +116,7 @@ await run("npm", ["run", "build"]);
 const pngDigest = await writeFixtureProject(workdir);
 
 const prompt = [
-  "Create a trace for pi-bio-agent dogfooding. You must use tools, in this order:",
+  "Create a trace for pi-bio-agent pattern proofing. You must use tools, in this order:",
   "1. Use read on plot.png and mention that it is an image.",
   "2. Use bash to run `wc -l data.csv`.",
   "3. Use bash to run `cat missing.txt`; this is expected to fail, continue after the error.",
@@ -136,7 +136,7 @@ const pi = await run("pi", [
   "--thinking", "high",
   "--tools", "read,bash,bio_describe_model,bio_validate_select,bio_query",
   "--session-id", sessionId,
-  "--name", "pi-bio trace dogfood",
+  "--name", "pi-bio trace pattern",
   "-p",
   `@${join(workdir, "plot.png")}`,
   prompt,
@@ -178,6 +178,6 @@ console.log(JSON.stringify({
   pngSha256: `sha256:${pngDigest}`,
 }, null, 2));
 
-if (!hasError) throw new Error("dogfood trace did not capture an error tool result");
-if (!hasImageRead) throw new Error("dogfood trace did not record the image read in the raw session");
-if (!hasBioRunLink) throw new Error("dogfood trace did not capture toolcall->run link");
+if (!hasError) throw new Error("pattern trace did not capture an error tool result");
+if (!hasImageRead) throw new Error("pattern trace did not record the image read in the raw session");
+if (!hasBioRunLink) throw new Error("pattern trace did not capture toolcall->run link");

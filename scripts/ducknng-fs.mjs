@@ -7,7 +7,7 @@ import { duckdbNodeConn } from "../dist/duckdb/node-api.js";
 import { createDucknngSqlConn } from "../dist/hosts/ducknng-sql-conn.js";
 import { resolveDucknngRuntime } from "./ducknng-runtime.mjs";
 
-// DOGFOOD (ridiculous-but-cool): a content-addressed distributed FILE SYSTEM as a COMPOSITION of pieces we
+// PATTERN (ridiculous-but-cool): a content-addressed distributed FILE SYSTEM as a COMPOSITION of pieces we
 // already have — the metadata tree is a DuckDB table behind a server-backed SqlConn (ducknng RPC here: mutable
 // cross-process mkdir/rename/rm are INSERT/UPDATE/DELETE), and the bytes live in CAS (content-addressed -> dedup
 // + versioning for free). Same split as Latch Data (Postgres metadata + S3 bytes + FUSE), but: dedup, snapshots,

@@ -257,7 +257,7 @@ describe("Pi coding-agent extension", () => {
     const sessionFile = join(cwd, "pi-session.jsonl");
     const imageBytes = Buffer.from("fake image bytes");
     const lines = [
-      { type: "session", version: 3, id: "pi-dogfood", timestamp: "2026-07-05T11:00:00.000Z", cwd },
+      { type: "session", version: 3, id: "pi-pattern", timestamp: "2026-07-05T11:00:00.000Z", cwd },
       { type: "message", id: "u1", parentId: null, timestamp: "2026-07-05T11:00:01.000Z", message: { role: "user", content: "make a plot" } },
       { type: "message", id: "a1", parentId: "u1", timestamp: "2026-07-05T11:00:02.000Z", message: { role: "assistant", provider: "openai", model: "codex", content: [{ type: "text", text: "Plotting." }, { type: "toolCall", id: "tc1", name: "plot", arguments: { chart: "bar" } }] } },
       { type: "message", id: "t1", parentId: "a1", timestamp: "2026-07-05T11:00:03.000Z", message: { role: "toolResult", toolCallId: "tc1", toolName: "plot", isError: false, content: [{ type: "image", mimeType: "image/png", data: imageBytes.toString("base64") }] } },
@@ -267,7 +267,7 @@ describe("Pi coding-agent extension", () => {
     const { handlers } = loadExtension(createBioExtension({ author: "agent:test" }));
     const sessionManager = {
       getSessionFile: () => sessionFile,
-      getSessionId: () => "pi-dogfood",
+      getSessionId: () => "pi-pattern",
     };
     const ctx = { cwd, sessionManager };
 
@@ -284,14 +284,14 @@ describe("Pi coding-agent extension", () => {
     const store = await openBioStore(cwd);
     let rawDigest = "";
     try {
-      assert.deepEqual((await sessionTimeline(store.conn, "pi-dogfood")).map((row) => row.role), ["user", "assistant", "toolResult"]);
-      const trajectory = await sessionToolTrajectory(store.conn, "pi-dogfood");
+      assert.deepEqual((await sessionTimeline(store.conn, "pi-pattern")).map((row) => row.role), ["user", "assistant", "toolResult"]);
+      const trajectory = await sessionToolTrajectory(store.conn, "pi-pattern");
       assert.equal(trajectory[0]!.name, "plot");
       assert.equal(trajectory[0]!.isError, false);
-      const artifacts = await sessionArtifacts(store.conn, "pi-dogfood");
+      const artifacts = await sessionArtifacts(store.conn, "pi-pattern");
       assert.equal(artifacts.length, 1);
       assert.equal(artifacts[0]!.mediaType, "image/png");
-      const sessionRows = await store.conn.all<{ value_json: string }>("SELECT value_json FROM bio_observations WHERE subject_id = 'session:pi-dogfood' AND predicate = 'session'");
+      const sessionRows = await store.conn.all<{ value_json: string }>("SELECT value_json FROM bio_observations WHERE subject_id = 'session:pi-pattern' AND predicate = 'session'");
       assert.equal(sessionRows.length, 1);
       rawDigest = (JSON.parse(sessionRows[0]!.value_json) as { raw_digest: string }).raw_digest;
       const lifecycleEvents = await store.conn.all<{ event_type: string; reason: string; payload_digest: string; kind: string }>(
@@ -301,7 +301,7 @@ describe("Pi coding-agent extension", () => {
            json_extract_string(value_json, '$.value.payload_digest') AS payload_digest,
            json_extract_string(value_json, '$.kind') AS kind
          FROM bio_observations
-         WHERE subject_id = 'session:pi-dogfood' AND predicate = 'host_event'
+         WHERE subject_id = 'session:pi-pattern' AND predicate = 'host_event'
          ORDER BY recorded_at::TIMESTAMPTZ, observation_id`,
       );
       assert.deepEqual(lifecycleEvents.map((event) => [event.kind, event.event_type, event.reason]), [

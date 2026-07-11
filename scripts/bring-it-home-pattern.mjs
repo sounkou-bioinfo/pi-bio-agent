@@ -68,7 +68,7 @@ class FakeDucknngProfileConn {
   nowMs = 1783283000000n;
 
   async run() {
-    throw new Error("FakeDucknngProfileConn.run is not used by this dogfood");
+    throw new Error("FakeDucknngProfileConn.run is not used by this pattern");
   }
 
   async all(sql, params) {
@@ -259,16 +259,16 @@ try {
       BiocGenerics: { Package: "BiocGenerics", Version: "0.52.0", Source: "Bioconductor", Repository: "Bioconductor" },
     },
   }, null, 2);
-  const renvEnv = envDescriptorFromRenvLock(renvLockText, { path: "renv.lock", notes: ["dogfood R/Bioconductor lock"] });
+  const renvEnv = envDescriptorFromRenvLock(renvLockText, { path: "renv.lock", notes: ["pattern R/Bioconductor lock"] });
   assert.deepEqual(validateEnvDescriptor(renvEnv), []);
   const renvEnvDigest = envDigest(renvEnv);
   assert.match(renvEnvDigest, /^sha256:[0-9a-f]{64}$/);
 
   const hostEvent = await recordHostEvent(conn, {
-    subjectId: "session:dogfood",
+    subjectId: "session:pattern",
     kind: "workbench.input.steer",
     recordedAt: NOW,
-    source: "bring-it-home-dogfood",
+    source: "bring-it-home-pattern",
     digest: `sha256:${"2".repeat(64)}`,
     value: {
       payload_digest: `sha256:${"3".repeat(64)}`,
@@ -276,30 +276,30 @@ try {
       redacted: true,
     },
     links: [
-      { predicate: "affects", objectId: "turn:dogfood:review", attrs: { reason: "user_steer" } },
-      { predicate: "context_sent_to", objectId: "model_call:dogfood:review" },
+      { predicate: "affects", objectId: "turn:pattern:review", attrs: { reason: "user_steer" } },
+      { predicate: "context_sent_to", objectId: "model_call:pattern:review" },
     ],
   });
   assert.equal(hostEvent.linkObservationIds.length, 2);
 
   await recordObservationLink(conn, {
-    subjectId: "workflow:dogfood:step:report",
+    subjectId: "workflow:pattern:step:report",
     predicate: "depends_on",
-    objectId: "workflow:dogfood:step:score",
+    objectId: "workflow:pattern:step:score",
     recordedAt: NOW,
-    source: "bring-it-home-dogfood",
+    source: "bring-it-home-pattern",
   });
   await recordObservationLink(conn, {
-    subjectId: "workflow:dogfood:step:score",
+    subjectId: "workflow:pattern:step:score",
     predicate: "depends_on",
-    objectId: "workflow:dogfood:step:extract",
+    objectId: "workflow:pattern:step:extract",
     recordedAt: NOW,
-    source: "bring-it-home-dogfood",
+    source: "bring-it-home-pattern",
   });
 
   let extractExecutions = 0;
   let scoreExecutions = 0;
-  const workflowCwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-dogfood-workflow-"));
+  const workflowCwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-pattern-workflow-"));
   const workflowRunner = nodeComputeRunner();
   async function runWorkflowBashStep(stepId, script, env = {}) {
     const handle = await workflowRunner.submit({
@@ -325,9 +325,9 @@ try {
     };
   }
   const firstPlan = await runJobStepsWithCheckpoints(conn, {
-    runId: "dogfood-workflow",
+    runId: "pattern-workflow",
     recordedAt: "2026-07-06T12:00:01.000Z",
-    source: "bring-it-home-dogfood",
+    source: "bring-it-home-pattern",
     replayDigest: REPLAY_DIGEST,
     attempt: 1,
     steps: [
@@ -351,9 +351,9 @@ try {
     ],
   });
   const resumedPlan = await runJobStepsWithCheckpoints(conn, {
-    runId: "dogfood-workflow",
+    runId: "pattern-workflow",
     recordedAt: "2026-07-06T12:00:02.000Z",
-    source: "bring-it-home-dogfood",
+    source: "bring-it-home-pattern",
     replayDigest: REPLAY_DIGEST,
     attempt: 2,
     steps: [
@@ -385,7 +385,7 @@ try {
           );
           return {
             ...JSON.parse(step.stdout),
-            upstream_checkpoint: jobStepCheckpointKey("dogfood-workflow", "extract/variants"),
+            upstream_checkpoint: jobStepCheckpointKey("pattern-workflow", "extract/variants"),
             process_backend: step.backend,
             process_run_id: step.runId,
             process_submitted_phase: step.submittedPhase,
@@ -408,12 +408,12 @@ try {
     { rows: 5, artifact_uri: "cas:sha256:variants-fixture", backend: "node-process" },
   );
   assert.equal(scored?.value.process_backend, "node-process");
-  assert.equal((await readJobStepCheckpoint(conn, "dogfood-workflow", "score/high-impact"))?.value.candidates, 2);
+  assert.equal((await readJobStepCheckpoint(conn, "pattern-workflow", "score/high-impact"))?.value.candidates, 2);
 
   let queueTick = 10;
   const queueRunner = queueJobRunner(conn, { clock: () => `2026-07-06T12:01:${String(++queueTick).padStart(2, "0")}.000Z` });
-  const queueRunId = "dogfood-queue-cancel";
-  const queueCwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-dogfood-queue-"));
+  const queueRunId = "pattern-queue-cancel";
+  const queueCwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-pattern-queue-"));
   const queueReplay = {
     schema: "pi-bio.run_replay_spec.v1",
     runId: queueRunId,
@@ -425,31 +425,31 @@ try {
     runId: queueRunId,
     replay: queueReplay,
     now: "2026-07-06T12:01:00.000Z",
-    source: "bring-it-home-dogfood",
+    source: "bring-it-home-pattern",
   });
-  const queueClaim = await claimJob(conn, { workerId: "worker:dogfood", now: "2026-07-06T12:01:12.000Z", leaseSeconds: 60 });
+  const queueClaim = await claimJob(conn, { workerId: "worker:pattern", now: "2026-07-06T12:01:12.000Z", leaseSeconds: 60 });
   assert.equal(queueClaim?.runId, queueRunId);
   await recordJobClaimStatus(conn, {
     runId: queueRunId,
-    workerId: "worker:dogfood",
+    workerId: "worker:pattern",
     attempt: queueClaim.attempt,
     replayDigest: queueClaim.replayDigest,
     phase: "running",
     recordedAt: "2026-07-06T12:01:13.000Z",
-    message: "claimed by dogfood worker",
+    message: "claimed by pattern worker",
   });
   await cancelBioJob(conn, {
     cwd: queueCwd,
     runId: queueRunId,
     now: "2026-07-06T12:01:14.000Z",
     runner: queueRunner,
-    source: "bring-it-home-dogfood",
+    source: "bring-it-home-pattern",
   });
   let staleQueueWriteRejected = false;
   try {
     await recordJobClaimStatus(conn, {
       runId: queueRunId,
-      workerId: "worker:dogfood",
+      workerId: "worker:pattern",
       attempt: queueClaim.attempt,
       replayDigest: queueClaim.replayDigest,
       phase: "succeeded",
@@ -462,8 +462,8 @@ try {
   const resumedQueue = await resumeBioJob(conn, { cwd: queueCwd, runId: queueRunId });
   assert.equal(resumedQueue.phase, "cancelled");
 
-  const reclaimRunId = "dogfood-queue-reclaim";
-  const reclaimCwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-dogfood-reclaim-"));
+  const reclaimRunId = "pattern-queue-reclaim";
+  const reclaimCwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-pattern-reclaim-"));
   const reclaimReplay = {
     schema: "pi-bio.run_replay_spec.v1",
     runId: reclaimRunId,
@@ -475,10 +475,10 @@ try {
     runId: reclaimRunId,
     replay: reclaimReplay,
     now: "2026-07-06T12:01:20.000Z",
-    source: "bring-it-home-dogfood",
+    source: "bring-it-home-pattern",
   });
   const firstReclaimClaim = await claimJob(conn, {
-    workerId: "worker:dogfood-a",
+    workerId: "worker:pattern-a",
     now: "2026-07-06T12:01:21.000Z",
     leaseSeconds: 2,
   });
@@ -486,23 +486,23 @@ try {
   assert.equal(firstReclaimClaim?.attempt, 1);
   const schedulerClaimEvent = await recordHostEvent(conn, {
     subjectId: `job:${reclaimRunId}`,
-    kind: "dogfood.scheduler.claim",
+    kind: "pattern.scheduler.claim",
     recordedAt: "2026-07-06T12:01:21.500Z",
-    source: "bring-it-home-dogfood",
+    source: "bring-it-home-pattern",
     digest: firstReclaimClaim.replayDigest,
     value: {
-      worker_id: "worker:dogfood-a",
+      worker_id: "worker:pattern-a",
       attempt: firstReclaimClaim.attempt,
       lease_expires_at: firstReclaimClaim.claimExpiresAt,
     },
     links: [
-      { predicate: "claimed_by", objectId: "worker:dogfood-a", attrs: { attempt: firstReclaimClaim.attempt } },
+      { predicate: "claimed_by", objectId: "worker:pattern-a", attrs: { attempt: firstReclaimClaim.attempt } },
       { predicate: "has_attempt", objectId: `job:${reclaimRunId}:attempt:${firstReclaimClaim.attempt}` },
     ],
   });
   await recordJobClaimStatus(conn, {
     runId: reclaimRunId,
-    workerId: "worker:dogfood-a",
+    workerId: "worker:pattern-a",
     attempt: firstReclaimClaim.attempt,
     replayDigest: firstReclaimClaim.replayDigest,
     phase: "running",
@@ -510,7 +510,7 @@ try {
     message: "first worker claimed before lease loss",
   });
   const reclaimedClaim = await claimJob(conn, {
-    workerId: "worker:dogfood-b",
+    workerId: "worker:pattern-b",
     now: "2026-07-06T12:01:24.000Z",
     leaseSeconds: 60,
   });
@@ -518,20 +518,20 @@ try {
   assert.equal(reclaimedClaim?.attempt, 2);
   const schedulerReclaimEvent = await recordHostEvent(conn, {
     subjectId: `job:${reclaimRunId}`,
-    kind: "dogfood.scheduler.lease_reclaimed",
+    kind: "pattern.scheduler.lease_reclaimed",
     recordedAt: "2026-07-06T12:01:24.500Z",
-    source: "bring-it-home-dogfood",
+    source: "bring-it-home-pattern",
     digest: reclaimedClaim.replayDigest,
     value: {
-      old_worker_id: "worker:dogfood-a",
+      old_worker_id: "worker:pattern-a",
       old_attempt: firstReclaimClaim.attempt,
       old_lease_expires_at: firstReclaimClaim.claimExpiresAt,
-      new_worker_id: "worker:dogfood-b",
+      new_worker_id: "worker:pattern-b",
       new_attempt: reclaimedClaim.attempt,
       new_lease_expires_at: reclaimedClaim.claimExpiresAt,
     },
     links: [
-      { predicate: "claimed_by", objectId: "worker:dogfood-b", attrs: { attempt: reclaimedClaim.attempt } },
+      { predicate: "claimed_by", objectId: "worker:pattern-b", attrs: { attempt: reclaimedClaim.attempt } },
       { predicate: "replaces_attempt", objectId: `job:${reclaimRunId}:attempt:${firstReclaimClaim.attempt}` },
       { predicate: "has_attempt", objectId: `job:${reclaimRunId}:attempt:${reclaimedClaim.attempt}` },
     ],
@@ -540,7 +540,7 @@ try {
   try {
     await recordJobClaimStatus(conn, {
       runId: reclaimRunId,
-      workerId: "worker:dogfood-a",
+      workerId: "worker:pattern-a",
       attempt: firstReclaimClaim.attempt,
       replayDigest: firstReclaimClaim.replayDigest,
       phase: "succeeded",
@@ -554,7 +554,7 @@ try {
   try {
     await recordJobClaimResult(conn, {
       runId: reclaimRunId,
-      workerId: "worker:dogfood-a",
+      workerId: "worker:pattern-a",
       attempt: firstReclaimClaim.attempt,
       replayDigest: firstReclaimClaim.replayDigest,
       result: { rows: [{ answer: 999 }], stale: true },
@@ -566,14 +566,14 @@ try {
   assert.equal(staleLeaseResultRejected, true);
   const schedulerStaleAttemptEvent = await recordHostEvent(conn, {
     subjectId: `job:${reclaimRunId}`,
-    kind: "dogfood.scheduler.stale_attempt_rejected",
+    kind: "pattern.scheduler.stale_attempt_rejected",
     recordedAt: "2026-07-06T12:01:25.750Z",
-    source: "bring-it-home-dogfood",
+    source: "bring-it-home-pattern",
     digest: reclaimedClaim.replayDigest,
     value: {
-      rejected_worker_id: "worker:dogfood-a",
+      rejected_worker_id: "worker:pattern-a",
       rejected_attempt: firstReclaimClaim.attempt,
-      live_worker_id: "worker:dogfood-b",
+      live_worker_id: "worker:pattern-b",
       live_attempt: reclaimedClaim.attempt,
       rejected_writes: ["status", "result"],
     },
@@ -584,7 +584,7 @@ try {
   });
   await recordJobClaimResult(conn, {
     runId: reclaimRunId,
-    workerId: "worker:dogfood-b",
+    workerId: "worker:pattern-b",
     attempt: reclaimedClaim.attempt,
     replayDigest: reclaimedClaim.replayDigest,
     result: { rows: [{ answer: 2 }], reclaimedFromAttempt: firstReclaimClaim.attempt },
@@ -592,7 +592,7 @@ try {
   });
   await recordJobClaimStatus(conn, {
     runId: reclaimRunId,
-    workerId: "worker:dogfood-b",
+    workerId: "worker:pattern-b",
     attempt: reclaimedClaim.attempt,
     replayDigest: reclaimedClaim.replayDigest,
     phase: "succeeded",
@@ -601,7 +601,7 @@ try {
   });
   await finishJobClaim(conn, {
     runId: reclaimRunId,
-    workerId: "worker:dogfood-b",
+    workerId: "worker:pattern-b",
     now: "2026-07-06T12:01:28.000Z",
     phase: "succeeded",
   });
@@ -617,13 +617,13 @@ try {
     ORDER BY recorded_at::TIMESTAMPTZ, observation_id
   `, [`job:${reclaimRunId}`]);
   assert.deepEqual(schedulerEventKinds.map((row) => row.kind), [
-    "dogfood.scheduler.claim",
-    "dogfood.scheduler.lease_reclaimed",
-    "dogfood.scheduler.stale_attempt_rejected",
+    "pattern.scheduler.claim",
+    "pattern.scheduler.lease_reclaimed",
+    "pattern.scheduler.stale_attempt_rejected",
   ]);
 
   const governanceCandidate = {
-    id: "dogfood.governed_report",
+    id: "pattern.governed_report",
     version: "1.0.0",
     fixtureSql: "CREATE TABLE nums AS SELECT * FROM (VALUES (1),(2),(3)) AS v(x)",
     sql: "SELECT x, x * 2 AS y FROM nums ORDER BY x",
@@ -634,7 +634,7 @@ try {
   const governanceSubmit = await submitCandidateForApproval(conn, governanceCandidate, {
     sandbox: duckdbNodeConn(governanceSandboxRaw),
     recordedAt: "2026-07-06T12:01:40.000Z",
-    source: "dogfood-governance-ci",
+    source: "pattern-governance-ci",
   });
   governanceSandboxRaw.closeSync?.();
   governanceSandboxInstance.closeSync?.();
@@ -644,7 +644,7 @@ try {
     subjectId: governanceCandidateNode,
     kind: "workbench.governance.approval_submitted",
     recordedAt: "2026-07-06T12:01:40.500Z",
-    source: "bring-it-home-dogfood",
+    source: "bring-it-home-pattern",
     digest: governanceSubmit.specDigest,
     value: {
       event_type: "approval_submitted",
@@ -655,7 +655,7 @@ try {
     },
     links: [
       { predicate: "governs", objectId: `operation:${governanceCandidate.id}` },
-      { predicate: "queued_in", objectId: "approval_queue:dogfood" },
+      { predicate: "queued_in", objectId: "approval_queue:pattern" },
     ],
   });
   const governanceDecision = await decideCandidateApproval(conn, {
@@ -664,23 +664,23 @@ try {
     specDigest: governanceSubmit.specDigest,
     approved: true,
     decidedAt: "2026-07-06T12:01:41.000Z",
-    source: "reviewer:dogfood",
-    approvedBy: "reviewer:dogfood",
-    reason: "dogfood approval path",
+    source: "reviewer:pattern",
+    approvedBy: "reviewer:pattern",
+    reason: "pattern approval path",
   });
   assert.equal(governanceDecision.activated, true);
   const governanceDecisionEvent = await recordHostEvent(conn, {
     subjectId: governanceCandidateNode,
     kind: "workbench.governance.approval_decided",
     recordedAt: "2026-07-06T12:01:41.500Z",
-    source: "bring-it-home-dogfood",
+    source: "bring-it-home-pattern",
     digest: governanceSubmit.specDigest,
     value: {
       event_type: "approval_decided",
       decision: "approved",
       activated: governanceDecision.activated,
-      approved_by_digest: sha256("reviewer:dogfood"),
-      reason_digest: sha256("dogfood approval path"),
+      approved_by_digest: sha256("reviewer:pattern"),
+      reason_digest: sha256("pattern approval path"),
     },
     links: [
       { predicate: "decides", objectId: `activation:operation:${governanceCandidate.id}` },
@@ -701,7 +701,7 @@ try {
 
   const profileConn = new FakeDucknngProfileConn();
   const firstProfile = await refreshDucknngHttpProfile(profileConn, {
-    profileId: "clinvar-read-dogfood",
+    profileId: "clinvar-read-pattern",
     scheme: "https",
     host: "api.example.test",
     port: 443,
@@ -709,12 +709,12 @@ try {
     method: "GET",
     tlsRequired: true,
     authHeaderName: "Authorization",
-    authHeaderValue: "Bearer dogfood-token-one",
+    authHeaderValue: "Bearer pattern-token-one",
     expiresAtMs: 1783286600000,
     allowSubjects: ["case:beta", "case:alpha", "case:alpha"],
   });
   const rotatedProfile = await refreshDucknngHttpProfile(profileConn, {
-    profileId: "clinvar-read-dogfood",
+    profileId: "clinvar-read-pattern",
     scheme: "https",
     host: "api.example.test",
     port: 443,
@@ -722,7 +722,7 @@ try {
     method: "GET",
     tlsRequired: true,
     authHeaderName: "Authorization",
-    authHeaderValue: "Bearer dogfood-token-two",
+    authHeaderValue: "Bearer pattern-token-two",
     expiresAtMs: 1783287200000,
     allowSubjects: ["case:alpha", "case:beta"],
   });
@@ -732,8 +732,8 @@ try {
   assert.notEqual(rotatedProfile.current.policyDigest, firstProfile.current.policyDigest);
   assert.equal(rotatedProfile.current.version, "2");
   assert.equal(rotatedProfile.current.subjectRestriction.count, 2);
-  assert.deepEqual(profileConn.authValuesSeen, ["Bearer dogfood-token-one", "Bearer dogfood-token-two"]);
-  assert.doesNotMatch(profileConn.sqlSeen.join("\n"), /dogfood-token|Bearer|case:alpha|case:beta/i);
+  assert.deepEqual(profileConn.authValuesSeen, ["Bearer pattern-token-one", "Bearer pattern-token-two"]);
+  assert.doesNotMatch(profileConn.sqlSeen.join("\n"), /pattern-token|Bearer|case:alpha|case:beta/i);
   const profileReceipt = rotatedProfile.current;
   assert.match(profileReceipt.policyDigest, /^sha256:[0-9a-f]{64}$/);
   assert.doesNotMatch(JSON.stringify(profileReceipt), /Bearer|token|secret|case:alpha|case:beta/i);
@@ -743,12 +743,12 @@ try {
     predicate: "ducknng_http_profile_receipt",
     value: profileReceipt,
     recordedAt: NOW,
-    source: "bring-it-home-dogfood",
+    source: "bring-it-home-pattern",
     digest: profileReceipt.policyDigest,
   });
 
-  const hostCapRunCwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-dogfood-host-cap-"));
-  const hostCapCas = fsCasStore(await fs.mkdtemp(join(tmpdir(), "pi-bio-dogfood-host-cap-cas-")));
+  const hostCapRunCwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-pattern-host-cap-"));
+  const hostCapCas = fsCasStore(await fs.mkdtemp(join(tmpdir(), "pi-bio-pattern-host-cap-cas-")));
   const hostCapRun = await runBioQueryFromManifest({
     cwd: hostCapRunCwd,
     dbPath: ":memory:",
@@ -756,8 +756,8 @@ try {
     sql: "SELECT consequence, count(*) AS n FROM variants GROUP BY consequence ORDER BY consequence",
     cas: hostCapCas,
     store: conn,
-    author: "bring-it-home-dogfood",
-    runId: "dogfood-host-capability",
+    author: "bring-it-home-pattern",
+    runId: "pattern-host-capability",
     now: NOW,
     hostCapabilityReceipts: [profileReceipt],
     casMetadata: { conn, nowMs: 1783283000000 },
@@ -783,13 +783,13 @@ try {
   );
   assert.ok(asNumber(hostCapCasRefRows[0]?.n) >= 3);
 
-  const rEnvRunCwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-dogfood-r-env-"));
-  const rEnvCas = fsCasStore(await fs.mkdtemp(join(tmpdir(), "pi-bio-dogfood-r-env-cas-")));
+  const rEnvRunCwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-pattern-r-env-"));
+  const rEnvCas = fsCasStore(await fs.mkdtemp(join(tmpdir(), "pi-bio-pattern-r-env-cas-")));
   const rEnvManifest = {
     schema: "pi-bio.manifest.v1",
-    id: "dogfood-r-env",
+    id: "pattern-r-env",
     version: "0.1.0",
-    title: "Dogfood R environment attestation",
+    title: "Pattern R environment attestation",
     description: "Tiny R files-only compute step with a declared renv.lock environment descriptor.",
     provides: {
       resolvers: [{ id: "compute.run", version: "0.1.0", title: "Compute run", description: "Run a contained child process.", output: { mode: "table" } }],
@@ -819,8 +819,8 @@ try {
     compute: { runner: withObservedEnvironment(nodeComputeRunner(), renvEnv) },
     cas: rEnvCas,
     store: conn,
-    author: "bring-it-home-dogfood",
-    runId: "dogfood-r-env",
+    author: "bring-it-home-pattern",
+    runId: "pattern-r-env",
     now: "2026-07-06T12:00:04.000Z",
   });
   assert.equal(rEnvRun.ok, true);
@@ -832,11 +832,11 @@ try {
   assert.ok(rEnvProvenance.notes.includes(`env_declared:${renvEnvDigest}`));
   assert.ok(rEnvProvenance.notes.includes(`env_observed:${renvEnvDigest}`));
 
-  const sessionRoot = await fs.mkdtemp(join(tmpdir(), "pi-bio-dogfood-session-"));
+  const sessionRoot = await fs.mkdtemp(join(tmpdir(), "pi-bio-pattern-session-"));
   const sessionCas = fsCasStore(join(sessionRoot, "cas"));
-  const sessionPath = join(sessionRoot, "dogfood-session.jsonl");
-  const sessionId = "dogfood-session";
-  const sessionToolCallId = "call_dogfood|fc_bio_query";
+  const sessionPath = join(sessionRoot, "pattern-session.jsonl");
+  const sessionId = "pattern-session";
+  const sessionToolCallId = "call_pattern|fc_bio_query";
   await fs.writeFile(sessionPath, `${[
     { type: "session", id: sessionId, timestamp: "2026-07-06T12:00:00.000Z", cwd: sessionRoot },
     { type: "message", id: "u1", timestamp: "2026-07-06T12:00:01.000Z", message: { role: "user", content: "Summarize variant consequences." } },
@@ -845,7 +845,7 @@ try {
       message: {
         role: "assistant",
         provider: "openai",
-        model: "gpt-dogfood",
+        model: "gpt-pattern",
         content: [
           { type: "text", text: "I will query the manifest." },
           { type: "toolCall", id: sessionToolCallId, name: "bio_query", arguments: { sql: "SELECT consequence, count(*) AS n FROM variants GROUP BY consequence ORDER BY consequence" } },
@@ -854,11 +854,11 @@ try {
     },
     { type: "message", id: "tr1", parentId: "a1", timestamp: "2026-07-06T12:00:03.000Z", message: { role: "toolResult", toolCallId: sessionToolCallId, toolName: "bio_query", isError: false, content: "3 rows" } },
   ].map((line) => JSON.stringify(line)).join("\n")}\n`, "utf8");
-  await ingestSessionJsonl({ conn, cas: sessionCas, sessionPath, sessionId, source: "bring-it-home-dogfood", now: NOW });
+  await ingestSessionJsonl({ conn, cas: sessionCas, sessionPath, sessionId, source: "bring-it-home-pattern", now: NOW });
   const sessionToolNode = `toolcall:${sessionId}:${sessionToolCallId}`;
   const hostCapRunNode = `run:${hostCapRun.runId}`;
-  await recordObservationLink(conn, { subjectId: sessionToolNode, predicate: "executes", objectId: hostCapRunNode, recordedAt: LATER, source: "bring-it-home-dogfood" });
-  await recordObservationLink(conn, { subjectId: hostCapRunNode, predicate: "invoked_by", objectId: sessionToolNode, recordedAt: LATER, source: "bring-it-home-dogfood" });
+  await recordObservationLink(conn, { subjectId: sessionToolNode, predicate: "executes", objectId: hostCapRunNode, recordedAt: LATER, source: "bring-it-home-pattern" });
+  await recordObservationLink(conn, { subjectId: hostCapRunNode, predicate: "invoked_by", objectId: sessionToolNode, recordedAt: LATER, source: "bring-it-home-pattern" });
   const figureSvg = Buffer.from("<svg xmlns='http://www.w3.org/2000/svg'><text>variant consequence counts</text></svg>");
   const figureDigest = sha256(figureSvg);
   await hostCapCas.put({ algorithm: "sha256", digest: figureDigest.slice("sha256:".length) }, figureSvg);
@@ -872,7 +872,7 @@ try {
     subjectId: hostCapRunNode,
     predicate: "produces",
     recordedAt: LATER,
-    source: "bring-it-home-dogfood",
+    source: "bring-it-home-pattern",
     attrs: {
       producer_run: hostCapRunNode,
       source_digest: hostCapRun.casRefs.result,
@@ -894,7 +894,7 @@ try {
     subjectId: hostCapRunNode,
     predicate: "produces",
     recordedAt: LATER,
-    source: "bring-it-home-dogfood",
+    source: "bring-it-home-pattern",
     attrs: {
       producer_run: hostCapRunNode,
       source_digest: hostCapRun.casRefs.result,
@@ -921,13 +921,13 @@ try {
   `);
   const externalProjection = await materializeGraphProjectionProfile(conn, {
     schema: "pi-bio.graph_projection_profile.v1",
-    id: "dogfood-external-kg",
-    title: "Dogfood external KG projection",
+    id: "pattern-external-kg",
+    title: "Pattern external KG projection",
     source: { kind: "external_kg", table: "external_kg_raw" },
     columns: { from: "subject", predicate: "predicate", to: "object" },
     closure: { source: "local_cte", transitivePredicates: ["rdfs:subClassOf"] },
-    target: { edgesTable: "dogfood_external_edges", closureTable: "dogfood_external_entailed" },
-    provenance: [{ source: "scripts/bring-it-home-dogfood.mjs", deid: "not_applicable" }],
+    target: { edgesTable: "pattern_external_edges", closureTable: "pattern_external_entailed" },
+    provenance: [{ source: "scripts/bring-it-home-pattern.mjs", deid: "not_applicable" }],
   });
   assert.equal(externalProjection.edgeCount, 3);
   assert.equal(externalProjection.closureCount, 3);
@@ -935,14 +935,14 @@ try {
   await materializeBioEdgesAsOf(conn, LATER);
   const internalProjection = await materializeGraphProjectionProfile(conn, {
     schema: "pi-bio.graph_projection_profile.v1",
-    id: "dogfood-internal-observation-graph",
-    title: "Dogfood internal observation graph projection",
+    id: "pattern-internal-observation-graph",
+    title: "Pattern internal observation graph projection",
     source: { kind: "observations", table: "bio_edges_as_of" },
     columns: { from: "from_id", predicate: "predicate", to: "to_id", attrs: "attrs", trust: "trust" },
     closure: { source: "local_cte", transitivePredicates: ["depends_on"] },
     target: {
-      edgesTable: "dogfood_internal_edges",
-      closureTable: "dogfood_internal_entailed",
+      edgesTable: "pattern_internal_edges",
+      closureTable: "pattern_internal_entailed",
       temporal: { kind: "as_of", asOf: LATER },
     },
     provenance: [{ source: "bio_observations", deid: "unknown" }],
@@ -951,16 +951,16 @@ try {
   assert.ok(internalProjection.closureCount >= 3);
 
   const reportDeps = await conn.all(`
-    SELECT to_id FROM dogfood_internal_entailed
-    WHERE from_id = 'workflow:dogfood:step:report' AND predicate = 'depends_on'
+    SELECT to_id FROM pattern_internal_entailed
+    WHERE from_id = 'workflow:pattern:step:report' AND predicate = 'depends_on'
     ORDER BY to_id
   `);
   assert.deepEqual(reportDeps.map((r) => r.to_id), [
-    "workflow:dogfood:step:extract",
-    "workflow:dogfood:step:score",
+    "workflow:pattern:step:extract",
+    "workflow:pattern:step:score",
   ]);
 
-  const corpusDir = await fs.mkdtemp(join(tmpdir(), "pi-bio-dogfood-corpus-"));
+  const corpusDir = await fs.mkdtemp(join(tmpdir(), "pi-bio-pattern-corpus-"));
   const corpus = await exportTrainingCorpusParquet(conn, corpusDir, { asOf: "2026-07-06T12:02:00.000Z" });
   assert.equal(corpus.redaction, "digest_only");
   assert.equal(corpus.tables.sessions.rows, 1);
@@ -988,7 +988,7 @@ try {
 
   const checkpointRow = await observationAsOfKey(
     conn,
-    jobStepCheckpointKey("dogfood-workflow", "extract/variants"),
+    jobStepCheckpointKey("pattern-workflow", "extract/variants"),
     "9999-12-31T23:59:59.999Z",
   );
   assert.ok(checkpointRow);
@@ -1000,7 +1000,7 @@ try {
     ORDER BY predicate
   `);
   const summary = {
-    dogfood: "bring-it-home",
+    pattern: "bring-it-home",
     hostEventLinks: hostEvent.linkObservationIds.length,
     jobStepExecutions: {
       extract: extractExecutions,

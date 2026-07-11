@@ -3,7 +3,7 @@
 One substrate — **data lives addressably outside the prompt (DuckDB tables + CAS + receipts), navigated by
 bounded queries + content-addressed memory** — reproduces ClawBio-style skills *and* closes over RLM, Fugu, and
 multi-agent execution. Each item below says what it proves and how to run it. Deterministic ones are unit tests
-(`npm test`); **live** ones spawn real agents / processes and are dogfoods you run by hand.
+(`npm test`); **live** ones spawn real agents / processes and are patterns you run by hand.
 
 ## 1. ClawBio skills as manifests (the baseline)
 A ClawBio skill = a manifest + SQL, with **zero per-skill TypeScript**. Tags are verified against the real source.
@@ -44,11 +44,11 @@ orchestrator (piece 1); the agent conducts.
 | `test/study-exec.test.ts` | the **executor** runs workers in topo order with per-step **access-list isolation** + downstream **shared memory**; includes a **TREE** and a **SURVEY/DEBATE** topology (N isolated respondents + an aggregator that fans them in — Fugu's signature) |
 | **live:** [`scripts/live-multi-agent.ts`](patterns/live-multi-agent.md) | **real multi-agent run** (chain): each step spawns a *separate `pi` process*; they communicate only via access-list artifacts the host threads — no shared db, so the process lock is never touched. `npx tsx scripts/live-multi-agent.ts` |
 | **live:** [`scripts/live-debate.ts`](patterns/live-debate.md) | **real best-of-N debate** (survey topology): two agents answer the same question independently, an aggregator synthesizes both. `npx tsx scripts/live-debate.ts` |
-| **dogfood:** [`scripts/blackboard-run.mjs`](patterns/blackboard-run.md) | **generic topology:** decentralized pub/sub blackboard (req/rep-free) with no external coordinator. `npm run dogfood:blackboard-run` |
-| **dogfood:** [`scripts/pipeline-fanout.mjs`](patterns/pipeline-fanout.md) | **generic topology:** bounded `push`/`pull` worker pool (load-balanced tasks, bounded concurrency). `npm run dogfood:pipeline-fanout` |
-| **dogfood:** [`scripts/nng-pair.mjs`](patterns/nng-pair.md) | **generic topology:** `1:1` pair/debate loop (proposer↔verifier) with separate OS processes. `npm run dogfood:nng-pair` |
-| **dogfood:** [`scripts/nng-survey.mjs`](patterns/nng-survey.md) | **generic topology:** `1:N` survey/jury loop (multiple providers + quorum) with abstain-safe aggregation. `npm run dogfood:nng-survey` |
-| **dogfood:** [`scripts/nng-job-runner.mjs`](patterns/nng-job-runner.md) | **generic topology:** req/rep status shape over ducknng (`job:id:status` pattern). `npm run dogfood:nng-job-runner` |
+| **pattern:** [`scripts/blackboard-run.mjs`](patterns/blackboard-run.md) | **generic topology:** decentralized pub/sub blackboard (req/rep-free) with no external coordinator. `npm run pattern:blackboard-run` |
+| **pattern:** [`scripts/pipeline-fanout.mjs`](patterns/pipeline-fanout.md) | **generic topology:** bounded `push`/`pull` worker pool (load-balanced tasks, bounded concurrency). `npm run pattern:pipeline-fanout` |
+| **pattern:** [`scripts/nng-pair.mjs`](patterns/nng-pair.md) | **generic topology:** `1:1` pair/debate loop (proposer↔verifier) with separate OS processes. `npm run pattern:nng-pair` |
+| **pattern:** [`scripts/nng-survey.mjs`](patterns/nng-survey.md) | **generic topology:** `1:N` survey/jury loop (multiple providers + quorum) with abstain-safe aggregation. `npm run pattern:nng-survey` |
+| **pattern:** [`scripts/nng-job-runner.mjs`](patterns/nng-job-runner.md) | **generic topology:** req/rep status shape over ducknng (`job:id:status` pattern). `npm run pattern:nng-job-runner` |
 | `test/blackboard.test.ts` | **pub/sub blackboard** (`src/core/blackboard.ts`): DECENTRALIZED — steps launched concurrently, each awaits its deps from a shared blackboard and publishes its note; order emerges from data deps, **no coordinator** (stigmergy) |
 | `test/pipeline.test.ts` | **push/pull pipeline** (`src/core/pipeline.ts`): N-worker load-balanced pool — the RLM labeling map as a self-balancing queue |
 
@@ -67,8 +67,8 @@ boundary analysis in [`docs/refinments.md`](../docs/refinments.md).
 |---|---|
 | `test/http-cas-reuse.test.ts` | **CAS** — a second db with an empty memo 304s from the shared content store and materializes with **no re-download** (immutable cross-db reuse) |
 | `test/run-store-init-sql.test.ts` | the host **connection-init hook** (`duckdbInitSql`) — where the **host** (never the agent) runs `INSTALL/LOAD` extensions before resolution; it is host-owned and not exposed through any agent tool |
-| **live:** [`scripts/ducknng-rpc-mutate.mjs`](patterns/ducknng-rpc-mutate.md) | **ducknng RPC** — separate processes **mutate** one shared table in place (`UPDATE`/`DELETE`/upsert) via `ducknng_run_rpc` against a server running native DuckDB, exec opt-in. The mutate-in-place quack can't do; a fact-superseding KG needs it. `npm run dogfood:ducknng-rpc-mutate` |
-| **live:** [`scripts/blackboard-shared.mjs`](patterns/blackboard-shared.md) | **ducknng RPC blackboard** — a decentralized pub/sub diamond DAG across separate processes (publish = `run_rpc` INSERT, await = poll `query_rpc`); order emerges from shared writes, no coordinator. Run with `npm run dogfood:blackboard-shared`. |
+| **live:** [`scripts/ducknng-rpc-mutate.mjs`](patterns/ducknng-rpc-mutate.md) | **ducknng RPC** — separate processes **mutate** one shared table in place (`UPDATE`/`DELETE`/upsert) via `ducknng_run_rpc` against a server running native DuckDB, exec opt-in. The mutate-in-place quack can't do; a fact-superseding KG needs it. `npm run pattern:ducknng-rpc-mutate` |
+| **live:** [`scripts/blackboard-shared.mjs`](patterns/blackboard-shared.md) | **ducknng RPC blackboard** — a decentralized pub/sub diamond DAG across separate processes (publish = `run_rpc` INSERT, await = poll `query_rpc`); order emerges from shared writes, no coordinator. Run with `npm run pattern:blackboard-shared`. |
 
 ## 5. The COMPUTE pillar & the two-pillar flagship
 SQL is poor at some things (an `lm()` fit, a Bayesian colocalization); those run **out-of-process** over Arrow IPC,
@@ -82,5 +82,5 @@ with the DATA contract staying SQL/Arrow.
 | [`coloc/`](coloc/) | **the two-pillar flagship** — post-GWAS colocalization (`PostGWAS`/`coloclize` shape): SQL allele **harmonization** (DATA) → out-of-process R **`coloc.abf`** over Arrow IPC (COMPUTE) → `PP.H4` posteriors. `test/coloc-example.test.ts` (real `coloc::coloc.abf`, `PP.H4 ≈ 1.0` on a shared-causal locus) |
 
 ---
-Run all deterministic examples: `npm test`. The **live** dogfoods need the `pi` CLI (multi-agent) / a free
+Run all deterministic examples: `npm test`. The **live** patterns need the `pi` CLI (multi-agent) / a free
 local port (ducknng) and are run by hand; their recorded outputs are in the linked `.md` files.

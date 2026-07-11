@@ -42,9 +42,9 @@ describe("ducknng upload lane as sibling shared-data transport", {
     const client = await openDucknngConnection();
     try {
       await server.raw.run("CREATE TABLE uploaded_variants(variant_key VARCHAR, score INTEGER)");
-      await server.raw.run("SELECT ducknng_start_server('upload_dogfood', 'tcp://127.0.0.1:0', 1, 134217728, 300000, 0::UBIGINT)");
+      await server.raw.run("SELECT ducknng_start_server('upload_pattern', 'tcp://127.0.0.1:0', 1, 134217728, 300000, 0::UBIGINT)");
       await server.raw.run("SELECT ducknng_register_upload_methods(false)");
-      const url = String((await server.raw.runAndReadAll("SELECT listen FROM ducknng_list_servers() WHERE name = 'upload_dogfood'")).getRows()[0]![0]);
+      const url = String((await server.raw.runAndReadAll("SELECT listen FROM ducknng_list_servers() WHERE name = 'upload_pattern'")).getRows()[0]![0]);
 
       await client.raw.run(`
         CREATE TABLE local_candidates AS
@@ -83,8 +83,8 @@ describe("ducknng upload lane as sibling shared-data transport", {
       const conn = duckdbNodeConn(server.raw);
       await createBioObservationSchema(conn);
       const receipt = await recordHostEvent(conn, {
-        subjectId: "transport:ducknng-upload:dogfood",
-        kind: "dogfood.ducknng.upload_committed",
+        subjectId: "transport:ducknng-upload:pattern",
+        kind: "pattern.ducknng.upload_committed",
         recordedAt: "2026-07-08T00:00:00.000Z",
         source: "ducknng-upload-shared-data.test",
         value: {
@@ -102,9 +102,9 @@ describe("ducknng upload lane as sibling shared-data transport", {
       const eventRows = await conn.all<{ kind: string }>(
         "SELECT json_extract_string(value_json, '$.kind') AS kind FROM bio_observations WHERE predicate = 'host_event'",
       );
-      assert.deepEqual(eventRows, [{ kind: "dogfood.ducknng.upload_committed" }]);
+      assert.deepEqual(eventRows, [{ kind: "pattern.ducknng.upload_committed" }]);
     } finally {
-      try { await server.raw.run("SELECT ducknng_stop_server('upload_dogfood')"); } catch { /* best effort */ }
+      try { await server.raw.run("SELECT ducknng_stop_server('upload_pattern')"); } catch { /* best effort */ }
       client.inst.closeSync();
       server.inst.closeSync();
     }

@@ -3,7 +3,7 @@ format: gfm
 ---
 
 <!-- README.md is generated from README.qmd — please edit this file, then `npm run readme:qmd`. -->
-<!-- The `pi`, `dogfood`, and `biocli` chunks run real commands. Rendering needs a built `dist/`, Pi, and model credentials. -->
+<!-- The `pi`, `pattern`, and `biocli` chunks run real commands. Rendering needs a built `dist/`, Pi, and model credentials. -->
 
 ```{r setup, include = FALSE}
 knitr::opts_chunk$set(comment = "")
@@ -95,14 +95,14 @@ knitr::knit_engines$set(biocli = function(options) {
   knitr::asis_output(paste0("``` sh\n", cmd, "\n```\n\n", rendered))
 })
 
-knitr::knit_engines$set(dogfood = function(options) {
+knitr::knit_engines$set(pattern = function(options) {
   cmd <- paste(options$code, collapse = " ")
   out <- suppressWarnings(system(paste(cmd, "2>&1"), intern = TRUE))
   status <- attr(out, "status")
   out_txt <- sanitize_paths(paste(out, collapse = "\n"))
-  if (!is.null(status) && status != 0) stop("dogfood render failed (exit ", status, "): ", cmd, "\n", out_txt)
-  start <- regexpr("\\{\\n  \"dogfood\"", out_txt)
-  if (start < 0) stop("dogfood render did not print summary JSON:\n", out_txt)
+  if (!is.null(status) && status != 0) stop("pattern render failed (exit ", status, "): ", cmd, "\n", out_txt)
+  start <- regexpr("\\{\\n  \"pattern\"", out_txt)
+  if (start < 0) stop("pattern render did not print summary JSON:\n", out_txt)
   summary <- jsonlite::fromJSON(substr(out_txt, start, nchar(out_txt)), simplifyVector = FALSE)
   artifact_roles <- Filter(function(x) !is.null(x$semanticRole), summary$trainingCorpus$artifactRoles)
   artifact_roles <- lapply(artifact_roles, function(x) Filter(Negate(is.null), x))
@@ -128,7 +128,7 @@ knitr::knit_engines$set(dogfood = function(options) {
   )
   knitr::asis_output(paste0("``` sh\n", cmd, "\n```\n\n", render_json_output(
     jsonlite::toJSON(proof, pretty = TRUE, auto_unbox = TRUE),
-    "Dogfood proof JSON"
+    "Pattern proof JSON"
   )))
 })
 ```
@@ -325,7 +325,7 @@ run-looking strings.
 
 Window an edge-shaped graph table without loading the whole neighborhood:
 
-```{r graph-window-dogfood-reset, include=FALSE}
+```{r graph-window-pattern-reset, include=FALSE}
 dir.create(".pi/bio-agent", recursive = TRUE, showWarnings = FALSE)
 unlink(c(".pi/bio-agent/readme-graph-window.duckdb", ".pi/bio-agent/readme-graph-window.duckdb.wal"), force = TRUE)
 ```
@@ -473,7 +473,7 @@ npm run check     # typecheck + tests + docs/readme/examples staleness gates (th
 `npm run provision:ducknng-owned` verifies the owned retry/auth/upload/TLS/RPC surface. Runtime Pi APIs are peer
 dependencies supplied by Pi itself.
 
-### Maintainer proof (dogfood)
+### Maintainer proof (pattern)
 
 This is executable maintainer evidence, not a product workflow or a biomedical answer source. It runs one compact
 composition of the shipped ledger, graph, host-capability, CAS, compute, and review primitives so changes are tested
@@ -481,8 +481,8 @@ against the substrate rather than only described in prose. Its proof JSON is col
 
 Run it from the repository root:
 
-```{dogfood}
-npm run dogfood:bring-it-home
+```{pattern}
+npm run pattern:bring-it-home
 ```
 
 It exercises host-event receipts, step checkpoints/resume, SemanticSQL projection,
@@ -490,11 +490,11 @@ ducknng profile receipts, SDK exports, figure/report CAS artifacts, and real pro
 compute when R is available. SemanticSQL compatibility is pinned to the concrete generated-view names at upstream
 commit `83503077e867419c18a211d97105d8ead554e947`; it is not a claim of equivalence with every future generator.
 
-Run the Pi session trace dogfood after installing the extension and configuring an
+Run the Pi session trace pattern after installing the extension and configuring an
 image-capable model:
 
 ```sh
-npm run dogfood:pi-session-trace
+npm run pattern:pi-session-trace
 ```
 
 It drives a real Pi session through image read, successful shell call, intentional

@@ -4,7 +4,7 @@ format: gfm
 
 # Pipeline (push/pull) topology — evidence
 
-`scripts/pipeline-fanout.mjs` is a **dogfood** of the **pipeline** (nng push/pull) topology — a **bounded work
+`scripts/pipeline-fanout.mjs` is a **pattern** of the **pipeline** (nng push/pull) topology — a **bounded work
 pool**. `runPipeline(tasks, worker, concurrency)` runs at most `concurrency` lanes pulling from a shared cursor,
 so N tasks drain through a fixed pool and results come back **in task order** even though they complete out of
 order. This is exactly the shape of chunked, rate-limited annotation: split a whole VCF into batches and push them
@@ -13,7 +13,7 @@ through a pool of ≤ K in-flight requests — the role `src/duckdb/ncurl-fanout
 impact + abstention rule as the SQL operation, in JS), so the run is network-free and the concurrency **cap is
 checked, not asserted**.
 
-Run: `npm run dogfood:pipeline-fanout`
+Run: `npm run pattern:pipeline-fanout`
 
 ## Recorded run (2026-06-30, timings representative)
 

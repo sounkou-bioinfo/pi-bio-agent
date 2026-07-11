@@ -14,7 +14,7 @@ Read this argument in this order:
 1. **Machine studying**: a corpus becomes harness expertise before the downstream task is known.
 2. **Fugu**: learned orchestration needs access lists, isolated workers, shared memory, and tool-call state.
 3. **RLM**: long context becomes a program over an external REPL instead of prompt text.
-4. **Local dogfood**: the scripts and tests exercise those primitives as ordinary repo code.
+4. **Local pattern**: the scripts and tests exercise those primitives as ordinary repo code.
 
 ## Machine studying: memory as data
 
@@ -90,7 +90,7 @@ values, and continue the root loop. This repository does not currently expose an
 DuckDB or `compute.run`, nor a persistent root-agent REPL that returns a symbolic final value. A workbench host can
 inject those capabilities, but SQL alone does not close over semantic mapping.
 
-The local dogfood is deliberately honest about map versus reduce:
+The local pattern is deliberately honest about map versus reduce:
 
 - `examples/long-context-aggregate/manifest.json` and `test/long-context-aggregate-example.test.ts` exercise the
   deterministic reduce: once labels exist, the distributional question is a bounded `GROUP BY`.

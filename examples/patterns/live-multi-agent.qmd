@@ -4,7 +4,7 @@ format: gfm
 
 # Live multi-agent run — evidence
 
-`scripts/live-multi-agent.ts` is a **dogfood** (not a unit test — non-deterministic, spawns real LLM agents). It
+`scripts/live-multi-agent.ts` is a **pattern** (not a unit test — non-deterministic, spawns real LLM agents). It
 runs a `StudyScaffold` where **each step's worker is a separate `pi` process**, and the workers communicate
 **only through access-list artifacts the host threads between them** — never by opening a shared DuckDB file, so
 the process-exclusive RW lock is never touched. This is an access-list-shaped Pi harness smoke, not a Fugu

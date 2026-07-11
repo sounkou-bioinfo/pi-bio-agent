@@ -1,6 +1,6 @@
 import { runPipeline } from "../dist/core/pipeline.js";
 
-// DOGFOOD: the PIPELINE (nng push/pull) topology — a bounded work POOL. `runPipeline(tasks, worker, concurrency)`
+// PATTERN: the PIPELINE (nng push/pull) topology — a bounded work POOL. `runPipeline(tasks, worker, concurrency)`
 // runs at most `concurrency` lanes pulling from a shared cursor, so N tasks drain through a fixed pool (results
 // stay in task order). This is the shape of chunked, rate-limited annotation: split a whole VCF into batches and
 // push them through a pool of <= K in-flight requests (the same role src/duckdb/ncurl-fanout.ts plays for the
@@ -21,7 +21,7 @@ let inFlight = 0, maxInFlight = 0;
 const order = [];
 
 // The worker = one "request": classify a chunk (the same rare/high-impact + abstention rule as the SQL operation,
-// here in JS so the dogfood is network-free). It tracks how many lanes are live to prove the pool cap.
+// here in JS so the pattern is network-free). It tracks how many lanes are live to prove the pool cap.
 const worker = async (chunk, i) => {
   inFlight++; maxInFlight = Math.max(maxInFlight, inFlight);
   await new Promise((r) => setTimeout(r, Math.max(10, 70 - i * 8))); // varied per-chunk "latency" (early = slower)

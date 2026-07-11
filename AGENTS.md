@@ -34,11 +34,11 @@ Instructions for coding agents working in this repository.
   manifests, SQL, fixtures, or host composition. Do not hide a core gap behind an application helper.
 - Do not add a second lifecycle, resolver, transport, graph model, auth layer, or schema merely because the first
   consumer finds the existing surface inconvenient. Name the concrete consumers, reconcile the contracts, then add
-  one shared primitive with dogfood and tests.
+  one shared primitive with pattern and tests.
 - `npm run check` checks core. `npm run check:all` checks core, workbench, and Quarto engine. Root CI is the canonical
   workspace gate; do not add nested package workflows.
 - npm scripts are a flat namespace; the existing `check:`, `build:`, `readme:`, `provision:`, `install:`, and
-  `dogfood:` prefixes are sufficient grouping. Keep one parameterized installer (`npm run install:skill -- --host …`)
+  `pattern:` prefixes are sufficient grouping. Keep one parameterized installer (`npm run install:skill -- --host …`)
   rather than adding an alias for every host.
 
 ## Avoid Docs Sprawl
@@ -56,10 +56,10 @@ Instructions for coding agents working in this repository.
   point to a test, script, manifest, operation, or generated example that exercises it.
 - `README.qmd` is the executable README source and `README.md` is its generated artifact. Example READMEs and tool
   inventories follow the same source/generator/check pattern; do not hand-edit their output.
-- Treat dogfood literate docs as generated artifacts: `examples/patterns/*.md` are now sourced from sibling
+- Treat pattern literate docs as generated artifacts: `examples/patterns/*.md` are now sourced from sibling
   `examples/patterns/*.qmd` files. Edit the `.qmd` source and run `npm run scripts:qmd` to regenerate.
-- Canonicalize runnable generic dogfood on `dogfood:` npm scripts: keep script bodies in `scripts/` but document them through
-  `examples/patterns/*.qmd` and call them with stable wrapper scripts (`npm run dogfood:*`) in prose and tables.
+- Canonicalize runnable generic pattern on `pattern:` npm scripts: keep script bodies in `scripts/` but document them through
+  `examples/patterns/*.qmd` and call them with stable wrapper scripts (`npm run pattern:*`) in prose and tables.
 - Quarto is suitable for future polyglot reports and can run TypeScript project scripts through its bundled Deno. Its
   Observable-JS cells are browser/reactive code, not a Node/DuckDB execution surface. Keep core Node/TypeScript claims
   in `test/`, `scripts/`, or package examples and link or generate them into prose.
@@ -82,9 +82,9 @@ Instructions for coding agents working in this repository.
 - This is pre-1.0 library work with no obligation to preserve unclear legacy surfaces. Prefer clarity and deletion over backward-compatibility contortions.
 - Prefer interfaces and dependency-injected host ports over config-file sprawl. New behavior should enter through typed contracts and explicit host composition, not ambient env flags or scattered JSON settings.
 
-## Dogfood Rule
+## Pattern Rule
 
-- The point of dogfooding is to reveal immanent primitives and exercise the library.
+- The point of pattern-based proofing is to reveal immanent primitives and exercise the library.
 - A primitive is justified by concrete instances already in the repo, ideally two or three of them. Name those instances before adding the abstraction.
 - When two abstractions appear to conflict, reconcile them before adding another surface. Start from concrete cases,
   find the shared motion, delete or collapse the weaker boundary, and document the resulting primitive. Do not
@@ -130,13 +130,13 @@ the missing core contract and promote only that contract, not an application-spe
 ## Do Not Re-Derive Proven Capabilities
 
 - Before proposing a new HTTP batching, retry, or rate-limit abstraction, inspect the existing implementation and
-  dogfood. `src/duckdb/ncurl-fanout.ts` owns bounded multi-batch AIO launch/drain/retry;
+  pattern. `src/duckdb/ncurl-fanout.ts` owns bounded multi-batch AIO launch/drain/retry;
   `src/duckdb/ncurl-retry.ts` owns single-endpoint SQL-native retry; and
   `src/duckdb/resolvers/http-policies.ts` owns host-fetch `429`/`503`, `Retry-After`, capped backoff, and
   cancellation. Their tests exercise transient and permanent failures.
 - `examples/wgs-chr22-annotation/live.mjs` already proves the real online-annotation path: an indexed `duckhts`
   region read, Ensembl VEP `/region` batches of at most 200 variants, bounded `ncurlFanout`, response parsing,
-  ClinVar joining, and SQL reduction. `scripts/pipeline-fanout.mjs` separately dogfoods the bounded worker-pool
+  ClinVar joining, and SQL reduction. `scripts/pipeline-fanout.mjs` separately patterns the bounded worker-pool
   topology. Reuse and generalize this path; do not reopen whether an agent can execute rate-limited VEP calls.
 - Narrative-to-ontology grounding does not require a phenotype-mapper service or another mandatory package.
   SemanticSQL-generated label/synonym views, DuckDB FTS or ordinary SQL, graph projection/closure, candidate

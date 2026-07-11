@@ -1,10 +1,10 @@
 import { memoryBlackboard, runScaffoldOnBlackboard } from "../dist/core/blackboard.js";
 
-// DOGFOOD: the BLACKBOARD (nng pub/sub) topology — DECENTRALIZED, no coordinator. Every step is launched at the
+// PATTERN: the BLACKBOARD (nng pub/sub) topology — DECENTRALIZED, no coordinator. Every step is launched at the
 // SAME time (runScaffoldOnBlackboard does Promise.all over all steps); a step that names upstream notes in its
 // access list BLOCKS on `awaitNote(slug)` until those are published, then runs and publishes its own. So the
 // execution order is NOT computed by a scheduler — it EMERGES from the data dependencies (publish = post to the
-// board, await = subscribe). Same StudyWorker contract as the chain/survey dogfoods; only the topology differs.
+// board, await = subscribe). Same StudyWorker contract as the chain/survey patterns; only the topology differs.
 // Deterministic (canned workers, no LLM) so it is reproducible and the emergence is observable.
 //
 // Run: npm run build && node scripts/blackboard-run.mjs

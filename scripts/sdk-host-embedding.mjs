@@ -128,7 +128,7 @@ if (!custom.ok) throw new Error(`sdk-host-embedding custom resolver failed: ${cu
 const customReplay = JSON.parse(await fs.readFile(join(custom.runDir, "replay.json"), "utf8"));
 
 console.log(JSON.stringify({
-  dogfood: "sdk-host-embedding",
+  pattern: "sdk-host-embedding",
   ok: true,
   publicImport: "pi-bio-agent",
   hostInjected: {

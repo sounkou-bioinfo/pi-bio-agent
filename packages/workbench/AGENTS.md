@@ -78,7 +78,7 @@ Instructions for coding agents working in this repository.
 
 - Zod schemas are the runtime contract and the source for OpenAPI. Do not maintain a second hand-written API spec.
 - Use `rg` and `apply_patch`. Run `npm run manifest:clinical` after template changes, then `npm run check`.
-- Run `npm run demo:clinical` for the end-to-end clinical path and `npm run dogfood:monarch` for the pinned foreign
-  graph path. Unit fixtures prove contracts; live dogfood proves source and host compatibility.
+- Run `npm run demo:clinical` for the end-to-end clinical path and `npm run pattern:monarch` for the pinned foreign
+  graph path. Unit fixtures prove contracts; live pattern proves source and host compatibility.
 - Keep README documentation consistent. For cross-package changes, also read the substrate repository's `AGENTS.md`
   and review with the reusable Pi review session described there.

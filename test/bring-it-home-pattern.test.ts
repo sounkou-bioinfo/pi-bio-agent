@@ -6,16 +6,16 @@ import { describe, test } from "node:test";
 const execFileAsync = promisify(execFile);
 const repoRoot = process.cwd();
 
-describe("bring-it-home dogfood command", () => {
+describe("bring-it-home pattern command", () => {
   test("composes host events, checkpoints, graph projection, ducknng profile receipts, and SDK exports", { timeout: 20_000 }, async () => {
-    const { stdout } = await execFileAsync(process.execPath, ["scripts/bring-it-home-dogfood.mjs"], {
+    const { stdout } = await execFileAsync(process.execPath, ["scripts/bring-it-home-pattern.mjs"], {
       cwd: repoRoot,
       maxBuffer: 4 * 1024 * 1024,
     });
-    const jsonStart = stdout.indexOf("{\n  \"dogfood\": \"bring-it-home\"");
+    const jsonStart = stdout.indexOf("{\n  \"pattern\": \"bring-it-home\"");
     assert.notEqual(jsonStart, -1, stdout);
     const summary = JSON.parse(stdout.slice(jsonStart)) as {
-      dogfood: string;
+      pattern: string;
       hostEventLinks: number;
       jobStepExecutions: {
         extract: number;
@@ -61,7 +61,7 @@ describe("bring-it-home dogfood command", () => {
       observationCounts: Record<string, number>;
     };
 
-    assert.equal(summary.dogfood, "bring-it-home");
+    assert.equal(summary.pattern, "bring-it-home");
     assert.equal(summary.hostEventLinks, 2);
     assert.deepEqual(summary.jobStepExecutions, {
       extract: 1,
@@ -73,9 +73,9 @@ describe("bring-it-home dogfood command", () => {
       extractBackend: "node-process",
       scoreBackend: "node-process",
     });
-    assert.equal(summary.checkpointKey, "job:dogfood-workflow:step:extract%2Fvariants");
+    assert.equal(summary.checkpointKey, "job:pattern-workflow:step:extract%2Fvariants");
     assert.deepEqual(summary.queueReclaim, {
-      runId: "dogfood-queue-reclaim",
+      runId: "pattern-queue-reclaim",
       firstAttempt: 1,
       reclaimedAttempt: 2,
       staleLeaseWriteRejected: true,
@@ -87,9 +87,9 @@ describe("bring-it-home dogfood command", () => {
       count: 3,
       linkCount: 7,
       kinds: [
-        "dogfood.scheduler.claim",
-        "dogfood.scheduler.lease_reclaimed",
-        "dogfood.scheduler.stale_attempt_rejected",
+        "pattern.scheduler.claim",
+        "pattern.scheduler.lease_reclaimed",
+        "pattern.scheduler.stale_attempt_rejected",
       ],
     });
     assert.deepEqual(summary.governanceHostEvents, {
@@ -122,9 +122,9 @@ describe("bring-it-home dogfood command", () => {
       envStatus: summary.renvEnvironment.envStatus,
       artifactRows: summary.renvEnvironment.artifactRows,
     }, { packages: 2, rVersion: "4.6.0", bioconductor: "3.22", envStatus: "matched", artifactRows: 1 });
-    assert.deepEqual(summary.externalProjection, { edgesTable: "dogfood_external_edges", edgeCount: 3, closureTable: "dogfood_external_entailed", closureCount: 3 });
-    assert.equal(summary.internalProjection.edgesTable, "dogfood_internal_edges");
-    assert.equal(summary.internalProjection.closureTable, "dogfood_internal_entailed");
+    assert.deepEqual(summary.externalProjection, { edgesTable: "pattern_external_edges", edgeCount: 3, closureTable: "pattern_external_entailed", closureCount: 3 });
+    assert.equal(summary.internalProjection.edgesTable, "pattern_internal_edges");
+    assert.equal(summary.internalProjection.closureTable, "pattern_internal_entailed");
     assert.ok(summary.internalProjection.edgeCount >= 4);
     assert.ok(summary.internalProjection.closureCount >= 3);
     assert.match(summary.trainingCorpus.digest, /^sha256:[0-9a-f]{64}$/);
@@ -140,19 +140,19 @@ describe("bring-it-home dogfood command", () => {
     }, { units: 1, toolCalls: 1, runs: 2, artifacts: 3, hostEvents: 6, hostEventLinks: 13, parquetReadbackRows: 1 });
     assert.deepEqual(summary.trainingCorpus.artifactRoles, [
       {
-        sourceNode: "run:dogfood-host-capability",
+        sourceNode: "run:pattern-host-capability",
         mediaType: "image/svg+xml",
         semanticRole: "figure",
         plottingSystem: "inline-svg",
       },
       {
-        sourceNode: "run:dogfood-host-capability",
+        sourceNode: "run:pattern-host-capability",
         mediaType: "text/html",
         semanticRole: "report",
         plottingSystem: null,
       },
       {
-        sourceNode: "run:dogfood-r-env",
+        sourceNode: "run:pattern-r-env",
         mediaType: null,
         semanticRole: null,
         plottingSystem: null,

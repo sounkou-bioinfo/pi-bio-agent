@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { runBioOperationFromManifest, runBioQueryFromManifest } from "../dist/hosts/run-store.js";
 
-// DOGFOOD: "most of ClawBio for free" — a real variant-classification skill is a MANIFEST + SQL, not a .ts file.
+// PATTERN: "most of ClawBio for free" — a real variant-classification skill is a MANIFEST + SQL, not a .ts file.
 // One manifest (examples/rare-high-impact: a variants table + the LoF SO-term set) answers MANY ClawBio-shaped
 // questions with NO new code:
 //   1. the PINNED, tested classification operation `rare_high_impact.report` — the safety-critical one, with

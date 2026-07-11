@@ -11,7 +11,7 @@ import { materializeEntailedEdges } from "../dist/duckdb/graph-closure.js";
 // `bio_edges`, run the real library
 // closure, and assert both a direct projected edge and transitive hops the closure had to derive. A best-effort probe
 // then checks that a pinned remote Monarch KG exposes the same canonical edge columns. The application-level Monarch
-// dogfood owns its nodes/edges/closure query and scientific predicate policy.
+// pattern owns its nodes/edges/closure query and scientific predicate policy.
 //
 // Run:  npm run build && node scripts/foreign-graph-closure.mjs
 

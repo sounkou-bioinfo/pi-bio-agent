@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { runStudyScaffold, type StudyWorker } from "../src/core/study-exec.js";
 import type { StudyScaffold } from "../src/core/study.js";
 
-// LIVE multi-agent run (a dogfood, NOT a unit test — non-deterministic, spawns real LLM agents). Each scaffold
+// LIVE multi-agent run (a pattern, NOT a unit test — non-deterministic, spawns real LLM agents). Each scaffold
 // step spawns a SEPARATE `pi` process as its worker; workers communicate ONLY through access-list artifacts the
 // host threads between them (upstream note bodies injected into the downstream prompt) — never by opening a
 // shared DuckDB file, so the process-exclusive RW lock is never touched. This is the boundary-correct Fugu run.

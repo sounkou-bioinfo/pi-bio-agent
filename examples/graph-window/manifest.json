@@ -2,7 +2,7 @@
   "schema": "pi-bio.manifest.v1",
   "id": "graph-window",
   "version": "0.1.0",
-  "title": "Graph window CLI dogfood",
+  "title": "Graph window CLI pattern",
   "description": "A tiny edge-shaped graph table for demonstrating pi-bio-agent graph-window over an existing DuckDB database.",
   "provides": {
     "resolvers": [

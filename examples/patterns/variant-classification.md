@@ -2,7 +2,7 @@
 
 # Variant classification — “most of ClawBio for free” — evidence
 
-`scripts/variant-classification.mjs` is a **dogfood** showing that a
+`scripts/variant-classification.mjs` is a **pattern** showing that a
 real ClawBio-shaped *Variant Classification* skill is a **manifest +
 SQL**, not a `.ts` file. One declared manifest
 (`examples/rare-high-impact`: a variants table + the LoF SO-term set)
@@ -50,4 +50,4 @@ defensible `included = 1`, not a naive `count(*)`. That is ClawBio’s
 Variant Classification skill reproduced as the substrate’s data + SQL +
 provenance, with the safety-critical edge case handled by construction.
 The deterministic guarantee is the unit test for the operation; this
-dogfood shows it answering real questions end to end.
+pattern shows it answering real questions end to end.

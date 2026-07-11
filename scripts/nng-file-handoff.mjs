@@ -11,7 +11,7 @@ import { fsCasStore } from "../dist/hosts/fs-cas.js";
 import { createDucknngSqlConn } from "../dist/hosts/ducknng-sql-conn.js";
 import { resolveDucknngRuntime } from "./ducknng-runtime.mjs";
 
-// DOGFOOD: distributed FILE I/O over the ledger + CAS. One agent PRODUCES a file (an R plot); a SEPARATE agent
+// PATTERN: distributed FILE I/O over the ledger + CAS. One agent PRODUCES a file (an R plot); a SEPARATE agent
 // READS it back. The only thing that crosses the wire is the DIGEST: the coordinator's shared job ledger carries
 // job:<id>:output = {digest,name,size} over ducknng RPC, and the file BYTES live in a content-addressed store both
 // agents reach. ducknng-fs is NOT needed: a shared CAS dir covers the HPC shared-storage case; a no-shared-FS

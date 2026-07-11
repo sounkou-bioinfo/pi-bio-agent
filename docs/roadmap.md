@@ -58,7 +58,7 @@ The test pyramid is now real:
 - **Effect tests**: local file/CAS/run ledger, CLI, memory, artifacts, DuckDB init/config, host policies.
 - **Application-operation tests**: connector manifests, coloc, rare-high-impact, compute examples, OpenTargets,
   Monarch KG HTTP, DuckHTS range reads.
-- **Flagship/dogfood tests**: bring-it-home, SDK host embedding, substrate skill, Pi session trace, SSH remote worker,
+- **Flagship/pattern tests**: bring-it-home, SDK host embedding, substrate skill, Pi session trace, SSH remote worker,
   and ducknng upload when the required hosts/extensions are available.
 - **Harness-adaptation tests**: approvals, activate/rollback, temporal skills, package skill validation and install
   presets, Pi extension tool registration and lifecycle receipts.
@@ -83,19 +83,19 @@ Core is closed over the main primitives needed by a downstream workbench:
 - open `recordHostEvent` facts and redacted training-corpus export;
 - graph projection profiles and the pinned SemanticSQL concrete-view compatibility contract;
 - figures/reports/session images as CAS-addressed artifacts linked through observations;
-- SDK base exports checked by a packed external-consumer dogfood;
+- SDK base exports checked by a packed external-consumer pattern;
 - packaged host-neutral skill plus installer presets for Pi, Codex, Claude, OpenCode, and GitHub Copilot.
 
 The compact evidence commands are:
 
 ```sh
-npm run dogfood:bring-it-home
-npm run dogfood:sdk-host-embedding
-npm run dogfood:substrate-skill
+npm run pattern:bring-it-home
+npm run pattern:sdk-host-embedding
+npm run pattern:substrate-skill
 ```
 
-Run `npm run dogfood:pi-session-trace` when Pi/model credentials are configured and a session-level integration
-check is needed. `npm run dogfood:ssh-remote-worker` is the opt-in cross-machine proof; it uses `rig` by default or
+Run `npm run pattern:pi-session-trace` when Pi/model credentials are configured and a session-level integration
+check is needed. `npm run pattern:ssh-remote-worker` is the opt-in cross-machine proof; it uses `rig` by default or
 `PI_BIO_SSH_HOST`, installs a packed package remotely, and requires SSH reverse forwarding.
 
 ### Cross-actor conformance
@@ -113,7 +113,7 @@ A failure is classified before adding an abstraction:
 - one application needs orchestration, UI, policy, or a report shape: keep it in that application;
 - evidence or replay cannot represent what happened: that is a core gap.
 
-The SSH dogfood proves one distributed lane: package installation, parameterized coordination SQL, lease claim,
+The SSH pattern proves one distributed lane: package installation, parameterized coordination SQL, lease claim,
 snapshot replay, staged input, and digest equality across hosts. Machine-studying, Fugu-shaped, and RLM-shaped claims
 still require real agent-harness runs in the workbench. Core tests and this one worker run do not establish recursive
 model behavior, scheduler operations, deployed restart/cancellation behavior, or expertise-versus-budget gains.

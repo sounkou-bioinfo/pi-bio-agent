@@ -2,7 +2,7 @@
 
 # Pipeline (push/pull) topology — evidence
 
-`scripts/pipeline-fanout.mjs` is a **dogfood** of the **pipeline** (nng
+`scripts/pipeline-fanout.mjs` is a **pattern** of the **pipeline** (nng
 push/pull) topology — a **bounded work pool**.
 `runPipeline(tasks, worker, concurrency)` runs at most `concurrency`
 lanes pulling from a shared cursor, so N tasks drain through a fixed
@@ -15,7 +15,7 @@ deterministic local variant-chunk classification (same rare/high-
 impact + abstention rule as the SQL operation, in JS), so the run is
 network-free and the concurrency **cap is checked, not asserted**.
 
-Run: `npm run dogfood:pipeline-fanout`
+Run: `npm run pattern:pipeline-fanout`
 
 ## Recorded run (2026-06-30, timings representative)
 

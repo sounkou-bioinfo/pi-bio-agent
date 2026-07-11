@@ -1,12 +1,12 @@
 
 
-# JobRunner NNG compute profile (dogfood)
+# JobRunner NNG compute profile (pattern)
 
-`scripts/nng-job-runner.mjs` is a **dogfood** cross-process
+`scripts/nng-job-runner.mjs` is a **pattern** cross-process
 **status-transport smoke** for the L1 `JobRunner` ledger shape over
 ducknng RPC. It is not a complete distributed compute backend.
 
-Run: `npm run dogfood:nng-job-runner`.
+Run: `npm run pattern:nng-job-runner`.
 
 A separate worker process simulates work and reports each phase
 (`running` → `succeeded`) by running a `recordObservation`-shaped

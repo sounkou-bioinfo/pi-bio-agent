@@ -28,10 +28,10 @@ The core claims below have executable evidence:
 | Manifest and SQL program | Strict manifest admission, schema discovery, lazy resource forcing, ad-hoc read-only queries, named SQL operations | [manifest.ts](../src/core/manifest.ts), [operations.ts](../src/core/operations.ts), [host-run-operation.test.ts](../test/host-run-operation.test.ts) |
 | Truthful host admission | Manifest declarations are separate from `ready` / `blocked` / `unknown` host assessment; unbound ports and unattested extensions are not called runnable | [manifest-capabilities.ts](../src/hosts/manifest-capabilities.ts), [manifest-capabilities.test.ts](../test/manifest-capabilities.test.ts) |
 | Data, network, compute | Files and SQL materialization, DuckHTS range reads, ducknng HTTP/RPC profiles, injected `http.get`, and injected async `compute.run` | [duckdb-substrate.md](duckdb-substrate.md), [duckhts-read-bcf.test.ts](../test/duckhts-read-bcf.test.ts), [compute-run-example.test.ts](../test/compute-run-example.test.ts) |
-| One async lifecycle | `submit/status/collect/cancel`, durable queue and ledger backends, a lease-owning worker, cancellation, stale-write rejection, and checkpoint-prefix resume | [ports.ts](../src/core/ports.ts), [queue-job-worker.ts](../src/hosts/queue-job-worker.ts), [job-store.ts](../src/hosts/job-store.ts), [queue-job-worker.test.ts](../test/queue-job-worker.test.ts), [python-workflow-dogfood.test.ts](../test/python-workflow-dogfood.test.ts) |
+| One async lifecycle | `submit/status/collect/cancel`, durable queue and ledger backends, a lease-owning worker, cancellation, stale-write rejection, and checkpoint-prefix resume | [ports.ts](../src/core/ports.ts), [queue-job-worker.ts](../src/hosts/queue-job-worker.ts), [job-store.ts](../src/hosts/job-store.ts), [queue-job-worker.test.ts](../test/queue-job-worker.test.ts), [python-workflow-pattern.test.ts](../test/python-workflow-pattern.test.ts) |
 | Required run evidence | When a host supplies a ledger, run facts and artifact projections are required; failures surface with the persisted run path | [run-store.ts](../src/hosts/run-store.ts), [run-observations.test.ts](../test/run-observations.test.ts) |
 | CAS and replay | Content-addressed results/receipts/replay/run objects, metadata refs/leases/GC, action cache, and path-portable snapshot reproduction | [fs-cas.ts](../src/hosts/fs-cas.ts), [cas-metadata.ts](../src/hosts/cas-metadata.ts), [reproduce.ts](../src/hosts/reproduce.ts), [reproduce.test.ts](../test/reproduce.test.ts) |
-| Cross-host composition | Exact parameterized HTTP `SqlConn` with required authorization and serialized execution; a typed Arrow/ducknng `SqlConn` with native TLS handles; a fresh SSH worker installs the package, claims a replay, and verifies source/result digests without the original manifest | [remote-sql-conn.ts](../src/hosts/remote-sql-conn.ts), [ducknng-sql-conn.ts](../src/hosts/ducknng-sql-conn.ts), [ducknng-sql-conn.test.ts](../test/ducknng-sql-conn.test.ts), [dogfood-ssh-remote-worker.mjs](../scripts/dogfood-ssh-remote-worker.mjs) |
+| Cross-host composition | Exact parameterized HTTP `SqlConn` with required authorization and serialized execution; a typed Arrow/ducknng `SqlConn` with native TLS handles; a fresh SSH worker installs the package, claims a replay, and verifies source/result digests without the original manifest | [remote-sql-conn.ts](../src/hosts/remote-sql-conn.ts), [ducknng-sql-conn.ts](../src/hosts/ducknng-sql-conn.ts), [ducknng-sql-conn.test.ts](../test/ducknng-sql-conn.test.ts), [pattern-ssh-remote-worker.mjs](../scripts/pattern-ssh-remote-worker.mjs) |
 | Consumer verification | `pi-bio-agent reproduce` and `bio_reproduce_run` rerun a replay on a fresh database and report concrete source/result/environment drift | [reproduce.ts](../src/cli/reproduce.ts), [cli-reproduce.test.ts](../test/cli-reproduce.test.ts), [pi-extension.test.ts](../test/pi-extension.test.ts) |
 | One temporal graph | Runs, host events, memory, sessions, jobs, declarations, and artifacts are observations; edge-like facts project to `bio_edges_as_of` | [observations.ts](../src/duckdb/observations.ts), [declaration-graph.ts](../src/hosts/declaration-graph.ts), [declaration-graph.test.ts](../test/declaration-graph.test.ts) |
 | Foreign and ontology graphs | Generic projection profiles cover KGX/external tables and internal observations; SemanticSQL concrete view names are pinned to an upstream commit and exercised in DuckDB | [graph-projection.ts](../src/core/graph-projection.ts), [semantic-sql.ts](../src/duckdb/semantic-sql.ts), [graph-projection.test.ts](../test/graph-projection.test.ts), [monarch-kg-http-example.test.ts](../test/monarch-kg-http-example.test.ts) |
@@ -44,15 +44,15 @@ The normal gate and compact consumer paths are:
 
 ```sh
 npm run check
-npm run dogfood:bring-it-home
-npm run dogfood:sdk-host-embedding
-npm run dogfood:substrate-skill
+npm run pattern:bring-it-home
+npm run pattern:sdk-host-embedding
+npm run pattern:substrate-skill
 ```
 
 The cross-machine proof is opt-in because it needs an SSH host with reverse forwarding:
 
 ```sh
-npm run dogfood:ssh-remote-worker
+npm run pattern:ssh-remote-worker
 ```
 
 The extension-backed lanes are explicit because they exercise real host environments:
@@ -60,7 +60,7 @@ The extension-backed lanes are explicit because they exercise real host environm
 ```sh
 npm run provision:duckhts
 npm run provision:ducknng-owned
-npm run dogfood:ducknng-upload
+npm run pattern:ducknng-upload
 ```
 
 CI provisions R plus DuckHTS for the full suite. A separate owned-ducknng job requires retry, subject-scoped HTTP

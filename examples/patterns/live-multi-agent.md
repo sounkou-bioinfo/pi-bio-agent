@@ -2,7 +2,7 @@
 
 # Live multi-agent run — evidence
 
-`scripts/live-multi-agent.ts` is a **dogfood** (not a unit test —
+`scripts/live-multi-agent.ts` is a **pattern** (not a unit test —
 non-deterministic, spawns real LLM agents). It runs a `StudyScaffold`
 where **each step’s worker is a separate `pi` process**, and the workers
 communicate **only through access-list artifacts the host threads

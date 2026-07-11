@@ -78,7 +78,7 @@ async function setupPushPull() {
   };
 }
 
-describe("Absurd-style durable queue + ducknng push dogfood", { skip: ducknngAvailable ? false : "ducknng unavailable" }, () => {
+describe("Absurd-style durable queue + ducknng push pattern", { skip: ducknngAvailable ? false : "ducknng unavailable" }, () => {
   test("a transport push references a durable wakeup event, then the worker claims from the queue", async () => {
     const queue = await setupQueue();
     const nng = await setupPushPull();
@@ -170,7 +170,7 @@ describe("Absurd-style durable queue + ducknng push dogfood", { skip: ducknngAva
   });
 });
 
-describe("Absurd-style step checkpoint dogfood", () => {
+describe("Absurd-style step checkpoint pattern", () => {
   test("a reclaimed attempt resumes from a recorded step checkpoint instead of redoing it", async () => {
     const queue = await setupQueue();
     const runId = "absurd-step-resume-1";

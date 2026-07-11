@@ -119,5 +119,5 @@ jobs:
           dist-test/test/ducknng-rpc-blackboard.test.js
           dist-test/test/ducknng-socket-reachability.test.js
 
-      - name: Require upload dogfood (no skipped lane)
-        run: npm run dogfood:ducknng-upload
+      - name: Require upload pattern (no skipped lane)
+        run: npm run pattern:ducknng-upload

@@ -55,7 +55,7 @@ const extensionPath = await firstExisting([
 
 if (!extensionPath) {
   throw new Error(
-    "ducknng-upload-dogfood: no ducknng.duckdb_extension found. Set DUCKNNG_EXTENSION_PATH or DUCKNNG_REPO to an upload-capable sibling build.",
+    "ducknng-upload-pattern: no ducknng.duckdb_extension found. Set DUCKNNG_EXTENSION_PATH or DUCKNNG_REPO to an upload-capable sibling build.",
   );
 }
 
@@ -65,14 +65,14 @@ const output = await run(process.execPath, ["--test", "dist-test/test/ducknng-up
 });
 
 if (testSummaryCount(output, "skipped") !== 0 || testSummaryCount(output, "todo") !== 0) {
-  throw new Error("ducknng-upload-dogfood: upload conformance did not run; it was skipped or marked todo");
+  throw new Error("ducknng-upload-pattern: upload conformance did not run; it was skipped or marked todo");
 }
 if (testSummaryCount(output, "pass") !== 1 || testSummaryCount(output, "fail") !== 0) {
-  throw new Error("ducknng-upload-dogfood: expected exactly one passing upload conformance test");
+  throw new Error("ducknng-upload-pattern: expected exactly one passing upload conformance test");
 }
 
 console.log(JSON.stringify({
-  dogfood: "ducknng-upload",
+  pattern: "ducknng-upload",
   ok: true,
   extensionPath,
 }, null, 2));

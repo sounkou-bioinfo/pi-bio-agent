@@ -67,7 +67,7 @@ describe("README hygiene: action-first generated README, no fake illustration bl
   });
 
   test("README.qmd examples are runnable chunks or typed code fences", () => {
-    const allowed = new Set(["r", "pi", "biocli", "dogfood", "sh", "ts", "json"]);
+    const allowed = new Set(["r", "pi", "biocli", "pattern", "sh", "ts", "json"]);
     const lines = readFileSync(join(ROOT, "README.qmd"), "utf8").split("\n");
     lines.forEach((line, i) => {
       const match = line.match(/^```\s*(?:\{?([A-Za-z0-9_-]+))?/);
