@@ -14,3 +14,4 @@ export * from "./resolvers/http-table-scan.js";
 export * from "./resolvers/http-policies.js"; // withAuth / withRetry — the host fetch-policy helpers the docs advertise
 export * from "./resolvers/compute-run.js";
 export * from "./http-profiles.js";
+export * from "./ncurl-fanout.js";

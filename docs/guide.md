@@ -97,6 +97,13 @@ job/checkpoint helpers. If an application needs a stable type that is not import
 `pi-bio-agent/core`, `pi-bio-agent/duckdb`, or `pi-bio-agent/hosts`, treat that as an SDK export gap rather than
 importing from `src/`.
 
+Applications can bind their own resolver implementations without extending the core registry. The manifest declares
+the resolver ID, version, parameters, and output contract; the host passes
+`resolverBindings: { "app.resolver": implementation }` to the high-level run, describe, and reproduce APIs. This is
+the composition point for an adapter such as a VEP fanout or service-specific table reader. Undeclared bindings are
+rejected, and replay records the manifest plus receipts, not executable functions, so the replaying host must supply
+the adapter again.
+
 The runnable host-embedding check is:
 
 ```sh

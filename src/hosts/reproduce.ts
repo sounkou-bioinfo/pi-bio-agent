@@ -2,6 +2,7 @@ import { promises as fs } from "node:fs";
 import { dirname, join, resolve, isAbsolute } from "node:path";
 import { RUN_REPLAY_SPEC_SCHEMA, receiptContentDigest, canonicalDigest, hostCapabilityReceiptDigests, type EnvAttestationSummary, type HostCapabilityReceipt, type RunReplayOutcome, type RunReplaySpec } from "../core/reproducibility.js";
 import type { BioManifest } from "../core/manifest.js";
+import type { HostResolverBindings } from "./run-store.js";
 import type { CasStore } from "../core/cas.js";
 import type { ComputeRunner, SqlConn } from "../core/ports.js";
 import type { FetchLike } from "../duckdb/resolvers/http-table-scan.js";
@@ -60,6 +61,8 @@ export interface ReproduceRequest {
   dbPath?: string;
   network?: { fetch: FetchLike };
   compute?: { runner: ComputeRunner };
+  /** Re-supply app/host resolver adapters needed by the manifest snapshot. */
+  resolverBindings?: HostResolverBindings;
   /** Host cancellation for network resolution, compute, and result materialization during the fresh run. */
   signal?: AbortSignal;
   cas?: CasStore;
@@ -198,7 +201,7 @@ export async function reproduceRun(req: ReproduceRequest): Promise<ReproduceResu
     manifestPath: replay.manifest?.path,
     manifestBaseDir,
     bindings: replay.bindings, duckdbInitSql: req.duckdbInitSql, protectedSessionBindings: req.protectedSessionBindings, protectedSessionVariables: req.protectedSessionVariables, duckdbConfig: req.duckdbConfig, hostCapabilityReceipts: req.hostCapabilityReceipts,
-    network: req.network, compute: req.compute, signal: req.signal, cas: req.cas, remoteCacheScope: req.remoteCacheScope,
+    network: req.network, compute: req.compute, resolverBindings: req.resolverBindings, signal: req.signal, cas: req.cas, remoteCacheScope: req.remoteCacheScope,
     store: req.store, author: req.author,
     runId: `reproduce-${shortId}${suffix}`, now: req.now,
   };

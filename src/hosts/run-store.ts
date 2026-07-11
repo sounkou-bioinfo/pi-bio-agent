@@ -47,6 +47,10 @@ const COMPUTE_RESOLVER = "compute.run";
 const PENDING_RUN_CAS_REF_TTL_MS = 24 * 60 * 60 * 1000;
 const RUN_ARTIFACT_SLOT_FUTURE = "9999-12-31T23:59:59.999Z";
 
+/** Executable resolver adapters supplied by an embedding host. Resolver specs remain declared and versioned in the
+ * manifest; these functions are runtime composition and never enter its serializable snapshot. */
+export type HostResolverBindings = Readonly<Record<string, BioResolverImpl>>;
+
 interface ManifestLoadRequest {
   cwd: string;
   manifestPath?: string;
@@ -349,6 +353,9 @@ export interface RunOperationRequest {
   network?: { fetch: FetchLike };
   /** COMPUTE opt-in (host grants out-of-process compute): pass a ComputeRunner to enable the compute.run resolver. Absent => compute.run stays unbound and fails closed. */
   compute?: { runner: ComputeRunner };
+  /** App/host-owned adapters for resolver ids declared by this manifest. An explicit binding may replace a built-in
+   * adapter for this run; undeclared ids are rejected before the execution connection is opened. */
+  resolverBindings?: HostResolverBindings;
   /** Cooperative cancellation, forwarded to each resolver (e.g. http.get's fetch). */
   signal?: AbortSignal;
   /** CAS mode (host opt-in): a content-addressed byte store. Present = resolvers snapshot bytes into it and
@@ -443,22 +450,32 @@ function resolveInCwd(cwd: string, p: string): string {
   return p === ":memory:" || isAbsolute(p) ? p : resolve(cwd, p);
 }
 
-/** Load + validate + register a manifest and bind the built-in resolver impls it declares. Shared by the
- *  operation and the ad-hoc query entry points. */
-async function prepareRegistry(req: { cwd: string; manifestPath?: string; manifestSnapshot?: BioManifest; manifestBaseDir?: string; network?: { fetch: FetchLike }; compute?: { runner: ComputeRunner } }): Promise<{ registry: BioRegistry; manifest: BioManifest; raw: BioManifest; manifestDigest: string; manifestBaseDir: string }> {
-  const { manifest, manifestDigest, manifestBaseDir } = await loadManifestSource(req);
-  const registry = createBioRegistry();
-  registry.registerManifest(manifest); // throws on an invalid manifest (fail closed)
-  // Host-injected capability resolvers — present only when the host GRANTS them by composition; absent => the
-  // declaring resource fails closed at resolve time.
+/** Load + validate + register a manifest and bind the resolver adapters composed by this host. Shared by the
+ * operation and ad-hoc query entry points. */
+function bindManifestResolvers(
+  registry: BioRegistry,
+  manifest: BioManifest,
+  req: { network?: { fetch: FetchLike }; compute?: { runner: ComputeRunner }; resolverBindings?: HostResolverBindings },
+): void {
+  const declared = new Set((manifest.provides?.resolvers ?? []).map((resolver) => resolver.id));
+  for (const id of Object.keys(req.resolverBindings ?? {})) {
+    if (!declared.has(id)) throw new Error(`host resolver binding '${id}' is not declared by manifest '${manifest.id}'`);
+  }
   const injected: Record<string, BioResolverImpl | undefined> = {
     [NETWORK_RESOLVER]: req.network ? httpTableResolver(req.network.fetch) : undefined,
     [COMPUTE_RESOLVER]: req.compute ? computeRunResolver(req.compute.runner) : undefined,
   };
-  for (const r of manifest.provides?.resolvers ?? []) {
-    const impl = BUILTIN_RESOLVERS[r.id] ?? injected[r.id];
-    if (impl) registry.bindResolverImpl(r.id, impl);
+  for (const resolver of manifest.provides?.resolvers ?? []) {
+    const impl = req.resolverBindings?.[resolver.id] ?? BUILTIN_RESOLVERS[resolver.id] ?? injected[resolver.id];
+    if (impl) registry.bindResolverImpl(resolver.id, impl);
   }
+}
+
+async function prepareRegistry(req: { cwd: string; manifestPath?: string; manifestSnapshot?: BioManifest; manifestBaseDir?: string; network?: { fetch: FetchLike }; compute?: { runner: ComputeRunner }; resolverBindings?: HostResolverBindings }): Promise<{ registry: BioRegistry; manifest: BioManifest; raw: BioManifest; manifestDigest: string; manifestBaseDir: string }> {
+  const { manifest, manifestDigest, manifestBaseDir } = await loadManifestSource(req);
+  const registry = createBioRegistry();
+  registry.registerManifest(manifest); // throws on an invalid manifest (fail closed)
+  bindManifestResolvers(registry, manifest, req);
   return { registry, manifest, raw: manifest, manifestDigest, manifestBaseDir };
 }
 
@@ -483,6 +500,7 @@ export async function describeBioManifestFromPath(req: {
   manifestPath: string;
   network?: { fetch: FetchLike };
   compute?: { runner: ComputeRunner };
+  resolverBindings?: HostResolverBindings;
   signal?: AbortSignal;
   capabilities?: Readonly<Record<string, HostCapabilityStatus>>;
 }): Promise<
@@ -511,13 +529,10 @@ export async function describeBioManifestFromPath(req: {
   if (errors.length) return { manifestPath: req.manifestPath, valid: false, errors };
   const registry = createBioRegistry();
   registry.registerManifest(raw);
-  const injected: Record<string, BioResolverImpl | undefined> = {
-    [NETWORK_RESOLVER]: req.network ? httpTableResolver(req.network.fetch) : undefined,
-    [COMPUTE_RESOLVER]: req.compute ? computeRunResolver(req.compute.runner) : undefined,
-  };
-  for (const resolver of raw.provides.resolvers ?? []) {
-    const impl = BUILTIN_RESOLVERS[resolver.id] ?? injected[resolver.id];
-    if (impl) registry.bindResolverImpl(resolver.id, impl);
+  try {
+    bindManifestResolvers(registry, raw, req);
+  } catch (error) {
+    return { manifestPath: req.manifestPath, valid: false, errors: [`host composition is invalid: ${(error as Error).message}`] };
   }
   const resolverBindings = new Set((raw.provides.resolvers ?? []).filter((resolver) => registry.hasResolverImpl(resolver.id)).map((resolver) => resolver.id));
   const capabilities: Record<string, HostCapabilityStatus> = {
@@ -1111,6 +1126,8 @@ export interface RunQueryRequest {
   network?: { fetch: FetchLike };
   /** COMPUTE opt-in (host grants out-of-process compute): pass a ComputeRunner to enable the compute.run resolver. Absent => compute.run stays unbound and fails closed. */
   compute?: { runner: ComputeRunner };
+  /** App/host-owned adapters for resolver ids declared by this manifest. See `RunOperationRequest`. */
+  resolverBindings?: HostResolverBindings;
   /** Cooperative cancellation, forwarded to each resolver (e.g. http.get's fetch). */
   signal?: AbortSignal;
   /** CAS mode (host opt-in): a content-addressed byte store for cross-db byte reuse. */

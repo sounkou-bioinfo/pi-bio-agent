@@ -18,6 +18,7 @@ describe("SDK host embedding dogfood", () => {
       ok: boolean;
       publicImport: string;
       hostInjected: Record<string, unknown>;
+      customResolver: { operationId: string; row: string; replayManifestId: string; functionBindingInReplay: boolean };
       run: {
         runId: string;
         rowCount: number;
@@ -38,9 +39,16 @@ describe("SDK host embedding dogfood", () => {
       sqlConn: "duckdbNodeConn",
       casStore: "fsCasStore",
       computeRunner: "nodeComputeRunner",
+      resolverBindings: 1,
       sqlPolicy: true,
       hostCapabilityReceipts: 1,
       casMetadata: true,
+    });
+    assert.deepEqual(summary.customResolver, {
+      operationId: "sdk.host_rows",
+      row: "from-sdk-host",
+      replayManifestId: "sdk-host-custom-resolver",
+      functionBindingInReplay: false,
     });
     assert.equal(summary.run.runId, "sdk-host-embedding");
     assert.equal(summary.run.rowCount, 2);
