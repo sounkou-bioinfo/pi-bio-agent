@@ -1,0 +1,246 @@
+{
+  "schema": "pi-bio.manifest.v1",
+  "id": "clinical-genomics-workbench",
+  "version": "0.2.0",
+  "title": "Clinical genomics workbench binding",
+  "description": "Direct and inverted rare-disease evidence passes reconciled into one declared relation. This binding routes evidence; it is not a complete ACMG/AMP kernel.",
+  "provides": {
+    "resolvers": [
+      {
+        "id": "duckdb.file_scan",
+        "version": "0.1.0",
+        "title": "DuckDB file scan",
+        "description": "Read a local file into a DuckDB table.",
+        "output": { "mode": "table" }
+      },
+      {
+        "id": "ducknng.http_fanout",
+        "version": "0.1.0",
+        "title": "DuckNNG HTTP fanout",
+        "description": "Run declared batch SQL through the host-provisioned DuckNNG AIO transport.",
+        "output": { "mode": "table" }
+      },
+      {
+        "id": "duckdb.sql_materialize",
+        "version": "0.1.0",
+        "title": "DuckDB SQL materialization",
+        "description": "Materialize a declared read-only SQL relation.",
+        "output": { "mode": "table" }
+      }
+    ],
+    "resources": [
+      {
+        "id": "case_variants",
+        "title": "Case variants",
+        "kind": "virtual",
+        "resolver": "duckdb.file_scan",
+        "params": { "path": "data/case_variants.csv", "table": "case_variants" }
+      },
+      {
+        "id": "so_loss_of_function",
+        "title": "Loss-of-function Sequence Ontology terms",
+        "kind": "virtual",
+        "resolver": "duckdb.file_scan",
+        "params": { "path": "data/so_loss_of_function.csv", "table": "so_loss_of_function" }
+      },
+      {
+        "id": "case_narratives",
+        "title": "Immutable source case narratives",
+        "kind": "virtual",
+        "resolver": "duckdb.file_scan",
+        "params": { "path": "data/case_narratives.csv", "table": "case_narratives" }
+      },
+      {
+        "id": "hpo_terms",
+        "title": "Declared HPO label and synonym rows",
+        "kind": "virtual",
+        "resolver": "duckdb.file_scan",
+        "params": { "path": "data/hpo_terms.csv", "table": "hpo_terms" }
+      },
+      {
+        "id": "prior_assessment",
+        "title": "Prior case assessment",
+        "kind": "virtual",
+        "resolver": "duckdb.file_scan",
+        "params": { "path": "data/prior_assessment.csv", "table": "prior_assessment" }
+      },
+      {
+        "id": "assessment_status_order",
+        "title": "Assessment status order",
+        "kind": "virtual",
+        "resolver": "duckdb.file_scan",
+        "params": { "path": "data/assessment_status_order.csv", "table": "assessment_status_order" }
+      },
+      {
+        "id": "variant_inputs",
+        "title": "Direct and indexed-search variant inputs",
+        "kind": "virtual",
+        "resolver": "duckdb.sql_materialize",
+        "params": { "table": "variant_inputs", "sqlFile": "relations/variant_inputs.sql" }
+      },
+      {
+        "id": "variant_search_coverage",
+        "title": "Indexed candidate-gene search coverage",
+        "kind": "virtual",
+        "resolver": "duckdb.sql_materialize",
+        "params": { "table": "variant_search_coverage", "sqlFile": "relations/variant_search_coverage.sql" }
+      },
+      {
+        "id": "variant_assessment",
+        "title": "Normalized variant assessment",
+        "kind": "virtual",
+        "resolver": "duckdb.sql_materialize",
+        "params": { "table": "variant_assessment", "sqlFile": "relations/variant_assessment.sql" }
+      },
+      {
+        "id": "phenotype_hypothesis",
+        "title": "Phenotype-supported hypotheses",
+        "kind": "virtual",
+        "resolver": "duckdb.sql_materialize",
+        "params": { "table": "phenotype_hypothesis", "sqlFile": "relations/phenotype_hypothesis.sql" }
+      },
+      {
+        "id": "case_evidence",
+        "title": "Reconciled direct and inverted case evidence",
+        "kind": "virtual",
+        "resolver": "duckdb.sql_materialize",
+        "params": { "table": "case_evidence", "sqlFile": "relations/case_evidence.sql" }
+      },
+      {
+        "id": "reanalysis_evidence",
+        "title": "Current versus prior assessment",
+        "kind": "virtual",
+        "resolver": "duckdb.sql_materialize",
+        "params": { "table": "reanalysis_evidence", "sqlFile": "relations/reanalysis_evidence.sql" }
+      },
+      {
+        "id": "vep_http_results",
+        "title": "Selected-variant VEP HTTP responses",
+        "kind": "virtual",
+        "resolver": "ducknng.http_fanout",
+        "params": {
+          "table": "vep_http_results",
+          "batchesSqlFile": "relations/vep_batches.sql",
+          "urlVariable": "vep_url",
+          "headersVariable": "vep_headers_json",
+          "profileVariable": "vep_profile_id",
+          "tlsConfigVariable": "vep_tls_config_id",
+          "extensions": ["ducknng"],
+          "declaredSources": ["https://rest.ensembl.org/vep/human/region"]
+        }
+      },
+      {
+        "id": "vep_response",
+        "title": "Selected-variant VEP response rows",
+        "kind": "virtual",
+        "resolver": "duckdb.sql_materialize",
+        "params": {
+          "table": "vep_response",
+          "sqlFile": "relations/vep_response.sql"
+        }
+      },
+      {
+        "id": "vep_annotations",
+        "title": "Normalized VEP annotations from the checkpoint",
+        "kind": "virtual",
+        "resolver": "duckdb.sql_materialize",
+        "params": { "table": "vep_annotations", "sqlFile": "relations/vep_annotations.sql" }
+      }
+    ],
+    "operations": [
+      {
+        "id": "clinical.vep_annotations",
+        "version": "0.1.0",
+        "title": "Normalize selected-variant VEP annotations",
+        "description": "Normalize the declared VEP response rows and return one annotation row per selected allele and transcript gene.",
+        "transport": "duckdb.sql",
+        "inputSchema": { "type": "object" },
+        "notes": [
+          "The endpoint, credentials, batching, retry, and cancellation policy are host composition; selected alleles are the operation input.",
+          "The SQL keeps VEP as annotation evidence. It does not turn an external response into a diagnosis."
+        ],
+        "sql": {
+          "readOnly": true,
+          "requiredResources": ["vep_http_results", "vep_response"],
+          "sqlFile": "operations/vep_annotations.sql"
+        }
+      },
+      {
+        "id": "clinical.case_evidence",
+        "version": "0.2.0",
+        "title": "Direct and inverted case evidence",
+        "description": "Return review-bearing rows from both traversal directions over one reconciled evidence relation, preserving missingness, conflicts, abstentions, and review targets without exporting routine exclusions.",
+        "transport": "duckdb.sql",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "case_id": { "type": "string" },
+            "phenotype_hypotheses_json": {
+              "type": "string",
+              "description": "Host-protected JSON array from the checkpointed phenotype-hypothesis operation."
+            },
+            "candidate_variant_search_json": {
+              "type": "string",
+              "description": "Host-protected JSON array from the checkpointed indexed variant-search operation."
+            },
+            "vep_annotations_json": {
+              "type": "string",
+              "description": "Host-protected JSON array from the checkpointed VEP annotation operation."
+            }
+          },
+          "required": ["case_id", "phenotype_hypotheses_json", "candidate_variant_search_json", "vep_annotations_json"]
+        },
+        "notes": [
+          "Direct starts from observed variants; inverted consumes the recorded phenotype-to-disease-to-gene hypothesis relation produced from accepted grounding assertions.",
+          "The two lanes share variant assessment semantics and retain all matching evidence-bearing variants.",
+          "Missing frequency and missing genotype support remain explicit evidence rows.",
+          "A hypothesis becomes missing genotype support only after completed variant-search coverage; otherwise it remains hypothesis_not_searched.",
+          "Routine direct-lane exclusions remain queryable in variant_assessment but are not copied into the evidence packet."
+        ],
+        "sql": {
+          "readOnly": true,
+          "requiredResources": [
+            "case_variants",
+            "so_loss_of_function",
+            "variant_inputs",
+            "variant_search_coverage",
+            "vep_annotations",
+            "variant_assessment",
+            "phenotype_hypothesis",
+            "case_evidence"
+          ],
+          "sqlFile": "operations/case_evidence.sql"
+        }
+      },
+      {
+        "id": "clinical.reanalysis_diff",
+        "version": "0.2.0",
+        "title": "Reanalysis diff",
+        "description": "Compare the shared current variant assessment with a prior assessment and retain unknown status vocabularies as an abstention.",
+        "transport": "duckdb.sql",
+        "inputSchema": {
+          "type": "object",
+          "properties": { "case_id": { "type": "string" } },
+          "required": ["case_id"]
+        },
+        "notes": [
+          "Reanalysis is a delta over durable prior results, not another prompt."
+        ],
+        "sql": {
+          "readOnly": true,
+          "requiredResources": [
+            "case_variants",
+            "so_loss_of_function",
+            "variant_inputs",
+            "prior_assessment",
+            "assessment_status_order",
+            "vep_annotations",
+            "variant_assessment",
+            "reanalysis_evidence"
+          ],
+          "sqlFile": "operations/reanalysis_diff.sql"
+        }
+      }
+    ]
+  }
+}

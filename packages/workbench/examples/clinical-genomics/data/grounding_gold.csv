@@ -1,0 +1,5 @@
+case_id,hpo_id,label,assertion_context,subject_context,subject_id,evidence_text,start_offset,end_offset
+CASE-RD-001,HP:0001263,Global developmental delay,present,proband,,late to sit and walk,16,36
+CASE-RD-001,HP:0001252,Hypotonia,present,proband,,hypotonia,45,54
+CASE-RD-001,HP:0001250,Seizure,absent,family,mother,seizures,74,82
+CASE-RD-001,HP:0001251,Ataxia,uncertain,proband,,ataxia,93,99

@@ -1,0 +1,64 @@
+{
+  "schema": "pi-bio.manifest.v1",
+  "id": "clinical-genomics-gene-intervals",
+  "version": "0.1.0",
+  "title": "Assembly-pinned candidate gene intervals",
+  "description": "Resolve ranked gene hypotheses to one assembly-specific genomic span per gene while retaining missing and ambiguous interval states. A known gene available only on another assembly fails the operation.",
+  "provides": {
+    "resolvers": [
+      {
+        "id": "duckdb.file_scan",
+        "version": "0.1.0",
+        "title": "DuckDB file scan",
+        "description": "Read a local interval snapshot into a DuckDB table.",
+        "output": { "mode": "table" }
+      },
+      {
+        "id": "duckdb.sql_materialize",
+        "version": "0.1.0",
+        "title": "DuckDB SQL materialization",
+        "description": "Materialize a declared read-only SQL relation.",
+        "output": { "mode": "table" }
+      }
+    ],
+    "resources": [
+      {
+        "id": "gene_intervals",
+        "title": "Assembly-pinned gene intervals",
+        "kind": "virtual",
+        "resolver": "duckdb.file_scan",
+        "params": { "path": "data/gene_intervals.csv", "table": "gene_intervals" }
+      },
+      {
+        "id": "candidate_gene_intervals",
+        "title": "Candidate gene interval resolution",
+        "kind": "virtual",
+        "resolver": "duckdb.sql_materialize",
+        "params": { "table": "candidate_gene_intervals", "sqlFile": "relations/candidate_gene_intervals.sql" }
+      }
+    ],
+    "operations": [
+      {
+        "id": "clinical.candidate_gene_intervals",
+        "version": "0.1.0",
+        "title": "Resolve candidate genes to assembly-pinned intervals",
+        "description": "Resolve every ranked hypothesis to a genomic span or an explicit missing or ambiguous-locus state; fail on an assembly mismatch.",
+        "transport": "duckdb.sql",
+        "inputSchema": {
+          "type": "object",
+          "required": ["case_id", "assembly", "hypotheses_json"],
+          "properties": {
+            "case_id": { "type": "string" },
+            "assembly": { "type": "string" },
+            "hypotheses_json": { "type": "string" }
+          }
+        },
+        "sql": {
+          "readOnly": true,
+          "requiredResources": ["gene_intervals", "candidate_gene_intervals"],
+          "sqlFile": "operations/candidate_gene_intervals.sql"
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,117 @@
+{
+  "schema": "pi-bio.manifest.v1",
+  "id": "clinical-genomics-monarch",
+  "version": "0.1.0",
+  "title": "Phenotype-to-gene hypotheses over a pinned Monarch KG",
+  "description": "An inverted rare-disease traversal over the canonical edges, nodes, and closure tables in a host-attached, versioned Monarch DuckDB snapshot.",
+  "provides": {
+    "resolvers": [
+      {
+        "id": "duckdb.sql_materialize",
+        "version": "0.1.0",
+        "title": "DuckDB SQL materialization",
+        "description": "Materialize a declared read-only SQL relation.",
+        "output": {
+          "mode": "table"
+        }
+      }
+    ],
+    "resources": [
+      {
+        "id": "case_phenotype_ancestors",
+        "title": "Case phenotype ontology ancestors",
+        "kind": "virtual",
+        "resolver": "duckdb.sql_materialize",
+        "params": {
+          "table": "case_phenotype_ancestors",
+          "declaredSources": [
+            "https://data.monarchinitiative.org/monarch-kg/2026-04-14/monarch-kg.duckdb"
+          ],
+          "sql": "WITH observed AS (\n  SELECT DISTINCT hpo_id\n  FROM UNNEST(CAST(getvariable('phenotype_ids') AS VARCHAR[])) AS terms(hpo_id)\n), closure_rows AS (\n  SELECT\n    o.hpo_id AS observed_hpo_id,\n    c.object_id AS ancestor_hpo_id\n  FROM observed o\n  JOIN monarch.closure c\n    ON c.subject_id = o.hpo_id\n   AND c.predicate_id = 'rdfs:subClassOf'\n  WHERE c.object_id LIKE 'HP:%'\n)\nSELECT observed_hpo_id, ancestor_hpo_id\nFROM closure_rows\nUNION\nSELECT hpo_id, hpo_id\nFROM observed"
+        }
+      },
+      {
+        "id": "monarch_disease_phenotype_matches",
+        "title": "Monarch disease-phenotype matches",
+        "kind": "virtual",
+        "resolver": "duckdb.sql_materialize",
+        "params": {
+          "table": "monarch_disease_phenotype_matches",
+          "declaredSources": [
+            "https://data.monarchinitiative.org/monarch-kg/2026-04-14/monarch-kg.duckdb"
+          ],
+          "sql": "WITH disease_annotations AS (\n  SELECT\n    e.subject AS disease_id,\n    e.object AS disease_hpo_id,\n    e.frequency_qualifier,\n    e.primary_knowledge_source,\n    e.has_evidence,\n    e.publications\n  FROM monarch.edges e\n  WHERE e.predicate = 'biolink:has_phenotype'\n    AND e.subject LIKE 'MONDO:%'\n    AND e.object LIKE 'HP:%'\n    AND coalesce(try_cast(e.negated AS BOOLEAN), false) = false\n), direct_or_broader AS (\n  SELECT\n    a.observed_hpo_id,\n    d.*,\n    CASE\n      WHEN a.observed_hpo_id = d.disease_hpo_id THEN 'exact'\n      ELSE 'observed_descends_from_annotation'\n    END AS match_kind\n  FROM case_phenotype_ancestors a\n  JOIN disease_annotations d\n    ON d.disease_hpo_id = a.ancestor_hpo_id\n), more_specific AS (\n  SELECT\n    observed.observed_hpo_id,\n    d.*,\n    'annotation_descends_from_observed' AS match_kind\n  FROM (SELECT DISTINCT observed_hpo_id FROM case_phenotype_ancestors) observed\n  JOIN monarch.closure c\n    ON c.object_id = observed.observed_hpo_id\n   AND c.predicate_id = 'rdfs:subClassOf'\n   AND c.subject_id LIKE 'HP:%'\n   AND c.subject_id <> observed.observed_hpo_id\n  JOIN disease_annotations d\n    ON d.disease_hpo_id = c.subject_id\n), candidate_matches AS (\n  SELECT * FROM direct_or_broader\n  UNION ALL\n  SELECT * FROM more_specific\n), annotation_frequency AS (\n  SELECT\n    disease_hpo_id,\n    COUNT(DISTINCT disease_id)::BIGINT AS annotated_disease_count\n  FROM disease_annotations\n  GROUP BY disease_hpo_id\n), totals AS (\n  SELECT COUNT(DISTINCT disease_id)::BIGINT AS total_disease_count\n  FROM disease_annotations\n)\nSELECT\n  m.observed_hpo_id,\n  m.disease_id,\n  disease.name AS disease_label,\n  m.disease_hpo_id,\n  phenotype.name AS disease_phenotype_label,\n  m.match_kind,\n  ln((t.total_disease_count + 1.0) / (f.annotated_disease_count + 1.0)) AS annotation_information_content,\n  f.annotated_disease_count,\n  t.total_disease_count,\n  m.frequency_qualifier,\n  m.primary_knowledge_source,\n  m.has_evidence,\n  m.publications\nFROM candidate_matches m\nJOIN annotation_frequency f USING (disease_hpo_id)\nCROSS JOIN totals t\nLEFT JOIN monarch.nodes disease ON disease.id = m.disease_id\nLEFT JOIN monarch.nodes phenotype ON phenotype.id = m.disease_hpo_id"
+        }
+      },
+      {
+        "id": "monarch_gene_disease_evidence",
+        "title": "Monarch gene-disease evidence for phenotype-matched diseases",
+        "kind": "virtual",
+        "resolver": "duckdb.sql_materialize",
+        "params": {
+          "table": "monarch_gene_disease_evidence",
+          "declaredSources": [
+            "https://data.monarchinitiative.org/monarch-kg/2026-04-14/monarch-kg.duckdb"
+          ],
+          "sql": "WITH candidate_diseases AS (\n  SELECT DISTINCT disease_id\n  FROM monarch_disease_phenotype_matches\n)\nSELECT DISTINCT\n  e.subject AS gene_id,\n  coalesce(gene.symbol, gene.name, e.subject) AS gene,\n  e.object AS disease_id,\n  e.predicate,\n  e.primary_knowledge_source,\n  e.has_evidence,\n  e.publications\nFROM monarch.edges e\nJOIN candidate_diseases candidate\n  ON candidate.disease_id = e.object\nLEFT JOIN monarch.nodes gene\n  ON gene.id = e.subject\nWHERE e.subject LIKE 'HGNC:%'\n  AND e.predicate IN (\n    'biolink:causes',\n    'biolink:gene_associated_with_condition',\n    'biolink:associated_with_increased_likelihood_of'\n  )\n  AND coalesce(try_cast(e.negated AS BOOLEAN), false) = false"
+        }
+      },
+      {
+        "id": "monarch_phenotype_hypotheses",
+        "title": "Ranked phenotype-supported hypotheses",
+        "kind": "virtual",
+        "resolver": "duckdb.sql_materialize",
+        "params": {
+          "table": "monarch_phenotype_hypotheses",
+          "sql": "WITH per_observed_term AS (\n  SELECT\n    disease_id,\n    any_value(disease_label) AS disease_label,\n    observed_hpo_id,\n    MAX(CASE WHEN match_kind = 'exact' THEN 1 ELSE 0 END)::INTEGER AS exact_match,\n    MAX(annotation_information_content) AS specificity,\n    COUNT(DISTINCT disease_hpo_id)::INTEGER AS supporting_annotations\n  FROM monarch_disease_phenotype_matches\n  GROUP BY disease_id, observed_hpo_id\n), disease_scores AS (\n  SELECT\n    disease_id,\n    any_value(disease_label) AS disease_label,\n    COUNT(DISTINCT observed_hpo_id)::INTEGER AS matched_observed_terms,\n    SUM(exact_match)::INTEGER AS exact_observed_terms,\n    SUM(specificity) AS phenotype_specificity_score,\n    SUM(supporting_annotations)::INTEGER AS supporting_phenotype_annotations\n  FROM per_observed_term\n  GROUP BY disease_id\n), disease_evidence AS (\n  SELECT\n    disease_id,\n    list_sort(list_distinct(list(match_kind))) AS phenotype_match_kinds,\n    list_sort(list_distinct(list(primary_knowledge_source) FILTER (\n      WHERE primary_knowledge_source IS NOT NULL\n    ))) AS phenotype_sources\n  FROM monarch_disease_phenotype_matches\n  GROUP BY disease_id\n), gene_evidence AS (\n  SELECT\n    gene_id,\n    any_value(gene) AS gene,\n    disease_id,\n    MAX(CASE WHEN predicate = 'biolink:causes' THEN 1 ELSE 0 END)::INTEGER AS has_causal_assertion,\n    COUNT(*)::INTEGER AS gene_disease_assertions,\n    list_sort(list_distinct(list(predicate))) AS gene_disease_predicates,\n    list_sort(list_distinct(list(primary_knowledge_source) FILTER (\n      WHERE primary_knowledge_source IS NOT NULL\n    ))) AS gene_disease_sources\n  FROM monarch_gene_disease_evidence\n  GROUP BY gene_id, disease_id\n)\nSELECT\n  g.gene_id,\n  g.gene,\n  d.disease_id,\n  d.disease_label,\n  d.matched_observed_terms,\n  d.exact_observed_terms,\n  d.phenotype_specificity_score,\n  d.supporting_phenotype_annotations,\n  evidence.phenotype_match_kinds,\n  evidence.phenotype_sources,\n  g.has_causal_assertion,\n  g.gene_disease_assertions,\n  g.gene_disease_predicates,\n  g.gene_disease_sources,\n  ROW_NUMBER() OVER (\n    ORDER BY\n      d.exact_observed_terms DESC,\n      d.matched_observed_terms DESC,\n      d.phenotype_specificity_score DESC,\n      g.has_causal_assertion DESC,\n      g.gene,\n      d.disease_id\n  )::INTEGER AS hypothesis_rank\nFROM disease_scores d\nJOIN disease_evidence evidence USING (disease_id)\nJOIN gene_evidence g USING (disease_id)"
+        }
+      }
+    ],
+    "operations": [
+      {
+        "id": "clinical.monarch_phenotype_hypotheses",
+        "version": "0.1.0",
+        "title": "Rank phenotype-supported gene and disease hypotheses",
+        "description": "Walk accepted HPO identifiers through Monarch ontology closure, disease-phenotype assertions, and gene-disease assertions. Return explicit match and source components rather than a clinical conclusion.",
+        "transport": "duckdb.sql",
+        "inputSchema": {
+          "type": "object",
+          "required": [
+            "phenotype_ids"
+          ],
+          "properties": {
+            "phenotype_ids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^HP:[0-9]+$"
+              },
+              "description": "Accepted HPO CURIEs."
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000
+            }
+          }
+        },
+        "notes": [
+          "The host supplies the manifest-declared canonical graph as the monarch catalog; fixture and remote compositions carry their own source receipts.",
+          "Exact and ancestor/descendant matches remain distinguishable in the result components.",
+          "Negated phenotype assertions are excluded; association predicates and knowledge sources remain visible.",
+          "This operation proposes hypotheses for downstream variant search and review. It does not diagnose a case."
+        ],
+        "sql": {
+          "readOnly": true,
+          "requiredResources": [
+            "case_phenotype_ancestors",
+            "monarch_disease_phenotype_matches",
+            "monarch_gene_disease_evidence",
+            "monarch_phenotype_hypotheses"
+          ],
+          "sqlTemplate": "SELECT *\nFROM monarch_phenotype_hypotheses\nORDER BY hypothesis_rank\nLIMIT coalesce(try_cast(getvariable('limit') AS INTEGER), 50)"
+        }
+      }
+    ]
+  }
+}

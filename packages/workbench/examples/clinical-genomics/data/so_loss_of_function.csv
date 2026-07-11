@@ -1,0 +1,5 @@
+id,label
+stop_gained,stop gained
+frameshift_variant,frameshift variant
+splice_acceptor_variant,splice acceptor variant
+splice_donor_variant,splice donor variant

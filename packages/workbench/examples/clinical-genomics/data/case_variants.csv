@@ -1,0 +1,6 @@
+case_id,variant_key,gene,consequence,allele_frequency,clinical_significance,zygosity,inheritance
+CASE-RD-001,17-43093464-A-T,GENEB,stop_gained,0.0002,Pathogenic,het,de_novo
+CASE-RD-001,2-47637258-C-CT,GENEZ,frameshift_variant,,Uncertain significance,het,inherited
+CASE-RD-001,7-100-A-G,GENEC,missense_variant,0.0001,Uncertain significance,het,inherited
+CASE-RD-001,11-200-G-A,GENED,stop_gained,0.02,Uncertain significance,het,inherited
+CASE-RD-001,3-300-C-T,GENEF,stop_gained,0.0001,Benign,het,inherited

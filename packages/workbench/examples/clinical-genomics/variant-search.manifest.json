@@ -1,0 +1,87 @@
+{
+  "schema": "pi-bio.manifest.v1",
+  "id": "clinical-genomics-candidate-variant-search",
+  "version": "0.1.0",
+  "title": "Indexed candidate-gene variant search",
+  "description": "Read only assembly-pinned candidate intervals from the indexed annotated-VCF fixture, validate contig and available assembly metadata, deduplicate overlapping region results per selected gene and allele, and emit both variant and coverage rows. Live VEP annotation is a subsequent provider, not implied by this fixture binding.",
+  "provides": {
+    "resolvers": [
+      {
+        "id": "duckhts.read_bcf",
+        "version": "0.1.0",
+        "title": "DuckHTS indexed VCF/BCF read",
+        "description": "Materialize raw VCF/BCF rows from an htslib region string.",
+        "output": {
+          "mode": "table"
+        }
+      },
+      {
+        "id": "duckdb.sql_materialize",
+        "version": "0.1.0",
+        "title": "DuckDB SQL materialization",
+        "description": "Materialize an empty typed relation when no candidate interval is resolvable.",
+        "output": {
+          "mode": "table"
+        }
+      }
+    ],
+    "resources": [
+      {
+        "id": "case_vcf_raw",
+        "title": "Candidate-region VCF records",
+        "kind": "virtual",
+        "resolver": "duckdb.sql_materialize",
+        "params": {
+          "table": "case_vcf_raw",
+          "sql": "SELECT NULL::VARCHAR AS CHROM, NULL::BIGINT AS POS, NULL::VARCHAR AS REF, NULL::VARCHAR[] AS ALT, NULL::VARCHAR[] AS INFO_GENE, NULL::VARCHAR[] AS INFO_CSQ, NULL::FLOAT[] AS INFO_AF, NULL::VARCHAR[] AS INFO_CLNSIG, NULL::VARCHAR[] AS INFO_ZYGOSITY, NULL::VARCHAR[] AS INFO_INHERITANCE WHERE FALSE"
+        }
+      },
+      {
+        "id": "case_vcf_contigs",
+        "title": "Case VCF contigs and assembly metadata",
+        "kind": "virtual",
+        "resolver": "duckdb.sql_materialize",
+        "params": {
+          "table": "case_vcf_contigs",
+          "sql": "SELECT NULL::VARCHAR AS chrom, NULL::BIGINT AS length, NULL::VARCHAR AS assembly WHERE FALSE"
+        }
+      }
+    ],
+    "operations": [
+      {
+        "id": "clinical.candidate_variant_search",
+        "version": "0.1.0",
+        "title": "Search candidate gene intervals in the case VCF",
+        "description": "Return allele-level candidate rows with the fixture's declared INFO annotations plus one coverage row per hypothesis gene. Overlapping region duplicates are collapsed per selected gene and allele.",
+        "transport": "duckdb.sql",
+        "inputSchema": {
+          "type": "object",
+          "required": [
+            "case_id",
+            "intervals_json",
+            "case_vcf_path"
+          ],
+          "properties": {
+            "case_id": {
+              "type": "string"
+            },
+            "intervals_json": {
+              "type": "string"
+            },
+            "case_vcf_path": {
+              "type": "string"
+            }
+          }
+        },
+        "sql": {
+          "readOnly": true,
+          "requiredResources": [
+            "case_vcf_raw",
+            "case_vcf_contigs"
+          ],
+          "sqlTemplate": "WITH interval_rows AS (\n  SELECT\n    json_extract_string(value, '$.gene_id') AS gene_id,\n    json_extract_string(value, '$.gene') AS gene,\n    json_extract_string(value, '$.disease_id') AS disease_id,\n    try_cast(json_extract(value, '$.hypothesis_rank') AS INTEGER) AS hypothesis_rank,\n    json_extract_string(value, '$.assembly') AS assembly,\n    json_extract_string(value, '$.chrom') AS chrom,\n    try_cast(json_extract(value, '$.start_1based') AS BIGINT) AS start_1based,\n    try_cast(json_extract(value, '$.end_1based') AS BIGINT) AS end_1based,\n    json_extract_string(value, '$.interval_status') AS interval_status\n  FROM json_each(CAST(getvariable('intervals_json') AS JSON))\n), resolved AS (\n  SELECT *\n  FROM interval_rows\n  WHERE interval_status = 'resolved'\n), validation AS (\n  SELECT CASE\n    WHEN count(*) FILTER (WHERE c.chrom IS NULL) > 0 THEN error(\n      'candidate variant search requested absent VCF contig ' || min(r.chrom) FILTER (WHERE c.chrom IS NULL)\n    )\n    WHEN count(*) FILTER (\n      WHERE c.assembly IS NOT NULL AND lower(c.assembly) <> lower(r.assembly)\n    ) > 0 THEN error(\n      'candidate variant search assembly mismatch on contig ' || min(r.chrom) FILTER (\n        WHERE c.assembly IS NOT NULL AND lower(c.assembly) <> lower(r.assembly)\n      )\n    )\n    ELSE true\n  END AS valid\n  FROM resolved r\n  LEFT JOIN case_vcf_contigs c USING (chrom)\n), alleles AS (\n  SELECT\n    raw.CHROM AS chrom,\n    raw.POS AS pos,\n    raw.REF AS ref,\n    allele.alt,\n    allele.alt_index,\n    list_extract(raw.INFO_GENE, allele.alt_index) AS annotated_gene,\n    list_extract(raw.INFO_CSQ, allele.alt_index) AS consequence,\n    try_cast(list_extract(raw.INFO_AF, allele.alt_index) AS DOUBLE) AS allele_frequency,\n    replace(list_extract(raw.INFO_CLNSIG, allele.alt_index), '_', ' ') AS clinical_significance,\n    list_extract(raw.INFO_ZYGOSITY, allele.alt_index) AS zygosity,\n    list_extract(raw.INFO_INHERITANCE, allele.alt_index) AS inheritance\n  FROM case_vcf_raw raw\n  CROSS JOIN UNNEST(raw.ALT) WITH ORDINALITY AS allele(alt, alt_index)\n), selected AS (\n  SELECT\n    i.gene_id,\n    i.gene,\n    i.disease_id,\n    i.hypothesis_rank,\n    i.assembly,\n    i.chrom,\n    i.start_1based,\n    i.end_1based,\n    a.pos,\n    a.ref,\n    a.alt,\n    a.annotated_gene,\n    a.consequence,\n    a.allele_frequency,\n    a.clinical_significance,\n    a.zygosity,\n    a.inheritance,\n    a.chrom || '-' || a.pos || '-' || a.ref || '-' || a.alt AS variant_key\n  FROM resolved i\n  JOIN alleles a\n    ON i.chrom = a.chrom\n   AND a.pos BETWEEN i.start_1based AND i.end_1based\n), variant_rows AS (\n  SELECT\n    gene_id,\n    gene,\n    MIN(hypothesis_rank)::INTEGER AS hypothesis_rank,\n    any_value(assembly) AS assembly,\n    any_value(chrom) AS chrom,\n    MIN(start_1based) AS start_1based,\n    MAX(end_1based) AS end_1based,\n    list_sort(list_distinct(list(disease_id))) AS disease_ids,\n    variant_key,\n    any_value(pos) AS pos,\n    any_value(ref) AS ref,\n    any_value(alt) AS alt,\n    CASE\n      WHEN count(DISTINCT struct_pack(\n        annotated_gene := annotated_gene,\n        consequence := consequence,\n        allele_frequency := allele_frequency,\n        clinical_significance := clinical_significance,\n        zygosity := zygosity,\n        inheritance := inheritance\n      )) > 1 THEN error('conflicting duplicate annotations for allele ' || variant_key)\n      ELSE any_value(annotated_gene)\n    END AS annotated_gene,\n    any_value(consequence) AS consequence,\n    any_value(allele_frequency) AS allele_frequency,\n    any_value(clinical_significance) AS clinical_significance,\n    any_value(zygosity) AS zygosity,\n    any_value(inheritance) AS inheritance\n  FROM selected\n  GROUP BY gene_id, gene, variant_key\n), coverage_rows AS (\n  SELECT\n    i.gene_id,\n    i.gene,\n    MIN(i.hypothesis_rank)::INTEGER AS hypothesis_rank,\n    any_value(i.assembly) AS assembly,\n    any_value(i.chrom) AS chrom,\n    MIN(i.start_1based) AS start_1based,\n    MAX(i.end_1based) AS end_1based,\n    list_sort(list_distinct(list(i.disease_id))) AS disease_ids,\n    CASE\n      WHEN bool_and(i.interval_status = 'resolved') THEN 'completed'\n      WHEN bool_or(i.interval_status = 'ambiguous_locus') THEN 'ambiguous_locus'\n      ELSE 'missing_gene_interval'\n    END AS search_status,\n    CASE\n      WHEN bool_and(i.interval_status = 'resolved')\n      THEN any_value(i.chrom) || ':' || MIN(i.start_1based) || '-' || MAX(i.end_1based)\n      ELSE NULL\n    END AS search_scope,\n    COUNT(DISTINCT v.variant_key)::INTEGER AS searched_variant_count\n  FROM interval_rows i\n  CROSS JOIN validation checked\n  LEFT JOIN variant_rows v\n    ON v.gene_id = i.gene_id\n  WHERE checked.valid\n  GROUP BY i.gene_id, i.gene\n)\nSELECT\n  'coverage' AS record_kind,\n  getvariable('case_id')::VARCHAR AS case_id,\n  c.gene_id,\n  c.gene,\n  c.disease_ids,\n  c.hypothesis_rank,\n  c.assembly,\n  c.chrom,\n  c.start_1based,\n  c.end_1based,\n  c.search_status,\n  c.search_scope,\n  c.searched_variant_count,\n  NULL::VARCHAR AS variant_key,\n  NULL::BIGINT AS pos,\n  NULL::VARCHAR AS ref,\n  NULL::VARCHAR AS alt,\n  NULL::VARCHAR AS annotated_gene,\n  NULL::VARCHAR AS consequence,\n  NULL::DOUBLE AS allele_frequency,\n  NULL::VARCHAR AS clinical_significance,\n  NULL::VARCHAR AS zygosity,\n  NULL::VARCHAR AS inheritance\nFROM coverage_rows c\nUNION ALL\nSELECT\n  'variant' AS record_kind,\n  getvariable('case_id')::VARCHAR AS case_id,\n  v.gene_id,\n  v.gene,\n  v.disease_ids,\n  v.hypothesis_rank,\n  v.assembly,\n  v.chrom,\n  v.start_1based,\n  v.end_1based,\n  'completed' AS search_status,\n  v.chrom || ':' || v.start_1based || '-' || v.end_1based AS search_scope,\n  c.searched_variant_count,\n  v.variant_key,\n  v.pos,\n  v.ref,\n  v.alt,\n  v.annotated_gene,\n  v.consequence,\n  v.allele_frequency,\n  v.clinical_significance,\n  v.zygosity,\n  v.inheritance\nFROM variant_rows v\nJOIN coverage_rows c USING (gene_id, gene)\nORDER BY record_kind, hypothesis_rank, gene, variant_key"
+        }
+      }
+    ]
+  }
+}

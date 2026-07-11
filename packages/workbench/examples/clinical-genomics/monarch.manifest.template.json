@@ -1,0 +1,100 @@
+{
+  "schema": "pi-bio.manifest.v1",
+  "id": "clinical-genomics-monarch",
+  "version": "0.1.0",
+  "title": "Phenotype-to-gene hypotheses over a pinned Monarch KG",
+  "description": "An inverted rare-disease traversal over the canonical edges, nodes, and closure tables in a host-attached, versioned Monarch DuckDB snapshot.",
+  "provides": {
+    "resolvers": [
+      {
+        "id": "duckdb.sql_materialize",
+        "version": "0.1.0",
+        "title": "DuckDB SQL materialization",
+        "description": "Materialize a declared read-only SQL relation.",
+        "output": { "mode": "table" }
+      }
+    ],
+    "resources": [
+      {
+        "id": "case_phenotype_ancestors",
+        "title": "Case phenotype ontology ancestors",
+        "kind": "virtual",
+        "resolver": "duckdb.sql_materialize",
+        "params": {
+          "table": "case_phenotype_ancestors",
+          "declaredSources": ["https://data.monarchinitiative.org/monarch-kg/2026-04-14/monarch-kg.duckdb"],
+          "sqlFile": "relations/monarch_case_phenotype_ancestors.sql"
+        }
+      },
+      {
+        "id": "monarch_disease_phenotype_matches",
+        "title": "Monarch disease-phenotype matches",
+        "kind": "virtual",
+        "resolver": "duckdb.sql_materialize",
+        "params": {
+          "table": "monarch_disease_phenotype_matches",
+          "declaredSources": ["https://data.monarchinitiative.org/monarch-kg/2026-04-14/monarch-kg.duckdb"],
+          "sqlFile": "relations/monarch_disease_phenotype_matches.sql"
+        }
+      },
+      {
+        "id": "monarch_gene_disease_evidence",
+        "title": "Monarch gene-disease evidence for phenotype-matched diseases",
+        "kind": "virtual",
+        "resolver": "duckdb.sql_materialize",
+        "params": {
+          "table": "monarch_gene_disease_evidence",
+          "declaredSources": ["https://data.monarchinitiative.org/monarch-kg/2026-04-14/monarch-kg.duckdb"],
+          "sqlFile": "relations/monarch_gene_disease_evidence.sql"
+        }
+      },
+      {
+        "id": "monarch_phenotype_hypotheses",
+        "title": "Ranked phenotype-supported hypotheses",
+        "kind": "virtual",
+        "resolver": "duckdb.sql_materialize",
+        "params": {
+          "table": "monarch_phenotype_hypotheses",
+          "sqlFile": "relations/monarch_phenotype_hypotheses.sql"
+        }
+      }
+    ],
+    "operations": [
+      {
+        "id": "clinical.monarch_phenotype_hypotheses",
+        "version": "0.1.0",
+        "title": "Rank phenotype-supported gene and disease hypotheses",
+        "description": "Walk accepted HPO identifiers through Monarch ontology closure, disease-phenotype assertions, and gene-disease assertions. Return explicit match and source components rather than a clinical conclusion.",
+        "transport": "duckdb.sql",
+        "inputSchema": {
+          "type": "object",
+          "required": ["phenotype_ids"],
+          "properties": {
+            "phenotype_ids": {
+              "type": "array",
+              "items": { "type": "string", "pattern": "^HP:[0-9]+$" },
+              "description": "Accepted HPO CURIEs."
+            },
+            "limit": { "type": "integer", "minimum": 1, "maximum": 1000 }
+          }
+        },
+        "notes": [
+          "The host supplies the manifest-declared canonical graph as the monarch catalog; fixture and remote compositions carry their own source receipts.",
+          "Exact and ancestor/descendant matches remain distinguishable in the result components.",
+          "Negated phenotype assertions are excluded; association predicates and knowledge sources remain visible.",
+          "This operation proposes hypotheses for downstream variant search and review. It does not diagnose a case."
+        ],
+        "sql": {
+          "readOnly": true,
+          "requiredResources": [
+            "case_phenotype_ancestors",
+            "monarch_disease_phenotype_matches",
+            "monarch_gene_disease_evidence",
+            "monarch_phenotype_hypotheses"
+          ],
+          "sqlFile": "operations/monarch_phenotype_hypotheses.sql"
+        }
+      }
+    ]
+  }
+}
