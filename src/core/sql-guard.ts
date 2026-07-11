@@ -1,5 +1,13 @@
 import type { SqlConn } from "./ports.js";
 
+/** Quote one DuckDB identifier before embedding it in SQL. Values are not parameter-bindable in identifier slots. */
+export function quoteSqlIdentifier(value: string, label = "SQL identifier"): string {
+  if (typeof value !== "string" || value.length === 0 || value.includes("\u0000")) {
+    throw new Error(`${label} must be a non-empty SQL identifier`);
+  }
+  return `"${value.split('"').join('""')}"`;
+}
+
 // The read-only SQL guards. They enforce STATEMENT CLASS ONLY: a single read-only SELECT/WITH for SQL fragments
 // that must embed as a subquery, and a slightly wider read-only result statement for user-facing inspection
 // (`SELECT`/`WITH`/`DESCRIBE`/`SUMMARIZE`). That is a correctness contract shared by execution paths so they

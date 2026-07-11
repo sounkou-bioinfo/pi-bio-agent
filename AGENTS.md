@@ -60,6 +60,33 @@ Instructions for coding agents working in this repository.
 - Prefer a short "lesson" paragraph in `docs/design.md`, `docs/refinments.md`, or the relevant example README over another standalone doc.
 - If the lesson depends on a negative result, say that directly. Example: `ducknng_ncurl_table` is right for one response table; chunk fanout needs scalar AIO handles plus host orchestration today.
 
+### DuckNNG is already the network substrate
+
+Do not rediscover this from the one-request connector examples. The maintained DuckNNG surface is already a
+SQL-visible async transport and the core has its generic composition:
+
+- `ducknng_ncurl_table` is the one-request, dynamic-schema path for REST, GraphQL, JSON, CSV, and similar body
+  reads. Compose URL/body in SQL and let the operation normalize the returned relation.
+- `ducknng_ncurl_aio` is the scalar per-row launcher. `ducknng_ncurl_aio_collect` is an any-ready collector, not
+  a wait-for-all barrier; `ducknng_aio_cancel` and `ducknng_aio_drop` are required lifecycle operations.
+- `src/duckdb/ncurl-fanout.ts` is the reusable bounded batch composition: it launches waves, drains every handle,
+  retries transport/429/5xx outcomes, reports permanent failures, and cancels/drops unfinished handles. It is not
+  a VEP client. `src/duckdb/ncurl-retry.ts` is the separate single-endpoint SQL-native retry path over the owned
+  volatile `ducknng` scalar.
+- TLS does not require a filesystem CA assumption. `ducknng_tls_config_from_pem(NULL, NULL, NULL, '', 1)` creates
+  a client TLS handle from the runtime's trust configuration; `ducknng_self_signed_tls_config` creates in-memory
+  development material. File-backed TLS is an explicit alternative, not the default architecture.
+- Credentialed SQL HTTP uses a host-commissioned DuckNNG profile. SQL supplies only the non-secret profile id;
+  DuckNNG injects the scoped header and the host records the redacted profile receipt. Never put tokens in a
+  manifest or invent an API-specific auth client.
+
+The proof is executable: `test/ncurl-fanout.test.ts` drives deterministic transient failures and cancellation;
+`examples/wgs-chr22-annotation/live.mjs` runs indexed DuckHTS -> chunked VEP -> DuckNNG fanout -> SQL reduction
+against live sources; `test/ducknng-sql-http.test.ts` covers SQL HTTP/session behavior; the DuckNNG repository owns
+the AIO, TLS, profile, and RPC implementations. A downstream application must compose these surfaces before adding
+TypeScript. If the application cannot express its transport as declared batch SQL plus this generic fanout, record
+the missing core contract and promote only that contract, not an application-specific client.
+
 ## Do Not Re-Derive Proven Capabilities
 
 - Before proposing a new HTTP batching, retry, or rate-limit abstraction, inspect the existing implementation and
@@ -88,7 +115,9 @@ Instructions for coding agents working in this repository.
 
 - The current pillars are data, network, compute, and knowledge/memory over DuckDB-centered provenance.
 - Data: files, formats, table functions, and SQL materialization.
-- Network: `ducknng_ncurl_table` and related primitives from the sibling `ducknng` extension when available; `http.get` is the host-injected fallback.
+- Network: DuckNNG's SQL-native `ncurl_table`/AIO/profile/TLS surfaces when provisioned; `ncurlFanout` and
+  `ncurlRetry` provide the bounded multi-request and single-request compositions. `http.get` is the host-injected
+  JS-fetch fallback, not a reason to duplicate DuckNNG in an application.
 - Compute is async from the bottom: `ComputeRunner` is `submit/status/collect/cancel`, future-shaped like
   nanonext/mirai/future. A local child process, an NNG worker, a scheduler, an Absurd-style durable queue, and a
   stateful REPL/session are implementations of that one lifecycle.

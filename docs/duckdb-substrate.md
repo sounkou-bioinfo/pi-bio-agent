@@ -29,6 +29,31 @@ DuckDB is the default tabular and graph substrate for `pi-bio-agent`.
 | `fts` | local search over catalogs, ontology labels/synonyms, documents, capability descriptions |
 | `httpfs` | remote HTTPS/S3 data only with explicit policy and credentials |
 
+## Network is SQL plus an async lifecycle
+
+`ducknng` is not merely a one-request HTTP table function. It is the DuckDB-native network and RPC substrate that
+the host provisions and the manifest/SQL composes:
+
+| Need | Existing surface | Use |
+|---|---|---|
+| One JSON/CSV/body response | `ducknng_ncurl_table` | Compose a literal or SQL-derived URL/body and materialize one response table. |
+| Many request bodies | `ducknng_ncurl_aio` + `ducknng_ncurl_aio_collect` | Launch one request per batch row, drain any-ready results, and treat status/error as data. |
+| Bounded retry/fanout | `pi-bio-agent` `ncurlFanout` | Cap in-flight waves, retry transport/429/5xx results, fail on permanent responses, and cancel/drop handles on abort. |
+| One endpoint retry | `pi-bio-agent` `ncurlRetry` | Use the owned volatile DuckNNG scalar and its SQL recursive retry path when one request is repeated. |
+| Credentialed HTTP | DuckNNG HTTP profiles | The host registers a scoped profile; SQL names only its non-secret id and receives a redacted receipt. |
+| Client TLS | `ducknng_tls_config_from_pem` | Create a runtime TLS handle without assuming a CA file. `ducknng_self_signed_tls_config` is the in-memory development path. |
+
+This is a closed-over proof, not a planned abstraction. The deterministic fanout test exercises transient failures,
+permanent failures, and cancellation; the WGS example exercises real indexed VCF input, 200-allele VEP batches,
+DuckNNG AIO fanout, response parsing, and SQL reduction. The connector manifests remain the simpler one-request
+case. A workbench should reuse these primitives and keep only domain SQL (batch body shape, response normalization,
+joins, and review policy). A new TypeScript HTTP client in an application is a regression against this design.
+
+The host still owns egress, extension provisioning, TLS material, credentials, and rate policy. `LOAD ducknng`
+fails closed when the extension is absent; it does not install or silently replace the transport. The library records
+the declared source, host capability/profile receipt, run result, and retry/failure outcome where the host supplies
+the run store and CAS.
+
 ## Stable views
 
 Backends should expose stable views even when the physical source is an extension call, parquet file, attached DuckDB database, or shell-produced staging file.

@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { quoteSqlIdentifier } from "../core/sql-guard.js";
 import type { SqlConn } from "../core/ports.js";
 
 // Chunked HTTP fanout over ducknng's ASYNC client — host code for the MANY-endpoints / chunk case. The dynamic-
@@ -19,7 +20,6 @@ import type { SqlConn } from "../core/ports.js";
 //                          maxRounds) are NOT here; they are returned in `failures` with their last status.
 // The host owns url/method/headers/profile/tls (composed in, never agent params); the data args are parameter-bound.
 
-const IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 // batch_id comes back from DuckDB as BIGINT; coercing to a JS number is only safe below 2^53. Guard it so a
 // huge id can never silently target the wrong row in a DELETE/UPDATE IN-list. (batch_id is a chunk index, so
@@ -75,14 +75,15 @@ const defaultTransient = (status: number | null, ok: boolean): boolean => !ok ||
  * abandoned in-flight handle is never left racing a relaunch. ducknng must already be LOADed on `conn`.
  */
 export async function ncurlFanout(conn: SqlConn, opts: NcurlFanoutOptions): Promise<NcurlFanoutResult> {
-  const { batchesTable, resultsTable, url, headersJson, profileId } = opts;
+  const { url, headersJson, profileId } = opts;
+  const batchesTableName = opts.batchesTable;
+  const resultsTableName = opts.resultsTable;
+  const batchesTable = quoteSqlIdentifier(batchesTableName, "ncurlFanout batchesTable");
+  const resultsTable = quoteSqlIdentifier(resultsTableName, "ncurlFanout resultsTable");
   const throwIfAborted = (): void => {
     if (opts.signal?.aborted) throw new Error("ncurlFanout: aborted");
   };
   throwIfAborted();
-  for (const [label, id] of [["batchesTable", batchesTable], ["resultsTable", resultsTable]] as const) {
-    if (!IDENT.test(id)) throw new Error(`ncurlFanout: ${label} '${id}' must be a SQL identifier`);
-  }
   const method = opts.method ?? "POST";
   const tlsConfigId = opts.tlsConfigId ?? 0;
   if (!Number.isInteger(tlsConfigId) || tlsConfigId < 0) throw new Error("ncurlFanout: tlsConfigId must be a non-negative integer");
@@ -99,10 +100,10 @@ export async function ncurlFanout(conn: SqlConn, opts: NcurlFanoutOptions): Prom
   // token keeps these INTERNAL names from clobbering a caller's own table (e.g. an existing `out__queue`) — they are
   // created, used, and dropped entirely within this call and never referenced by the caller.
   const tok = randomBytes(4).toString("hex");
-  const queue = `${resultsTable}__queue_${tok}`;
-  const wave = `${resultsTable}__wave_${tok}`;
-  const launched = `${resultsTable}__launched_${tok}`;
-  const collected = `${resultsTable}__collected_${tok}`;
+  const queue = quoteSqlIdentifier(`${resultsTableName}__queue_${tok}`, "ncurlFanout queue table");
+  const wave = quoteSqlIdentifier(`${resultsTableName}__wave_${tok}`, "ncurlFanout wave table");
+  const launched = quoteSqlIdentifier(`${resultsTableName}__launched_${tok}`, "ncurlFanout launched table");
+  const collected = quoteSqlIdentifier(`${resultsTableName}__collected_${tok}`, "ncurlFanout collected table");
   await conn.run(`CREATE OR REPLACE TABLE ${resultsTable} (batch_id BIGINT, status INTEGER, body_text VARCHAR)`);
   await conn.run(`CREATE OR REPLACE TABLE ${queue} AS SELECT batch_id, body, ${maxRounds}::INTEGER AS attempts_left FROM ${batchesTable}`);
 

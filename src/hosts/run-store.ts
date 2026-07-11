@@ -18,6 +18,7 @@ import { duckdbNodeConn } from "../duckdb/node-api.js";
 import { sqlReadsOnlyResolvedTables, resolvedBaseTables, sqlUsesNonDeterministicFn, hermeticIntrospectionUsable } from "../duckdb/plan-hermeticity.js";
 import { duckdbFileScanResolver } from "../duckdb/resolvers/duckdb-file-scan.js";
 import { duckdbSqlMaterializeResolver } from "../duckdb/resolvers/duckdb-sql-materialize.js";
+import { ducknngHttpFanoutResolver } from "../duckdb/resolvers/ducknng-http-fanout.js";
 import { duckhtsReadBcfResolver } from "../duckdb/resolvers/duckhts-read-bcf.js";
 import { httpTableResolver, type FetchLike } from "../duckdb/resolvers/http-table-scan.js";
 import { computeRunResolver } from "../duckdb/resolvers/compute-run.js";
@@ -34,6 +35,7 @@ import { recordManifestDeclarations } from "./declaration-graph.js";
 const BUILTIN_RESOLVERS: Record<string, BioResolverImpl> = {
   "duckdb.file_scan": duckdbFileScanResolver,
   "duckdb.sql_materialize": duckdbSqlMaterializeResolver, // the general resolver: materialization is declared SQL
+  "ducknng.http_fanout": ducknngHttpFanoutResolver,
   "duckhts.read_bcf": duckhtsReadBcfResolver, // bound always; fails closed at resolve time if duckhts is not provisioned
 };
 
