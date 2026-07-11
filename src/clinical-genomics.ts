@@ -17,6 +17,7 @@ import {
   type BioManifest,
   type CasStore,
   type ContentAddress,
+  type HostCapabilityReceipt,
   type JsonValue,
   type RunCasRefs,
   type SqlConn,
@@ -40,7 +41,7 @@ export const EVIDENCE_PACKET_SCHEMA = "pi-bio.workbench.evidence_packet.v1" as c
 export const CLINICAL_ANALYSIS_SCHEMA = "pi-bio.workbench.clinical_analysis.v1" as const;
 
 const SOURCE = "pi-bio-workbench:clinical-genomics";
-const WORKFLOW_VERSION = "clinical-evidence-workflow.v4";
+const WORKFLOW_VERSION = "clinical-evidence-workflow.v5";
 const PACKET_MEDIA_TYPE = "application/vnd.pi-bio.workbench.evidence+json";
 const PACKET_STEP = "packet";
 
@@ -59,6 +60,33 @@ export interface RunClinicalGenomicsRequest {
   hypotheses: PhenotypeHypothesisRuntime;
   /** Host-owned assembly, interval snapshot, indexed case VCF, and DuckHTS provisioning. */
   variantSearch: CandidateVariantSearchRuntime;
+  /** Host-owned VEP endpoint/profile and DuckNNG provisioning for selected candidate alleles. */
+  vep: VepAnnotationRuntime;
+}
+
+export interface VepAnnotationRuntime {
+  url: string;
+  headersJson: string;
+  profileId?: string;
+  sourceId: string;
+  sourceVersion: string;
+  duckdbInitSql: string[];
+  hostCapabilityReceipts?: readonly HostCapabilityReceipt[];
+}
+
+/** Default CLI/server composition; library callers should inject their own endpoint and host policy. */
+export function defaultVepAnnotationRuntime(): VepAnnotationRuntime {
+  return {
+    url: process.env.PI_BIO_VEP_URL ?? "https://rest.ensembl.org/vep/human/region",
+    headersJson: process.env.PI_BIO_VEP_HEADERS_JSON ?? "[{\"name\":\"Content-Type\",\"value\":\"application/json\"},{\"name\":\"Accept\",\"value\":\"application/json\"}]",
+    ...(process.env.PI_BIO_VEP_PROFILE_ID ? { profileId: process.env.PI_BIO_VEP_PROFILE_ID } : {}),
+    sourceId: process.env.PI_BIO_VEP_SOURCE_ID ?? "https://rest.ensembl.org/vep/human/region",
+    sourceVersion: process.env.PI_BIO_VEP_SOURCE_VERSION ?? "live",
+    duckdbInitSql: [
+      "LOAD ducknng",
+      "SET VARIABLE vep_tls_config_id = ducknng_tls_config_from_pem(NULL, NULL, NULL, '', 1)",
+    ],
+  };
 }
 
 export type OperationRows = {
@@ -280,6 +308,7 @@ function buildPacket(args: {
   hypotheses: OperationRows;
   intervals: OperationRows;
   variantSearch: OperationRows;
+  vep: OperationRows;
   evidence: OperationRows;
   reanalysis: OperationRows;
 }): EvidencePacket {
@@ -333,6 +362,7 @@ function buildPacket(args: {
         args.hypotheses.runId,
         args.intervals.runId,
         args.variantSearch.runId,
+        args.vep.runId,
         args.evidence.runId,
         args.reanalysis.runId,
       ],
@@ -547,6 +577,8 @@ async function runOperation(args: {
   duckdbInitSql?: string[];
   bindings?: Record<string, unknown>;
   protectedBindings?: Record<string, unknown>;
+  protectedVariables?: readonly string[];
+  hostCapabilityReceipts?: readonly HostCapabilityReceipt[];
 }): Promise<OperationCheckpoint> {
   const response = await runBioOperationFromManifest({
     cwd: args.exampleDir,
@@ -564,10 +596,14 @@ async function runOperation(args: {
     serialize: false,
     ...(args.duckdbInitSql ? { duckdbInitSql: args.duckdbInitSql } : {}),
     bindings: { case_id: args.caseId, ...args.bindings },
-    ...(args.protectedBindings ? {
+    ...(args.protectedBindings || args.protectedVariables ? {
       protectedSessionBindings: args.protectedBindings,
-      protectedSessionVariables: Object.keys(args.protectedBindings),
+      protectedSessionVariables: [...new Set([
+        ...Object.keys(args.protectedBindings ?? {}),
+        ...(args.protectedVariables ?? []),
+      ])],
     } : {}),
+    ...(args.hostCapabilityReceipts ? { hostCapabilityReceipts: args.hostCapabilityReceipts } : {}),
   });
   if (!response.ok) throw new Error(`${args.operationId} failed: ${response.error}`);
   if (!response.casRefs?.result) throw new Error(`${args.operationId} completed without a CAS result digest`);
@@ -701,6 +737,7 @@ async function workflowReplayDigest(
   grounding: GroundingRuntime,
   hypotheses: PhenotypeHypothesisRuntime,
   variantSearch: CandidateVariantSearchRuntime,
+  vep: VepAnnotationRuntime,
 ): Promise<string> {
   const manifest = JSON.parse(await fs.readFile(join(exampleDir, "manifest.json"), "utf8")) as BioManifest;
   const hypothesisManifestPath = isAbsolute(hypotheses.manifestPath)
@@ -763,6 +800,14 @@ async function workflowReplayDigest(
       sourceVersion: variantSearch.sourceVersion,
       duckdbInitSqlDigest: canonicalDigest(variantSearch.duckdbInitSql),
     },
+    vep: {
+      sourceId: vep.sourceId,
+      sourceVersion: vep.sourceVersion,
+      urlDigest: canonicalDigest(vep.url),
+      headersDigest: canonicalDigest(vep.headersJson),
+      duckdbInitSqlDigest: canonicalDigest(vep.duckdbInitSql),
+      hostCapabilityReceiptDigest: canonicalDigest(vep.hostCapabilityReceipts ?? []),
+    },
   });
 }
 
@@ -785,8 +830,11 @@ export async function runClinicalGenomicsWorkbench(req: RunClinicalGenomicsReque
   ) {
     throw new Error("candidate variant-search composition requires an assembly, manifests, source identity, indexed VCF, and DuckDB initialization");
   }
+  if (!req.vep?.url || !req.vep.sourceId || !req.vep.sourceVersion || !req.vep.headersJson || !req.vep.duckdbInitSql.length) {
+    throw new Error("VEP composition requires an endpoint, source identity, headers, and DuckDB initialization");
+  }
   const composition = req.grounding;
-  const replayDigest = await workflowReplayDigest(exampleDir, req.caseId, composition, req.hypotheses, req.variantSearch);
+  const replayDigest = await workflowReplayDigest(exampleDir, req.caseId, composition, req.hypotheses, req.variantSearch, req.vep);
   const analysisDbDir = join(exampleDir, ".pi", "bio-agent", "analyses");
   const analysisDbPath = join(analysisDbDir, `${createHash("sha256").update(analysisId).digest("hex")}.duckdb`);
   await fs.mkdir(analysisDbDir, { recursive: true });
@@ -910,26 +958,80 @@ export async function runClinicalGenomicsWorkbench(req: RunClinicalGenomicsReque
           },
         },
         {
+          stepId: "vep-annotation",
+          run: async ({ valueOf }) => {
+            const variantSearchCheckpoint = valueOf<JsonValue>("candidate-variant-search") as unknown as OperationCheckpoint;
+            const variantSearch = await readOperationRows(cas, variantSearchCheckpoint);
+            const selected = variantSearch.rows.filter((row) => row.record_kind === "variant");
+            const manifest = JSON.parse(await fs.readFile(join(exampleDir, "manifest.json"), "utf8")) as BioManifest;
+            const httpResource = manifest.provides?.resources?.find((resource) => resource.id === "vep_http_results");
+            if (!httpResource) throw new Error("clinical manifest has no vep_http_results resource");
+            httpResource.params = {
+              ...httpResource.params,
+              declaredSources: [req.vep.sourceId],
+              sourceVersion: req.vep.sourceVersion,
+            };
+            const annotation = await runOperation({
+              exampleDir,
+              manifestSnapshot: manifest,
+              manifestBaseDir: exampleDir,
+              conn: store.conn,
+              cas,
+              caseId: req.caseId,
+              operationId: "clinical.vep_annotations",
+              runId: `${analysisId}.vep`,
+              now,
+              dbPath: analysisDbPath,
+              duckdbInitSql: req.vep.duckdbInitSql,
+              protectedBindings: {
+                selected_variants_json: JSON.stringify(selected),
+                vep_url: req.vep.url,
+                vep_headers_json: req.vep.headersJson,
+                vep_profile_id: req.vep.profileId ?? "",
+              },
+              ...(req.vep.hostCapabilityReceipts ? { hostCapabilityReceipts: req.vep.hostCapabilityReceipts } : {}),
+            });
+            await recordObservationLink(store.conn, {
+              subjectId: `run:${annotation.runId}`,
+              predicate: "uses_run",
+              objectId: `run:${variantSearchCheckpoint.runId}`,
+              recordedAt: now,
+              source: SOURCE,
+              digest: annotation.resultDigest,
+            });
+            return toJsonValue(annotation);
+          },
+        },
+        {
           stepId: "reanalysis",
-          run: async () => toJsonValue(await runOperation({
-            exampleDir,
-            conn: store.conn,
-            cas,
-            caseId: req.caseId,
-            operationId: "clinical.reanalysis_diff",
-            runId: `${analysisId}.reanalysis`,
-            now,
-            dbPath: analysisDbPath,
-            protectedBindings: { candidate_variant_search_json: "[]" },
-          })),
+          run: async ({ valueOf }) => {
+            const annotationCheckpoint = valueOf<JsonValue>("vep-annotation") as unknown as OperationCheckpoint;
+            const annotations = await readOperationRows(cas, annotationCheckpoint);
+            return toJsonValue(await runOperation({
+              exampleDir,
+              conn: store.conn,
+              cas,
+              caseId: req.caseId,
+              operationId: "clinical.reanalysis_diff",
+              runId: `${analysisId}.reanalysis`,
+              now,
+              dbPath: analysisDbPath,
+              protectedBindings: {
+                candidate_variant_search_json: "[]",
+                vep_annotations_json: JSON.stringify(annotations.rows),
+              },
+            }));
+          },
         },
         {
           stepId: "case-evidence",
           run: async ({ valueOf }) => {
             const hypothesisCheckpoint = valueOf<JsonValue>("phenotype-hypotheses") as unknown as OperationCheckpoint;
             const variantSearchCheckpoint = valueOf<JsonValue>("candidate-variant-search") as unknown as OperationCheckpoint;
+            const annotationCheckpoint = valueOf<JsonValue>("vep-annotation") as unknown as OperationCheckpoint;
             const hypotheses = await readOperationRows(cas, hypothesisCheckpoint);
             const variantSearch = await readOperationRows(cas, variantSearchCheckpoint);
+            const annotations = await readOperationRows(cas, annotationCheckpoint);
             const evidence = await runOperation({
               exampleDir,
               conn: store.conn,
@@ -942,6 +1044,7 @@ export async function runClinicalGenomicsWorkbench(req: RunClinicalGenomicsReque
               protectedBindings: {
                 phenotype_hypotheses_json: JSON.stringify(hypotheses.rows),
                 candidate_variant_search_json: JSON.stringify(variantSearch.rows),
+                vep_annotations_json: JSON.stringify(annotations.rows),
               },
             });
             await recordObservationLink(store.conn, {
@@ -970,11 +1073,13 @@ export async function runClinicalGenomicsWorkbench(req: RunClinicalGenomicsReque
             const hypothesisCheckpoint = valueOf<JsonValue>("phenotype-hypotheses") as unknown as OperationCheckpoint;
             const intervalCheckpoint = valueOf<JsonValue>("candidate-gene-intervals") as unknown as OperationCheckpoint;
             const variantSearchCheckpoint = valueOf<JsonValue>("candidate-variant-search") as unknown as OperationCheckpoint;
+            const annotationCheckpoint = valueOf<JsonValue>("vep-annotation") as unknown as OperationCheckpoint;
             const evidenceCheckpoint = valueOf<JsonValue>("case-evidence") as unknown as OperationCheckpoint;
             const reanalysisCheckpoint = valueOf<JsonValue>("reanalysis") as unknown as OperationCheckpoint;
             const hypotheses = await readOperationRows(cas, hypothesisCheckpoint);
             const intervals = await readOperationRows(cas, intervalCheckpoint);
             const variantSearch = await readOperationRows(cas, variantSearchCheckpoint);
+            const vep = await readOperationRows(cas, annotationCheckpoint);
             const evidence = await readOperationRows(cas, evidenceCheckpoint);
             const reanalysis = await readOperationRows(cas, reanalysisCheckpoint);
             const packet = buildPacket({
@@ -985,6 +1090,7 @@ export async function runClinicalGenomicsWorkbench(req: RunClinicalGenomicsReque
               hypotheses,
               intervals,
               variantSearch,
+              vep,
               evidence,
               reanalysis,
             });

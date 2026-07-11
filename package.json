@@ -20,6 +20,7 @@
     "demo:clinical": "npm run build && node dist/cli.js run",
     "dogfood:monarch": "npm run build && node scripts/run-monarch-inverted-dogfood.mjs",
     "benchmark:grounding": "npm run build && node scripts/run-phenotype-grounding-benchmark.mjs",
+    "provision:ducknng": "node --input-type=module -e \"import {DuckDBInstance} from '@duckdb/node-api'; const c=await(await DuckDBInstance.create(':memory:')).connect(); await c.run('INSTALL ducknng FROM community;'); await c.run('LOAD ducknng;'); console.log('ducknng installed + loaded');\"",
     "provision:duckhts": "node --input-type=module -e \"import {DuckDBInstance} from '@duckdb/node-api'; const c=await(await DuckDBInstance.create(':memory:')).connect(); await c.run('INSTALL duckhts FROM community;'); await c.run('LOAD duckhts;'); console.log('duckhts installed + loaded');\"",
     "serve": "npm run build && node dist/server.js"
   },
@@ -27,7 +28,7 @@
     "@hono/node-server": "^2.0.8",
     "@hono/zod-openapi": "^1.4.0",
     "hono": "^4.12.28",
-    "pi-bio-agent": "file:../pi-bio-agent",
+    "pi-bio-agent": "git+https://github.com/sounkou-bioinfo/pi-bio-agent.git#11ba17dffbd8cda3a85b1d56f586e56247a09400",
     "zod": "^4.4.3"
   },
   "devDependencies": {

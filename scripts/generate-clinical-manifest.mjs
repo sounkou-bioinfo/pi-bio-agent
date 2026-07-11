@@ -23,11 +23,11 @@ const fixtureSources = {
   monarch_gene_disease_evidence: ["file:data/monarch_edges.csv", "file:data/monarch_nodes.csv"],
 };
 
-async function inlineSql(target, textKey) {
-  if (!target?.sqlFile) return;
-  const sqlText = await fs.readFile(join(exampleDir, target.sqlFile), "utf8");
+async function inlineSql(target, fileKey, textKey) {
+  if (!target?.[fileKey]) return;
+  const sqlText = await fs.readFile(join(exampleDir, target[fileKey]), "utf8");
   target[textKey] = sqlText.trim();
-  delete target.sqlFile;
+  delete target[fileKey];
 }
 
 for (const { templateName, manifestName, fixture } of manifests) {
@@ -43,10 +43,11 @@ for (const { templateName, manifestName, fixture } of manifests) {
     }
   }
   for (const resource of template.provides?.resources ?? []) {
-    await inlineSql(resource.params, "sql");
+    await inlineSql(resource.params, "sqlFile", "sql");
+    await inlineSql(resource.params, "batchesSqlFile", "batchesSql");
   }
   for (const operation of template.provides?.operations ?? []) {
-    await inlineSql(operation.sql, "sqlTemplate");
+    await inlineSql(operation.sql, "sqlFile", "sqlTemplate");
   }
 
   const rendered = `${JSON.stringify(template, null, 2)}\n`;

@@ -28,31 +28,34 @@ causal diagnosis, or clinical validity beyond the declared fixture data.
 
 ```sh
 npm install
+npm run provision:ducknng
 npm run provision:duckhts
 npm run check
 npm run demo:clinical
 ```
 
 One analysis checkpoints phenotype grounding, graph-backed phenotype hypotheses, candidate-gene intervals, indexed
-variant search, direct reanalysis, reconciled evidence, and packet assembly.
+variant search, one SQL-native Ensembl VEP request over the selected alleles, reanalysis, reconciled evidence, and
+packet assembly.
 Grounding resolves the narrative and ontology candidates through recorded manifest queries; agent augmentation,
-term proposals, and review are host-injected ports. The packaged CLI uses an explicit recorded fixture, while a live
-host supplies its own model or human implementations. Reusing an analysis id resumes from the durable checkpoints:
+term proposals, and review are host-injected ports. The packaged CLI uses an explicit grounding fixture and the
+host-configured VEP endpoint; a live host supplies its own model or human implementations. Reusing an analysis id
+resumes from the durable checkpoints:
 
 ```sh
 node dist/cli.js run examples/clinical-genomics CASE-RD-001 analysis-demo
 node dist/cli.js run examples/clinical-genomics CASE-RD-001 analysis-demo
 ```
 
-The second invocation reports zero executed steps and seven reused steps. Scientific result, receipt, replay, and
+The second invocation reports zero executed steps and eight reused steps. Scientific result, receipt, replay, and
 run-object bytes live in CAS; checkpoints carry only their references. Reusing an analysis id after a declared input
 file, grounding composition, graph manifest, graph fixture, interval snapshot, indexed VCF identity, or host
 attachment changes fails closed because the task replay digest pins them.
 
-The hermetic VCF fixture already carries allele-specific gene, consequence, frequency, ClinVar, zygosity, and
-inheritance fields so the complete relation can be tested without network access. A production inverted traversal
-still needs the next declared stage: bounded Ensembl VEP `/region` fanout, or an admitted local VEP provider, over
-the selected alleles before clinical assessment. Fixture annotation is not evidence that this live stage exists.
+The hermetic VCF fixture carries allele-specific gene, consequence, frequency, ClinVar, zygosity, and inheritance
+fields. The VEP stage is a declared `ducknng.http_fanout` resource followed by ordinary SQL: the host supplies the
+endpoint, headers, an in-memory DuckNNG TLS handle, and `LOAD ducknng`; the manifest supplies 200-allele batch SQL;
+core runs bounded AIO fanout/retry/cancel; SQL parses the response table. There is no second VEP client in this app.
 
 Pass a host module as the final argument to replace the recorded fixture. The module exports a default function or
 `createGroundingRuntime({ workspace })` returning the same host-injected augmenter, proposal, and reviewer ports used
@@ -113,5 +116,6 @@ The same Zod route schemas validate requests and generate the OpenAPI 3.1 docume
 `http://localhost:8787/openapi.json`. The server fixes the clinical workspace at startup; clients cannot submit a
 host path in the request, and host store paths are not part of the response contract.
 
-The app depends on the sibling substrate through `"pi-bio-agent": "file:../pi-bio-agent"`. It consumes substrate
-APIs directly and does not vendor or reimplement them.
+The app depends on the `pi-bio-agent` package from [its GitHub repository](https://github.com/sounkou-bioinfo/pi-bio-agent).
+It consumes substrate APIs directly and does not vendor or reimplement them. A local sibling or link is only a
+lockstep development arrangement.

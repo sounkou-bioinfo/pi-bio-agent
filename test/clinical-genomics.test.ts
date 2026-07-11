@@ -13,6 +13,8 @@ import {
 import { loadRecordedGroundingRuntime } from "../src/recorded-grounding.js";
 import { localMonarchFixtureRuntime } from "../src/monarch-host.js";
 import { localCandidateVariantSearchRuntime } from "../src/candidate-variant-search.js";
+import type { VepAnnotationRuntime } from "../src/clinical-genomics.js";
+import { startVepFixture } from "./vep-fixture.js";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const fixtureRoot = join(repoRoot, "examples", "clinical-genomics");
@@ -28,15 +30,22 @@ async function copyFixture(): Promise<string> {
 
 async function runFixture(
   exampleDir: string,
-    request: Omit<Parameters<typeof runClinicalGenomicsWorkbench>[0], "exampleDir" | "grounding" | "hypotheses" | "variantSearch">,
+    request: Omit<Parameters<typeof runClinicalGenomicsWorkbench>[0], "exampleDir" | "grounding" | "hypotheses" | "variantSearch" | "vep">,
+    injectedVep?: VepAnnotationRuntime,
 ) {
-  return runClinicalGenomicsWorkbench({
-    ...request,
-    exampleDir,
-    grounding: await loadRecordedGroundingRuntime(join(exampleDir, "data", "grounding_proposals.json")),
-    hypotheses: localMonarchFixtureRuntime(exampleDir),
-    variantSearch: localCandidateVariantSearchRuntime(exampleDir),
-  });
+  const fixture = injectedVep ? undefined : await startVepFixture();
+  try {
+    return await runClinicalGenomicsWorkbench({
+      ...request,
+      exampleDir,
+      grounding: await loadRecordedGroundingRuntime(join(exampleDir, "data", "grounding_proposals.json")),
+      hypotheses: localMonarchFixtureRuntime(exampleDir),
+      variantSearch: localCandidateVariantSearchRuntime(exampleDir),
+      vep: injectedVep ?? fixture!.runtime,
+    });
+  } finally {
+    if (fixture) await fixture.close();
+  }
 }
 
 test("clinical workbench reconciles direct and inverted traversal into one evidence relation", async () => {
@@ -47,7 +56,7 @@ test("clinical workbench reconciles direct and inverted traversal into one evide
     now: "2026-07-05T12:00:00Z",
   });
 
-  assert.equal(out.workflow.executedSteps, 7);
+  assert.equal(out.workflow.executedSteps, 8);
   assert.equal(out.workflow.reusedSteps, 0);
   assert.equal(out.packet.schema, "pi-bio.workbench.evidence_packet.v1");
   assert.equal(out.packet.summary.kernelScope, "evidence routing only; not a complete clinical classification kernel");
@@ -79,6 +88,9 @@ test("clinical workbench reconciles direct and inverted traversal into one evide
   assert.equal(supported?.gene_id, "HGNC:GENEB");
   assert.equal(supported?.hypothesis_rank, 1);
   assert.deepEqual(supported?.gene_disease_predicates, ["biolink:causes"]);
+  assert.equal(supported?.vep_impact, "HIGH");
+  assert.equal(supported?.vep_consequence, "stop_gained");
+  assert.equal(supported?.vep_allele_frequency, 0.0002);
   assert.ok(inverted.some((row) => row.gene === "GENEH" && row.evidence_status === "hypothesis_without_supporting_variant"));
   assert.ok(out.packet.summary.reviewQueue.some((row) => row.kind === "review_missing_genotype_support" && row.target === "hypothesis:MONDO:GENEH:GENEH"));
   assert.ok(out.packet.summary.reviewQueue.some((row) => row.kind === "resolve_frequency" && row.target === "variant:2-47637258-C-CT"));
@@ -86,17 +98,25 @@ test("clinical workbench reconciles direct and inverted traversal into one evide
 
 test("SDK entry resolves a relative workspace exactly once", async () => {
   const exampleDir = await copyFixture();
-  const out = await runClinicalGenomicsWorkbench({
-    exampleDir: relative(process.cwd(), exampleDir),
-    caseId: "CASE-RD-001",
-    analysisId: "analysis-relative-workspace",
-    now: "2026-07-05T12:00:00Z",
-    grounding: await loadRecordedGroundingRuntime(join(exampleDir, "data", "grounding_proposals.json")),
-    hypotheses: localMonarchFixtureRuntime(exampleDir),
-    variantSearch: localCandidateVariantSearchRuntime(exampleDir),
-  });
+  const vep = await startVepFixture();
+  let out;
+  try {
+    out = await runClinicalGenomicsWorkbench({
+      exampleDir: relative(process.cwd(), exampleDir),
+      caseId: "CASE-RD-001",
+      analysisId: "analysis-relative-workspace",
+      now: "2026-07-05T12:00:00Z",
+      grounding: await loadRecordedGroundingRuntime(join(exampleDir, "data", "grounding_proposals.json")),
+      hypotheses: localMonarchFixtureRuntime(exampleDir),
+      variantSearch: localCandidateVariantSearchRuntime(exampleDir),
+      vep: vep.runtime,
+    });
+  } finally {
+    await vep.close();
+  }
   assert.ok(out.analysisDbPath.startsWith(resolve(exampleDir)));
-  assert.equal(out.workflow.executedSteps, 7);
+  assert.equal(out.workflow.executedSteps, 8);
+  assert.equal(vep.requests(), 3, "the SQL-native VEP transport retries two transient 503 responses");
 });
 
 test("indexed inverted traversal preserves multiallelic allele alignment before evidence reduction", async () => {
@@ -232,31 +252,39 @@ test("changed grounding composition invalidates checkpoint replay", async () => 
   }), /replay digest does not match/);
 });
 
-test("same analysis id resumes from all seven durable checkpoints", async () => {
+test("same analysis id resumes from all durable checkpoints", async () => {
   const exampleDir = await copyFixture();
-  const first = await runFixture(exampleDir, {
-    caseId: "CASE-RD-001",
-    analysisId: "analysis-resume",
-    now: "2026-07-05T12:00:00Z",
-  });
-  const resumed = await runFixture(exampleDir, {
-    caseId: "CASE-RD-001",
-    analysisId: "analysis-resume",
-    now: "2026-07-05T12:05:00Z",
-  });
+  const vep = await startVepFixture();
+  let first;
+  let resumed;
+  try {
+    first = await runFixture(exampleDir, {
+      caseId: "CASE-RD-001",
+      analysisId: "analysis-resume",
+      now: "2026-07-05T12:00:00Z",
+    }, vep.runtime);
+    resumed = await runFixture(exampleDir, {
+      caseId: "CASE-RD-001",
+      analysisId: "analysis-resume",
+      now: "2026-07-05T12:05:00Z",
+    }, vep.runtime);
+  } finally {
+    await vep.close();
+  }
 
-  assert.equal(first.workflow.executedSteps, 7);
+  assert.equal(first.workflow.executedSteps, 8);
   assert.equal(resumed.workflow.executedSteps, 0);
-  assert.equal(resumed.workflow.reusedSteps, 7);
+  assert.equal(resumed.workflow.reusedSteps, 8);
   assert.equal(resumed.packetDigest, first.packetDigest);
   assert.equal(resumed.packet.generatedAt, "2026-07-05T12:00:00Z");
+  assert.equal(vep.requests(), 3, "resuming reuses the VEP checkpoint without another fanout");
 
   const store = await openBioStore(exampleDir);
   try {
     const rows = await store.conn.all<{ n: bigint }>(
       "SELECT count(*) AS n FROM bio_observations WHERE predicate = 'run' AND starts_with(subject_id, 'run:analysis-resume.')",
     );
-    assert.equal(Number(rows[0]?.n), 8);
+    assert.equal(Number(rows[0]?.n), 9);
   } finally {
     store.close();
   }
@@ -342,7 +370,7 @@ test("packet and scientific runs are CAS-backed and connected in the ledger", as
       "SELECT value_json FROM bio_observations WHERE subject_id = ? AND predicate = 'job_step_checkpoint' ORDER BY statement_key",
       [`job:${out.analysisId}`],
     );
-    assert.equal(checkpoints.length, 7);
+    assert.equal(checkpoints.length, 8);
     assert.ok(checkpoints.every((row) => {
       const envelope = JSON.parse(row.value_json) as { value: Record<string, unknown> };
       return !("rows" in envelope.value) && !("packet" in envelope.value);

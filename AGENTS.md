@@ -2,113 +2,73 @@
 
 Instructions for coding agents working in this repository.
 
-## Product And Dependency Direction
+## Product Boundary
 
-- `pi-bio-workbench` is the application layer over the sibling `pi-bio-agent` substrate. It owns scientific
-  workflows, manifests, domain relations, typed proposals, review policy, evidence packets, APIs, and user-facing
-  surfaces. `pi-bio-agent` owns execution, durable jobs/checkpoints, CAS, receipts, replay, graph/memory primitives,
-  and host-injected effects.
-- Keep the dependency one-way through `file:../pi-bio-agent` during development. Do not vendor, fork, or reimplement
-  substrate behavior in this repository. A genuine missing primitive is fixed in core; application composition stays
-  here.
-- This is pre-1.0 work with no compatibility obligation to toy or unclear surfaces. Prefer replacing a false model
-  over preserving it behind adapters.
-- The model is an agent over scientific apparatus, not the source of biomedical facts. Facts come from declared
-  case data, ontologies, knowledge graphs, annotation sources, deterministic computation, receipts, and approved
-  judgments.
+- `pi-bio-workbench` is an application binding over the sibling `pi-bio-agent` substrate. It owns domain data,
+  relations, workflow composition, review policy, API schemas, and user-facing surfaces. Core owns execution,
+  durable jobs/checkpoints, CAS, receipts, replay, graph/memory primitives, and host-injected effects.
+- Keep the dependency one-way through the `pi-bio-agent` package. Do not vendor or reimplement substrate behavior. A
+  local sibling/link is a lockstep development arrangement, not the public dependency contract. A missing primitive
+  is a core change; an application choice stays in manifests, SQL, fixtures, or host composition.
+- The agent or human composes over declared facts. Biomedical facts come from declared resources, deterministic SQL
+  or compute, receipts, CAS, and recorded judgments, not from generated prose.
+- This is pre-1.0 work. Delete false models instead of preserving them behind compatibility shims.
+
+## Thin Binding Rule
+
+- Manifests and SQL are the workbench program. Keep them declarative and small: one template is authored and the
+  generated manifest is derived by `npm run manifest:clinical`; do not hand-edit duplicated generated JSON.
+- Before adding a TypeScript file or helper, check whether existing core SQL, a resolver, SemanticSQL, DuckDB FTS,
+  DuckHTS, DuckNNG, the async runner, CAS, or checkpoints already express the behavior. Domain questions belong in
+  relations and operations, not per-question clients, skills, parsers, or workflow engines.
+- TypeScript in this repository is limited to application orchestration, host policy/capability injection, typed API
+  boundaries, and an adapter that a concrete source genuinely requires. If the same adapter shape appears twice,
+  name the concrete consumers and move the reusable primitive to `pi-bio-agent` instead of adding a third app file.
+- Do not create a new schema/version/helper merely to label an internal intermediate. A persisted artifact, public API,
+  replay contract, or independently consumed relation must earn its own contract; otherwise use ordinary SQL rows.
+
+## Proven Core Capabilities
+
+- `duckdb.sql_materialize` is the general declared read-only SQL materializer. Use it over DuckDB-native files,
+  `httpfs`, views, SemanticSQL projections, and extension table functions; do not write a source-specific loader.
+- `ducknng_ncurl_table` handles one dynamic-schema response. `ducknng.http_fanout` and core `ncurlFanout` handle
+  declared batch SQL with bounded AIO launch/drain, transient retry, backoff, cancellation, and terminal failure.
+  `ducknng` also provides host-owned profiles and in-memory TLS handles. Do not add `fetch`, `urllib`, or a VEP client.
+- `duckhts.read_bcf` performs indexed region reads. Existing examples prove the online VEP fanout path; application
+  code supplies only domain batch SQL and response normalization.
+- Compute is the async `submit/status/collect/cancel` port. Workflow code uses task -> step -> checkpoint and resumes
+  from completed content-pinned steps; it does not invent another lifecycle.
+- Use canonical graph relations, pinned foreign graph projections, SemanticSQL views, FTS, and SQL closure. Do not
+  serialize large graph neighborhoods into prompts or create a mandatory phenotype-mapper service.
 
 ## Clinical Traversals
 
-- Direct and inverted are traversal orders over shared evidence, not separate clinical kernels.
-- Direct starts from case variants and applies declared annotation, frequency, consequence, inheritance, and
-  evidence rules.
-- Inverted starts from the case narrative, grounds phenotype assertions, walks phenotype/disease/gene relations,
-  and uses the resulting gene hypotheses to select which parts of the case variant set need annotation. Both lanes
-  must converge on compatible candidate-variant/disease evidence relations.
-- Do not introduce a dedicated phenotype-mapper service, mandatory grounding package, or per-question skill.
-  Compose declared ontology label/synonym relations, DuckDB FTS or ordinary SQL, `pi-bio-agent` term sets and typed
-  grounding validation, graph projection/closure, Monarch phenotype/disease/gene evidence, `duckhts` indexed range
-  reads, and DuckDB SQL scoring. A separate grounding implementation is optional only after measured retrieval or
-  reranking failures justify it.
+- Direct and inverted are traversal orders over shared evidence, not separate kernels. Direct starts from variants;
+  inverted starts from the case narrative, grounds phenotype assertions, walks phenotype/disease/gene relations,
+  selects assembly-pinned intervals, reads indexed case VCF regions, and annotates the selected alleles. Both converge
+  on compatible candidate and assessment relations.
+- Preserve negative, uncertain, family-context, missing-frequency, missing-coverage, and unsupported-scope states.
+  A missed or unsearched variant is not negative evidence. Assembly or coordinate mismatches fail closed.
+- The inverted lane composes declared ontology labels/synonyms, FTS or SQL, typed term sets and grounding validation,
+  graph projection/closure, Monarch, DuckHTS, existing VEP fanout, and SQL ranking. Add another provider only after a
+  measured retrieval or reranking gap.
+- Online VEP is targeted and bounded. If the admitted set or endpoint cannot be handled, fail clearly or route to a
+  declared local compute path; never truncate or silently substitute an answer.
 
-## Inverted Lane: Established Composition
+## Provenance And Coordination
 
-Treat the following as the implementation baseline, not a question to re-derive:
+- Every scientific path is manifest/operation -> resolver or injected port -> DuckDB relation -> run -> CAS/receipt ->
+  observation. A deliberate bypass is integration debt.
+- Subagents and UI surfaces exchange relations, CAS references, checkpoints, and observations. Prose is explanation,
+  not the scientific state.
+- Live sources, volatile SQL, host effects, auth profiles, and region reads must be recorded honestly. Host policy owns
+  network, filesystem, credentials, process isolation, and extension provisioning; this repository is not a sandbox.
 
-1. Record the case narrative as a declared, content-addressed input.
-2. Materialize HPO labels and synonyms from a declared ontology source. Let the agent inspect/query those relations
-   with DuckDB FTS or ordinary SQL, build real candidate `TermSet`s, and submit typed proposals through deterministic
-   no-invented-identifier validation. The application validates quoted source spans and records subject,
-   presence/absence, uncertainty, family context, offsets, ontology version/digest, proposal, and approval. Do not
-   discard negative or uncertain observations during grounding.
-3. Walk HPO/MONDO and a pinned Monarch graph projection to produce disease/gene hypotheses and explicit score
-   components. Query graph relations in DuckDB; do not serialize large graph neighborhoods into prompts.
-4. Resolve candidate genes to assembly-pinned genomic intervals. Use indexed `duckhts` range reads against the case
-   VCF/BCF, deduplicate variants from overlapping intervals, and retain the gene/phenotype selection reason.
-5. Normalize and batch the selected variants for Ensembl VEP `/region`, at most 200 variants per request. Reuse
-   `pi-bio-agent/src/duckdb/ncurl-fanout.ts`: it already provides bounded AIO fanout, transient retry, backoff,
-   cancellation, and terminal failure reporting. The live precedent is
-   `pi-bio-agent/examples/wgs-chr22-annotation/live.mjs`; single-endpoint and host-fetch retry policies also already
-   exist in core. Do not design another rate-limit layer.
-6. Materialize VEP response rows and join them to phenotype, disease, gene, inheritance, frequency, ClinVar, and
-   other declared evidence. Pin request inputs and returned scientific rows through run receipts/CAS.
-7. Send only the reduced candidate relation to literature retrieval and typed, gated assessment. The complete
-   relations remain queryable even when an evidence packet is bounded.
+## API And Checks
 
-An orchestrating agent may delegate grounding, graph expansion, annotation review, and literature assessment to
-subagents. Subagents coordinate through DuckDB relations, CAS references, checkpoints, and ledger observations, not
-private prose state. One durable annotation step owns network batching so parallel agents do not duplicate effects.
-
-## Coverage And Clinical Honesty
-
-- Pin the reference assembly at every interval and VEP step. A build mismatch is a failed run, not a warning.
-- Record candidate-gene and interval coverage: genes proposed, genes scanned, intervals read, variants observed,
-  variants submitted, variants annotated, failures, and exclusions. A variant outside the selected scope is "not
-  searched by this traversal," not negative evidence.
-- Test overlapping genes/intervals, multiallelic records, normalization, transcript multiplicity, missing frequency,
-  inheritance, and retry/resume behavior. SV/CNV, breakends, repeats, mitochondrial variants, and distant regulatory
-  effects need explicit supported/unsupported coverage rather than being silently treated as ordinary SNVs.
-- Online VEP is the targeted path. When the selected set exceeds the admitted online budget or the endpoint is
-  unavailable, fail or route to a declared local VEP/`duckvep` compute path. Never truncate silently.
-- Candidate selection can miss novel genes or phenocopies. The direct lane is the complementary search, and reports
-  must state the scope of each traversal rather than presenting one lane as exhaustive.
-
-## Current Implementation Debt
-
-- The inverted lane now consumes reviewed, original-span-grounded phenotype observations. Its HPO vocabulary,
-  recorded proposal/review ports, and benchmark gold are still hermetic fixtures; they prove orchestration and
-  failure behavior, not real-world grounding accuracy.
-- Negative, uncertain, and family-context assertions remain in the grounding artifact but do not yet contribute to
-  the Monarch ranking score; do not describe the current score as full phenotype compatibility.
-- The workflow now invokes the same canonical graph operation against either a hermetic graph fixture or the pinned
-  Monarch snapshot. Its exact/ancestor match counts and annotation-frequency score are explicit, but they are not a
-  clinically validated semantic-similarity method.
-- Ranked hypotheses now resolve through an assembly-pinned interval snapshot and indexed DuckHTS reads. The search
-  validates requested contigs and available VCF assembly metadata through `read_hts_header`, deduplicates overlapping
-  region output per selected gene and allele, and records zero-result coverage explicitly.
-- The hermetic indexed VCF carries allele-specific annotation fields so CI can exercise the complete relation. Live
-  bounded VEP `/region` fanout, response materialization, and its admitted local fallback remain application work;
-  do not describe fixture annotations as that production stage.
-- A phenotype-supported gene with no selected supporting variant is recorded as missing genotype support within the
-  search scope; it is not treated as evidence against the hypothesis.
-- Keep hermetic CI fixtures, but generate or validate them against recorded real-source dogfood. Do not cite fixture
-  success as proof of clinical validity.
-
-## API And Workflow Discipline
-
-- Keep the API schema-first: Zod schemas are runtime validation and the source of OpenAPI. Do not maintain a second
-  hand-written API specification.
-- HTTP clients must not choose host filesystem paths, credentials, extension policy, or arbitrary execution
-  settings. Those belong to host composition.
-- Preserve task -> step -> checkpoint semantics. Resume from content-pinned completed steps; changed scientific
-  inputs must invalidate reuse. Checkpoints carry CAS references rather than duplicating result rows.
-- Every scientific operation should follow manifest/operation -> resolver or injected port -> DuckDB relation ->
-  recorded run -> CAS/receipts -> observations. Call out any deliberate bypass as integration debt.
-
-## Checks
-
-- Use `rg` for repository search and `apply_patch` for manual edits.
-- Run `npm run check` after manifest, workflow, API, or relation changes.
-- Run the real dogfood relevant to a claim. Unit fixtures prove contracts and edge handling; they do not prove live
-  source compatibility, rate behavior, graph coverage, or scientific validity.
-- Review substantial changes with the reusable Pi review session described in `../pi-bio-agent/AGENTS.md`.
+- Zod schemas are the runtime contract and the source for OpenAPI. Do not maintain a second hand-written API spec.
+- Use `rg` and `apply_patch`. Run `npm run manifest:clinical` after template changes, then `npm run check`.
+- Run `npm run demo:clinical` for the end-to-end clinical path and `npm run dogfood:monarch` for the pinned foreign
+  graph path. Unit fixtures prove contracts; live dogfood proves source and host compatibility.
+- Keep README source/rendered documentation consistent. Review substantial changes with the reusable Pi review session
+  described in `../pi-bio-agent/AGENTS.md`.

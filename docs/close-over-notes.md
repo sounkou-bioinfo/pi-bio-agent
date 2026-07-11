@@ -5,17 +5,20 @@ primitive is warranted only when the application cannot express a concrete workf
 
 ## Clinical binding
 
-The clinical example is one evidence task with five durable steps:
+The clinical example is one evidence task with eight durable steps:
 
 1. Phenotype grounding resolves the immutable narrative and HPO candidates through recorded manifest queries,
    runs host-injected augmentation/proposal/review ports, and stores the complete result in CAS.
 2. `clinical.monarch_phenotype_hypotheses` walks canonical graph `edges`, `nodes`, and ontology `closure`, then stores
    the ranked hypothesis relation and complete run evidence in CAS.
-3. `clinical.case_evidence` consumes that checkpointed result through a digest-pinned protected binding and returns
-   bounded review evidence from direct and inverted traversal.
-4. `clinical.reanalysis_diff` compares the same variant-assessment semantics with declared prior state and status
-   order.
-5. The application builds one evidence packet, writes it to CAS, and links the case, analysis, packet, and scientific
+3. Candidate hypotheses resolve to assembly-pinned intervals.
+4. The indexed case-VCF search records coverage and selected alleles.
+5. The `vep_http_results` resource declares 200-allele batch SQL and uses the generic `ducknng.http_fanout`
+   resolver, which closes over core `ncurlFanout` launch/drain/retry/cancel. `clinical.vep_annotations` uses ordinary
+   SQL over the response table; normalized rows are checkpointed in CAS.
+6. `clinical.reanalysis_diff` consumes the VEP checkpoint through protected bindings.
+7. `clinical.case_evidence` materializes the current assessment and both traversal lanes.
+8. The application builds one evidence packet, writes it to CAS, and links the case, analysis, packet, and scientific
    runs in the observation ledger.
 
 The relations carry the domain logic:
@@ -60,18 +63,20 @@ configuration, and local fixture bytes, so changed graph inputs cannot reuse sta
   a clinical ranking method.
 - Negative, uncertain, and family-context phenotype assertions remain in the grounding CAS artifact but are not yet
   scoring inputs to the Monarch operation.
-- The next inverted-lane step is assembly-pinned candidate-gene interval resolution and indexed case-VCF search.
-  Until that producer records coverage, live Monarch hypotheses remain `hypothesis_not_searched`.
+- The VEP binding is a 200-allele batch composition over `ducknng.http_fanout`, including core bounded concurrency,
+  transient retry, and cancellation cleanup. The app must not add a VEP-specific HTTP client.
 
-No new core primitive was required for this slice. The next concrete work is an application producer for candidate
-gene intervals, indexed variant search, and coverage rows, not a new workflow engine or action registry.
+The repeated batch transport in the application did reveal one reusable core primitive: the generic
+`ducknng.http_fanout` resolver over the existing `ncurlFanout` lifecycle. The next concrete work is application SQL
+for evidence and review, not another workflow engine, action registry, or HTTP client.
 
 ## Repository topology
 
-Keep the substrate and workbench in separate repositories while the workbench is proving the public consumer
-surface. The sibling file dependency and pinned two-repository CI provide fast local development without hiding an
-accidental internal API. Reconsider a monorepo only when ordinary features repeatedly require atomic commits and
-lockstep releases across both repositories; this grounding slice required no core code change.
+The long-term shape can follow `pi`/`pi-mono`: one workspace with independently named `packages/agent` and
+`packages/workbench`, shared checks, and lockstep release tooling. The package boundary remains real inside that
+workspace: the workbench imports the agent package, never its source internals. Until that migration is worth doing,
+the two GitHub repositories and a pinned package dependency keep the public consumer surface honest; a local sibling
+or link is only the lockstep development override.
 
 Execution policy remains host-owned. Trusted local scientific work can use the unrestricted host ports directly.
 Gondolin or another isolation backend is an optional `ComputeRunner`/host composition for untrusted generated code,

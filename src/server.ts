@@ -5,6 +5,7 @@ import { createWorkbenchApi } from "./api/app.js";
 import { loadHostGroundingRuntime } from "./grounding-host.js";
 import { localMonarchFixtureRuntime } from "./monarch-host.js";
 import { localCandidateVariantSearchRuntime } from "./candidate-variant-search.js";
+import { defaultVepAnnotationRuntime } from "./clinical-genomics.js";
 
 export async function startWorkbenchServer(workspaceArg = "examples/clinical-genomics", portArg = "8787", groundingModule?: string): Promise<ServerType> {
   const workspace = resolve(workspaceArg);
@@ -17,6 +18,7 @@ export async function startWorkbenchServer(workspaceArg = "examples/clinical-gen
     grounding,
     hypotheses: localMonarchFixtureRuntime(workspace),
     variantSearch: localCandidateVariantSearchRuntime(workspace),
+    vep: defaultVepAnnotationRuntime(),
   });
   return serve({ fetch: app.fetch, port }, (info) => {
     console.log(`pi-bio-workbench listening on http://localhost:${info.port}`);

@@ -7,6 +7,7 @@ import {
 import type { GroundingRuntime } from "../phenotype-grounding.js";
 import type { PhenotypeHypothesisRuntime } from "../monarch-host.js";
 import type { CandidateVariantSearchRuntime } from "../candidate-variant-search.js";
+import type { VepAnnotationRuntime } from "../clinical-genomics.js";
 import {
   AnalysisPathSchema,
   ClinicalAnalysisResponseSchema,
@@ -21,6 +22,7 @@ export interface WorkbenchApiOptions {
   grounding: GroundingRuntime;
   hypotheses: PhenotypeHypothesisRuntime;
   variantSearch: CandidateVariantSearchRuntime;
+  vep: VepAnnotationRuntime;
   clock?: () => string;
 }
 
@@ -88,6 +90,7 @@ export function createWorkbenchApi(options: WorkbenchApiOptions): OpenAPIHono {
         grounding: options.grounding,
         hypotheses: options.hypotheses,
         variantSearch: options.variantSearch,
+        vep: options.vep,
         now: options.clock?.(),
       });
       const { storePath: _storePath, analysisDbPath: _analysisDbPath, ...publicResult } = result;

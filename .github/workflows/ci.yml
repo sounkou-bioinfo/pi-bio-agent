@@ -19,7 +19,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: sounkou-bioinfo/pi-bio-agent
-          ref: 0bdc88ffe6c9756914879263ac571ef576789878
+          ref: 124e2be2c687eec97d195aba9de5ac549e4a8fbd
           path: pi-bio-agent
 
       - name: Setup Node
@@ -39,6 +39,10 @@ jobs:
       - name: Provision DuckHTS
         working-directory: pi-bio-workbench
         run: npm run provision:duckhts
+
+      - name: Provision DuckNNG
+        working-directory: pi-bio-workbench
+        run: npm run provision:ducknng
 
       - name: Check workbench
         working-directory: pi-bio-workbench

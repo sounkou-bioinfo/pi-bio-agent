@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { resolve } from "node:path";
-import { runClinicalGenomicsWorkbench } from "./clinical-genomics.js";
+import { defaultVepAnnotationRuntime, runClinicalGenomicsWorkbench } from "./clinical-genomics.js";
 import { loadHostGroundingRuntime } from "./grounding-host.js";
 import { localMonarchFixtureRuntime } from "./monarch-host.js";
 import { localCandidateVariantSearchRuntime } from "./candidate-variant-search.js";
@@ -19,6 +19,7 @@ if (command === "serve") {
     grounding: await loadHostGroundingRuntime(exampleDir, args[4]),
     hypotheses: localMonarchFixtureRuntime(exampleDir),
     variantSearch: localCandidateVariantSearchRuntime(exampleDir),
+    vep: defaultVepAnnotationRuntime(),
     ...(args[3] ? { analysisId: args[3] } : {}),
   });
   console.log(JSON.stringify(result, null, 2));

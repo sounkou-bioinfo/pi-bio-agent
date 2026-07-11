@@ -16,6 +16,15 @@
         }
       },
       {
+        "id": "ducknng.http_fanout",
+        "version": "0.1.0",
+        "title": "DuckNNG HTTP fanout",
+        "description": "Run declared batch SQL through the host-provisioned DuckNNG AIO transport.",
+        "output": {
+          "mode": "table"
+        }
+      },
+      {
         "id": "duckdb.sql_materialize",
         "version": "0.1.0",
         "title": "DuckDB SQL materialization",
@@ -113,7 +122,7 @@
         "resolver": "duckdb.sql_materialize",
         "params": {
           "table": "variant_assessment",
-          "sql": "SELECT\n  v.variant_source,\n  v.case_id,\n  v.selection_gene_id,\n  v.selection_disease_ids,\n  v.hypothesis_rank,\n  v.variant_key,\n  v.gene,\n  v.annotated_gene,\n  v.consequence,\n  TRY_CAST(v.allele_frequency AS DOUBLE) AS allele_frequency,\n  v.clinical_significance,\n  v.zygosity,\n  v.inheritance,\n  lof.id IS NOT NULL AS is_predicted_loss_of_function,\n  CASE\n    WHEN TRY_CAST(v.allele_frequency AS DOUBLE) IS NULL THEN 'abstain_no_frequency'\n    WHEN lower(v.clinical_significance) = 'benign' THEN 'excluded_benign'\n    WHEN lof.id IS NULL THEN 'excluded_not_high_impact'\n    WHEN TRY_CAST(v.allele_frequency AS DOUBLE) >= 0.01 THEN 'excluded_not_rare'\n    ELSE 'candidate'\n  END AS variant_bucket,\n  CASE\n    WHEN TRY_CAST(v.allele_frequency AS DOUBLE) IS NULL THEN 'needs_frequency_evidence'\n    WHEN lower(v.clinical_significance) = 'benign' THEN 'not_reportable_by_screen'\n    WHEN lof.id IS NULL THEN 'not_reportable_by_screen'\n    WHEN TRY_CAST(v.allele_frequency AS DOUBLE) >= 0.01 THEN 'not_reportable_by_screen'\n    WHEN lower(v.clinical_significance) IN ('pathogenic', 'likely pathogenic') THEN 'curated_plp_candidate'\n    ELSE 'candidate_needs_review'\n  END AS variant_status,\n  CASE\n    WHEN TRY_CAST(v.allele_frequency AS DOUBLE) IS NULL THEN 'allele_frequency'\n  END AS missing_field,\n  CASE\n    WHEN lower(v.clinical_significance) = 'benign' AND lof.id IS NOT NULL\n      THEN 'benign_vs_predicted_loss_of_function'\n  END AS conflict,\n  CASE\n    WHEN TRY_CAST(v.allele_frequency AS DOUBLE) IS NULL THEN 'resolve_frequency'\n    WHEN lower(v.clinical_significance) = 'benign' AND lof.id IS NOT NULL THEN 'review_conflict'\n    WHEN lower(v.clinical_significance) = 'benign' THEN NULL\n    WHEN lof.id IS NULL THEN NULL\n    WHEN TRY_CAST(v.allele_frequency AS DOUBLE) >= 0.01 THEN NULL\n    WHEN lower(v.clinical_significance) IN ('pathogenic', 'likely pathogenic') THEN 'confirm_candidate'\n    ELSE 'adjudicate_candidate'\n  END AS review_kind\nFROM variant_inputs v\nLEFT JOIN so_loss_of_function lof\n  ON lof.id = v.consequence\nWHERE v.case_id = getvariable('case_id')"
+          "sql": "WITH enriched AS (\n  SELECT\n    v.*,\n    va.impact AS vep_impact,\n    va.consequence AS vep_consequence,\n    va.allele_frequency AS vep_allele_frequency,\n    va.clinical_significance AS vep_clinical_significance,\n    coalesce(va.consequence, v.consequence) AS assessed_consequence,\n    coalesce(va.allele_frequency, TRY_CAST(v.allele_frequency AS DOUBLE)) AS assessed_allele_frequency,\n    coalesce(va.clinical_significance, v.clinical_significance) AS assessed_clinical_significance\n  FROM variant_inputs v\n  LEFT JOIN vep_annotations va\n    ON va.variant_key = v.variant_key\n   AND (va.gene IS NULL OR va.gene = v.gene)\n)\nSELECT\n  v.variant_source,\n  v.case_id,\n  v.selection_gene_id,\n  v.selection_disease_ids,\n  v.hypothesis_rank,\n  v.variant_key,\n  v.gene,\n  v.annotated_gene,\n  v.assessed_consequence AS consequence,\n  v.assessed_allele_frequency AS allele_frequency,\n  v.assessed_clinical_significance AS clinical_significance,\n  v.vep_impact,\n  v.vep_consequence,\n  v.vep_allele_frequency,\n  v.vep_clinical_significance,\n  v.zygosity,\n  v.inheritance,\n  lof.id IS NOT NULL AS is_predicted_loss_of_function,\n  CASE\n    WHEN v.assessed_allele_frequency IS NULL THEN 'abstain_no_frequency'\n    WHEN lower(v.assessed_clinical_significance) = 'benign' THEN 'excluded_benign'\n    WHEN lof.id IS NULL THEN 'excluded_not_high_impact'\n    WHEN v.assessed_allele_frequency >= 0.01 THEN 'excluded_not_rare'\n    ELSE 'candidate'\n  END AS variant_bucket,\n  CASE\n    WHEN v.assessed_allele_frequency IS NULL THEN 'needs_frequency_evidence'\n    WHEN lower(v.assessed_clinical_significance) = 'benign' THEN 'not_reportable_by_screen'\n    WHEN lof.id IS NULL THEN 'not_reportable_by_screen'\n    WHEN v.assessed_allele_frequency >= 0.01 THEN 'not_reportable_by_screen'\n    WHEN lower(v.assessed_clinical_significance) IN ('pathogenic', 'likely pathogenic') THEN 'curated_plp_candidate'\n    ELSE 'candidate_needs_review'\n  END AS variant_status,\n  CASE\n    WHEN v.assessed_allele_frequency IS NULL THEN 'allele_frequency'\n  END AS missing_field,\n  CASE\n    WHEN lower(v.assessed_clinical_significance) = 'benign' AND lof.id IS NOT NULL\n      THEN 'benign_vs_predicted_loss_of_function'\n  END AS conflict,\n  CASE\n    WHEN v.assessed_allele_frequency IS NULL THEN 'resolve_frequency'\n    WHEN lower(v.assessed_clinical_significance) = 'benign' AND lof.id IS NOT NULL THEN 'review_conflict'\n    WHEN lower(v.assessed_clinical_significance) = 'benign' THEN NULL\n    WHEN lof.id IS NULL THEN NULL\n    WHEN v.assessed_allele_frequency >= 0.01 THEN NULL\n    WHEN lower(v.assessed_clinical_significance) IN ('pathogenic', 'likely pathogenic') THEN 'confirm_candidate'\n    ELSE 'adjudicate_candidate'\n  END AS review_kind\nFROM enriched v\nLEFT JOIN so_loss_of_function lof\n  ON lof.id = v.assessed_consequence\nWHERE v.case_id = getvariable('case_id')"
         }
       },
       {
@@ -133,7 +142,7 @@
         "resolver": "duckdb.sql_materialize",
         "params": {
           "table": "case_evidence",
-          "sql": "WITH evidence_bearing_variant AS (\n  SELECT *\n  FROM variant_assessment\n  WHERE variant_bucket IN ('candidate', 'abstain_no_frequency')\n     OR conflict IS NOT NULL\n),\ndirect AS (\n  SELECT\n    va.case_id,\n    'direct' AS lane,\n    'variant:' || va.variant_key AS evidence_key,\n    NULL::VARCHAR AS gene_id,\n    va.gene,\n    NULL::VARCHAR AS disease_id,\n    NULL::VARCHAR AS disease_label,\n    va.variant_key,\n    va.annotated_gene,\n    va.consequence,\n    va.allele_frequency,\n    va.clinical_significance,\n    va.zygosity,\n    va.inheritance,\n    va.variant_bucket,\n    va.variant_status,\n    NULL::INTEGER AS matched_observed_terms,\n    NULL::INTEGER AS exact_observed_terms,\n    NULL::DOUBLE AS phenotype_specificity_score,\n    NULL::INTEGER AS supporting_phenotype_annotations,\n    NULL::VARCHAR[] AS phenotype_match_kinds,\n    NULL::VARCHAR[] AS phenotype_sources,\n    NULL::INTEGER AS has_causal_assertion,\n    NULL::INTEGER AS gene_disease_assertions,\n    NULL::VARCHAR[] AS gene_disease_predicates,\n    NULL::VARCHAR[] AS gene_disease_sources,\n    NULL::INTEGER AS hypothesis_rank,\n    NULL::VARCHAR AS variant_search_status,\n    NULL::VARCHAR AS variant_search_scope,\n    NULL::VARCHAR AS variant_search_assembly,\n    NULL::INTEGER AS searched_variant_count,\n    va.variant_status AS evidence_status,\n    va.missing_field,\n    va.conflict,\n    va.review_kind,\n    'variant:' || va.variant_key AS review_target\n  FROM evidence_bearing_variant va\n  WHERE va.variant_source = 'direct'\n),\ninverted_with_variant AS (\n  SELECT\n    ph.case_id,\n    'inverted' AS lane,\n    'hypothesis:' || ph.disease_id || ':' || ph.gene || ':' || va.variant_key AS evidence_key,\n    ph.gene_id,\n    ph.gene,\n    ph.disease_id,\n    ph.disease_label,\n    va.variant_key,\n    va.annotated_gene,\n    va.consequence,\n    va.allele_frequency,\n    va.clinical_significance,\n    va.zygosity,\n    va.inheritance,\n    va.variant_bucket,\n    va.variant_status,\n    ph.matched_observed_terms,\n    ph.exact_observed_terms,\n    ph.phenotype_specificity_score,\n    ph.supporting_phenotype_annotations,\n    ph.phenotype_match_kinds,\n    ph.phenotype_sources,\n    ph.has_causal_assertion,\n    ph.gene_disease_assertions,\n    ph.gene_disease_predicates,\n    ph.gene_disease_sources,\n    ph.hypothesis_rank,\n    coverage.search_status AS variant_search_status,\n    coverage.search_scope AS variant_search_scope,\n    coverage.assembly AS variant_search_assembly,\n    try_cast(coverage.searched_variant_count AS INTEGER) AS searched_variant_count,\n    CASE\n      WHEN va.variant_bucket = 'candidate' THEN 'genotype_supports_hypothesis'\n      WHEN va.variant_bucket = 'abstain_no_frequency' THEN 'hypothesis_variant_abstained'\n      ELSE 'variant_conflicts_with_hypothesis'\n    END AS evidence_status,\n    va.missing_field,\n    va.conflict,\n    CASE\n      WHEN va.variant_bucket = 'candidate' THEN 'correlate_supported_hypothesis'\n      ELSE va.review_kind\n    END AS review_kind,\n    'hypothesis:' || ph.disease_id || ':' || ph.gene AS review_target\n  FROM phenotype_hypothesis ph\n  JOIN evidence_bearing_variant va\n    ON va.variant_source = 'inverted'\n   AND va.case_id = ph.case_id\n   AND va.selection_gene_id = ph.gene_id\n   AND list_contains(va.selection_disease_ids, ph.disease_id)\n  LEFT JOIN variant_search_coverage coverage\n    ON coverage.case_id = ph.case_id\n   AND coverage.gene_id = ph.gene_id\n   AND list_contains(coverage.disease_ids, ph.disease_id)\n),\ninverted_without_support AS (\n  SELECT\n    ph.case_id,\n    'inverted' AS lane,\n    'hypothesis:' || ph.disease_id || ':' || ph.gene || ':no-supporting-variant' AS evidence_key,\n    ph.gene_id,\n    ph.gene,\n    ph.disease_id,\n    ph.disease_label,\n    NULL::VARCHAR AS variant_key,\n    NULL::VARCHAR AS annotated_gene,\n    NULL::VARCHAR AS consequence,\n    NULL::DOUBLE AS allele_frequency,\n    NULL::VARCHAR AS clinical_significance,\n    NULL::VARCHAR AS zygosity,\n    NULL::VARCHAR AS inheritance,\n    NULL::VARCHAR AS variant_bucket,\n    NULL::VARCHAR AS variant_status,\n    ph.matched_observed_terms,\n    ph.exact_observed_terms,\n    ph.phenotype_specificity_score,\n    ph.supporting_phenotype_annotations,\n    ph.phenotype_match_kinds,\n    ph.phenotype_sources,\n    ph.has_causal_assertion,\n    ph.gene_disease_assertions,\n    ph.gene_disease_predicates,\n    ph.gene_disease_sources,\n    ph.hypothesis_rank,\n    coverage.search_status AS variant_search_status,\n    coverage.search_scope AS variant_search_scope,\n    coverage.assembly AS variant_search_assembly,\n    try_cast(coverage.searched_variant_count AS INTEGER) AS searched_variant_count,\n    CASE\n      WHEN coverage.search_status = 'completed' THEN 'hypothesis_without_supporting_variant'\n      ELSE 'hypothesis_not_searched'\n    END AS evidence_status,\n    CASE\n      WHEN coverage.search_status = 'completed' THEN 'variant_support'\n      ELSE 'variant_search'\n    END AS missing_field,\n    NULL::VARCHAR AS conflict,\n    CASE\n      WHEN coverage.search_status = 'completed' THEN 'review_missing_genotype_support'\n      ELSE NULL\n    END AS review_kind,\n    'hypothesis:' || ph.disease_id || ':' || ph.gene AS review_target\n  FROM phenotype_hypothesis ph\n  LEFT JOIN variant_search_coverage coverage\n    ON coverage.case_id = ph.case_id\n   AND coverage.gene_id = ph.gene_id\n   AND list_contains(coverage.disease_ids, ph.disease_id)\n  WHERE NOT EXISTS (\n    SELECT 1\n    FROM evidence_bearing_variant va\n    WHERE va.variant_source = 'inverted'\n      AND va.case_id = ph.case_id\n      AND va.selection_gene_id = ph.gene_id\n      AND list_contains(va.selection_disease_ids, ph.disease_id)\n  )\n)\nSELECT * FROM direct\nUNION ALL\nSELECT * FROM inverted_with_variant\nUNION ALL\nSELECT * FROM inverted_without_support"
+          "sql": "WITH evidence_bearing_variant AS (\n  SELECT *\n  FROM variant_assessment\n  WHERE variant_bucket IN ('candidate', 'abstain_no_frequency')\n     OR conflict IS NOT NULL\n),\ndirect AS (\n  SELECT\n    va.case_id,\n    'direct' AS lane,\n    'variant:' || va.variant_key AS evidence_key,\n    NULL::VARCHAR AS gene_id,\n    va.gene,\n    NULL::VARCHAR AS disease_id,\n    NULL::VARCHAR AS disease_label,\n    va.variant_key,\n    va.annotated_gene,\n    va.consequence,\n    va.allele_frequency,\n    va.clinical_significance,\n    va.zygosity,\n    va.inheritance,\n    va.vep_impact,\n    va.vep_consequence,\n    va.vep_allele_frequency,\n    va.vep_clinical_significance,\n    va.variant_bucket,\n    va.variant_status,\n    NULL::INTEGER AS matched_observed_terms,\n    NULL::INTEGER AS exact_observed_terms,\n    NULL::DOUBLE AS phenotype_specificity_score,\n    NULL::INTEGER AS supporting_phenotype_annotations,\n    NULL::VARCHAR[] AS phenotype_match_kinds,\n    NULL::VARCHAR[] AS phenotype_sources,\n    NULL::INTEGER AS has_causal_assertion,\n    NULL::INTEGER AS gene_disease_assertions,\n    NULL::VARCHAR[] AS gene_disease_predicates,\n    NULL::VARCHAR[] AS gene_disease_sources,\n    NULL::INTEGER AS hypothesis_rank,\n    NULL::VARCHAR AS variant_search_status,\n    NULL::VARCHAR AS variant_search_scope,\n    NULL::VARCHAR AS variant_search_assembly,\n    NULL::INTEGER AS searched_variant_count,\n    va.variant_status AS evidence_status,\n    va.missing_field,\n    va.conflict,\n    va.review_kind,\n    'variant:' || va.variant_key AS review_target\n  FROM evidence_bearing_variant va\n  WHERE va.variant_source = 'direct'\n),\ninverted_with_variant AS (\n  SELECT\n    ph.case_id,\n    'inverted' AS lane,\n    'hypothesis:' || ph.disease_id || ':' || ph.gene || ':' || va.variant_key AS evidence_key,\n    ph.gene_id,\n    ph.gene,\n    ph.disease_id,\n    ph.disease_label,\n    va.variant_key,\n    va.annotated_gene,\n    va.consequence,\n    va.allele_frequency,\n    va.clinical_significance,\n    va.zygosity,\n    va.inheritance,\n    va.vep_impact,\n    va.vep_consequence,\n    va.vep_allele_frequency,\n    va.vep_clinical_significance,\n    va.variant_bucket,\n    va.variant_status,\n    ph.matched_observed_terms,\n    ph.exact_observed_terms,\n    ph.phenotype_specificity_score,\n    ph.supporting_phenotype_annotations,\n    ph.phenotype_match_kinds,\n    ph.phenotype_sources,\n    ph.has_causal_assertion,\n    ph.gene_disease_assertions,\n    ph.gene_disease_predicates,\n    ph.gene_disease_sources,\n    ph.hypothesis_rank,\n    coverage.search_status AS variant_search_status,\n    coverage.search_scope AS variant_search_scope,\n    coverage.assembly AS variant_search_assembly,\n    try_cast(coverage.searched_variant_count AS INTEGER) AS searched_variant_count,\n    CASE\n      WHEN va.variant_bucket = 'candidate' THEN 'genotype_supports_hypothesis'\n      WHEN va.variant_bucket = 'abstain_no_frequency' THEN 'hypothesis_variant_abstained'\n      ELSE 'variant_conflicts_with_hypothesis'\n    END AS evidence_status,\n    va.missing_field,\n    va.conflict,\n    CASE\n      WHEN va.variant_bucket = 'candidate' THEN 'correlate_supported_hypothesis'\n      ELSE va.review_kind\n    END AS review_kind,\n    'hypothesis:' || ph.disease_id || ':' || ph.gene AS review_target\n  FROM phenotype_hypothesis ph\n  JOIN evidence_bearing_variant va\n    ON va.variant_source = 'inverted'\n   AND va.case_id = ph.case_id\n   AND va.selection_gene_id = ph.gene_id\n   AND list_contains(va.selection_disease_ids, ph.disease_id)\n  LEFT JOIN variant_search_coverage coverage\n    ON coverage.case_id = ph.case_id\n   AND coverage.gene_id = ph.gene_id\n   AND list_contains(coverage.disease_ids, ph.disease_id)\n),\ninverted_without_support AS (\n  SELECT\n    ph.case_id,\n    'inverted' AS lane,\n    'hypothesis:' || ph.disease_id || ':' || ph.gene || ':no-supporting-variant' AS evidence_key,\n    ph.gene_id,\n    ph.gene,\n    ph.disease_id,\n    ph.disease_label,\n    NULL::VARCHAR AS variant_key,\n    NULL::VARCHAR AS annotated_gene,\n    NULL::VARCHAR AS consequence,\n    NULL::DOUBLE AS allele_frequency,\n    NULL::VARCHAR AS clinical_significance,\n    NULL::VARCHAR AS zygosity,\n    NULL::VARCHAR AS inheritance,\n    NULL::VARCHAR AS vep_impact,\n    NULL::VARCHAR AS vep_consequence,\n    NULL::DOUBLE AS vep_allele_frequency,\n    NULL::VARCHAR AS vep_clinical_significance,\n    NULL::VARCHAR AS variant_bucket,\n    NULL::VARCHAR AS variant_status,\n    ph.matched_observed_terms,\n    ph.exact_observed_terms,\n    ph.phenotype_specificity_score,\n    ph.supporting_phenotype_annotations,\n    ph.phenotype_match_kinds,\n    ph.phenotype_sources,\n    ph.has_causal_assertion,\n    ph.gene_disease_assertions,\n    ph.gene_disease_predicates,\n    ph.gene_disease_sources,\n    ph.hypothesis_rank,\n    coverage.search_status AS variant_search_status,\n    coverage.search_scope AS variant_search_scope,\n    coverage.assembly AS variant_search_assembly,\n    try_cast(coverage.searched_variant_count AS INTEGER) AS searched_variant_count,\n    CASE\n      WHEN coverage.search_status = 'completed' THEN 'hypothesis_without_supporting_variant'\n      ELSE 'hypothesis_not_searched'\n    END AS evidence_status,\n    CASE\n      WHEN coverage.search_status = 'completed' THEN 'variant_support'\n      ELSE 'variant_search'\n    END AS missing_field,\n    NULL::VARCHAR AS conflict,\n    CASE\n      WHEN coverage.search_status = 'completed' THEN 'review_missing_genotype_support'\n      ELSE NULL\n    END AS review_kind,\n    'hypothesis:' || ph.disease_id || ':' || ph.gene AS review_target\n  FROM phenotype_hypothesis ph\n  LEFT JOIN variant_search_coverage coverage\n    ON coverage.case_id = ph.case_id\n   AND coverage.gene_id = ph.gene_id\n   AND list_contains(coverage.disease_ids, ph.disease_id)\n  WHERE NOT EXISTS (\n    SELECT 1\n    FROM evidence_bearing_variant va\n    WHERE va.variant_source = 'inverted'\n      AND va.case_id = ph.case_id\n      AND va.selection_gene_id = ph.gene_id\n      AND list_contains(va.selection_disease_ids, ph.disease_id)\n  )\n)\nSELECT * FROM direct\nUNION ALL\nSELECT * FROM inverted_with_variant\nUNION ALL\nSELECT * FROM inverted_without_support"
         }
       },
       {
@@ -145,9 +154,71 @@
           "table": "reanalysis_evidence",
           "sql": "WITH current_and_prior AS (\n  SELECT\n    coalesce(current.case_id, prior.case_id) AS case_id,\n    coalesce(current.variant_key, prior.variant_key) AS variant_key,\n    prior.prior_status,\n    current.variant_status AS current_status\n  FROM (SELECT * FROM variant_assessment WHERE variant_source = 'direct') current\n  FULL OUTER JOIN prior_assessment prior USING (case_id, variant_key)\n  WHERE coalesce(current.case_id, prior.case_id) = getvariable('case_id')\n)\nSELECT\n  cp.case_id,\n  cp.variant_key,\n  cp.prior_status,\n  cp.current_status,\n  CASE\n    WHEN cp.prior_status IS NULL THEN 'new'\n    WHEN cp.current_status IS NULL THEN 'dropped'\n    WHEN prior_order.rank IS NULL OR current_order.rank IS NULL THEN 'abstain_unknown_status'\n    WHEN cp.prior_status = cp.current_status THEN 'unchanged'\n    WHEN current_order.rank > prior_order.rank THEN 'upgraded'\n    ELSE 'downgraded'\n  END AS change_status\nFROM current_and_prior cp\nLEFT JOIN assessment_status_order prior_order\n  ON prior_order.status = cp.prior_status\nLEFT JOIN assessment_status_order current_order\n  ON current_order.status = cp.current_status\nWHERE cp.prior_status IS NOT NULL\n   OR cp.current_status IN ('needs_frequency_evidence', 'candidate_needs_review', 'curated_plp_candidate')"
         }
+      },
+      {
+        "id": "vep_http_results",
+        "title": "Selected-variant VEP HTTP responses",
+        "kind": "virtual",
+        "resolver": "ducknng.http_fanout",
+        "params": {
+          "table": "vep_http_results",
+          "urlVariable": "vep_url",
+          "headersVariable": "vep_headers_json",
+          "profileVariable": "vep_profile_id",
+          "tlsConfigVariable": "vep_tls_config_id",
+          "extensions": [
+            "ducknng"
+          ],
+          "declaredSources": [
+            "https://rest.ensembl.org/vep/human/region"
+          ],
+          "batchesSql": "WITH selected AS (\n  SELECT\n    row_number() OVER (ORDER BY json_extract_string(value, '$.variant_key')) - 1 AS ordinal,\n    replace(json_extract_string(value, '$.chrom'), 'chr', '') AS chrom,\n    json_extract_string(value, '$.pos') AS pos,\n    json_extract_string(value, '$.ref') AS ref,\n    json_extract_string(value, '$.alt') AS alt\n  FROM json_each(CAST(getvariable('selected_variants_json') AS JSON))\n), batched AS (\n  SELECT\n    (ordinal // 200)::BIGINT AS batch_id,\n    chrom || ' ' || pos || ' . ' || ref || ' ' || alt || ' . . .' AS variant\n  FROM selected\n)\nSELECT\n  batch_id,\n  json_object('variants', json_group_array(variant))::VARCHAR AS body\nFROM batched\nGROUP BY batch_id\nORDER BY batch_id;"
+        }
+      },
+      {
+        "id": "vep_response",
+        "title": "Selected-variant VEP response rows",
+        "kind": "virtual",
+        "resolver": "duckdb.sql_materialize",
+        "params": {
+          "table": "vep_response",
+          "sql": "SELECT\n  r.batch_id,\n  json_extract_string(item.value, '$.input') AS input,\n  json_extract_string(item.value, '$.most_severe_consequence') AS most_severe_consequence,\n  json_extract(item.value, '$.transcript_consequences') AS transcript_consequences,\n  json_extract(item.value, '$.colocated_variants') AS colocated_variants\nFROM vep_http_results r\nCROSS JOIN json_each(CAST(r.body_text AS JSON)) AS item\nWHERE r.status BETWEEN 200 AND 299;"
+        }
+      },
+      {
+        "id": "vep_annotations",
+        "title": "Normalized VEP annotations from the checkpoint",
+        "kind": "virtual",
+        "resolver": "duckdb.sql_materialize",
+        "params": {
+          "table": "vep_annotations",
+          "sql": "SELECT\n  json_extract_string(value, '$.variant_key') AS variant_key,\n  json_extract_string(value, '$.input') AS input,\n  json_extract_string(value, '$.gene') AS gene,\n  json_extract_string(value, '$.impact') AS impact,\n  json_extract_string(value, '$.consequence') AS consequence,\n  try_cast(json_extract(value, '$.allele_frequency') AS DOUBLE) AS allele_frequency,\n  json_extract_string(value, '$.clinical_significance') AS clinical_significance,\n  json_extract_string(value, '$.most_severe_consequence') AS most_severe_consequence,\n  json_extract_string(value, '$.annotation_source') AS annotation_source\nFROM json_each(CAST(getvariable('vep_annotations_json') AS JSON))\nWHERE coalesce(json_extract_string(value, '$.variant_key'), '') <> '';"
+        }
       }
     ],
     "operations": [
+      {
+        "id": "clinical.vep_annotations",
+        "version": "0.1.0",
+        "title": "Normalize selected-variant VEP annotations",
+        "description": "Normalize the declared VEP response rows and return one annotation row per selected allele and transcript gene.",
+        "transport": "duckdb.sql",
+        "inputSchema": {
+          "type": "object"
+        },
+        "notes": [
+          "The endpoint, credentials, batching, retry, and cancellation policy are host composition; selected alleles are the operation input.",
+          "The SQL keeps VEP as annotation evidence. It does not turn an external response into a diagnosis."
+        ],
+        "sql": {
+          "readOnly": true,
+          "requiredResources": [
+            "vep_http_results",
+            "vep_response"
+          ],
+          "sqlTemplate": "WITH exploded AS (\n  SELECT\n    replace(split_part(v.input, ' ', 1), 'chr', '') || '-' || split_part(v.input, ' ', 2) || '-' || split_part(v.input, ' ', 4) || '-' || split_part(v.input, ' ', 5) AS variant_key,\n    v.input,\n    v.most_severe_consequence,\n    json_extract_string(tc.value, '$.gene_symbol') AS gene,\n    json_extract_string(tc.value, '$.impact') AS impact,\n    coalesce(json_extract_string(tc.value, '$.consequence_terms[0]'), v.most_severe_consequence) AS consequence,\n    v.colocated_variants AS colocated_variants,\n    split_part(v.input, ' ', 5) AS alt\n  FROM vep_response v\n  CROSS JOIN json_each(v.transcript_consequences) AS tc\n  WHERE v.input IS NOT NULL\n), transcript_rows AS (\n  SELECT\n    variant_key,\n    input,\n    gene,\n    impact,\n    consequence,\n    try_cast(json_extract_string(colocated_variants, '$[0].frequencies.' || alt || '.gnomadg') AS DOUBLE) AS allele_frequency,\n    json_extract_string(colocated_variants, '$[0].clin_sig[0]') AS clinical_significance,\n    most_severe_consequence\n  FROM exploded\n)\nSELECT\n  variant_key,\n  input,\n  gene,\n  impact,\n  consequence,\n  allele_frequency,\n  clinical_significance,\n  most_severe_consequence,\n  'vep' AS annotation_source\nFROM transcript_rows\nORDER BY variant_key, gene, impact DESC, consequence;"
+        }
+      },
       {
         "id": "clinical.case_evidence",
         "version": "0.2.0",
@@ -167,12 +238,17 @@
             "candidate_variant_search_json": {
               "type": "string",
               "description": "Host-protected JSON array from the checkpointed indexed variant-search operation."
+            },
+            "vep_annotations_json": {
+              "type": "string",
+              "description": "Host-protected JSON array from the checkpointed VEP annotation operation."
             }
           },
           "required": [
             "case_id",
             "phenotype_hypotheses_json",
-            "candidate_variant_search_json"
+            "candidate_variant_search_json",
+            "vep_annotations_json"
           ]
         },
         "notes": [
@@ -189,6 +265,7 @@
             "so_loss_of_function",
             "variant_inputs",
             "variant_search_coverage",
+            "vep_annotations",
             "variant_assessment",
             "phenotype_hypothesis",
             "case_evidence"
@@ -224,6 +301,7 @@
             "variant_inputs",
             "prior_assessment",
             "assessment_status_order",
+            "vep_annotations",
             "variant_assessment",
             "reanalysis_evidence"
           ],
