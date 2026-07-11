@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-// Generate the "## Pi tools" list in README.md + README.Rmd from the extension's registerTool({ name, label })
+// Generate the "## Pi tools" list in README.md + README.qmd from the extension's registerTool({ name, label })
 // calls, so it can never drift. `--check` fails (exit 1) if either file's block is stale — wired into `npm run check`.
 import { promises as fs } from "node:fs";
 
 const SRC = "extensions/pi-coding-agent/index.ts";
-const FILES = ["README.md", "README.Rmd"];
+const FILES = ["README.md", "README.qmd"];
 const BEGIN = "<!-- BEGIN GENERATED:tools (scripts/generate-readme-tools.mjs — do not edit by hand) -->";
 const END = "<!-- END GENERATED:tools -->";
 const check = process.argv.includes("--check");

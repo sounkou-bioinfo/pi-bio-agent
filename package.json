@@ -71,7 +71,7 @@
     "check": "npm run typecheck && npm test && npm run check:docs && npm run check:examples && npm run check:readme-tools && npm run check:skills",
     "docs:index": "node scripts/generate-docs-index.mjs",
     "check:docs": "node scripts/generate-docs-index.mjs --check",
-    "readme:rmd": "npm run build && Rscript -e 'rmarkdown::render(\"README.Rmd\", quiet=TRUE)' && rm -f README.html",
+    "readme:qmd": "npm run build && quarto render README.qmd --to gfm --output README.md",
     "readme:examples": "npm run build && node scripts/generate-example-readmes.mjs",
     "check:examples": "npm run build && node scripts/generate-example-readmes.mjs --check",
     "provision:duckhts": "node --input-type=module -e \"import {DuckDBInstance} from '@duckdb/node-api'; const c=await(await DuckDBInstance.create(':memory:')).connect(); await c.run('INSTALL duckhts FROM community;'); await c.run('LOAD duckhts;'); console.log('duckhts installed + loaded');\"",

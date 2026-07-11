@@ -19,7 +19,7 @@ Instructions for coding agents working in this repository.
 - Read `docs/INDEX.md` before opening random docs. Use it to find the existing home for an idea.
 - For architecture work, read `docs/design.md`, `docs/abstraction-derivation.md`, `docs/duckdb-substrate.md`, `docs/closes-over.md`, and `docs/refinments.md`.
 - For memory, graph, and provenance work, read `docs/memory-and-knowledge-unification.md`, `docs/ontology-and-knowledge-graphs.md`, and `docs/concurrency.md`.
-- For user-facing behavior, check both `README.Rmd` and the rendered `README.md`; keep them consistent when editing README prose.
+- For user-facing behavior, check `README.qmd` and the rendered `README.md`; keep them consistent when editing README prose.
 
 ## Monorepo Layout And Boundary Discipline
 
@@ -54,7 +54,7 @@ Instructions for coding agents working in this repository.
 
 - Documentation is a woven view of executable source, not a second implementation. A user-facing workflow claim must
   point to a test, script, manifest, operation, or generated example that exercises it.
-- `README.Rmd` is the executable README source and `README.md` is its generated artifact. Example READMEs and tool
+- `README.qmd` is the executable README source and `README.md` is its generated artifact. Example READMEs and tool
   inventories follow the same source/generator/check pattern; do not hand-edit their output.
 - Quarto is suitable for future polyglot reports and can run TypeScript project scripts through its bundled Deno. Its
   Observable-JS cells are browser/reactive code, not a Node/DuckDB execution surface. Keep core Node/TypeScript claims
@@ -169,3 +169,4 @@ the missing core contract and promote only that contract, not an application-spe
 - For code or manifest-contract changes, run `npm run typecheck` and focused tests; broaden to `npm test` when shared behavior changes.
 - For repository reviews, use Pi as the local review pal instead of only self-review. Use a reusable review session instead of one-off/no-session runs: `pi --model openai-codex/gpt-5.3-codex-spark --thinking high --tools read,grep,find,ls,bash --session-id pi-pal-review -p "<review prompt>"`. Reuse the same `--session-id` across related review passes so the reviewer carries local context. Do not use Anthropic for routine reviews unless explicitly requested; its billing path is different.
 - When a review session gets large, stale, or crosses topics, run an explicit compaction turn before continuing: `pi --model openai-codex/gpt-5.3-codex-spark --thinking high --tools read,grep,find,ls,bash --session-id pi-pal-review -p "Compact this review session into durable notes: repo invariants, commands run, open findings, false positives, and next checks. Keep only facts needed for future review passes."` Then continue with the same session or start a dated `--session-id` seeded from that compacted summary.
+- `NEWS.md` is not currently populated by build or check scripts. Update it manually when you want a release-note artifact.

@@ -11,7 +11,7 @@ import { join } from "node:path";
 
 const ROOT = process.cwd(); // `node --test` runs from the repo root
 const docFiles = [
-  "README.Rmd", // the SOURCE (README.md is rendered from it) — forbid tokens here so a re-render can't reintroduce them
+  "README.qmd", // the SOURCE (README.md is rendered from it) — forbid tokens here so a re-render can't reintroduce them
   "README.md",
   ...readdirSync(join(ROOT, "docs")).filter((f) => f.endsWith(".md")).map((f) => join("docs", f)),
   ...readdirSync(join(ROOT, "scripts")).filter((f) => f.endsWith(".md")).map((f) => join("scripts", f)), // shipped example/evidence docs
@@ -49,16 +49,16 @@ describe("docs-conformance: the public docs name only facilities the code actual
 });
 
 describe("README hygiene: action-first generated README, no fake illustration blocks", () => {
-  test("README.md is still marked as generated from README.Rmd", () => {
+  test("README.md is still marked as generated from README.qmd", () => {
     const text = readFileSync(join(ROOT, "README.md"), "utf8");
     assert.ok(
-      text.trimStart().startsWith("<!-- README.md is generated from README.Rmd"),
-      "README.md must stay a rendered artifact; edit README.Rmd and render instead",
+      text.trimStart().startsWith("<!-- README.md is generated from README.qmd"),
+      "README.md must stay a rendered artifact; edit README.qmd and render instead",
     );
   });
 
   test("README sources avoid text-only architecture fences", () => {
-    for (const rel of ["README.Rmd", "README.md"]) {
+    for (const rel of ["README.qmd", "README.md"]) {
       const lines = readFileSync(join(ROOT, rel), "utf8").split("\n");
       lines.forEach((line, i) => {
         assert.ok(!/^```\s*\{?text\b/i.test(line), `${rel}:${i + 1} uses a text-only fence; use a runnable chunk or prose`);
@@ -66,15 +66,15 @@ describe("README hygiene: action-first generated README, no fake illustration bl
     }
   });
 
-  test("README.Rmd examples are runnable chunks or typed code fences", () => {
+  test("README.qmd examples are runnable chunks or typed code fences", () => {
     const allowed = new Set(["r", "pi", "biocli", "dogfood", "sh", "ts", "json"]);
-    const lines = readFileSync(join(ROOT, "README.Rmd"), "utf8").split("\n");
+    const lines = readFileSync(join(ROOT, "README.qmd"), "utf8").split("\n");
     lines.forEach((line, i) => {
       const match = line.match(/^```\s*(?:\{?([A-Za-z0-9_-]+))?/);
       if (!match) return;
       const lang = match[1];
       if (!lang) return;
-      assert.ok(allowed.has(lang), `README.Rmd:${i + 1} uses unsupported fence '${lang}'`);
+      assert.ok(allowed.has(lang), `README.qmd:${i + 1} uses unsupported fence '${lang}'`);
     });
   });
 });

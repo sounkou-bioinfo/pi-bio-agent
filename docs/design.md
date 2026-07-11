@@ -55,7 +55,7 @@ operations, skills, and study notes compose those primitives for particular work
 
 ## Executable documentation
 
-Documentation is a woven view of the executable system, not a second implementation. `README.Rmd` is the current
+Documentation is a woven view of the executable system, not a second implementation. `README.qmd` is the current
 multi-runtime source for the rendered README; generated example READMEs and tool inventories follow the same rule.
 For core Node/TypeScript claims, the executable source is a test, script, manifest, operation, or package example, and
 the prose links to it. A design fence is illustrative only when it says so; otherwise it must be runnable or generated

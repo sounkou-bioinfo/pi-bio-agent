@@ -1,8 +1,8 @@
 ---
-output: github_document
+format: gfm
 ---
 
-<!-- README.md is generated from README.Rmd — please edit that file, then `npm run readme:rmd`. -->
+<!-- README.md is generated from README.qmd — please edit this file, then `npm run readme:qmd`. -->
 <!-- The `pi`, `dogfood`, and `biocli` chunks run real commands. Rendering needs a built `dist/`, Pi, and model credentials. -->
 
 ```{r setup, include = FALSE}

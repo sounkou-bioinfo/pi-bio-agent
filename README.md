@@ -1,5 +1,7 @@
 
-<!-- README.md is generated from README.Rmd — please edit that file, then `npm run readme:rmd`. -->
+
+<!-- README.md is generated from README.qmd — please edit this file, then `npm run readme:qmd`. -->
+
 <!-- The `pi`, `dogfood`, and `biocli` chunks run real commands. Rendering needs a built `dist/`, Pi, and model credentials. -->
 
 # pi-bio-agent
@@ -116,7 +118,9 @@ pi-bio-agent query .pi/bio-agent/readme-clinvar-tp53.json \
 ```
 
 <details>
+
 <summary>
+
 Command JSON output
 </summary>
 
@@ -204,7 +208,9 @@ pi-bio-agent query examples/variant-counts/manifest.json \
 ```
 
 <details>
+
 <summary>
+
 Command JSON output
 </summary>
 
@@ -246,7 +252,9 @@ pi-bio-agent reproduce .pi/bio-agent/runs/readme-variant-counts/replay.json
 ```
 
 <details>
+
 <summary>
+
 Command JSON output
 </summary>
 
@@ -311,12 +319,12 @@ DuckDB tables and stamp receipts: resolver version, parameter digest,
 and source snapshot. An operation is one read-only `SELECT`/`WITH` over
 those tables. Whatever it returns is the result.
 
-| leg       | primitive                                                                                                                                                                        |
-|-----------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Data      | `file_scan` and `duckdb.sql_materialize` over files, object stores, local DBs, and DuckDB community extensions such as `duckhts`, `anndata`, `duckdb_zarr`, and `plinking_duck`. |
-| Network   | `ducknng_ncurl_table` and ducknng HTTP profiles for SQL-native HTTP/RPC. `http.get` remains a host-injected JS fetch resolver when an application chooses it.                    |
-| Compute   | `compute.run`: a child process over Arrow IPC and declared file artifacts. R, Python, `rv`, Nextflow, or an NNG worker pool are argv/runner choices, not new core APIs.          |
-| Knowledge | one SemanticSQL-shaped graph: `bio_edges`, `bio_edges_as_of`, and `entailed_edge` for ontology terms, memory, observations, sessions, tool calls, artifacts, and run links.      |
+| leg | primitive |
+|----|----|
+| Data | `file_scan` and `duckdb.sql_materialize` over files, object stores, local DBs, and DuckDB community extensions such as `duckhts`, `anndata`, `duckdb_zarr`, and `plinking_duck`. |
+| Network | `ducknng_ncurl_table` and ducknng HTTP profiles for SQL-native HTTP/RPC. `http.get` remains a host-injected JS fetch resolver when an application chooses it. |
+| Compute | `compute.run`: a child process over Arrow IPC and declared file artifacts. R, Python, `rv`, Nextflow, or an NNG worker pool are argv/runner choices, not new core APIs. |
+| Knowledge | one SemanticSQL-shaped graph: `bio_edges`, `bio_edges_as_of`, and `entailed_edge` for ontology terms, memory, observations, sessions, tool calls, artifacts, and run links. |
 
 Host capabilities are explicit. If no `fetch` is injected, `http.get` is
 unavailable. If no `ComputeRunner` is injected, `compute.run` is
@@ -418,7 +426,9 @@ pi-bio-agent query examples/graph-window/manifest.json \
 ```
 
 <details>
+
 <summary>
+
 Command JSON output
 </summary>
 
@@ -454,7 +464,9 @@ pi-bio-agent graph-window \
 ```
 
 <details>
+
 <summary>
+
 Command JSON output
 </summary>
 
@@ -527,6 +539,13 @@ pi-bio-agent query examples/connectors/uniprot.json \
   --sql "SELECT primaryAccession, uniProtkbId, sequence.length aa FROM uniprot_entry"
 ```
 
+<details>
+
+<summary>
+
+Command JSON output
+</summary>
+
 ``` json
 {
   "ok": true,
@@ -548,6 +567,8 @@ pi-bio-agent query examples/connectors/uniprot.json \
   ]
 }
 ```
+
+</details>
 
 ## Pi tools
 
@@ -701,7 +722,9 @@ npm run dogfood:bring-it-home
 ```
 
 <details>
+
 <summary>
+
 Dogfood proof JSON
 </summary>
 
