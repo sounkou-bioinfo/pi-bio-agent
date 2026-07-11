@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { DuckDBInstance } from "@duckdb/node-api";
 
 const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const model = process.env.PI_BIO_PATTERN_MODEL ?? "openai-codex/gpt-5.5";
+const model = process.env.PI_BIO_PATTERN_MODEL ?? "gpt-5.3-codex-spark";
 const providerArgs = model.includes("/") ? ["--model", model] : ["--provider", "openai-codex", "--model", model];
 const sessionId = `pi-bio-pattern-${Date.now().toString(36)}`;
 const workdir = await mkdtemp(join(tmpdir(), "pi-bio-session-trace-"));
