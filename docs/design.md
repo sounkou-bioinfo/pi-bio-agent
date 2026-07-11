@@ -83,7 +83,8 @@ the related code.
   candidate can be chosen. Do not let a model invent identifiers or silently mutate tables.
 - **ducknng HTTP fanout is a real transport seam, not an implementation detail.** `ducknng_ncurl_table` is right for one
   response table. Whole-VCF or paginated annotation needs per-row scalar AIO launch, repeated any-ready drain, and
-  status-as-value retry logic; permanent `4xx` terminates, transient `429`/`5xx` retries. See
+  status-as-value retry logic; permanent `4xx` terminates, transient `429`/`5xx` retries. The fanout loop also accepts
+  a host abort signal and cancels/drops in-flight handles before returning the cancellation error. See
   `src/duckdb/ncurl-fanout.ts`, `src/duckdb/ncurl-retry.ts`, `test/ncurl-fanout.test.ts`, and
   `examples/wgs-chr22-annotation/README.md`.
 - **RPC shared state means a single writer owns the DB.** Clients should hold only throwaway `:memory:` DuckDB

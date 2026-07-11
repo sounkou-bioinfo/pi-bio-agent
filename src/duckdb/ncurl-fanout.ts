@@ -52,6 +52,8 @@ export interface NcurlFanoutOptions {
   drainSpins?: number; // safety cap on drain iterations per wave; default 200
   backoffMs?: number; // initial inter-wave backoff when transient retries remain; default 500
   maxBackoffMs?: number; // default 8000
+  /** Cooperative host cancellation. An abort during drain cancels and drops every in-flight handle before throwing. */
+  signal?: AbortSignal;
   /** Which outcomes are TRANSIENT (worth retrying). Default: transport failure (ok=false) or 429 or any 5xx.
    *  A permanent status (e.g. 400/404) is NOT retried — it terminates immediately. */
   isTransient?: (status: number | null, ok: boolean) => boolean;
@@ -74,6 +76,10 @@ const defaultTransient = (status: number | null, ok: boolean): boolean => !ok ||
  */
 export async function ncurlFanout(conn: SqlConn, opts: NcurlFanoutOptions): Promise<NcurlFanoutResult> {
   const { batchesTable, resultsTable, url, headersJson, profileId } = opts;
+  const throwIfAborted = (): void => {
+    if (opts.signal?.aborted) throw new Error("ncurlFanout: aborted");
+  };
+  throwIfAborted();
   for (const [label, id] of [["batchesTable", batchesTable], ["resultsTable", resultsTable]] as const) {
     if (!IDENT.test(id)) throw new Error(`ncurlFanout: ${label} '${id}' must be a SQL identifier`);
   }
@@ -104,6 +110,7 @@ export async function ncurlFanout(conn: SqlConn, opts: NcurlFanoutOptions): Prom
   let waves = 0;
   let backoff = opts.backoffMs ?? 500;
   for (;;) {
+    throwIfAborted();
     const [{ q }] = await conn.all<{ q: bigint }>(`SELECT count(*) q FROM ${queue}`);
     if (Number(q) === 0) break;
     waves += 1;
@@ -139,6 +146,7 @@ export async function ncurlFanout(conn: SqlConn, opts: NcurlFanoutOptions): Prom
         );
         const [{ n }] = await conn.all<{ n: bigint }>(`SELECT count(*) n FROM ${collected}`);
         got = Number(n);
+        throwIfAborted();
       }
 
       // 2xx successes -> results

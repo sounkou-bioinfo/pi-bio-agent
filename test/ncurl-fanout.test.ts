@@ -24,6 +24,25 @@ const ducknngAvailable = await (async () => {
 
 const CANNED = '[{"input":"x","most_severe_consequence":"missense_variant"}]';
 
+test("ncurlFanout rejects a pre-aborted host signal before creating tables", async () => {
+  const controller = new AbortController();
+  controller.abort();
+  const conn = {
+    all: async () => { throw new Error("ncurlFanout touched the connection after abort"); },
+    run: async () => { throw new Error("ncurlFanout touched the connection after abort"); },
+  };
+  await assert.rejects(
+    () => ncurlFanout(conn, {
+      batchesTable: "batches",
+      resultsTable: "results",
+      url: "http://127.0.0.1:1/unused",
+      headersJson: "[]",
+      signal: controller.signal,
+    }),
+    /ncurlFanout: aborted/,
+  );
+});
+
 // flaky=true: 400 on a missing `variants` array, else 503 for the first 2 calls then 200 (exercises retry).
 // flaky=false: 400 on a missing `variants` array, else always 200 (isolates the permanent-400 case).
 // Bind port 0 (OS-assigned) and DISCOVER the real base URL — a fixed port races under parallel test runs / TIME_WAIT.
