@@ -61,6 +61,23 @@ assertion recall with lexical retrieval; each augmentation mode reaches precisio
 proposals, original-text spans, augmentation receipts, review decisions, per-case metrics, micro metrics, and the
 recorded bootstrap run.
 
+## Query the pinned Monarch graph
+
+The inverted traversal can also run directly over Monarch's versioned DuckDB database. The host attaches the
+snapshot read-only; the manifest then queries its canonical `edges`, `nodes`, and ontology `closure` tables. No
+Monarch-specific resolver or denormalized search table is involved.
+
+```sh
+npm run dogfood:monarch
+```
+
+The checked-in query starts from four accepted HPO identifiers and returns phenotype-supported disease and gene
+hypotheses with exact-match counts, ancestor/descendant match kinds, annotation specificity, association predicates,
+and primary knowledge sources. A recorded run against the `2026-04-14` snapshot ranked PCDH19/DEE9 first and
+SCN1A/DEE6A second. The output is a hypothesis relation for targeted variant search and review, not a diagnosis.
+Result, receipts, replay spec, and run object are stored in CAS, while the ledger records the run, manifest, and
+operation links.
+
 ## Run the API
 
 ```sh

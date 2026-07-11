@@ -4,11 +4,11 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const exampleDir = join(repoRoot, "examples", "clinical-genomics");
-const templatePath = join(exampleDir, "manifest.template.json");
-const manifestPath = join(exampleDir, "manifest.json");
 const check = process.argv.includes("--check");
-
-const template = JSON.parse(await fs.readFile(templatePath, "utf8"));
+const manifests = [
+  ["manifest.template.json", "manifest.json"],
+  ["monarch.manifest.template.json", "monarch.manifest.json"],
+];
 
 async function inlineSql(target, textKey) {
   if (!target?.sqlFile) return;
@@ -17,25 +17,29 @@ async function inlineSql(target, textKey) {
   delete target.sqlFile;
 }
 
-for (const resource of template.provides?.resources ?? []) {
-  await inlineSql(resource.params, "sql");
-}
-for (const operation of template.provides?.operations ?? []) {
-  await inlineSql(operation.sql, "sqlTemplate");
-}
-
-const rendered = `${JSON.stringify(template, null, 2)}\n`;
-
-if (check) {
-  let current = "";
-  try {
-    current = await fs.readFile(manifestPath, "utf8");
-  } catch {
-    throw new Error(`missing generated manifest: ${manifestPath}`);
+for (const [templateName, manifestName] of manifests) {
+  const templatePath = join(exampleDir, templateName);
+  const manifestPath = join(exampleDir, manifestName);
+  const template = JSON.parse(await fs.readFile(templatePath, "utf8"));
+  for (const resource of template.provides?.resources ?? []) {
+    await inlineSql(resource.params, "sql");
   }
-  if (current !== rendered) {
-    throw new Error("examples/clinical-genomics/manifest.json is stale; run npm run manifest:clinical");
+  for (const operation of template.provides?.operations ?? []) {
+    await inlineSql(operation.sql, "sqlTemplate");
   }
-} else {
-  await fs.writeFile(manifestPath, rendered);
+
+  const rendered = `${JSON.stringify(template, null, 2)}\n`;
+  if (check) {
+    let current = "";
+    try {
+      current = await fs.readFile(manifestPath, "utf8");
+    } catch {
+      throw new Error(`missing generated manifest: ${manifestPath}`);
+    }
+    if (current !== rendered) {
+      throw new Error(`${manifestPath} is stale; run npm run manifest:clinical`);
+    }
+  } else {
+    await fs.writeFile(manifestPath, rendered);
+  }
 }
