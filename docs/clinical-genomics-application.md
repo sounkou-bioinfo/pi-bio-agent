@@ -59,8 +59,8 @@ new primitive. Each is a composition of existing pieces and stays app-side:
 2. **Monarch-KG projection** is not a core build. It is pure SQL, shown in
    `scripts/foreign-graph-closure.mjs`: `ATTACH`
    read-only + a `subject/predicate/object → from_id/predicate/to_id` SELECT + the existing `materializeEntailedEdges`
-   (which already takes any source table). It belongs in a manifest. The opt-in live benchmark closes the remote
-   Monarch `biolink:subclass_of` slice at run time; the remaining app question is predicate policy and snapshot
+   (which already takes any source table). It belongs in a manifest. The script probes a pinned remote canonical
+   `edges` relation; the remaining app questions are predicate policy, use of upstream closure, and snapshot
    provenance, not a missing core primitive.
 3. **Ledger → training dataset** is not a core build. It is a `SELECT`/view over `bio_observations` joined to the Phase-4
    approval slots (contested = a `WHERE` over decisions), with a documented dataset schema.
@@ -122,10 +122,9 @@ quality.
   data plane. Weight-update studying is out of scope ([`machine-studying-lineage`](./machine-studying-lineage.md)).
 - `model→tools→model` HPO adjudication is a genuine agentic loop, but the agent already does that with the grounding
   tools; it is app behavior, not a library primitive.
-- Remote Monarch ATTACH is proven on a locus extract (`scripts/foreign-graph-closure.mjs`), and the same script's
-  opt-in live benchmark exercises remote `biolink:subclass_of` closure at Monarch scale. Keep it as a regression
-  benchmark because the `latest` URL is mutable, and future snapshots, broader predicate sets, and upstream
-  precomputed closures are application policy choices.
+- Foreign graph projection and closure are proven on a hermetic Biolink edge fixture
+  (`scripts/foreign-graph-closure.mjs`), while its best-effort remote probe checks a pinned Monarch canonical `edges`
+  relation. Full nodes/edges/upstream-closure traversal and future snapshot selection remain application policy.
 - Calibration and ACMG points encode human curatorial judgment (authored rules, not derivable); they are app
   producers with tests, and the receipt records which ruleset/version ran.
 - Claims about small specialized models outperforming frontier models are domain-contingent. For this application,

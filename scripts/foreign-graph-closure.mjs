@@ -7,63 +7,37 @@ import { materializeEntailedEdges } from "../dist/duckdb/graph-closure.js";
 
 // PROOF of the immanent abstraction (docs/refinments.md): an EXTERNAL SQL graph is a `bio_edges` source via ATTACH +
 // a subject/predicate/object column map, and the SAME `entailed_edge` closure walks it. We build a small
-// Monarch-shaped external DuckDB (a "locus extract": a biolink `denormalized_edges` table with an is_a hierarchy +
-// gene→phenotype + gene→disease→phenotype), ATTACH it read-only, project it into `bio_edges`, run the real library
+// Biolink-shaped external DuckDB with canonical subject/predicate/object edges, ATTACH it read-only, project it into
+// `bio_edges`, run the real library
 // closure, and assert both a direct projected edge and transitive hops the closure had to derive. A best-effort probe
-// then shows the REAL remote Monarch KG (a remote .duckdb over httpfs) is ATTACH-able and biolink-shaped. With
-// --bench-remote-subclass, the script also materializes the real remote biolink:subclass_of slice and closes it with
-// the same library primitive; that path is intentionally opt-in because it is a live network benchmark.
+// then checks that a pinned remote Monarch KG exposes the same canonical edge columns. The application-level Monarch
+// dogfood owns its nodes/edges/closure query and scientific predicate policy.
 //
 // Run:  npm run build && node scripts/foreign-graph-closure.mjs
-// Bench: npm run build && node scripts/foreign-graph-closure.mjs --bench-remote-subclass
 
 const assert = (cond, msg) => { if (!cond) { console.error("FAIL:", msg); process.exit(1); } };
 
-async function makeMonarchShapedExtract(path) {
-  // a foreign KG in its OWN duckdb file, biolink `denormalized_edges` columns (subject/predicate/object + labels)
+async function makeBiolinkExtract(path) {
   const inst = await DuckDBInstance.create(path);
   const c = await inst.connect();
-  await c.run("CREATE TABLE denormalized_edges (subject TEXT, predicate TEXT, object TEXT, subject_label TEXT, object_label TEXT)");
+  await c.run("CREATE TABLE edges (subject TEXT, predicate TEXT, object TEXT)");
   const rows = [
     // HP is_a hierarchy (3 levels): Seizure -> Abn. CNS physiology -> Abn. nervous system
-    ["HP:0001250", "biolink:subclass_of", "HP:0012638", "Seizure", "Abnormal nervous system physiology"],
-    ["HP:0012638", "biolink:subclass_of", "HP:0000707", "Abnormal nervous system physiology", "Abnormality of the nervous system"],
+    ["HP:0001250", "biolink:subclass_of", "HP:0012638"],
+    ["HP:0012638", "biolink:subclass_of", "HP:0000707"],
     // gene -> phenotype (leaf) and gene -> disease
-    ["NCBIGene:6323", "biolink:has_phenotype", "HP:0001250", "SCN1A", "Seizure"],
-    ["NCBIGene:6323", "biolink:gene_associated_with_condition", "MONDO:0100135", "SCN1A", "SCN1A-related epilepsy"],
+    ["NCBIGene:6323", "biolink:has_phenotype", "HP:0001250"],
+    ["NCBIGene:6323", "biolink:gene_associated_with_condition", "MONDO:0100135"],
     // disease -> phenotype
-    ["MONDO:0100135", "biolink:has_phenotype", "HP:0001250", "SCN1A-related epilepsy", "Seizure"],
+    ["MONDO:0100135", "biolink:has_phenotype", "HP:0001250"],
   ];
-  for (const r of rows) await c.run("INSERT INTO denormalized_edges VALUES (?,?,?,?,?)", r);
+  for (const r of rows) await c.run("INSERT INTO edges VALUES (?,?,?)", r);
   c.closeSync(); inst.closeSync();
 }
 
-async function benchRemoteSubclassClosure(raw, conn) {
-  const t0 = performance.now();
-  const dt = () => `${((performance.now() - t0) / 1000).toFixed(2)}s`;
-  console.log(`  REAL Monarch subclass closure benchmark: start`);
-  await raw.run(
-    "CREATE OR REPLACE TABLE bio_edges AS SELECT subject AS from_id, predicate, object AS to_id FROM monarch.denormalized_edges WHERE predicate='biolink:subclass_of'",
-  );
-  const [sourceStats] = await conn.all(
-    "SELECT count(*) AS edges, count(DISTINCT from_id) AS subjects, count(DISTINCT to_id) AS objects FROM bio_edges",
-  );
-  console.log(
-    `    [${dt()}] source: ${sourceStats.edges} subclass edges, ${sourceStats.subjects} subjects, ${sourceStats.objects} objects`,
-  );
-  const entailed = await materializeEntailedEdges(conn, ["biolink:subclass_of"]);
-  const [closureStats] = await conn.all(
-    "SELECT count(DISTINCT from_id) AS subjects, count(DISTINCT to_id) AS objects FROM entailed_edge",
-  );
-  console.log(
-    `    [${dt()}] closure: ${entailed} entailed rows, ${closureStats.subjects} subjects, ${closureStats.objects} objects`,
-  );
-}
-
 async function main() {
-  const benchRemoteSubclass = process.argv.includes("--bench-remote-subclass");
   const extPath = join(tmpdir(), `monarch-extract-${process.pid}.duckdb`);
-  await makeMonarchShapedExtract(extPath);
+  await makeBiolinkExtract(extPath);
 
   const raw = await (await DuckDBInstance.create(":memory:")).connect();
   const conn = duckdbNodeConn(raw);
@@ -71,7 +45,7 @@ async function main() {
   // 1) ATTACH the foreign graph read-only, 2) PROJECT it into bio_edges via the column map (subject/predicate/object).
   await raw.run(`ATTACH '${extPath}' AS ext (READ_ONLY)`);
   await conn.run(
-    "CREATE TABLE bio_edges AS SELECT subject AS from_id, predicate, object AS to_id FROM ext.denormalized_edges",
+    "CREATE TABLE bio_edges AS SELECT subject AS from_id, predicate, object AS to_id FROM ext.edges",
   );
   const direct = Number((await conn.all("SELECT count(*) AS n FROM bio_edges"))[0].n);
   console.log(`  ATTACHed foreign KG + projected ${direct} biolink edges into bio_edges (subject/predicate/object -> from_id/predicate/to_id)`);
@@ -106,17 +80,15 @@ async function main() {
   await raw.run("DETACH ext");
   await fs.rm(extPath, { force: true });
 
-  // 5) best-effort: the REAL remote Monarch KG is a remote .duckdb, ATTACH-able + biolink-shaped. Skip-report on
-  //    failure (no httpfs / network / too slow). Use --bench-remote-subclass to exercise the real remote closure.
+  // 5) best-effort: the pinned remote Monarch KG is a remote .duckdb with canonical edges. Skip-report on failure.
   try {
     await raw.run("INSTALL httpfs; LOAD httpfs;");
-    await raw.run("ATTACH 'https://data.monarchinitiative.org/monarch-kg/latest/monarch-kg.duckdb' AS monarch (READ_ONLY)");
-    const cols = await conn.all("SELECT column_name FROM information_schema.columns WHERE table_catalog='monarch' AND table_name='denormalized_edges' AND column_name IN ('subject','predicate','object') ORDER BY 1");
-    const sample = await conn.all("SELECT predicate FROM monarch.denormalized_edges LIMIT 1");
-    console.log(`  REAL Monarch remote ATTACH: reachable; denormalized_edges has ${cols.length}/3 of subject/predicate/object; sample predicate='${sample[0]?.predicate}'. Same projection applies.`);
-    if (benchRemoteSubclass) await benchRemoteSubclassClosure(raw, conn);
+    await raw.run("ATTACH 'https://data.monarchinitiative.org/monarch-kg/2026-04-14/monarch-kg.duckdb' AS monarch (READ_ONLY)");
+    const cols = await conn.all("SELECT column_name FROM information_schema.columns WHERE table_catalog='monarch' AND table_name='edges' AND column_name IN ('subject','predicate','object') ORDER BY 1");
+    const sample = await conn.all("SELECT predicate FROM monarch.edges LIMIT 1");
+    console.log(`  Pinned Monarch remote ATTACH: reachable; edges has ${cols.length}/3 of subject/predicate/object; sample predicate='${sample[0]?.predicate}'. Same projection applies.`);
   } catch (e) {
-    console.log(`  REAL Monarch remote ATTACH: skipped (${String(e).replace(/\s+/g, " ").slice(0, 90)}). Mechanism proven on the extract above.`);
+    console.log(`  Pinned Monarch remote ATTACH: skipped (${String(e).replace(/\s+/g, " ").slice(0, 90)}). Mechanism proven on the extract above.`);
   }
   process.exit(0);
 }
