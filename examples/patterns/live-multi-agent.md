@@ -10,8 +10,8 @@ between them** — never by opening a shared DuckDB file, so the
 process-exclusive RW lock is never touched. This is an
 access-list-shaped Pi harness smoke, not a Fugu implementation.
 
-Run it with: `npx tsx scripts/live-multi-agent.ts` (requires the `pi`
-CLI + a configured provider).
+Run it with: `npm run pattern:live-multi-agent` (requires the `pi` CLI +
+a configured provider).
 
 ## Recorded run (2026-06-29)
 

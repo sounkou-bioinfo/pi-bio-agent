@@ -9,8 +9,8 @@ access-list), and an aggregator agent **surveys both and synthesizes**.
 Same proven executor + direct-spawn worker as `live-multi-agent.ts` —
 only the scaffold *topology* changes (fan-in, not a chain).
 
-Run: `npx tsx scripts/live-debate.ts` (requires the `pi` CLI + a
-configured provider).
+Run: `npm run pattern:live-debate` (requires the `pi` CLI + a configured
+provider).
 
 ## Recorded run (2026-06-30)
 

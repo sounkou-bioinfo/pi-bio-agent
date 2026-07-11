@@ -50,3 +50,31 @@ The defensible answer is **included = 1**: the unknown-frequency variant is **ab
 
 So the abstention is one operation away, and the run carries a receipt at every step
 (the two file digests + the operation's pinned SQL digest) — the abstention is auditable, not implicit.
+
+## Why it is not a skill
+
+The same manifest also demonstrates a second concept: an ad-hoc question needs no new skill if the resolver contract is already declared.
+
+- `rare_high_impact.report` stays the pinned, audited operation used for safety-critical abstention.
+- `SELECT consequence, count(*) ...` can be run directly against the same resolved tables for exploratory slices.
+
+That is, one declared resource surface enables both:
+
+1. a **deterministic, regression-pinned operation** for the critical bucket definition; and
+2. a **direct SQL exploratory query** that shares the exact same source provenance (same manifest, same receipts, same ledger run context).
+
+The key point is not “more patterns,” but fewer: manifest + resolver + SQL over those tables.
+
+```sh
+pi-bio-agent query examples/rare-high-impact/manifest.json \
+  --db :memory: \
+  --operation rare_high_impact.report \
+  --run-id rare-high-impact.report
+```
+
+```sh
+pi-bio-agent query examples/rare-high-impact/manifest.json \
+  --db :memory: \
+  --sql "SELECT consequence, count(*) AS n FROM annotated_variants GROUP BY consequence ORDER BY n DESC, consequence" \
+  --run-id rare-high-impact.ad-hoc-consequence
+```

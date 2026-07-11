@@ -2,15 +2,15 @@
 
 # Cross-process shared memory over a ducknng server — evidence
 
-`npm run build && node scripts/memory-over-ducknng.mjs` — the
-inter-process / inter-agent memory mode of
-[docs/concurrency.md](../docs/concurrency.md), run for real. A server
-process owns the ONE `bio_observations` store; two **separate OS
-processes** remember/recall through it over the typed ducknng `SqlConn`,
-**sequentially** (A writes, then B reads). This is a separate-process
-*sharing* smoke test — it does **not** prove concurrent same-slug writes
-(those need server-side per-`statement_key` serialization; see the
-residue in [docs/concurrency.md](../docs/concurrency.md)) nor
+`npm run pattern:memory-over-ducknng` — the inter-process / inter-agent
+memory mode of [docs/concurrency.md](../docs/concurrency.md), run for
+real. A server process owns the ONE `bio_observations` store; two
+**separate OS processes** remember/recall through it over the typed
+ducknng `SqlConn`, **sequentially** (A writes, then B reads). This is a
+separate-process *sharing* smoke test — it does **not** prove concurrent
+same-slug writes (those need server-side per-`statement_key`
+serialization; see the residue in
+[docs/concurrency.md](../docs/concurrency.md)) nor
 persistent/inter-machine behavior (the server DB is `:memory:`).
 
 The memory-store functions (`remember`, `recall`, `listMemory`) are
