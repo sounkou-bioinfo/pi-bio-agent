@@ -39,6 +39,15 @@ sanitize_paths <- function(txt) {
   txt
 }
 
+render_json_output <- function(txt, summary = "JSON output") {
+  paste0(
+    "<details>\n",
+    "<summary>", summary, "</summary>\n\n",
+    "``` json\n", txt, "\n```\n\n",
+    "</details>\n"
+  )
+}
+
 knitr::knit_engines$set(pi = function(options) {
   prompt <- paste(options$code, collapse = " ")
   model <- if (!is.null(options$model)) options$model else "openai-codex/gpt-5.3-codex"
@@ -78,7 +87,12 @@ knitr::knit_engines$set(biocli = function(options) {
   lang <- if (grepl("^\\s*[\\[{]", out_txt)) "json" else ""
   # wrap each flag onto its own continuation line so long commands don't overflow the README
   cmd <- gsub(" --", " \\\\\n  --", paste("pi-bio-agent", args))
-  knitr::asis_output(paste0("``` sh\n", cmd, "\n```\n\n", "``` ", lang, "\n", out_txt, "\n```\n"))
+  rendered <- if (lang == "json") {
+    render_json_output(out_txt, "Command JSON output")
+  } else {
+    paste0("``` ", lang, "\n", out_txt, "\n```\n")
+  }
+  knitr::asis_output(paste0("``` sh\n", cmd, "\n```\n\n", rendered))
 })
 
 knitr::knit_engines$set(dogfood = function(options) {
@@ -112,7 +126,10 @@ knitr::knit_engines$set(dogfood = function(options) {
     queueCancel = summary$queueCancel[c("staleWriteRejected", "resumedPhase")],
     renvEnvironment = summary$renvEnvironment[c("rVersion", "bioconductor", "envStatus", "artifactRows")]
   )
-  knitr::asis_output(paste0("``` sh\n", cmd, "\n```\n\n``` json\n", jsonlite::toJSON(proof, pretty = TRUE, auto_unbox = TRUE), "\n```\n"))
+  knitr::asis_output(paste0("``` sh\n", cmd, "\n```\n\n", render_json_output(
+    jsonlite::toJSON(proof, pretty = TRUE, auto_unbox = TRUE),
+    "Dogfood proof JSON"
+  )))
 })
 ```
 
@@ -321,31 +338,6 @@ query examples/graph-window/manifest.json --db .pi/bio-agent/readme-graph-window
 graph-window --db .pi/bio-agent/readme-graph-window.duckdb --table bio_edges --start run:readme --direction both --limit 10
 ```
 
-## Dogfood
-
-Run the compact all-primitives dogfood:
-
-```{dogfood}
-npm run dogfood:bring-it-home
-```
-
-It exercises host-event receipts, step checkpoints/resume, SemanticSQL projection,
-ducknng profile receipts, SDK exports, figure/report CAS artifacts, and real process
-compute when R is available. SemanticSQL compatibility is pinned to the concrete generated-view names at upstream
-commit `83503077e867419c18a211d97105d8ead554e947`; it is not a claim of equivalence with every future generator.
-
-Run the Pi session trace dogfood after installing the extension and configuring an
-image-capable model:
-
-```sh
-npm run dogfood:pi-session-trace
-```
-
-It drives a real Pi session through image read, successful shell call, intentional
-shell error, manifest discovery, SQL validation, `bio_query`, and then queries the
-project ledger for the session summary, tool trajectory, CAS roots, and the recorded
-tool-call/run linkage.
-
 ## Examples
 
 Every [example](examples/) has a recorded run; `npm run check` fails if generated
@@ -468,7 +460,7 @@ Prior art and lineage:
   [`nanonext`](https://github.com/r-lib/nanonext) · [`mirai`](https://mirai.r-lib.org/)
 - **SemanticSQL** (canonical LinkML source schema for `statements`, `prefix`, generated views, and
   `entailed_edge`): <https://github.com/INCATools/semantic-sql>
-- Design thread (sounkou-bioinfo × Manuel): [LinkedIn](https://www.linkedin.com/feed/update/urn:li:activity:7473824764575436800)
+- Design thread (Sounkou Mahamane Toure × Manuel Corpas): [LinkedIn](https://www.linkedin.com/feed/update/urn:li:activity:7473824764575436800)
 
 ## Development
 
@@ -481,6 +473,35 @@ npm run check     # typecheck + tests + docs/readme/examples staleness gates (th
 `npm run provision:ducknng-owned` verifies the owned retry/auth/upload/TLS/RPC surface. Runtime Pi APIs are peer
 dependencies supplied by Pi itself.
 
+### Maintainer proof (dogfood)
+
+This is executable maintainer evidence, not a product workflow or a biomedical answer source. It runs one compact
+composition of the shipped ledger, graph, host-capability, CAS, compute, and review primitives so changes are tested
+against the substrate rather than only described in prose. Its proof JSON is collapsed in the rendered README.
+
+Run it from the repository root:
+
+```{dogfood}
+npm run dogfood:bring-it-home
+```
+
+It exercises host-event receipts, step checkpoints/resume, SemanticSQL projection,
+ducknng profile receipts, SDK exports, figure/report CAS artifacts, and real process
+compute when R is available. SemanticSQL compatibility is pinned to the concrete generated-view names at upstream
+commit `83503077e867419c18a211d97105d8ead554e947`; it is not a claim of equivalence with every future generator.
+
+Run the Pi session trace dogfood after installing the extension and configuring an
+image-capable model:
+
+```sh
+npm run dogfood:pi-session-trace
+```
+
+It drives a real Pi session through image read, successful shell call, intentional
+shell error, manifest discovery, SQL validation, `bio_query`, and then queries the
+project ledger for the session summary, tool trajectory, CAS roots, and the recorded
+tool-call/run linkage.
+
 ## Status & contributing
 
 Pre-1.0 (`0.1.0`). The public API may still move. Issues and PRs welcome. Keep new
@@ -489,4 +510,4 @@ or SQL, not bespoke core code.
 
 ## License
 
-[GPL-2.0-or-later](LICENSE) © sounkou-bioinfo
+[GPL-2.0-or-later](LICENSE) © Sounkou Mahamane Toure

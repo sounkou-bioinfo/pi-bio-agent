@@ -2,6 +2,7 @@
   "name": "pi-bio-workbench",
   "version": "0.1.0",
   "private": true,
+  "author": "Sounkou Mahamane Toure",
   "description": "Application workbench built on pi-bio-agent primitives; clinical genomics is the first binding.",
   "license": "GPL-2.0-or-later",
   "type": "module",

@@ -1,17 +1,37 @@
 import { chmodSync, existsSync, rmSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { dirname, join, resolve } from "node:path";
+import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const localTsc = join(packageRoot, "node_modules", "typescript", "bin", "tsc");
-const tscCommand = existsSync(localTsc) ? process.execPath : "tsc";
-const tscPrefix = existsSync(localTsc) ? [localTsc] : [];
+const localBinTsc = join(packageRoot, "node_modules", ".bin", process.platform === "win32" ? "tsc.cmd" : "tsc");
+
+const isWithin = (root, candidate) => {
+  const path = relative(root, candidate);
+  return path === "" || (path !== ".." && !path.startsWith(`..${sep}`) && !isAbsolute(path));
+};
+
+const pathTsc = process.env.PATH?.split(delimiter)
+  .map((entry) => join(entry, process.platform === "win32" ? "tsc.cmd" : "tsc"))
+  .find((candidate) => existsSync(candidate));
+const trustedRoots = [join(packageRoot, "node_modules")];
+if (basename(dirname(packageRoot)) === "node_modules") trustedRoots.push(dirname(packageRoot));
+const trustedPathTsc = pathTsc && trustedRoots.some((root) => isWithin(root, pathTsc)) ? pathTsc : undefined;
+const tscInvocation = existsSync(localTsc)
+  ? { command: process.execPath, args: [localTsc] }
+  : existsSync(localBinTsc)
+    ? { command: localBinTsc, args: [] }
+    : trustedPathTsc
+      ? { command: trustedPathTsc, args: [] }
+      : undefined;
 const requiredDist = [
   join(packageRoot, "dist", "index.js"),
   join(packageRoot, "dist", "cli", "bin.js"),
 ];
-const tscProbe = spawnSync(tscCommand, [...tscPrefix, "--version"], { cwd: packageRoot, stdio: "ignore" });
+const tscProbe = tscInvocation
+  ? spawnSync(tscInvocation.command, [...tscInvocation.args, "--version"], { cwd: packageRoot, stdio: "ignore" })
+  : { status: 1 };
 if (tscProbe.status !== 0) {
   const missing = requiredDist.filter((path) => !existsSync(path));
   if (missing.length === 0) {
@@ -28,7 +48,7 @@ if (tscProbe.status !== 0) {
 }
 
 rmSync(join(packageRoot, "dist"), { recursive: true, force: true });
-const build = spawnSync(tscCommand, [...tscPrefix, "-p", "tsconfig.build.json"], {
+const build = spawnSync(tscInvocation.command, [...tscInvocation.args, "-p", "tsconfig.build.json"], {
   cwd: packageRoot,
   stdio: "inherit",
 });

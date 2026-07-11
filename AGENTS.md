@@ -21,14 +21,25 @@ Instructions for coding agents working in this repository.
 - For memory, graph, and provenance work, read `docs/memory-and-knowledge-unification.md`, `docs/ontology-and-knowledge-graphs.md`, and `docs/concurrency.md`.
 - For user-facing behavior, check both `README.Rmd` and the rendered `README.md`; keep them consistent when editing README prose.
 
-## Monorepo Packages
+## Monorepo Layout And Boundary Discipline
 
-- The root is the public `pi-bio-agent` package. `packages/workbench` is a first-party application consumer with its
-  own package identity, manifests, SQL, API, and tests.
-- Keep the package boundary real: the workbench imports the root package surface, never `src/` internals. A generic
-  need belongs in core; a clinical choice belongs in the workbench.
-- `npm run check` checks core. `npm run check:all` checks core and workbench. The workspace is the lockstep
-  development path; the workbench's standalone metadata still names the GitHub package contract.
+- The repository root is the public `pi-bio-agent` package. `packages/workbench` is the first-party application
+  package in this same repository, with its own manifests, SQL, API, and tests. There is no second canonical
+  workbench checkout or repository to keep in sync.
+- Keep the package boundary real: the workbench consumes the root package surface, never `src/` internals. Its package
+  metadata retains the GitHub package contract for external consumers; local lockstep development happens in this
+  workspace and is not a reason to publish sibling filesystem paths or duplicate the core.
+- Core owns reusable execution and evidence primitives. The workbench owns clinical composition and policy. If a
+  workbench need is generic, stop and add the smallest tested primitive to core; if it is a domain choice, keep it in
+  manifests, SQL, fixtures, or host composition. Do not hide a core gap behind an application helper.
+- Do not add a second lifecycle, resolver, transport, graph model, auth layer, or schema merely because the first
+  consumer finds the existing surface inconvenient. Name the concrete consumers, reconcile the contracts, then add
+  one shared primitive with dogfood and tests.
+- `npm run check` checks core. `npm run check:all` checks core and workbench. Root CI is the canonical workspace gate;
+  do not add a nested package workflow.
+- npm scripts are a flat namespace; the existing `check:`, `build:`, `readme:`, `provision:`, `install:`, and
+  `dogfood:` prefixes are sufficient grouping. Keep one parameterized installer (`npm run install:skill -- --host …`)
+  rather than adding an alias for every host.
 
 ## Avoid Docs Sprawl
 
@@ -38,6 +49,19 @@ Instructions for coding agents working in this repository.
 - Avoid dated status headings like `Implemented (date)`. Dates are fine for recorded-run evidence, release notes, or source-citation context; they are poor anchors for living design docs.
 - Keep docs professional: no assistant mannerisms, no hype slogans, no all-caps emphasis, no private-review shorthand, and no claims stronger than the repo demonstrates.
 - Treat external READMEs as positioning, not proof. When a reference informs architecture, read its code, tests, schemas, or specs and cite the implemented pattern rather than the marketing paragraph.
+
+## Executable Documentation
+
+- Documentation is a woven view of executable source, not a second implementation. A user-facing workflow claim must
+  point to a test, script, manifest, operation, or generated example that exercises it.
+- `README.Rmd` is the executable README source and `README.md` is its generated artifact. Example READMEs and tool
+  inventories follow the same source/generator/check pattern; do not hand-edit their output.
+- Quarto is suitable for future polyglot reports and can run TypeScript project scripts through its bundled Deno. Its
+  Observable-JS cells are browser/reactive code, not a Node/DuckDB execution surface. Keep core Node/TypeScript claims
+  in `test/`, `scripts/`, or package examples and link or generate them into prose.
+- A `text` fence or explicitly labeled pseudocode/diagram is illustrative. A `ts`, `sql`, or `sh` block should be
+  runnable or included from the source that the checks execute. Never paste live JSON/results into docs when a renderer
+  or example generator can produce them.
 
 ## Core Boundary
 
@@ -112,13 +136,9 @@ the missing core contract and promote only that contract, not an application-spe
   `TermSet`s, `decideGrounding`, and the host agent loop already compose the path from text to validated CURIEs.
   External grounding packages may be benchmarks or optional providers only when a measured case demonstrates a
   retrieval/reranking gap; do not add one to the baseline architecture by association.
-- Rare-disease application policy stays downstream. The inverted traversal is case narrative -> grounded phenotype
-  assertions -> Monarch disease/gene hypotheses -> assembly-pinned gene intervals -> indexed case-VCF range reads
-  -> existing VEP fanout -> SQL ranking -> literature evidence and gated review. This composition is application
-  work, not evidence for another core resolver, mapper, workflow engine, or per-question skill.
-- Agent and subagent coordination should pass durable relations, CAS references, checkpoints, and observations.
+- Consumers and hosts should coordinate through durable relations, CAS references, checkpoints, and observations.
   Prose handoffs may explain work, but they are not the scientific state and must not become the only record of a
-  candidate, source, score, or judgment.
+  source, result, or judgment.
 
 ## Pillars And Compute Lifecycle
 

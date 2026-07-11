@@ -70,6 +70,8 @@ pi \
 
 Manifest path: `.pi/bio-agent/readme-clinvar-tp53.json`
 
+SQL:
+
 ``` sql
 WITH distinct_calls AS (
   SELECT DISTINCT
@@ -112,6 +114,11 @@ pi-bio-agent query .pi/bio-agent/readme-clinvar-tp53.json \
   --init-sql "INSTALL duckhts FROM community; LOAD duckhts;" \
   --sql "WITH distinct_calls AS (SELECT DISTINCT CHROM, POS, REF, ALT, significance FROM clinvar, UNNEST(INFO_CLNSIG) AS u(significance)) SELECT significance, COUNT(*) AS n FROM distinct_calls GROUP BY significance ORDER BY n DESC"
 ```
+
+<details>
+<summary>
+Command JSON output
+</summary>
 
 ``` json
 {
@@ -174,6 +181,8 @@ pi-bio-agent query .pi/bio-agent/readme-clinvar-tp53.json \
 }
 ```
 
+</details>
+
 ## Start
 
 Install the Pi extension:
@@ -193,6 +202,11 @@ pi-bio-agent query examples/variant-counts/manifest.json \
   --author readme \
   --sql "SELECT consequence, count(*) AS n FROM variants GROUP BY consequence ORDER BY consequence"
 ```
+
+<details>
+<summary>
+Command JSON output
+</summary>
 
 ``` json
 {
@@ -223,11 +237,18 @@ pi-bio-agent query examples/variant-counts/manifest.json \
 }
 ```
 
+</details>
+
 Verify that run against a fresh database:
 
 ``` sh
 pi-bio-agent reproduce .pi/bio-agent/runs/readme-variant-counts/replay.json
 ```
+
+<details>
+<summary>
+Command JSON output
+</summary>
 
 ``` json
 {
@@ -254,6 +275,8 @@ pi-bio-agent reproduce .pi/bio-agent/runs/readme-variant-counts/replay.json
   "runDir": ".pi/bio-agent/runs/reproduce-readme-variant-counts-<run>"
 }
 ```
+
+</details>
 
 Use it as a library:
 
@@ -394,6 +417,11 @@ pi-bio-agent query examples/graph-window/manifest.json \
   --sql "SELECT count(*) AS n FROM bio_edges"
 ```
 
+<details>
+<summary>
+Command JSON output
+</summary>
+
 ``` json
 {
   "ok": true,
@@ -414,6 +442,8 @@ pi-bio-agent query examples/graph-window/manifest.json \
 }
 ```
 
+</details>
+
 ``` sh
 pi-bio-agent graph-window \
   --db .pi/bio-agent/readme-graph-window.duckdb \
@@ -422,6 +452,11 @@ pi-bio-agent graph-window \
   --direction both \
   --limit 10
 ```
+
+<details>
+<summary>
+Command JSON output
+</summary>
 
 ``` json
 {
@@ -459,117 +494,7 @@ pi-bio-agent graph-window \
 }
 ```
 
-## Dogfood
-
-Run the compact all-primitives dogfood:
-
-``` sh
-npm run dogfood:bring-it-home
-```
-
-``` json
-{
-  "observationCounts": {
-    "executes": 1,
-    "invoked_by": 1,
-    "tool_call": 1,
-    "run": 2,
-    "host_event": 6,
-    "job_step_checkpoint": 2
-  },
-  "ducknngProfile": {
-    "version": "2",
-    "receiptChanged": true,
-    "subjectRestriction": {
-      "restricted": true,
-      "count": 2,
-      "digest": "sha256:ceee9bcb816bd665d011958ad04d1fdfdcb0230ac619ea4a59afaedc002dc953"
-    }
-  },
-  "casMetadata": {
-    "casMetadataRefs": 4,
-    "artifactCasMetadataRefs": 2
-  },
-  "graphProjection": {
-    "external": {
-      "edgeCount": 3,
-      "closureCount": 3
-    },
-    "internal": {
-      "edgeCountAtLeast4": true,
-      "closureCountAtLeast3": true
-    }
-  },
-  "trainingCorpus": {
-    "toolCalls": 1,
-    "runs": 2,
-    "artifacts": 3,
-    "hostEvents": 6,
-    "hostEventLinks": 13,
-    "parquetReadbackRows": 1,
-    "artifactRoles": [
-      {
-        "sourceNode": "run:dogfood-host-capability",
-        "mediaType": "image/svg+xml",
-        "semanticRole": "figure",
-        "plottingSystem": "inline-svg"
-      },
-      {
-        "sourceNode": "run:dogfood-host-capability",
-        "mediaType": "text/html",
-        "semanticRole": "report"
-      }
-    ]
-  },
-  "governanceHostEvents": {
-    "count": 2,
-    "linkCount": 4,
-    "kinds": [
-      "workbench.governance.approval_submitted",
-      "workbench.governance.approval_decided"
-    ],
-    "eventTypes": [
-      "approval_submitted",
-      "approval_decided"
-    ]
-  },
-  "sdkConsumer": {
-    "publicExportsOnly": true,
-    "runtimeImports": true,
-    "packageSource": "npm-pack"
-  },
-  "queueCancel": {
-    "staleWriteRejected": true,
-    "resumedPhase": "cancelled"
-  },
-  "renvEnvironment": {
-    "rVersion": "4.6.0",
-    "bioconductor": "3.22",
-    "envStatus": "matched",
-    "artifactRows": 1
-  }
-}
-```
-
-It exercises host-event receipts, step checkpoints/resume, SemanticSQL
-projection, ducknng profile receipts, SDK exports, figure/report CAS
-artifacts, and real process compute when R is available. SemanticSQL
-compatibility is pinned to the concrete generated-view names at upstream
-commit `83503077e867419c18a211d97105d8ead554e947`; it is not a claim of
-equivalence with every future generator.
-
-Run the Pi session trace dogfood after installing the extension and
-configuring an image-capable model:
-
-``` sh
-npm run dogfood:pi-session-trace
-```
-
-It drives a real Pi session through image read, successful shell call,
-intentional shell error, manifest discovery, SQL validation,
-`bio_query`, and then queries the project ledger for the session
-summary, tool trajectory, CAS roots, and the recorded tool-call/run
-linkage.
+</details>
 
 ## Examples
 
@@ -746,7 +671,7 @@ Prior art and lineage:
 - **SemanticSQL** (canonical LinkML source schema for `statements`,
   `prefix`, generated views, and `entailed_edge`):
   <https://github.com/INCATools/semantic-sql>
-- Design thread (sounkou-bioinfo × Manuel):
+- Design thread (Sounkou Mahamane Toure × Manuel Corpas):
   [LinkedIn](https://www.linkedin.com/feed/update/urn:li:activity:7473824764575436800)
 
 ## Development
@@ -761,6 +686,131 @@ local `duckhts.read_bcf` tests. `npm run provision:ducknng-owned`
 verifies the owned retry/auth/upload/TLS/RPC surface. Runtime Pi APIs
 are peer dependencies supplied by Pi itself.
 
+### Maintainer proof (dogfood)
+
+This is executable maintainer evidence, not a product workflow or a
+biomedical answer source. It runs one compact composition of the shipped
+ledger, graph, host-capability, CAS, compute, and review primitives so
+changes are tested against the substrate rather than only described in
+prose. Its proof JSON is collapsed in the rendered README.
+
+Run it from the repository root:
+
+``` sh
+npm run dogfood:bring-it-home
+```
+
+<details>
+<summary>
+Dogfood proof JSON
+</summary>
+
+``` json
+{
+  "observationCounts": {
+    "executes": 1,
+    "invoked_by": 1,
+    "tool_call": 1,
+    "run": 2,
+    "host_event": 6,
+    "job_step_checkpoint": 2
+  },
+  "ducknngProfile": {
+    "version": "2",
+    "receiptChanged": true,
+    "subjectRestriction": {
+      "restricted": true,
+      "count": 2,
+      "digest": "sha256:ceee9bcb816bd665d011958ad04d1fdfdcb0230ac619ea4a59afaedc002dc953"
+    }
+  },
+  "casMetadata": {
+    "casMetadataRefs": 4,
+    "artifactCasMetadataRefs": 2
+  },
+  "graphProjection": {
+    "external": {
+      "edgeCount": 3,
+      "closureCount": 3
+    },
+    "internal": {
+      "edgeCountAtLeast4": true,
+      "closureCountAtLeast3": true
+    }
+  },
+  "trainingCorpus": {
+    "toolCalls": 1,
+    "runs": 2,
+    "artifacts": 3,
+    "hostEvents": 6,
+    "hostEventLinks": 13,
+    "parquetReadbackRows": 1,
+    "artifactRoles": [
+      {
+        "sourceNode": "run:dogfood-host-capability",
+        "mediaType": "image/svg+xml",
+        "semanticRole": "figure",
+        "plottingSystem": "inline-svg"
+      },
+      {
+        "sourceNode": "run:dogfood-host-capability",
+        "mediaType": "text/html",
+        "semanticRole": "report"
+      }
+    ]
+  },
+  "governanceHostEvents": {
+    "count": 2,
+    "linkCount": 4,
+    "kinds": [
+      "workbench.governance.approval_submitted",
+      "workbench.governance.approval_decided"
+    ],
+    "eventTypes": [
+      "approval_submitted",
+      "approval_decided"
+    ]
+  },
+  "sdkConsumer": {
+    "publicExportsOnly": true,
+    "runtimeImports": true,
+    "packageSource": "npm-pack"
+  },
+  "queueCancel": {
+    "staleWriteRejected": true,
+    "resumedPhase": "cancelled"
+  },
+  "renvEnvironment": {
+    "rVersion": "4.6.0",
+    "bioconductor": "3.22",
+    "envStatus": "matched",
+    "artifactRows": 1
+  }
+}
+```
+
+</details>
+
+It exercises host-event receipts, step checkpoints/resume, SemanticSQL
+projection, ducknng profile receipts, SDK exports, figure/report CAS
+artifacts, and real process compute when R is available. SemanticSQL
+compatibility is pinned to the concrete generated-view names at upstream
+commit `83503077e867419c18a211d97105d8ead554e947`; it is not a claim of
+equivalence with every future generator.
+
+Run the Pi session trace dogfood after installing the extension and
+configuring an image-capable model:
+
+``` sh
+npm run dogfood:pi-session-trace
+```
+
+It drives a real Pi session through image read, successful shell call,
+intentional shell error, manifest discovery, SQL validation,
+`bio_query`, and then queries the project ledger for the session
+summary, tool trajectory, CAS roots, and the recorded tool-call/run
+linkage.
+
 ## Status & contributing
 
 Pre-1.0 (`0.1.0`). The public API may still move. Issues and PRs
@@ -769,4 +819,4 @@ become data, a resolver adapter, or SQL, not bespoke core code.
 
 ## License
 
-[GPL-2.0-or-later](LICENSE) © sounkou-bioinfo
+[GPL-2.0-or-later](LICENSE) © Sounkou Mahamane Toure
