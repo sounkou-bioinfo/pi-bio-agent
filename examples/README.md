@@ -42,8 +42,8 @@ orchestrator (piece 1); the agent conducts.
 |---|---|
 | `test/study-scaffold.test.ts` | `StudyScaffold` = a DAG of `(subtask, produces, accessList)`; fail-closed validation (access refs only to earlier steps → acyclic); Kahn topo-order |
 | `test/study-exec.test.ts` | the **executor** runs workers in topo order with per-step **access-list isolation** + downstream **shared memory**; includes a **TREE** and a **SURVEY/DEBATE** topology (N isolated respondents + an aggregator that fans them in — Fugu's signature) |
-| **live:** [`scripts/live-multi-agent.ts`](../scripts/live-multi-agent.md) | **real multi-agent run** (chain): each step spawns a *separate `pi` process*; they communicate only via access-list artifacts the host threads — no shared db, so the process lock is never touched. `npx tsx scripts/live-multi-agent.ts` |
-| **live:** [`scripts/live-debate.ts`](../scripts/live-debate.md) | **real best-of-N debate** (survey topology): two agents answer the same question independently, an aggregator synthesizes both. `npx tsx scripts/live-debate.ts` |
+| **live:** [`scripts/live-multi-agent.ts`](dogfood/live-multi-agent.md) | **real multi-agent run** (chain): each step spawns a *separate `pi` process*; they communicate only via access-list artifacts the host threads — no shared db, so the process lock is never touched. `npx tsx scripts/live-multi-agent.ts` |
+| **live:** [`scripts/live-debate.ts`](dogfood/live-debate.md) | **real best-of-N debate** (survey topology): two agents answer the same question independently, an aggregator synthesizes both. `npx tsx scripts/live-debate.ts` |
 
 | `test/blackboard.test.ts` | **pub/sub blackboard** (`src/core/blackboard.ts`): DECENTRALIZED — steps launched concurrently, each awaits its deps from a shared blackboard and publishes its note; order emerges from data deps, **no coordinator** (stigmergy) |
 | `test/pipeline.test.ts` | **push/pull pipeline** (`src/core/pipeline.ts`): N-worker load-balanced pool — the RLM labeling map as a self-balancing queue |
@@ -63,8 +63,8 @@ boundary analysis in [`docs/refinments.md`](../docs/refinments.md).
 |---|---|
 | `test/http-cas-reuse.test.ts` | **CAS** — a second db with an empty memo 304s from the shared content store and materializes with **no re-download** (immutable cross-db reuse) |
 | `test/run-store-init-sql.test.ts` | the host **connection-init hook** (`duckdbInitSql`) — where the **host** (never the agent) runs `INSTALL/LOAD` extensions before resolution; it is host-owned and not exposed through any agent tool |
-| **live:** [`scripts/ducknng-rpc-mutate.mjs`](../scripts/ducknng-rpc-mutate.md) | **ducknng RPC** — separate processes **mutate** one shared table in place (`UPDATE`/`DELETE`/upsert) via `ducknng_run_rpc` against a server running native DuckDB, exec opt-in. The mutate-in-place quack can't do; a fact-superseding KG needs it. |
-| **live:** [`scripts/blackboard-shared.mjs`](../scripts/blackboard-shared.md) | **ducknng RPC blackboard** — a decentralized pub/sub diamond DAG across separate processes (publish = `run_rpc` INSERT, await = poll `query_rpc`); order emerges from shared writes, no coordinator. |
+| **live:** [`scripts/ducknng-rpc-mutate.mjs`](dogfood/ducknng-rpc-mutate.md) | **ducknng RPC** — separate processes **mutate** one shared table in place (`UPDATE`/`DELETE`/upsert) via `ducknng_run_rpc` against a server running native DuckDB, exec opt-in. The mutate-in-place quack can't do; a fact-superseding KG needs it. |
+| **live:** [`scripts/blackboard-shared.mjs`](dogfood/blackboard-shared.md) | **ducknng RPC blackboard** — a decentralized pub/sub diamond DAG across separate processes (publish = `run_rpc` INSERT, await = poll `query_rpc`); order emerges from shared writes, no coordinator. |
 
 ## 5. The COMPUTE pillar & the two-pillar flagship
 SQL is poor at some things (an `lm()` fit, a Bayesian colocalization); those run **out-of-process** over Arrow IPC,
