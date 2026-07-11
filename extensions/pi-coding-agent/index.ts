@@ -3,7 +3,16 @@ import { Type } from "typebox";
 import { summarizeBioContext, type BioContext } from "../../src/core/context.js";
 import { validateReadOnlySelect } from "../../src/core/knowledge-graph.js";
 import { graphProjectionPolicyWarnings, graphProjectionSql, validateGraphProjectionProfile, type GraphProjectionProfile } from "../../src/core/graph-projection.js";
-import { deriveStudyPlan, normalizeStudySlug, walkMemoryGraph, type StudyArtifactKind, type StudyCorpus, type StudyNote } from "../../src/core/study.js";
+import {
+  STUDY_ARTIFACT_KINDS,
+  STUDY_NOTE_LINK_PREDICATES,
+  deriveStudyPlan,
+  normalizeStudySlug,
+  walkMemoryGraph,
+  type StudyArtifactKind,
+  type StudyCorpus,
+  type StudyNote,
+} from "../../src/core/study.js";
 import { deleteStudyNote, makeStudyNote, runtimeSkillRoot, runtimeStudyRoot, validateSkillInput, writeProjectSkill, writeStudyNote } from "../../src/hosts/pi-project.js";
 import { defaultDuckDbExtensionCatalog, findDuckDbExtensions } from "../../src/duckdb/extensions.js";
 import { queryGraphWindow } from "../../src/duckdb/graph-window.js";
@@ -66,7 +75,7 @@ const BIO_ORIENTATION = [
   "  file_scan/read_bcf `path` or SQL that hits a REMOTE URI can still reach the network via DuckDB/httpfs — that",
   "  egress is the host's sandbox to police, not a library gate.)",
   "- REMEMBER (machine studying): memory is an append-only, as-of, ATTRIBUTED store (the same temporal ledger as",
-  "  facts) — `bio_remember` (link with `[[slug]]`; re-writing supersedes, never clobbers) / `bio_list_memory`",
+  "  facts) — `bio_remember` (`[[slug]]` and optional typed `links` support; re-writing supersedes, never clobbers) / `bio_list_memory`",
   "  / `bio_walk_memory` (walk the graph) / `bio_recall`. list/read take an `asOf` time (time-travel), and",
   "  `bio_forget` is a RETRACTION (recall as-of earlier still sees it) — memory is never erased. Prefer",
   "  walking your own memory over re-reading the corpus. Promote a stable workflow to a skill with `bio_create_skill`.",
@@ -816,12 +825,18 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
     label: "Remember (memory note)",
     description: "Remember a project-local memory note. APPENDS to the temporal ledger (bio_observations, agent:memory:<slug>): a re-write of the same slug SUPERSEDES the current revision while every prior revision is retained (recall as-of an earlier time still sees it); the store is the source of truth. Also materializes a legible .pi/bio-agent/study-notes/<slug>.json file view (upserted in place). Use for corpus maps, cheatsheets, concept maps, probes, and memories too volatile or broad to become skills.",
     parameters: Type.Object({
-      kind: Type.String({ description: "corpus_map | cheatsheet | concept_map | question_bank | rubric | worked_example | failure_case | memory_note | skill_draft | index" }),
+      kind: Type.Union(STUDY_ARTIFACT_KINDS.map((kind) => Type.Literal(kind)), {
+        description: "Artifact kind for the study note.",
+      }),
       title: Type.String(),
       hook: Type.String({ description: "One-line retrieval hook: when this note should be read. Must say when to read it, not just restate the title." }),
       body: Type.String(),
       slug: Type.Optional(Type.String({ description: "Stable kebab-case identity and upsert key. Derived from the title when omitted." })),
       tags: Type.Optional(Type.Array(Type.String())),
+      links: Type.Optional(Type.Array(Type.Object({
+        to: Type.String({ description: "Target note slug (lowercase kebab-case)." }),
+        predicate: Type.Optional(Type.Union(STUDY_NOTE_LINK_PREDICATES.map((predicate) => Type.Literal(predicate)))),
+      }, { additionalProperties: false }))),
       sources: Type.Optional(Type.Array(Type.Object({
         path: Type.Optional(Type.String()),
         url: Type.Optional(Type.String()),
@@ -829,14 +844,32 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
         quote: Type.Optional(Type.String()),
       }))),
     }),
-    async execute(_id, params: { kind: StudyArtifactKind; title: string; hook: string; body: string; slug?: string; tags?: string[]; sources?: StudyNote["sources"] }, _signal, _onUpdate, ctx) {
+    async execute(_id, params: {
+      kind: StudyArtifactKind;
+      title: string;
+      hook: string;
+      body: string;
+      slug?: string;
+      tags?: string[];
+      links?: StudyNote["links"];
+      sources?: StudyNote["sources"];
+    }, _signal, _onUpdate, ctx) {
       const note = makeStudyNote(params); // normalize slug + parse [[links]] from the body
       // carry `sources` INTO the temporal store too — else shared/as-of recall loses the citations the file view keeps.
-      const mem: MemoryContent = { slug: note.slug, kind: note.kind, title: note.title, hook: note.hook, body: note.body, tags: note.tags ?? [], ...(note.sources && note.sources.length ? { sources: note.sources } : {}) };
+      const mem: MemoryContent = {
+        slug: note.slug,
+        kind: note.kind,
+        title: note.title,
+        hook: note.hook,
+        body: note.body,
+        tags: note.tags ?? [],
+        ...(note.links ? { links: note.links } : {}),
+        ...(note.sources && note.sources.length ? { sources: note.sources } : {}),
+      };
       // The ledger is the source of truth (append-only, as-of, attributed); the file is a legible git-diffable view.
       await withStore(openStore, ctx.cwd, (conn) => remember(conn, mem, systemClock(), author));
       const { path } = await writeStudyNote(ctx.cwd, note);
-      return text({ stored: memorySubjectId(note.slug), author, materialized: path, note: { slug: note.slug, kind: note.kind, title: note.title, hook: note.hook, tags: note.tags } });
+      return text({ stored: memorySubjectId(note.slug), author, materialized: path, note: { slug: note.slug, kind: note.kind, title: note.title, hook: note.hook, tags: note.tags, links: note.links } });
     },
   });
 
@@ -868,7 +901,7 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
   pi.registerTool({
     name: "bio_walk_memory",
     label: "Walk bio memory graph",
-    description: "Walk the MEMORY GRAPH: each memory note is a node (memory:<slug>); its [[slug]] wikilinks (parsed from the note body) are edges. With no start, returns the whole memory graph (nodes + edges) so you grasp structure at a glance INSTEAD of reading every note (or re-reading the corpus). With a start slug + depth, returns that note's neighborhood (BFS out N hops, links followed both ways). Memory is a graph, not a flat list — studying is only ONE way it gets populated.",
+    description: "Walk the MEMORY GRAPH: each memory note is a node (memory:<slug>); wikilinks (in body) and typed `links` are edges. With no start, returns the whole memory graph (nodes + edges) so you grasp structure at a glance INSTEAD of reading every note (or re-reading the corpus). With a start slug + depth, returns that note's neighborhood (BFS out N hops, links followed both ways). Memory is a graph, not a flat list — studying is only ONE way it gets populated.",
     parameters: Type.Object({
       start: Type.Optional(Type.String({ description: "Start note slug; omit for the whole graph." })),
       depth: Type.Optional(Type.Number({ description: "Hops to walk out from start (default 1)." })),

@@ -32,10 +32,9 @@ unified-data-model bet instead of sitting beside it as flat last-write-wins file
 - `memoryHistory(conn, slug)` is the change trail: *what changed, when, by whom*.
 - `forget(conn, slug, now, author)` is a **temporal retraction**: a tombstone (null content) so `recall(now)` is
   null but `recall(earlier)` still sees it. Memory is never destroyed.
-- Each `[[slug]]` wikilink (parsed from the note body) is an **edge-like** observation that
-  `materializeBioEdgesAsOf(t)` projects into `bio_edges_as_of`, so the memory graph is walkable **as of t** through
-  the *same* SemanticSQL closure as facts. (Typed `StudyNote.links` are not yet authorable via `bio_remember`: a
-  deliberate future feature, not an implied capability.)
+- Each `[[slug]]` wikilink (parsed from the note body) and each explicit `links` entry are **edge-like**
+  observations that `materializeBioEdgesAsOf(t)` projects into `bio_edges_as_of`, so the memory graph is walkable
+  **as of t** through the *same* SemanticSQL closure as facts.
 
 **One store, not a `memory.duckdb`.** Facts, jobs, activation, memory, store-logged runs, and agent session traces
 are all rows in the **same `bio_observations` table in the same DuckDB** as the graph
@@ -102,7 +101,7 @@ one fact per file
     metadata.type-> user | feedback | project | reference   (role, not form)
   body:
     the fact; feedback/project add explicit **Why:** and **How to apply:** lines
-    [[name]] wikilinks to related units (dangling links allowed = future work marker)
+    [[name]] wikilinks to related units (dangling links are allowed and represented as graph edges)
 a single loaded index file (MEMORY.md): one line per unit -> "[Title](file) — hook"
 recall: only the index is always in context; full units are read on demand
 discipline:

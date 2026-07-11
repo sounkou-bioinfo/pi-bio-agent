@@ -1,5 +1,5 @@
 import type { SqlConn } from "../core/ports.js";
-import { parseStudyNoteLinks } from "../core/study.js";
+import { parseStudyNoteLinks, type StudyNoteLink } from "../core/study.js";
 import {
   createBioObservationSchema,
   observationAsOfKey,
@@ -84,6 +84,7 @@ export interface MemoryContent {
   hook: string;
   body: string;
   tags: string[];
+  links?: StudyNoteLink[];
   /** citations backing the note; persisted into the ledger so `recall`/shared memory don't lose provenance. */
   sources?: MemorySource[];
 }
@@ -122,13 +123,13 @@ export async function remember(conn: SqlConn, note: MemoryContent, wallNow: stri
         statementKey: subject,
         subjectId: subject,
         predicate: CONTENT,
-        value: { kind: note.kind, title: note.title, hook: note.hook, body: note.body, tags: note.tags, ...(note.sources && note.sources.length ? { sources: note.sources } : {}) },
+        value: { kind: note.kind, title: note.title, hook: note.hook, body: note.body, tags: note.tags, ...(note.links ? { links: note.links } : {}), ...(note.sources && note.sources.length ? { sources: note.sources } : {}) },
         recordedAt: now,
         source: author,
       });
       if (!inserted) continue; // a concurrent client advanced the slot since we read it — re-read + retry
       const newKeys = new Set<string>();
-      for (const link of parseStudyNoteLinks({ body: note.body, links: [] })) {
+      for (const link of parseStudyNoteLinks({ body: note.body, links: note.links })) {
         const to = memorySubjectId(link.to);
         const key = `${subject}|${link.predicate}|${to}`;
         newKeys.add(key);
@@ -162,7 +163,17 @@ export async function remember(conn: SqlConn, note: MemoryContent, wallNow: stri
 function rowToContent(row: ObservationRow | null): RecalledMemory | null {
   if (!row || row.value_json == null) return null; // a tombstone (forgotten) carries null content
   const v = JSON.parse(row.value_json) as Omit<MemoryContent, "slug">;
-  return { slug: row.subject_id.slice(MEMORY_NS.length), kind: v.kind, title: v.title, hook: v.hook, body: v.body, tags: v.tags ?? [], ...(v.sources && v.sources.length ? { sources: v.sources } : {}), author: row.source ?? null };
+  return {
+    slug: row.subject_id.slice(MEMORY_NS.length),
+    kind: v.kind,
+    title: v.title,
+    hook: v.hook,
+    body: v.body,
+    tags: v.tags ?? [],
+    ...(v.links ? { links: v.links } : {}),
+    ...(v.sources && v.sources.length ? { sources: v.sources } : {}),
+    author: row.source ?? null,
+  };
 }
 
 /** Recall a memory slug's content (and its author) AS OF a time (default now). null if it did not exist yet or was forgotten by then. */

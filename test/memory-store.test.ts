@@ -114,6 +114,30 @@ describe("temporal memory over bio_observations", () => {
     assert.equal((await recall(c, "cited"))?.sources, undefined, "a later revision with no sources supersedes — sources are per-revision, not sticky");
   });
 
+  test("typed links are persisted and projected as edges (including dedupe across body + explicit links)", async () => {
+    const c = await conn();
+    await remember(c, {
+      slug: "origin",
+      kind: "memory_note",
+      title: "origin",
+      hook: "for typed-link projection test",
+      body: "Body has [[gamma]] and an explicit edge to the same gamma.",
+      tags: [],
+      links: [
+        { to: "gamma", predicate: "references" },
+        { to: "delta", predicate: "see_also" },
+        { to: "gamma", predicate: "depends_on" },
+      ],
+    }, T1);
+    await materializeBioEdgesAsOf(c, MEMORY_NOW);
+    const rows = await c.all<{ predicate: string; to_id: string }>("SELECT predicate, to_id FROM bio_edges_as_of WHERE from_id = ?", [memorySubjectId("origin")]);
+    const seen = new Set(rows.map((r) => `${r.predicate}|${r.to_id}`));
+    assert.equal(seen.size, 3, "duplicate [[gamma]] + explicit references are deduped by (to,predicate), with distinct predicates preserved");
+    assert.ok(seen.has(`references|${memorySubjectId("gamma")}`), "references edge present");
+    assert.ok(seen.has(`depends_on|${memorySubjectId("gamma")}`), "depends_on typed edge present");
+    assert.ok(seen.has(`see_also|${memorySubjectId("delta")}`), "see_also typed edge present");
+  });
+
   test("reconciliation only touches MEMORY's own wikilink edges — a foreign edge fact from the same subject survives", async () => {
     const c = await conn();
     await remember(c, note("foo", "hi [[bar]]"), T1); // a memory wikilink edge foo|<pred>|bar

@@ -616,6 +616,10 @@ describe("Pi coding-agent extension", () => {
       title: "OpenTargets identifiers",
       hook: "Use before GraphQL evidence queries.",
       body: "Resolve target and disease IDs first. See [[opentargets-target-node]].",
+      links: [
+        { to: "opentargets-target-node", predicate: "references" },
+        { to: "opentargets-target-alias" },
+      ],
       tags: ["opentargets"],
     }, undefined, undefined, ctx);
     await byName.get("bio_remember")!.execute("id", {
@@ -626,6 +630,15 @@ describe("Pi coding-agent extension", () => {
       tags: ["opentargets"],
     }, undefined, undefined, ctx);
     assert.equal(wrote.details.note.slug, "opentargets-identifiers");
+    assert.equal(wrote.details.note.links?.length, 2);
+    assert.equal(wrote.details.note.links?.some((link: { to: string; predicate?: string }) => link.to === "opentargets-target-node" && link.predicate === "references"), true);
+    assert.equal(
+      wrote.details.note.links?.some(
+        (link: { to: string; predicate?: string }) =>
+          link.to === "opentargets-target-alias" && (link.predicate === undefined || link.predicate === "references"),
+      ),
+      true,
+    );
     // written to the ONE store (attributed) AND materialized as a legible file view
     assert.equal(wrote.details.stored, "memory:opentargets-identifiers");
     assert.match(await readFile(wrote.details.materialized, "utf8"), /opentargets-identifiers/);
@@ -636,11 +649,12 @@ describe("Pi coding-agent extension", () => {
     const graphWindow = await byName.get("bio_graph_window")!.execute("id", {
       startId: "memory:opentargets-identifiers",
       direction: "out",
-      predicates: ["references"],
       limit: 10,
     }, undefined, undefined, ctx);
-    assert.equal(graphWindow.details.rows.length, 1);
-    assert.equal(graphWindow.details.rows[0].to_id, "memory:opentargets-target-node");
+    assert.equal(graphWindow.details.rows.length, 2);
+    const tos = graphWindow.details.rows.map((r: { to_id: string }) => r.to_id).sort();
+    assert.equal(tos[0], "memory:opentargets-target-alias");
+    assert.equal(tos[1], "memory:opentargets-target-node");
 
     // forget = temporal retraction: gone from recall(now), but the store keeps the history
     const forgotten = await byName.get("bio_forget")!.execute("id", { slug: "opentargets-identifiers" }, undefined, undefined, ctx);
