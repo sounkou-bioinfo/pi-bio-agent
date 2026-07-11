@@ -59,6 +59,9 @@ Instructions for coding agents working in this repository.
 - Quarto is suitable for future polyglot reports and can run TypeScript project scripts through its bundled Deno. Its
   Observable-JS cells are browser/reactive code, not a Node/DuckDB execution surface. Keep core Node/TypeScript claims
   in `test/`, `scripts/`, or package examples and link or generate them into prose.
+- If a workbench report proves that persistent local Node/TypeScript cells are needed, add a package-level Quarto
+  engine adapter. It may translate Markdown cells to the existing CLI/SDK and host ports; it must not implement a
+  second scientific runtime, ledger, CAS, or compute lifecycle in core.
 - A `text` fence or explicitly labeled pseudocode/diagram is illustrative. A `ts`, `sql`, or `sh` block should be
   runnable or included from the source that the checks execute. Never paste live JSON/results into docs when a renderer
   or example generator can produce them.

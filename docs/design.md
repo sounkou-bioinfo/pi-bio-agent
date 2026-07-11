@@ -60,8 +60,12 @@ multi-runtime source for the rendered README; generated example READMEs and tool
 For core Node/TypeScript claims, the executable source is a test, script, manifest, operation, or package example, and
 the prose links to it. A design fence is illustrative only when it says so; otherwise it must be runnable or generated
 from the source it describes. Quarto is a useful outer renderer for polyglot reports and its `quarto run` command can
-execute TypeScript build/proof scripts through Deno, but Observable-JS cells are not a Node/DuckDB kernel. Do not add
-copied result snapshots or a second handwritten API description to make a page look complete.
+execute TypeScript build/proof scripts through Deno, but Observable-JS cells are not a Node/DuckDB kernel. Quarto 1.9
+now exposes a low-level TypeScript engine extension API with Markdown-in/Markdown-out execution; if a workbench report
+needs persistent local Node/TypeScript cells, implement that as a package adapter over the existing CLI/SDK and host
+ports, using a real workbench example to define state, async, output, and provenance semantics. Do not add the engine
+to core or use it to create a second compute/ledger abstraction. Do not add copied result snapshots or a second
+handwritten API description to make a page look complete.
 
 ## Hard-Learned Lessons
 
@@ -912,3 +916,4 @@ External projects and references cited above, with URLs (cite sources as links, 
 - [DuckDB](https://duckdb.org) + [DuckDB community extensions](https://community-extensions.duckdb.org) (incl. DuckHTS): the execution substrate.
 - [ColBERT](https://github.com/stanford-futuredata/ColBERT), [TACHIOM](https://github.com/TusKANNy/tachiom): late-interaction retrieval (Tier 3; deferred).
 - [Machine Studying](https://jacobxli.com/blog/2026/machine-studying/): the studying/expertise-per-budget framing.
+- [Quarto](https://quarto.org/docs/extensions/creating): polyglot rendering and the package-level engine extension seam.
