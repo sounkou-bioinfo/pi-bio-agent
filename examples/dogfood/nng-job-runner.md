@@ -4,8 +4,9 @@
 
 `scripts/nng-job-runner.mjs` is a **dogfood** cross-process
 **status-transport smoke** for the L1 `JobRunner` ledger shape over
-ducknng RPC. It is not a complete distributed compute backend. Run it
-with `npm run dogfood:nng-job-runner`.
+ducknng RPC. It is not a complete distributed compute backend.
+
+Run: `npm run dogfood:nng-job-runner`.
 
 A separate worker process simulates work and reports each phase
 (`running` → `succeeded`) by running a `recordObservation`-shaped
