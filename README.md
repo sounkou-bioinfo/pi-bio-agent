@@ -16,6 +16,10 @@ with prior state. The evidence packet contains review-bearing rows rather than e
 relations remain available to SQL in the per-analysis DuckDB file. The SDK and CLI return that host path for local
 inspection; the HTTP contract does not expose it.
 
+The inverted lane also carries variant-search coverage. A phenotype-supported gene with no supporting row is
+`hypothesis_not_searched` until an assembly-pinned search records completed coverage; only then can it become
+`hypothesis_without_supporting_variant`.
+
 This is evidence routing, not a complete clinical classification kernel. It does not claim ACMG/AMP classification,
 causal diagnosis, or clinical validity beyond the declared fixture data.
 
@@ -27,7 +31,8 @@ npm run check
 npm run demo:clinical
 ```
 
-One analysis checkpoints phenotype grounding, the reconciled evidence operation, reanalysis, and packet assembly.
+One analysis checkpoints phenotype grounding, graph-backed phenotype hypotheses, the reconciled evidence operation,
+reanalysis, and packet assembly.
 Grounding resolves the narrative and ontology candidates through recorded manifest queries; agent augmentation,
 term proposals, and review are host-injected ports. The packaged CLI uses an explicit recorded fixture, while a live
 host supplies its own model or human implementations. Reusing an analysis id resumes from the durable checkpoints:
@@ -37,9 +42,10 @@ node dist/cli.js run examples/clinical-genomics CASE-RD-001 analysis-demo
 node dist/cli.js run examples/clinical-genomics CASE-RD-001 analysis-demo
 ```
 
-The second invocation reports zero executed steps and four reused steps. Scientific result, receipt, replay, and
+The second invocation reports zero executed steps and five reused steps. Scientific result, receipt, replay, and
 run-object bytes live in CAS; checkpoints carry only their references. Reusing an analysis id after a declared input
-file or grounding composition changes fails closed because the task replay digest pins both.
+file, grounding composition, graph manifest, graph fixture, or host attachment changes fails closed because the task
+replay digest pins them.
 
 Pass a host module as the final argument to replace the recorded fixture. The module exports a default function or
 `createGroundingRuntime({ workspace })` returning the same host-injected augmenter, proposal, and reviewer ports used
@@ -63,9 +69,10 @@ recorded bootstrap run.
 
 ## Query the pinned Monarch graph
 
-The inverted traversal can also run directly over Monarch's versioned DuckDB database. The host attaches the
-snapshot read-only; the manifest then queries its canonical `edges`, `nodes`, and ontology `closure` tables. No
-Monarch-specific resolver or denormalized search table is involved.
+The main workflow invokes one graph operation against a canonical local fixture in CI. The same operation can run
+directly over Monarch's versioned DuckDB database: the host attaches the snapshot read-only, and the manifest queries
+its canonical `edges`, `nodes`, and ontology `closure` tables. No Monarch-specific resolver or denormalized search
+table is involved.
 
 ```sh
 npm run dogfood:monarch
@@ -77,6 +84,9 @@ and primary knowledge sources. A recorded run against the `2026-04-14` snapshot 
 SCN1A/DEE6A second. The output is a hypothesis relation for targeted variant search and review, not a diagnosis.
 Result, receipts, replay spec, and run object are stored in CAS, while the ledger records the run, manifest, and
 operation links.
+
+Embedded hosts select the same live composition with `pinnedMonarchRuntime(workspace)`; the packaged CLI and API use
+`localMonarchFixtureRuntime(workspace)` so their default run remains hermetic.
 
 ## Run the API
 

@@ -78,11 +78,13 @@ private prose state. One durable annotation step owns network batching so parall
 - The inverted lane now consumes reviewed, original-span-grounded phenotype observations. Its HPO vocabulary,
   recorded proposal/review ports, and benchmark gold are still hermetic fixtures; they prove orchestration and
   failure behavior, not real-world grounding accuracy.
-- `examples/clinical-genomics/data/gene_phenotype.csv` and the current exact-match count in
-  `relations/phenotype_hypothesis.sql` are orchestration fixtures, not a defensible phenotype-ranking method. Replace
-  them with a pinned real graph projection, ontology-aware matching/information content, and explicit score columns.
-- `inverted_gap` is too coarse as a scientific label. A phenotype-supported gene with no selected supporting variant
-  means missing genotype support within the recorded search scope; it does not mean the gene was ruled out.
+- Negative, uncertain, and family-context assertions remain in the grounding artifact but do not yet contribute to
+  the Monarch ranking score; do not describe the current score as full phenotype compatibility.
+- The workflow now invokes the same canonical graph operation against either a hermetic graph fixture or the pinned
+  Monarch snapshot. Its exact/ancestor match counts and annotation-frequency score are explicit, but they are not a
+  clinically validated semantic-similarity method.
+- A phenotype-supported gene with no selected supporting variant is recorded as missing genotype support within the
+  search scope; it is not treated as evidence against the hypothesis.
 - Keep hermetic CI fixtures, but generate or validate them against recorded real-source dogfood. Do not cite fixture
   success as proof of clinical validity.
 

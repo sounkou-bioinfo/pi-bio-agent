@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { promises as fs } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import {
   canonicalDigest,
   fsCasStore,
@@ -29,12 +29,13 @@ import {
   type OntologyCandidate,
   type PhenotypeGroundingResult,
 } from "./phenotype-grounding.js";
+import type { PhenotypeHypothesisRuntime } from "./monarch-host.js";
 
 export const EVIDENCE_PACKET_SCHEMA = "pi-bio.workbench.evidence_packet.v1" as const;
 export const CLINICAL_ANALYSIS_SCHEMA = "pi-bio.workbench.clinical_analysis.v1" as const;
 
 const SOURCE = "pi-bio-workbench:clinical-genomics";
-const WORKFLOW_VERSION = "clinical-evidence-workflow.v2";
+const WORKFLOW_VERSION = "clinical-evidence-workflow.v3";
 const PACKET_MEDIA_TYPE = "application/vnd.pi-bio.workbench.evidence+json";
 const PACKET_STEP = "packet";
 
@@ -49,6 +50,8 @@ export interface RunClinicalGenomicsRequest {
   now?: string;
   /** Host-owned model/human composition. The application does not import a model SDK. */
   grounding: GroundingRuntime;
+  /** Host-owned graph attachment and manifest composition for phenotype-to-gene hypotheses. */
+  hypotheses: PhenotypeHypothesisRuntime;
 }
 
 export type OperationRows = {
@@ -70,6 +73,7 @@ export type EvidencePacket = {
   caseId: string;
   generatedAt: string;
   lanes: {
+    hypotheses: OperationRows;
     direct: OperationRows;
     inverted: OperationRows;
     reanalysis: OperationRows;
@@ -86,8 +90,10 @@ export type EvidencePacket = {
   summary: {
     directCandidates: number;
     directAbstentions: number;
+    phenotypeHypotheses: number;
     invertedSupportedHypotheses: number;
     invertedGaps: number;
+    invertedUnsearched: number;
     conflicts: number;
     reanalysisSignals: number;
     reviewQueue: ReviewItem[];
@@ -200,8 +206,8 @@ function reviewReason(kind: string, row: JsonRecord): string {
       return `${variant || gene} has no usable allele frequency and was not called rare.`;
     case "correlate_supported_hypothesis":
       return `${gene} has both phenotype and screened genotype support; their case-level fit requires review.`;
-    case "inverted_gap":
-      return `${gene} is phenotype-supported, but no evidence-bearing variant in that gene passed the declared screen.`;
+    case "review_missing_genotype_support":
+      return `${gene} is phenotype-supported, but no supporting variant was found within the recorded search scope; this is missing genotype support, not evidence against the hypothesis.`;
     case "review_conflict":
       return `${variant || gene} has conflicting curated and predicted consequence evidence.`;
     case "reanalysis_signal":
@@ -251,6 +257,7 @@ function buildPacket(args: {
   caseId: string;
   generatedAt: string;
   grounding: GroundingCheckpoint;
+  hypotheses: OperationRows;
   evidence: OperationRows;
   reanalysis: OperationRows;
 }): EvidencePacket {
@@ -262,7 +269,7 @@ function buildPacket(args: {
     analysisId: args.analysisId,
     caseId: args.caseId,
     generatedAt: args.generatedAt,
-    lanes: { direct, inverted, reanalysis: args.reanalysis },
+    lanes: { hypotheses: args.hypotheses, direct, inverted, reanalysis: args.reanalysis },
     grounding: {
       groundingId: args.grounding.groundingId,
       mode: args.grounding.mode,
@@ -275,8 +282,10 @@ function buildPacket(args: {
     summary: {
       directCandidates: direct.rows.filter((row) => row.variant_bucket === "candidate").length,
       directAbstentions: direct.rows.filter((row) => asString(row.variant_bucket).startsWith("abstain_")).length,
+      phenotypeHypotheses: args.hypotheses.rows.length,
       invertedSupportedHypotheses: distinctCount(inverted.rows, "genotype_supports_hypothesis"),
       invertedGaps: distinctCount(inverted.rows, "hypothesis_without_supporting_variant"),
+      invertedUnsearched: distinctCount(inverted.rows, "hypothesis_not_searched"),
       conflicts: direct.rows.filter((row) => row.conflict != null).length,
       reanalysisSignals: args.reanalysis.rows.filter((row) =>
         (row.change_status === "new" || row.change_status === "upgraded")
@@ -286,7 +295,7 @@ function buildPacket(args: {
       kernelScope: "evidence routing only; not a complete clinical classification kernel",
     },
     provenance: {
-      runIds: [...args.grounding.queryRunIds, args.evidence.runId, args.reanalysis.runId],
+      runIds: [...args.grounding.queryRunIds, args.hypotheses.runId, args.evidence.runId, args.reanalysis.runId],
     },
   };
 }
@@ -485,6 +494,7 @@ async function runGrounding(args: {
 
 async function runOperation(args: {
   exampleDir: string;
+  manifestPath?: string;
   conn: SqlConn;
   cas: CasStore;
   caseId: string;
@@ -492,13 +502,14 @@ async function runOperation(args: {
   runId: string;
   now: string;
   dbPath: string;
+  duckdbInitSql?: string[];
   bindings?: Record<string, unknown>;
   protectedBindings?: Record<string, unknown>;
 }): Promise<OperationCheckpoint> {
   const response = await runBioOperationFromManifest({
     cwd: args.exampleDir,
     dbPath: args.dbPath,
-    manifestPath: "manifest.json",
+    manifestPath: args.manifestPath ?? "manifest.json",
     operationId: args.operationId,
     runId: args.runId,
     now: args.now,
@@ -507,6 +518,7 @@ async function runOperation(args: {
     cas: args.cas,
     casMetadata: { conn: args.conn },
     serialize: false,
+    ...(args.duckdbInitSql ? { duckdbInitSql: args.duckdbInitSql } : {}),
     bindings: { case_id: args.caseId, ...args.bindings },
     ...(args.protectedBindings ? {
       protectedSessionBindings: args.protectedBindings,
@@ -633,15 +645,38 @@ async function recordPacket(args: {
   return { schema: "pi-bio.workbench.packet_checkpoint.v1", packetDigest, packetUri };
 }
 
-async function workflowReplayDigest(exampleDir: string, caseId: string, grounding: GroundingRuntime): Promise<string> {
+async function digestFile(path: string): Promise<string> {
+  const hash = createHash("sha256");
+  for await (const chunk of createReadStream(path)) hash.update(chunk);
+  return `sha256:${hash.digest("hex")}`;
+}
+
+async function workflowReplayDigest(
+  exampleDir: string,
+  caseId: string,
+  grounding: GroundingRuntime,
+  hypotheses: PhenotypeHypothesisRuntime,
+): Promise<string> {
   const manifest = JSON.parse(await fs.readFile(join(exampleDir, "manifest.json"), "utf8")) as BioManifest;
-  const inputs: Array<{ resourceId: string; digest: string }> = [];
+  const hypothesisManifestPath = isAbsolute(hypotheses.manifestPath)
+    ? hypotheses.manifestPath
+    : resolve(exampleDir, hypotheses.manifestPath);
+  const hypothesisManifest = JSON.parse(await fs.readFile(hypothesisManifestPath, "utf8")) as BioManifest;
+  const inputPaths = new Map<string, string>();
   for (const resource of manifest.provides?.resources ?? []) {
-    if (resource.resolver !== "duckdb.file_scan" || typeof resource.params.path !== "string") continue;
-    const hash = createHash("sha256");
-    for await (const chunk of createReadStream(resolve(exampleDir, resource.params.path))) hash.update(chunk);
-    inputs.push({ resourceId: resource.id, digest: `sha256:${hash.digest("hex")}` });
+    if (resource.resolver === "duckdb.file_scan" && typeof resource.params.path === "string") {
+      inputPaths.set(`clinical:${resource.id}`, resolve(exampleDir, resource.params.path));
+    }
   }
+  for (const resource of hypothesisManifest.provides?.resources ?? []) {
+    const sources = Array.isArray(resource.params.declaredSources) ? resource.params.declaredSources : [];
+    for (const source of sources) {
+      if (typeof source !== "string" || !source.startsWith("file:")) continue;
+      const path = source.slice("file:".length);
+      inputPaths.set(`hypotheses:${source}`, isAbsolute(path) ? path : resolve(dirname(hypothesisManifestPath), path));
+    }
+  }
+  const inputs = await Promise.all([...inputPaths].map(async ([resourceId, path]) => ({ resourceId, digest: await digestFile(path) })));
   inputs.sort((left, right) => left.resourceId < right.resourceId ? -1 : left.resourceId > right.resourceId ? 1 : 0);
   return canonicalDigest({
     schema: WORKFLOW_VERSION,
@@ -655,20 +690,30 @@ async function workflowReplayDigest(exampleDir: string, caseId: string, groundin
       reviewer: grounding.reviewer.identity,
       augmenter: grounding.augmenter?.identity ?? null,
     },
+    hypotheses: {
+      manifest: hypothesisManifest,
+      operationId: hypotheses.operationId,
+      limit: hypotheses.limit,
+      duckdbInitSqlDigest: canonicalDigest(hypotheses.duckdbInitSql),
+    },
   });
 }
 
 export async function runClinicalGenomicsWorkbench(req: RunClinicalGenomicsRequest): Promise<RunClinicalGenomicsResult> {
   const now = req.now ?? new Date().toISOString();
   const analysisId = req.analysisId ?? `clinical-${randomUUID()}`;
+  const exampleDir = resolve(req.exampleDir);
   if (!req.grounding.contractDigest) throw new Error("grounding composition requires a contractDigest");
+  if (!req.hypotheses?.manifestPath || !req.hypotheses.duckdbInitSql.length || !Number.isInteger(req.hypotheses.limit) || req.hypotheses.limit < 1) {
+    throw new Error("phenotype hypothesis composition requires a manifest, DuckDB initialization, and a positive integer limit");
+  }
   const composition = req.grounding;
-  const replayDigest = await workflowReplayDigest(req.exampleDir, req.caseId, composition);
-  const analysisDbDir = join(req.exampleDir, ".pi", "bio-agent", "analyses");
+  const replayDigest = await workflowReplayDigest(exampleDir, req.caseId, composition, req.hypotheses);
+  const analysisDbDir = join(exampleDir, ".pi", "bio-agent", "analyses");
   const analysisDbPath = join(analysisDbDir, `${createHash("sha256").update(analysisId).digest("hex")}.duckdb`);
   await fs.mkdir(analysisDbDir, { recursive: true });
-  const store = await openBioStore(req.exampleDir);
-  const cas = fsCasStore(join(req.exampleDir, ".pi", "bio-agent", "cas"));
+  const store = await openBioStore(exampleDir);
+  const cas = fsCasStore(join(exampleDir, ".pi", "bio-agent", "cas"));
   try {
     const workflow = await runJobStepsWithCheckpoints(store.conn, {
       runId: analysisId,
@@ -679,7 +724,7 @@ export async function runClinicalGenomicsWorkbench(req: RunClinicalGenomicsReque
         {
           stepId: "phenotype-grounding",
           run: async () => toJsonValue(await runGrounding({
-            exampleDir: req.exampleDir,
+            exampleDir,
             analysisDbPath,
             ledger: store.conn,
             cas,
@@ -690,13 +735,36 @@ export async function runClinicalGenomicsWorkbench(req: RunClinicalGenomicsReque
           })),
         },
         {
-          stepId: "case-evidence",
+          stepId: "phenotype-hypotheses",
           run: async ({ valueOf }) => {
             const groundingCheckpoint = valueOf<JsonValue>("phenotype-grounding") as unknown as GroundingCheckpoint;
             const groundingArtifact = await readCasJson(cas, groundingCheckpoint.resultDigest) as unknown as GroundingArtifact;
             if (groundingArtifact.schema !== "pi-bio.workbench.grounding_artifact.v1") throw new Error("unsupported grounding artifact schema");
+            const phenotypeIds = [...new Set(groundingArtifact.result.accepted
+              .filter((observation) => observation.assertionContext === "present" && observation.subjectContext === "proband")
+              .map((observation) => observation.hpoId))];
             return toJsonValue(await runOperation({
-              exampleDir: req.exampleDir,
+              exampleDir,
+              manifestPath: req.hypotheses.manifestPath,
+              conn: store.conn,
+              cas,
+              caseId: req.caseId,
+              operationId: req.hypotheses.operationId,
+              runId: `${analysisId}.hypotheses`,
+              now,
+              dbPath: analysisDbPath,
+              duckdbInitSql: req.hypotheses.duckdbInitSql,
+              bindings: { phenotype_ids: phenotypeIds, limit: req.hypotheses.limit },
+            }));
+          },
+        },
+        {
+          stepId: "case-evidence",
+          run: async ({ valueOf }) => {
+            const hypothesisCheckpoint = valueOf<JsonValue>("phenotype-hypotheses") as unknown as OperationCheckpoint;
+            const hypotheses = await readOperationRows(cas, hypothesisCheckpoint);
+            const evidence = await runOperation({
+              exampleDir,
               conn: store.conn,
               cas,
               caseId: req.caseId,
@@ -704,14 +772,23 @@ export async function runClinicalGenomicsWorkbench(req: RunClinicalGenomicsReque
               runId: `${analysisId}.evidence`,
               now,
               dbPath: analysisDbPath,
-              protectedBindings: { grounded_phenotypes_json: JSON.stringify(groundingArtifact.result.accepted) },
-            }));
+              protectedBindings: { phenotype_hypotheses_json: JSON.stringify(hypotheses.rows) },
+            });
+            await recordObservationLink(store.conn, {
+              subjectId: `run:${evidence.runId}`,
+              predicate: "uses_run",
+              objectId: `run:${hypothesisCheckpoint.runId}`,
+              recordedAt: now,
+              source: SOURCE,
+              digest: evidence.resultDigest,
+            });
+            return toJsonValue(evidence);
           },
         },
         {
           stepId: "reanalysis",
           run: async () => toJsonValue(await runOperation({
-            exampleDir: req.exampleDir,
+            exampleDir,
             conn: store.conn,
             cas,
             caseId: req.caseId,
@@ -725,11 +802,13 @@ export async function runClinicalGenomicsWorkbench(req: RunClinicalGenomicsReque
           stepId: PACKET_STEP,
           run: async ({ valueOf }) => {
             const groundingCheckpoint = valueOf<JsonValue>("phenotype-grounding") as unknown as GroundingCheckpoint;
+            const hypothesisCheckpoint = valueOf<JsonValue>("phenotype-hypotheses") as unknown as OperationCheckpoint;
             const evidenceCheckpoint = valueOf<JsonValue>("case-evidence") as unknown as OperationCheckpoint;
             const reanalysisCheckpoint = valueOf<JsonValue>("reanalysis") as unknown as OperationCheckpoint;
+            const hypotheses = await readOperationRows(cas, hypothesisCheckpoint);
             const evidence = await readOperationRows(cas, evidenceCheckpoint);
             const reanalysis = await readOperationRows(cas, reanalysisCheckpoint);
-            const packet = buildPacket({ analysisId, caseId: req.caseId, generatedAt: now, grounding: groundingCheckpoint, evidence, reanalysis });
+            const packet = buildPacket({ analysisId, caseId: req.caseId, generatedAt: now, grounding: groundingCheckpoint, hypotheses, evidence, reanalysis });
             return toJsonValue(await recordPacket({ conn: store.conn, cas, packet, recordedAt: now }));
           },
         },
@@ -737,7 +816,7 @@ export async function runClinicalGenomicsWorkbench(req: RunClinicalGenomicsReque
     });
     const checkpoint = workflow.steps.find((step) => step.stepId === PACKET_STEP)?.value as PacketCheckpoint | undefined;
     if (!checkpoint) throw new Error(`analysis '${analysisId}' completed without an evidence packet checkpoint`);
-    const packet = await readEvidencePacket(req.exampleDir, checkpoint.packetDigest);
+    const packet = await readEvidencePacket(exampleDir, checkpoint.packetDigest);
     return {
       analysisId,
       packet,
@@ -749,7 +828,7 @@ export async function runClinicalGenomicsWorkbench(req: RunClinicalGenomicsReque
         reusedSteps: workflow.reused,
       },
       analysisDbPath,
-      storePath: join(req.exampleDir, ".pi", "bio-agent", "store.duckdb"),
+      storePath: join(exampleDir, ".pi", "bio-agent", "store.duckdb"),
     };
   } finally {
     store.close();

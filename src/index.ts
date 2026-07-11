@@ -3,5 +3,6 @@ export * from "./phenotype-grounding.js";
 export * from "./phenotype-benchmark.js";
 export * from "./recorded-grounding.js";
 export * from "./grounding-host.js";
+export * from "./monarch-host.js";
 export * from "./api/app.js";
 export * from "./api/schemas.js";

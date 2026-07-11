@@ -6,6 +6,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createWorkbenchApi } from "../src/api/app.js";
 import { loadRecordedGroundingRuntime } from "../src/recorded-grounding.js";
+import { localMonarchFixtureRuntime } from "../src/monarch-host.js";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const fixtureRoot = join(repoRoot, "examples", "clinical-genomics");
@@ -17,6 +18,7 @@ async function appFixture() {
   return createWorkbenchApi({
     clinicalWorkspace: workspace,
     grounding: await loadRecordedGroundingRuntime(join(workspace, "data", "grounding_proposals.json")),
+    hypotheses: localMonarchFixtureRuntime(workspace),
     clock: () => "2026-07-05T12:00:00Z",
   });
 }

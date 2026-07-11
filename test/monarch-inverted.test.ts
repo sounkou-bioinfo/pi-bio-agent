@@ -6,10 +6,11 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { fsCasStore, openBioStore, runBioOperationFromManifest } from "pi-bio-agent";
+import { PINNED_MONARCH_DUCKDB } from "../src/monarch-host.js";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const sourceManifest = join(repoRoot, "examples", "clinical-genomics", "monarch.manifest.json");
-const pinnedMonarchUrl = "https://data.monarchinitiative.org/monarch-kg/2026-04-14/monarch-kg.duckdb";
+const pinnedMonarchUrl = PINNED_MONARCH_DUCKDB;
 
 async function createMonarchFixture(path: string): Promise<void> {
   const instance = await DuckDBInstance.create(path);

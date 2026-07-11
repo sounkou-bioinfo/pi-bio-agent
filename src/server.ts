@@ -3,6 +3,7 @@ import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 import { createWorkbenchApi } from "./api/app.js";
 import { loadHostGroundingRuntime } from "./grounding-host.js";
+import { localMonarchFixtureRuntime } from "./monarch-host.js";
 
 export async function startWorkbenchServer(workspaceArg = "examples/clinical-genomics", portArg = "8787", groundingModule?: string): Promise<ServerType> {
   const workspace = resolve(workspaceArg);
@@ -10,7 +11,7 @@ export async function startWorkbenchServer(workspaceArg = "examples/clinical-gen
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("port must be an integer from 1 to 65535");
 
   const grounding = await loadHostGroundingRuntime(workspace, groundingModule);
-  const app = createWorkbenchApi({ clinicalWorkspace: workspace, grounding });
+  const app = createWorkbenchApi({ clinicalWorkspace: workspace, grounding, hypotheses: localMonarchFixtureRuntime(workspace) });
   return serve({ fetch: app.fetch, port }, (info) => {
     console.log(`pi-bio-workbench listening on http://localhost:${info.port}`);
     console.log(`OpenAPI: http://localhost:${info.port}/openapi.json`);

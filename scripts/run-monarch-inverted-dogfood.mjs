@@ -2,10 +2,11 @@ import { promises as fs } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { fsCasStore, openBioStore, runBioOperationFromManifest } from "pi-bio-agent";
+import { PINNED_MONARCH_DUCKDB } from "../dist/monarch-host.js";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const stateDir = join(repoRoot, ".pi", "bio-agent");
-const monarchUrl = "https://data.monarchinitiative.org/monarch-kg/2026-04-14/monarch-kg.duckdb";
+const monarchUrl = PINNED_MONARCH_DUCKDB;
 const phenotypeIds = [
   "HP:0006813",
   "HP:0002123",

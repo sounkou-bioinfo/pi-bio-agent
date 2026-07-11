@@ -26,6 +26,7 @@ const EvidenceStatusSchema = z.union([
   VariantStatusSchema,
   z.enum([
     "hypothesis_without_supporting_variant",
+    "hypothesis_not_searched",
     "genotype_supports_hypothesis",
     "hypothesis_variant_abstained",
     "variant_conflicts_with_hypothesis",
@@ -37,7 +38,7 @@ const ReviewKindSchema = z.enum([
   "adjudicate_candidate",
   "resolve_frequency",
   "correlate_supported_hypothesis",
-  "inverted_gap",
+  "review_missing_genotype_support",
   "review_conflict",
 ]);
 
@@ -45,8 +46,10 @@ export const CaseEvidenceRowSchema = z.object({
   case_id: z.string(),
   lane: z.enum(["direct", "inverted"]),
   evidence_key: z.string(),
+  gene_id: z.string().nullable(),
   gene: z.string(),
   disease_id: z.string().nullable(),
+  disease_label: z.string().nullable(),
   variant_key: z.string().nullable(),
   consequence: z.string().nullable(),
   allele_frequency: z.number().nullable(),
@@ -56,13 +59,44 @@ export const CaseEvidenceRowSchema = z.object({
   variant_bucket: VariantBucketSchema.nullable(),
   variant_status: VariantStatusSchema.nullable(),
   matched_observed_terms: z.number().int().nullable(),
-  declared_terms_in_resource: z.number().int().nullable(),
+  exact_observed_terms: z.number().int().nullable(),
+  phenotype_specificity_score: z.number().nullable(),
+  supporting_phenotype_annotations: z.number().int().nullable(),
+  phenotype_match_kinds: z.array(z.string()).nullable(),
+  phenotype_sources: z.array(z.string()).nullable(),
+  has_causal_assertion: z.number().int().nullable(),
+  gene_disease_assertions: z.number().int().nullable(),
+  gene_disease_predicates: z.array(z.string()).nullable(),
+  gene_disease_sources: z.array(z.string()).nullable(),
+  hypothesis_rank: z.number().int().nullable(),
+  variant_search_status: z.string().nullable(),
+  variant_search_scope: z.string().nullable(),
+  variant_search_assembly: z.string().nullable(),
+  searched_variant_count: z.number().int().nullable(),
   evidence_status: EvidenceStatusSchema,
-  missing_field: z.enum(["allele_frequency", "variant_support"]).nullable(),
+  missing_field: z.enum(["allele_frequency", "variant_support", "variant_search"]).nullable(),
   conflict: z.literal("benign_vs_predicted_loss_of_function").nullable(),
   review_kind: ReviewKindSchema.nullable(),
   review_target: z.string(),
 }).strict().openapi("CaseEvidenceRow");
+
+export const PhenotypeHypothesisRowSchema = z.object({
+  gene_id: z.string(),
+  gene: z.string(),
+  disease_id: z.string(),
+  disease_label: z.string(),
+  matched_observed_terms: z.number().int(),
+  exact_observed_terms: z.number().int(),
+  phenotype_specificity_score: z.number(),
+  supporting_phenotype_annotations: z.number().int(),
+  phenotype_match_kinds: z.array(z.string()),
+  phenotype_sources: z.array(z.string()),
+  has_causal_assertion: z.number().int(),
+  gene_disease_assertions: z.number().int(),
+  gene_disease_predicates: z.array(z.string()),
+  gene_disease_sources: z.array(z.string()),
+  hypothesis_rank: z.number().int(),
+}).strict().openapi("PhenotypeHypothesisRow");
 
 export const ReanalysisRowSchema = z.object({
   case_id: z.string(),
@@ -82,6 +116,7 @@ function operationRowsSchema<T extends z.ZodType>(name: string, rows: T) {
 }
 
 const CaseEvidenceOperationSchema = operationRowsSchema("CaseEvidenceOperation", CaseEvidenceRowSchema);
+const PhenotypeHypothesisOperationSchema = operationRowsSchema("PhenotypeHypothesisOperation", PhenotypeHypothesisRowSchema);
 const ReanalysisOperationSchema = operationRowsSchema("ReanalysisOperation", ReanalysisRowSchema);
 
 export const ReviewItemSchema = z.object({
@@ -96,6 +131,7 @@ export const EvidencePacketSchema = z.object({
   caseId: z.string(),
   generatedAt: z.iso.datetime(),
   lanes: z.object({
+    hypotheses: PhenotypeHypothesisOperationSchema,
     direct: CaseEvidenceOperationSchema,
     inverted: CaseEvidenceOperationSchema,
     reanalysis: ReanalysisOperationSchema,
@@ -112,8 +148,10 @@ export const EvidencePacketSchema = z.object({
   summary: z.object({
     directCandidates: z.number().int().nonnegative(),
     directAbstentions: z.number().int().nonnegative(),
+    phenotypeHypotheses: z.number().int().nonnegative(),
     invertedSupportedHypotheses: z.number().int().nonnegative(),
     invertedGaps: z.number().int().nonnegative(),
+    invertedUnsearched: z.number().int().nonnegative(),
     conflicts: z.number().int().nonnegative(),
     reanalysisSignals: z.number().int().nonnegative(),
     reviewQueue: z.array(ReviewItemSchema),

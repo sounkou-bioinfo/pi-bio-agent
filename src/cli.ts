@@ -2,6 +2,7 @@
 import { resolve } from "node:path";
 import { runClinicalGenomicsWorkbench } from "./clinical-genomics.js";
 import { loadHostGroundingRuntime } from "./grounding-host.js";
+import { localMonarchFixtureRuntime } from "./monarch-host.js";
 import { startWorkbenchServer } from "./server.js";
 
 const args = process.argv.slice(2);
@@ -15,6 +16,7 @@ if (command === "serve") {
     exampleDir,
     caseId: args[2] ?? "CASE-RD-001",
     grounding: await loadHostGroundingRuntime(exampleDir, args[4]),
+    hypotheses: localMonarchFixtureRuntime(exampleDir),
     ...(args[3] ? { analysisId: args[3] } : {}),
   });
   console.log(JSON.stringify(result, null, 2));

@@ -37,6 +37,13 @@
         "params": { "path": "data/so_loss_of_function.csv", "table": "so_loss_of_function" }
       },
       {
+        "id": "variant_search_coverage",
+        "title": "Recorded variant search coverage",
+        "kind": "virtual",
+        "resolver": "duckdb.file_scan",
+        "params": { "path": "data/variant_search_coverage.csv", "table": "variant_search_coverage" }
+      },
+      {
         "id": "case_narratives",
         "title": "Immutable source case narratives",
         "kind": "virtual",
@@ -49,13 +56,6 @@
         "kind": "virtual",
         "resolver": "duckdb.file_scan",
         "params": { "path": "data/hpo_terms.csv", "table": "hpo_terms" }
-      },
-      {
-        "id": "gene_phenotype",
-        "title": "Gene phenotype evidence",
-        "kind": "virtual",
-        "resolver": "duckdb.file_scan",
-        "params": { "path": "data/gene_phenotype.csv", "table": "gene_phenotype" }
       },
       {
         "id": "prior_assessment",
@@ -77,13 +77,6 @@
         "kind": "virtual",
         "resolver": "duckdb.sql_materialize",
         "params": { "table": "variant_assessment", "sqlFile": "relations/variant_assessment.sql" }
-      },
-      {
-        "id": "grounded_phenotype_observations",
-        "title": "Accepted phenotype observations",
-        "kind": "virtual",
-        "resolver": "duckdb.sql_materialize",
-        "params": { "table": "grounded_phenotype_observations", "sqlFile": "relations/grounded_phenotype_observations.sql" }
       },
       {
         "id": "phenotype_hypothesis",
@@ -118,17 +111,18 @@
           "type": "object",
           "properties": {
             "case_id": { "type": "string" },
-            "grounded_phenotypes_json": {
+            "phenotype_hypotheses_json": {
               "type": "string",
-              "description": "Host-protected JSON array of accepted phenotype observations from the checkpointed grounding step."
+              "description": "Host-protected JSON array from the checkpointed phenotype-hypothesis operation."
             }
           },
-          "required": ["case_id", "grounded_phenotypes_json"]
+          "required": ["case_id", "phenotype_hypotheses_json"]
         },
         "notes": [
-          "Direct starts from observed variants; inverted starts from accepted, original-narrative-grounded phenotype observations injected as the grounded_phenotype_observations relation.",
+          "Direct starts from observed variants; inverted consumes the recorded phenotype-to-disease-to-gene hypothesis relation produced from accepted grounding assertions.",
           "The two lanes share variant assessment semantics and retain all matching evidence-bearing variants.",
           "Missing frequency and missing genotype support remain explicit evidence rows.",
+          "A hypothesis becomes missing genotype support only after completed variant-search coverage; otherwise it remains hypothesis_not_searched.",
           "Routine direct-lane exclusions remain queryable in variant_assessment but are not copied into the evidence packet."
         ],
         "sql": {
@@ -136,11 +130,8 @@
           "requiredResources": [
             "case_variants",
             "so_loss_of_function",
-            "case_narratives",
-            "hpo_terms",
-            "gene_phenotype",
+            "variant_search_coverage",
             "variant_assessment",
-            "grounded_phenotype_observations",
             "phenotype_hypothesis",
             "case_evidence"
           ],

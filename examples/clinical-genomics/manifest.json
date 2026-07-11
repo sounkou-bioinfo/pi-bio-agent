@@ -47,6 +47,16 @@
         }
       },
       {
+        "id": "variant_search_coverage",
+        "title": "Recorded variant search coverage",
+        "kind": "virtual",
+        "resolver": "duckdb.file_scan",
+        "params": {
+          "path": "data/variant_search_coverage.csv",
+          "table": "variant_search_coverage"
+        }
+      },
+      {
         "id": "case_narratives",
         "title": "Immutable source case narratives",
         "kind": "virtual",
@@ -64,16 +74,6 @@
         "params": {
           "path": "data/hpo_terms.csv",
           "table": "hpo_terms"
-        }
-      },
-      {
-        "id": "gene_phenotype",
-        "title": "Gene phenotype evidence",
-        "kind": "virtual",
-        "resolver": "duckdb.file_scan",
-        "params": {
-          "path": "data/gene_phenotype.csv",
-          "table": "gene_phenotype"
         }
       },
       {
@@ -107,23 +107,13 @@
         }
       },
       {
-        "id": "grounded_phenotype_observations",
-        "title": "Accepted phenotype observations",
-        "kind": "virtual",
-        "resolver": "duckdb.sql_materialize",
-        "params": {
-          "table": "grounded_phenotype_observations",
-          "sql": "WITH parsed AS (\n  SELECT\n    json_extract_string(value, '$.caseId') AS case_id,\n    json_extract_string(value, '$.hpoId') AS hpo_id,\n    json_extract_string(value, '$.hpoLabel') AS hpo_label,\n    json_extract_string(value, '$.assertionContext') AS assertion_context,\n    json_extract_string(value, '$.subjectContext') AS subject_context,\n    json_extract_string(value, '$.subjectId') AS subject_id,\n    json_extract_string(value, '$.evidenceText') AS evidence_text,\n    CAST(json_extract(value, '$.startOffset') AS INTEGER) AS start_offset,\n    CAST(json_extract(value, '$.endOffset') AS INTEGER) AS end_offset,\n    json_extract_string(value, '$.sourceDigest') AS source_digest,\n    json_extract_string(value, '$.ontologySource') AS ontology_source,\n    json_extract_string(value, '$.ontologyVersion') AS ontology_version,\n    json_extract_string(value, '$.ontologyDigest') AS ontology_digest,\n    json_extract_string(value, '$.proposalId') AS proposal_id,\n    json_extract_string(value, '$.proposalProvider') AS proposal_provider,\n    json_extract_string(value, '$.proposalModel') AS proposal_model,\n    CAST(json_extract(value, '$.confidence') AS DOUBLE) AS proposal_confidence,\n    json_extract_string(value, '$.review.decision') AS review_decision,\n    json_extract_string(value, '$.review.reviewer') AS review_reviewer,\n    json_extract_string(value, '$.review.proposalDigest') AS review_proposal_digest,\n    json_extract_string(value, '$.review.inputDigest') AS review_input_digest,\n    json_extract_string(value, '$.acceptanceState') AS acceptance_state\n  FROM json_each(getvariable('grounded_phenotypes_json'))\n), ontology_identity AS (\n  SELECT DISTINCT hpo_id, label, ontology_source, ontology_version, ontology_digest\n  FROM hpo_terms\n), checked AS (\n  SELECT p.*,\n    CASE\n      WHEN n.case_id IS NULL THEN error('grounded phenotype references an unknown case')\n      WHEN p.source_digest <> 'sha256:' || sha256(n.narrative) THEN error('grounded phenotype source digest mismatch')\n      WHEN p.start_offset IS NULL OR p.end_offset IS NULL OR p.start_offset < 0 OR p.end_offset <= p.start_offset\n        OR p.end_offset > length(n.narrative) THEN error('grounded phenotype has invalid source offsets')\n      WHEN substr(n.narrative, p.start_offset + 1, p.end_offset - p.start_offset) <> p.evidence_text\n        THEN error('grounded phenotype evidence does not match the source narrative')\n      WHEN h.hpo_id IS NULL THEN error('grounded phenotype references an undeclared ontology term')\n      WHEN p.hpo_label <> h.label OR p.ontology_source <> h.ontology_source\n        OR p.ontology_version <> h.ontology_version OR p.ontology_digest <> h.ontology_digest\n        THEN error('grounded phenotype ontology identity mismatch')\n      WHEN p.assertion_context NOT IN ('present', 'absent', 'uncertain', 'differential')\n        THEN error('grounded phenotype has an invalid assertion context')\n      WHEN p.subject_context NOT IN ('proband', 'family')\n        OR (p.subject_context = 'family' AND coalesce(p.subject_id, '') = '')\n        THEN error('grounded phenotype has an invalid subject context')\n      WHEN p.review_decision <> 'approved' OR p.acceptance_state <> 'accepted'\n        THEN error('grounded phenotype is not approved and accepted')\n      WHEN coalesce(p.proposal_id, '') = '' OR coalesce(p.review_reviewer, '') = ''\n        OR coalesce(p.review_proposal_digest, '') = '' OR coalesce(p.review_input_digest, '') = ''\n        THEN error('grounded phenotype is missing proposal or review identity')\n      ELSE true\n    END AS valid\n  FROM parsed p\n  LEFT JOIN case_narratives n USING (case_id)\n  LEFT JOIN ontology_identity h USING (hpo_id)\n)\nSELECT\n  case_id, hpo_id, hpo_label, assertion_context, subject_context, subject_id,\n  evidence_text, start_offset, end_offset, source_digest, ontology_source,\n  ontology_version, ontology_digest, proposal_id, proposal_provider, proposal_model,\n  proposal_confidence, review_decision, review_reviewer, review_proposal_digest,\n  review_input_digest, acceptance_state\nFROM checked\nWHERE valid"
-        }
-      },
-      {
         "id": "phenotype_hypothesis",
         "title": "Phenotype-supported hypotheses",
         "kind": "virtual",
         "resolver": "duckdb.sql_materialize",
         "params": {
           "table": "phenotype_hypothesis",
-          "sql": "WITH observed AS (\n  SELECT case_id, hpo_id\n  FROM grounded_phenotype_observations\n  WHERE case_id = getvariable('case_id')\n    AND assertion_context = 'present'\n    AND subject_context = 'proband'\n    AND acceptance_state = 'accepted'\n),\nmatched AS (\n  SELECT\n    o.case_id,\n    gp.gene,\n    gp.disease_id,\n    gp.validity,\n    gp.mode,\n    COUNT(DISTINCT o.hpo_id)::INTEGER AS matched_observed_terms\n  FROM observed o\n  JOIN gene_phenotype gp\n    ON gp.hpo_id = o.hpo_id\n  GROUP BY o.case_id, gp.gene, gp.disease_id, gp.validity, gp.mode\n),\ndeclared AS (\n  SELECT\n    gene,\n    disease_id,\n    COUNT(DISTINCT hpo_id)::INTEGER AS declared_terms_in_resource\n  FROM gene_phenotype\n  GROUP BY gene, disease_id\n)\nSELECT\n  m.case_id,\n  m.gene,\n  m.disease_id,\n  m.validity,\n  m.mode,\n  m.matched_observed_terms,\n  d.declared_terms_in_resource\nFROM matched m\nJOIN declared d USING (gene, disease_id)"
+          "sql": "SELECT\n  getvariable('case_id')::VARCHAR AS case_id,\n  json_extract_string(value, '$.gene_id') AS gene_id,\n  json_extract_string(value, '$.gene') AS gene,\n  json_extract_string(value, '$.disease_id') AS disease_id,\n  json_extract_string(value, '$.disease_label') AS disease_label,\n  try_cast(json_extract(value, '$.matched_observed_terms') AS INTEGER) AS matched_observed_terms,\n  try_cast(json_extract(value, '$.exact_observed_terms') AS INTEGER) AS exact_observed_terms,\n  try_cast(json_extract(value, '$.phenotype_specificity_score') AS DOUBLE) AS phenotype_specificity_score,\n  try_cast(json_extract(value, '$.supporting_phenotype_annotations') AS INTEGER) AS supporting_phenotype_annotations,\n  try_cast(json_extract(value, '$.phenotype_match_kinds') AS VARCHAR[]) AS phenotype_match_kinds,\n  try_cast(json_extract(value, '$.phenotype_sources') AS VARCHAR[]) AS phenotype_sources,\n  try_cast(json_extract(value, '$.has_causal_assertion') AS INTEGER) AS has_causal_assertion,\n  try_cast(json_extract(value, '$.gene_disease_assertions') AS INTEGER) AS gene_disease_assertions,\n  try_cast(json_extract(value, '$.gene_disease_predicates') AS VARCHAR[]) AS gene_disease_predicates,\n  try_cast(json_extract(value, '$.gene_disease_sources') AS VARCHAR[]) AS gene_disease_sources,\n  try_cast(json_extract(value, '$.hypothesis_rank') AS INTEGER) AS hypothesis_rank\nFROM json_each(CAST(getvariable('phenotype_hypotheses_json') AS JSON))\nWHERE json_extract_string(value, '$.gene') IS NOT NULL\n  AND json_extract_string(value, '$.disease_id') IS NOT NULL"
         }
       },
       {
@@ -133,7 +123,7 @@
         "resolver": "duckdb.sql_materialize",
         "params": {
           "table": "case_evidence",
-          "sql": "WITH evidence_bearing_variant AS (\n  SELECT *\n  FROM variant_assessment\n  WHERE variant_bucket IN ('candidate', 'abstain_no_frequency')\n     OR conflict IS NOT NULL\n),\ndirect AS (\n  SELECT\n    va.case_id,\n    'direct' AS lane,\n    'variant:' || va.variant_key AS evidence_key,\n    va.gene,\n    NULL::VARCHAR AS disease_id,\n    va.variant_key,\n    va.consequence,\n    va.allele_frequency,\n    va.clinical_significance,\n    va.zygosity,\n    va.inheritance,\n    va.variant_bucket,\n    va.variant_status,\n    NULL::INTEGER AS matched_observed_terms,\n    NULL::INTEGER AS declared_terms_in_resource,\n    va.variant_status AS evidence_status,\n    va.missing_field,\n    va.conflict,\n    va.review_kind,\n    'variant:' || va.variant_key AS review_target\n  FROM evidence_bearing_variant va\n),\ninverted_with_variant AS (\n  SELECT\n    ph.case_id,\n    'inverted' AS lane,\n    'hypothesis:' || ph.disease_id || ':' || ph.gene || ':' || va.variant_key AS evidence_key,\n    ph.gene,\n    ph.disease_id,\n    va.variant_key,\n    va.consequence,\n    va.allele_frequency,\n    va.clinical_significance,\n    va.zygosity,\n    va.inheritance,\n    va.variant_bucket,\n    va.variant_status,\n    ph.matched_observed_terms,\n    ph.declared_terms_in_resource,\n    CASE\n      WHEN va.variant_bucket = 'candidate' THEN 'genotype_supports_hypothesis'\n      WHEN va.variant_bucket = 'abstain_no_frequency' THEN 'hypothesis_variant_abstained'\n      ELSE 'variant_conflicts_with_hypothesis'\n    END AS evidence_status,\n    va.missing_field,\n    va.conflict,\n    CASE\n      WHEN va.variant_bucket = 'candidate' THEN 'correlate_supported_hypothesis'\n      ELSE va.review_kind\n    END AS review_kind,\n    'hypothesis:' || ph.disease_id || ':' || ph.gene AS review_target\n  FROM phenotype_hypothesis ph\n  JOIN evidence_bearing_variant va\n    ON va.case_id = ph.case_id\n   AND va.gene = ph.gene\n),\ninverted_without_support AS (\n  SELECT\n    ph.case_id,\n    'inverted' AS lane,\n    'hypothesis:' || ph.disease_id || ':' || ph.gene || ':no-supporting-variant' AS evidence_key,\n    ph.gene,\n    ph.disease_id,\n    NULL::VARCHAR AS variant_key,\n    NULL::VARCHAR AS consequence,\n    NULL::DOUBLE AS allele_frequency,\n    NULL::VARCHAR AS clinical_significance,\n    NULL::VARCHAR AS zygosity,\n    NULL::VARCHAR AS inheritance,\n    NULL::VARCHAR AS variant_bucket,\n    NULL::VARCHAR AS variant_status,\n    ph.matched_observed_terms,\n    ph.declared_terms_in_resource,\n    'hypothesis_without_supporting_variant' AS evidence_status,\n    'variant_support' AS missing_field,\n    NULL::VARCHAR AS conflict,\n    'inverted_gap' AS review_kind,\n    'hypothesis:' || ph.disease_id || ':' || ph.gene AS review_target\n  FROM phenotype_hypothesis ph\n  WHERE NOT EXISTS (\n    SELECT 1\n    FROM evidence_bearing_variant va\n    WHERE va.case_id = ph.case_id\n      AND va.gene = ph.gene\n  )\n)\nSELECT * FROM direct\nUNION ALL\nSELECT * FROM inverted_with_variant\nUNION ALL\nSELECT * FROM inverted_without_support"
+          "sql": "WITH evidence_bearing_variant AS (\n  SELECT *\n  FROM variant_assessment\n  WHERE variant_bucket IN ('candidate', 'abstain_no_frequency')\n     OR conflict IS NOT NULL\n),\ndirect AS (\n  SELECT\n    va.case_id,\n    'direct' AS lane,\n    'variant:' || va.variant_key AS evidence_key,\n    NULL::VARCHAR AS gene_id,\n    va.gene,\n    NULL::VARCHAR AS disease_id,\n    NULL::VARCHAR AS disease_label,\n    va.variant_key,\n    va.consequence,\n    va.allele_frequency,\n    va.clinical_significance,\n    va.zygosity,\n    va.inheritance,\n    va.variant_bucket,\n    va.variant_status,\n    NULL::INTEGER AS matched_observed_terms,\n    NULL::INTEGER AS exact_observed_terms,\n    NULL::DOUBLE AS phenotype_specificity_score,\n    NULL::INTEGER AS supporting_phenotype_annotations,\n    NULL::VARCHAR[] AS phenotype_match_kinds,\n    NULL::VARCHAR[] AS phenotype_sources,\n    NULL::INTEGER AS has_causal_assertion,\n    NULL::INTEGER AS gene_disease_assertions,\n    NULL::VARCHAR[] AS gene_disease_predicates,\n    NULL::VARCHAR[] AS gene_disease_sources,\n    NULL::INTEGER AS hypothesis_rank,\n    NULL::VARCHAR AS variant_search_status,\n    NULL::VARCHAR AS variant_search_scope,\n    NULL::VARCHAR AS variant_search_assembly,\n    NULL::INTEGER AS searched_variant_count,\n    va.variant_status AS evidence_status,\n    va.missing_field,\n    va.conflict,\n    va.review_kind,\n    'variant:' || va.variant_key AS review_target\n  FROM evidence_bearing_variant va\n),\ninverted_with_variant AS (\n  SELECT\n    ph.case_id,\n    'inverted' AS lane,\n    'hypothesis:' || ph.disease_id || ':' || ph.gene || ':' || va.variant_key AS evidence_key,\n    ph.gene_id,\n    ph.gene,\n    ph.disease_id,\n    ph.disease_label,\n    va.variant_key,\n    va.consequence,\n    va.allele_frequency,\n    va.clinical_significance,\n    va.zygosity,\n    va.inheritance,\n    va.variant_bucket,\n    va.variant_status,\n    ph.matched_observed_terms,\n    ph.exact_observed_terms,\n    ph.phenotype_specificity_score,\n    ph.supporting_phenotype_annotations,\n    ph.phenotype_match_kinds,\n    ph.phenotype_sources,\n    ph.has_causal_assertion,\n    ph.gene_disease_assertions,\n    ph.gene_disease_predicates,\n    ph.gene_disease_sources,\n    ph.hypothesis_rank,\n    coverage.search_status AS variant_search_status,\n    coverage.search_scope AS variant_search_scope,\n    coverage.assembly AS variant_search_assembly,\n    try_cast(coverage.searched_variant_count AS INTEGER) AS searched_variant_count,\n    CASE\n      WHEN va.variant_bucket = 'candidate' THEN 'genotype_supports_hypothesis'\n      WHEN va.variant_bucket = 'abstain_no_frequency' THEN 'hypothesis_variant_abstained'\n      ELSE 'variant_conflicts_with_hypothesis'\n    END AS evidence_status,\n    va.missing_field,\n    va.conflict,\n    CASE\n      WHEN va.variant_bucket = 'candidate' THEN 'correlate_supported_hypothesis'\n      ELSE va.review_kind\n    END AS review_kind,\n    'hypothesis:' || ph.disease_id || ':' || ph.gene AS review_target\n  FROM phenotype_hypothesis ph\n  JOIN evidence_bearing_variant va\n    ON va.case_id = ph.case_id\n   AND va.gene = ph.gene\n  LEFT JOIN variant_search_coverage coverage\n    ON coverage.case_id = ph.case_id\n   AND coverage.gene = ph.gene\n),\ninverted_without_support AS (\n  SELECT\n    ph.case_id,\n    'inverted' AS lane,\n    'hypothesis:' || ph.disease_id || ':' || ph.gene || ':no-supporting-variant' AS evidence_key,\n    ph.gene_id,\n    ph.gene,\n    ph.disease_id,\n    ph.disease_label,\n    NULL::VARCHAR AS variant_key,\n    NULL::VARCHAR AS consequence,\n    NULL::DOUBLE AS allele_frequency,\n    NULL::VARCHAR AS clinical_significance,\n    NULL::VARCHAR AS zygosity,\n    NULL::VARCHAR AS inheritance,\n    NULL::VARCHAR AS variant_bucket,\n    NULL::VARCHAR AS variant_status,\n    ph.matched_observed_terms,\n    ph.exact_observed_terms,\n    ph.phenotype_specificity_score,\n    ph.supporting_phenotype_annotations,\n    ph.phenotype_match_kinds,\n    ph.phenotype_sources,\n    ph.has_causal_assertion,\n    ph.gene_disease_assertions,\n    ph.gene_disease_predicates,\n    ph.gene_disease_sources,\n    ph.hypothesis_rank,\n    coverage.search_status AS variant_search_status,\n    coverage.search_scope AS variant_search_scope,\n    coverage.assembly AS variant_search_assembly,\n    try_cast(coverage.searched_variant_count AS INTEGER) AS searched_variant_count,\n    CASE\n      WHEN coverage.search_status = 'completed' THEN 'hypothesis_without_supporting_variant'\n      ELSE 'hypothesis_not_searched'\n    END AS evidence_status,\n    CASE\n      WHEN coverage.search_status = 'completed' THEN 'variant_support'\n      ELSE 'variant_search'\n    END AS missing_field,\n    NULL::VARCHAR AS conflict,\n    CASE\n      WHEN coverage.search_status = 'completed' THEN 'review_missing_genotype_support'\n      ELSE NULL\n    END AS review_kind,\n    'hypothesis:' || ph.disease_id || ':' || ph.gene AS review_target\n  FROM phenotype_hypothesis ph\n  LEFT JOIN variant_search_coverage coverage\n    ON coverage.case_id = ph.case_id\n   AND coverage.gene = ph.gene\n  WHERE NOT EXISTS (\n    SELECT 1\n    FROM evidence_bearing_variant va\n    WHERE va.case_id = ph.case_id\n      AND va.gene = ph.gene\n  )\n)\nSELECT * FROM direct\nUNION ALL\nSELECT * FROM inverted_with_variant\nUNION ALL\nSELECT * FROM inverted_without_support"
         }
       },
       {
@@ -160,20 +150,21 @@
             "case_id": {
               "type": "string"
             },
-            "grounded_phenotypes_json": {
+            "phenotype_hypotheses_json": {
               "type": "string",
-              "description": "Host-protected JSON array of accepted phenotype observations from the checkpointed grounding step."
+              "description": "Host-protected JSON array from the checkpointed phenotype-hypothesis operation."
             }
           },
           "required": [
             "case_id",
-            "grounded_phenotypes_json"
+            "phenotype_hypotheses_json"
           ]
         },
         "notes": [
-          "Direct starts from observed variants; inverted starts from accepted, original-narrative-grounded phenotype observations injected as the grounded_phenotype_observations relation.",
+          "Direct starts from observed variants; inverted consumes the recorded phenotype-to-disease-to-gene hypothesis relation produced from accepted grounding assertions.",
           "The two lanes share variant assessment semantics and retain all matching evidence-bearing variants.",
           "Missing frequency and missing genotype support remain explicit evidence rows.",
+          "A hypothesis becomes missing genotype support only after completed variant-search coverage; otherwise it remains hypothesis_not_searched.",
           "Routine direct-lane exclusions remain queryable in variant_assessment but are not copied into the evidence packet."
         ],
         "sql": {
@@ -181,15 +172,12 @@
           "requiredResources": [
             "case_variants",
             "so_loss_of_function",
-            "case_narratives",
-            "hpo_terms",
-            "gene_phenotype",
+            "variant_search_coverage",
             "variant_assessment",
-            "grounded_phenotype_observations",
             "phenotype_hypothesis",
             "case_evidence"
           ],
-          "sqlTemplate": "SELECT *\nFROM case_evidence\nORDER BY\n  lane,\n  CASE evidence_status\n    WHEN 'curated_plp_candidate' THEN 0\n    WHEN 'candidate_needs_review' THEN 1\n    WHEN 'genotype_supports_hypothesis' THEN 2\n    WHEN 'hypothesis_variant_abstained' THEN 3\n    WHEN 'hypothesis_without_supporting_variant' THEN 4\n    ELSE 5\n  END,\n  gene,\n  variant_key"
+          "sqlTemplate": "SELECT *\nFROM case_evidence\nORDER BY\n  lane,\n  CASE evidence_status\n    WHEN 'curated_plp_candidate' THEN 0\n    WHEN 'candidate_needs_review' THEN 1\n    WHEN 'genotype_supports_hypothesis' THEN 2\n    WHEN 'hypothesis_variant_abstained' THEN 3\n    WHEN 'hypothesis_without_supporting_variant' THEN 4\n    WHEN 'hypothesis_not_searched' THEN 5\n    ELSE 6\n  END,\n  gene,\n  variant_key"
         }
       },
       {

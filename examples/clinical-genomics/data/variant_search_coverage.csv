@@ -1,0 +1,4 @@
+case_id,gene,assembly,search_status,search_scope,searched_variant_count
+CASE-RD-001,GENEB,GRCh38,completed,declared_case_variant_fixture,1
+CASE-RD-001,GENEH,GRCh38,completed,declared_case_variant_fixture,0
+CASE-RD-001,GENEZ,GRCh38,completed,declared_case_variant_fixture,1

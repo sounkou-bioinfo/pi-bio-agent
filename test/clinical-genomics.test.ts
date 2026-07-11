@@ -2,15 +2,16 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { openBioStore, runBioOperationFromManifest } from "pi-bio-agent";
+import { fsCasStore, openBioStore } from "pi-bio-agent";
 import {
   getClinicalAnalysis,
   readEvidencePacket,
   runClinicalGenomicsWorkbench,
 } from "../src/clinical-genomics.js";
 import { loadRecordedGroundingRuntime } from "../src/recorded-grounding.js";
+import { localMonarchFixtureRuntime } from "../src/monarch-host.js";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const fixtureRoot = join(repoRoot, "examples", "clinical-genomics");
@@ -24,12 +25,13 @@ async function copyFixture(): Promise<string> {
 
 async function runFixture(
   exampleDir: string,
-  request: Omit<Parameters<typeof runClinicalGenomicsWorkbench>[0], "exampleDir" | "grounding">,
+  request: Omit<Parameters<typeof runClinicalGenomicsWorkbench>[0], "exampleDir" | "grounding" | "hypotheses">,
 ) {
   return runClinicalGenomicsWorkbench({
     ...request,
     exampleDir,
     grounding: await loadRecordedGroundingRuntime(join(exampleDir, "data", "grounding_proposals.json")),
+    hypotheses: localMonarchFixtureRuntime(exampleDir),
   });
 }
 
@@ -41,14 +43,16 @@ test("clinical workbench reconciles direct and inverted traversal into one evide
     now: "2026-07-05T12:00:00Z",
   });
 
-  assert.equal(out.workflow.executedSteps, 4);
+  assert.equal(out.workflow.executedSteps, 5);
   assert.equal(out.workflow.reusedSteps, 0);
   assert.equal(out.packet.schema, "pi-bio.workbench.evidence_packet.v1");
   assert.equal(out.packet.summary.kernelScope, "evidence routing only; not a complete clinical classification kernel");
   assert.equal(out.packet.summary.directCandidates, 1);
   assert.equal(out.packet.summary.directAbstentions, 1);
+  assert.equal(out.packet.summary.phenotypeHypotheses, out.packet.lanes.hypotheses.rows.length);
   assert.equal(out.packet.summary.invertedSupportedHypotheses, 1);
   assert.equal(out.packet.summary.invertedGaps, 1);
+  assert.equal(out.packet.summary.invertedUnsearched, 0);
   assert.equal(out.packet.summary.conflicts, 1);
   assert.equal(out.packet.summary.reanalysisSignals, 1);
   assert.equal(out.packet.grounding.mode, "pre+post");
@@ -62,9 +66,27 @@ test("clinical workbench reconciles direct and inverted traversal into one evide
   assert.equal(direct.find((row) => row.variant_key === "3-300-C-T")?.conflict, "benign_vs_predicted_loss_of_function");
 
   const inverted = out.packet.lanes.inverted.rows;
-  assert.ok(inverted.some((row) => row.gene === "GENEB" && row.evidence_status === "genotype_supports_hypothesis"));
+  const supported = inverted.find((row) => row.gene === "GENEB" && row.evidence_status === "genotype_supports_hypothesis");
+  assert.equal(supported?.gene_id, "HGNC:GENEB");
+  assert.equal(supported?.hypothesis_rank, 1);
+  assert.deepEqual(supported?.gene_disease_predicates, ["biolink:causes"]);
   assert.ok(inverted.some((row) => row.gene === "GENEH" && row.evidence_status === "hypothesis_without_supporting_variant"));
+  assert.ok(out.packet.summary.reviewQueue.some((row) => row.kind === "review_missing_genotype_support" && row.target === "hypothesis:MONDO:GENEH:GENEH"));
   assert.ok(out.packet.summary.reviewQueue.some((row) => row.kind === "resolve_frequency" && row.target === "variant:2-47637258-C-CT"));
+});
+
+test("SDK entry resolves a relative workspace exactly once", async () => {
+  const exampleDir = await copyFixture();
+  const out = await runClinicalGenomicsWorkbench({
+    exampleDir: relative(process.cwd(), exampleDir),
+    caseId: "CASE-RD-001",
+    analysisId: "analysis-relative-workspace",
+    now: "2026-07-05T12:00:00Z",
+    grounding: await loadRecordedGroundingRuntime(join(exampleDir, "data", "grounding_proposals.json")),
+    hypotheses: localMonarchFixtureRuntime(exampleDir),
+  });
+  assert.ok(out.analysisDbPath.startsWith(resolve(exampleDir)));
+  assert.equal(out.workflow.executedSteps, 5);
 });
 
 test("inverted traversal retains every case variant for a phenotype-supported gene", async () => {
@@ -81,6 +103,24 @@ test("inverted traversal retains every case variant for a phenotype-supported ge
   const geneB = out.packet.lanes.inverted.rows.filter((row) => row.gene === "GENEB");
   assert.deepEqual(geneB.map((row) => row.variant_key).sort(), ["17-43093464-A-T", "17-43093465-G-A"]);
   assert.equal(out.packet.summary.invertedSupportedHypotheses, 1, "variant rows do not inflate hypothesis cardinality");
+});
+
+test("a phenotype hypothesis is not called missing genotype support without completed search coverage", async () => {
+  const exampleDir = await copyFixture();
+  const coveragePath = join(exampleDir, "data", "variant_search_coverage.csv");
+  const coverage = await fs.readFile(coveragePath, "utf8");
+  await fs.writeFile(coveragePath, coverage.split("\n").filter((line) => !line.includes(",GENEH,")).join("\n"));
+  const out = await runFixture(exampleDir, {
+    caseId: "CASE-RD-001",
+    analysisId: "analysis-unsearched-hypothesis",
+    now: "2026-07-05T12:00:00Z",
+  });
+  const geneH = out.packet.lanes.inverted.rows.find((row) => row.gene === "GENEH");
+  assert.equal(geneH?.evidence_status, "hypothesis_not_searched");
+  assert.equal(geneH?.missing_field, "variant_search");
+  assert.equal(geneH?.review_kind, null);
+  assert.equal(out.packet.summary.invertedGaps, 0);
+  assert.equal(out.packet.summary.invertedUnsearched, 1);
 });
 
 test("an unranked status abstains even when prior and current labels are equal", async () => {
@@ -100,39 +140,22 @@ test("an unranked status abstains even when prior and current labels are equal",
   );
 });
 
-test("the evidence operation rejects forged grounded observations", async () => {
+test("checkpoint replay digest rejects changed graph fixture bytes", async () => {
   const exampleDir = await copyFixture();
-  const response = await runBioOperationFromManifest({
-    cwd: exampleDir,
-    dbPath: join(exampleDir, "forged-grounding.duckdb"),
-    manifestPath: "manifest.json",
-    operationId: "clinical.case_evidence",
-    bindings: { case_id: "CASE-RD-001" },
-    protectedSessionBindings: {
-      grounded_phenotypes_json: JSON.stringify([{
-        caseId: "CASE-RD-001",
-        hpoId: "HP:0001252",
-        hpoLabel: "Hypotonia",
-        assertionContext: "present",
-        subjectContext: "proband",
-        evidenceText: "hypotonia",
-        startOffset: 45,
-        endOffset: 54,
-        sourceDigest: "sha256:forged",
-        ontologySource: "HPO",
-        ontologyVersion: "fixture-2026-07",
-        ontologyDigest: "sha256:0000000000000000000000000000000000000000000000000000000000000001",
-        proposalId: "forged",
-        proposalProvider: "forged",
-        proposalModel: "forged",
-        review: { decision: "approved", reviewer: "forged", proposalDigest: "forged", inputDigest: "forged" },
-        acceptanceState: "accepted",
-      }]),
-    },
-    protectedSessionVariables: ["grounded_phenotypes_json"],
+  await runFixture(exampleDir, {
+    caseId: "CASE-RD-001",
+    analysisId: "analysis-graph-input-change",
+    now: "2026-07-05T12:00:00Z",
   });
-  assert.equal(response.ok, false);
-  if (!response.ok) assert.match(response.error, /source digest mismatch/);
+  await fs.appendFile(
+    join(exampleDir, "data", "monarch_edges.csv"),
+    "MONDO:GENEH,biolink:has_phenotype,HP:0001250,false,infores:fixture,,ECO:0000001,\n",
+  );
+  await assert.rejects(() => runFixture(exampleDir, {
+    caseId: "CASE-RD-001",
+    analysisId: "analysis-graph-input-change",
+    now: "2026-07-05T12:05:00Z",
+  }), /replay digest does not match/);
 });
 
 test("checkpoint replay digest rejects changed declared input bytes", async () => {
@@ -174,7 +197,7 @@ test("changed grounding composition invalidates checkpoint replay", async () => 
   }), /replay digest does not match/);
 });
 
-test("same analysis id resumes from all four durable checkpoints", async () => {
+test("same analysis id resumes from all five durable checkpoints", async () => {
   const exampleDir = await copyFixture();
   const first = await runFixture(exampleDir, {
     caseId: "CASE-RD-001",
@@ -187,9 +210,9 @@ test("same analysis id resumes from all four durable checkpoints", async () => {
     now: "2026-07-05T12:05:00Z",
   });
 
-  assert.equal(first.workflow.executedSteps, 4);
+  assert.equal(first.workflow.executedSteps, 5);
   assert.equal(resumed.workflow.executedSteps, 0);
-  assert.equal(resumed.workflow.reusedSteps, 4);
+  assert.equal(resumed.workflow.reusedSteps, 5);
   assert.equal(resumed.packetDigest, first.packetDigest);
   assert.equal(resumed.packet.generatedAt, "2026-07-05T12:00:00Z");
 
@@ -198,7 +221,7 @@ test("same analysis id resumes from all four durable checkpoints", async () => {
     const rows = await store.conn.all<{ n: bigint }>(
       "SELECT count(*) AS n FROM bio_observations WHERE predicate = 'run' AND starts_with(subject_id, 'run:analysis-resume.')",
     );
-    assert.equal(Number(rows[0]?.n), 5);
+    assert.equal(Number(rows[0]?.n), 6);
   } finally {
     store.close();
   }
@@ -221,19 +244,31 @@ test("packet and scientific runs are CAS-backed and connected in the ledger", as
     packetUri: out.packetUri,
   });
 
+  const receiptsAddress = out.packet.lanes.hypotheses.casRefs?.receipts;
+  assert.match(receiptsAddress ?? "", /^sha256:/);
+  const cas = fsCasStore(join(exampleDir, ".pi", "bio-agent", "cas"));
+  const receipts = JSON.parse(await fs.readFile(
+    cas.pathFor({ algorithm: "sha256", digest: receiptsAddress!.slice(7) }),
+    "utf8",
+  )) as Array<{ sourceSnapshots?: Array<{ source: string }> }>;
+  const graphSources = receipts.flatMap((receipt) => receipt.sourceSnapshots ?? []).map(({ source }) => source);
+  assert.ok(graphSources.includes("file:data/monarch_edges.csv"));
+  assert.ok(graphSources.includes("file:data/monarch_nodes.csv"));
+  assert.ok(graphSources.includes("file:data/monarch_closure.csv"));
+
   const analysisDb = await openBioStore(exampleDir, { path: out.analysisDbPath });
   try {
-    const rows = await analysisDb.conn.all<{ assessed: bigint; packet_rows: bigint; grounded: bigint; hypotheses: bigint }>(
+    const rows = await analysisDb.conn.all<{ assessed: bigint; packet_rows: bigint; ranked: bigint; hypotheses: bigint }>(
       `SELECT
         (SELECT count(*) FROM variant_assessment) AS assessed,
         (SELECT count(*) FROM case_evidence) AS packet_rows,
-        (SELECT count(*) FROM grounded_phenotype_observations) AS grounded,
+        (SELECT count(*) FROM monarch_phenotype_hypotheses) AS ranked,
         (SELECT count(*) FROM phenotype_hypothesis) AS hypotheses`,
     );
     assert.deepEqual({
       assessed: Number(rows[0]?.assessed), packetRows: Number(rows[0]?.packet_rows),
-      grounded: Number(rows[0]?.grounded), hypotheses: Number(rows[0]?.hypotheses),
-    }, { assessed: 5, packetRows: 5, grounded: 4, hypotheses: 2 });
+      ranked: Number(rows[0]?.ranked), hypotheses: Number(rows[0]?.hypotheses),
+    }, { assessed: 5, packetRows: 5, ranked: 2, hypotheses: 2 });
   } finally {
     analysisDb.close();
   }
@@ -249,7 +284,7 @@ test("packet and scientific runs are CAS-backed and connected in the ledger", as
       "SELECT value_json FROM bio_observations WHERE subject_id = ? AND predicate = 'job_step_checkpoint' ORDER BY statement_key",
       [`job:${out.analysisId}`],
     );
-    assert.equal(checkpoints.length, 4);
+    assert.equal(checkpoints.length, 5);
     assert.ok(checkpoints.every((row) => {
       const envelope = JSON.parse(row.value_json) as { value: Record<string, unknown> };
       return !("rows" in envelope.value) && !("packet" in envelope.value);
@@ -268,6 +303,11 @@ test("packet and scientific runs are CAS-backed and connected in the ledger", as
       assert.ok(observations.some((row) => row.subject_id === `analysis:${out.analysisId}` && row.predicate === "uses_run" && row.object_id === `run:${runId}`));
       assert.ok(observations.some((row) => row.subject_id === out.packetUri && row.predicate === "derived_from" && row.object_id === `run:${runId}`));
     }
+    const runLinks = await store.conn.all<{ predicate: string; object_id: string | null }>(
+      "SELECT predicate, object_id FROM bio_observations WHERE subject_id = ? ORDER BY predicate, object_id",
+      [`run:${out.packet.lanes.inverted.runId}`],
+    );
+    assert.ok(runLinks.some((row) => row.predicate === "uses_run" && row.object_id === `run:${out.packet.lanes.hypotheses.runId}`));
     const groundingRoots = await store.conn.all<{ digest: string }>(
       "SELECT digest FROM cas_ref WHERE ref_id = ? AND ref_type = 'artifact'",
       [out.packet.grounding.groundingId],

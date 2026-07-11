@@ -1,9 +1,9 @@
 {
   "schema": "pi-bio.manifest.v1",
-  "id": "clinical-genomics-monarch",
+  "id": "clinical-genomics-monarch-fixture",
   "version": "0.1.0",
-  "title": "Phenotype-to-gene hypotheses over a pinned Monarch KG",
-  "description": "An inverted rare-disease traversal over the canonical edges, nodes, and closure tables in a host-attached, versioned Monarch DuckDB snapshot.",
+  "title": "Phenotype-to-gene hypotheses over the canonical graph fixture",
+  "description": "Hermetic canonical edges, nodes, and closure tables used to exercise the same inverted traversal as the pinned Monarch snapshot.",
   "provides": {
     "resolvers": [
       {
@@ -25,7 +25,7 @@
         "params": {
           "table": "case_phenotype_ancestors",
           "declaredSources": [
-            "https://data.monarchinitiative.org/monarch-kg/2026-04-14/monarch-kg.duckdb"
+            "file:data/monarch_closure.csv"
           ],
           "sql": "WITH observed AS (\n  SELECT DISTINCT hpo_id\n  FROM UNNEST(CAST(getvariable('phenotype_ids') AS VARCHAR[])) AS terms(hpo_id)\n), closure_rows AS (\n  SELECT\n    o.hpo_id AS observed_hpo_id,\n    c.object_id AS ancestor_hpo_id\n  FROM observed o\n  JOIN monarch.closure c\n    ON c.subject_id = o.hpo_id\n   AND c.predicate_id = 'rdfs:subClassOf'\n  WHERE c.object_id LIKE 'HP:%'\n)\nSELECT observed_hpo_id, ancestor_hpo_id\nFROM closure_rows\nUNION\nSELECT hpo_id, hpo_id\nFROM observed"
         }
@@ -38,7 +38,9 @@
         "params": {
           "table": "monarch_disease_phenotype_matches",
           "declaredSources": [
-            "https://data.monarchinitiative.org/monarch-kg/2026-04-14/monarch-kg.duckdb"
+            "file:data/monarch_edges.csv",
+            "file:data/monarch_nodes.csv",
+            "file:data/monarch_closure.csv"
           ],
           "sql": "WITH disease_annotations AS (\n  SELECT\n    e.subject AS disease_id,\n    e.object AS disease_hpo_id,\n    e.frequency_qualifier,\n    e.primary_knowledge_source,\n    e.has_evidence,\n    e.publications\n  FROM monarch.edges e\n  WHERE e.predicate = 'biolink:has_phenotype'\n    AND e.subject LIKE 'MONDO:%'\n    AND e.object LIKE 'HP:%'\n    AND coalesce(try_cast(e.negated AS BOOLEAN), false) = false\n), direct_or_broader AS (\n  SELECT\n    a.observed_hpo_id,\n    d.*,\n    CASE\n      WHEN a.observed_hpo_id = d.disease_hpo_id THEN 'exact'\n      ELSE 'observed_descends_from_annotation'\n    END AS match_kind\n  FROM case_phenotype_ancestors a\n  JOIN disease_annotations d\n    ON d.disease_hpo_id = a.ancestor_hpo_id\n), more_specific AS (\n  SELECT\n    observed.observed_hpo_id,\n    d.*,\n    'annotation_descends_from_observed' AS match_kind\n  FROM (SELECT DISTINCT observed_hpo_id FROM case_phenotype_ancestors) observed\n  JOIN monarch.closure c\n    ON c.object_id = observed.observed_hpo_id\n   AND c.predicate_id = 'rdfs:subClassOf'\n   AND c.subject_id LIKE 'HP:%'\n   AND c.subject_id <> observed.observed_hpo_id\n  JOIN disease_annotations d\n    ON d.disease_hpo_id = c.subject_id\n), candidate_matches AS (\n  SELECT * FROM direct_or_broader\n  UNION ALL\n  SELECT * FROM more_specific\n), annotation_frequency AS (\n  SELECT\n    disease_hpo_id,\n    COUNT(DISTINCT disease_id)::BIGINT AS annotated_disease_count\n  FROM disease_annotations\n  GROUP BY disease_hpo_id\n), totals AS (\n  SELECT COUNT(DISTINCT disease_id)::BIGINT AS total_disease_count\n  FROM disease_annotations\n)\nSELECT\n  m.observed_hpo_id,\n  m.disease_id,\n  disease.name AS disease_label,\n  m.disease_hpo_id,\n  phenotype.name AS disease_phenotype_label,\n  m.match_kind,\n  ln((t.total_disease_count + 1.0) / (f.annotated_disease_count + 1.0)) AS annotation_information_content,\n  f.annotated_disease_count,\n  t.total_disease_count,\n  m.frequency_qualifier,\n  m.primary_knowledge_source,\n  m.has_evidence,\n  m.publications\nFROM candidate_matches m\nJOIN annotation_frequency f USING (disease_hpo_id)\nCROSS JOIN totals t\nLEFT JOIN monarch.nodes disease ON disease.id = m.disease_id\nLEFT JOIN monarch.nodes phenotype ON phenotype.id = m.disease_hpo_id"
         }
@@ -51,7 +53,8 @@
         "params": {
           "table": "monarch_gene_disease_evidence",
           "declaredSources": [
-            "https://data.monarchinitiative.org/monarch-kg/2026-04-14/monarch-kg.duckdb"
+            "file:data/monarch_edges.csv",
+            "file:data/monarch_nodes.csv"
           ],
           "sql": "WITH candidate_diseases AS (\n  SELECT DISTINCT disease_id\n  FROM monarch_disease_phenotype_matches\n)\nSELECT DISTINCT\n  e.subject AS gene_id,\n  coalesce(gene.symbol, gene.name, e.subject) AS gene,\n  e.object AS disease_id,\n  e.predicate,\n  e.primary_knowledge_source,\n  e.has_evidence,\n  e.publications\nFROM monarch.edges e\nJOIN candidate_diseases candidate\n  ON candidate.disease_id = e.object\nLEFT JOIN monarch.nodes gene\n  ON gene.id = e.subject\nWHERE e.subject LIKE 'HGNC:%'\n  AND e.predicate IN (\n    'biolink:causes',\n    'biolink:gene_associated_with_condition',\n    'biolink:associated_with_increased_likelihood_of'\n  )\n  AND coalesce(try_cast(e.negated AS BOOLEAN), false) = false"
         }

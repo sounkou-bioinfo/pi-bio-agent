@@ -1,0 +1,11 @@
+subject,predicate,object,negated,primary_knowledge_source,frequency_qualifier,has_evidence,publications
+MONDO:GENEB,biolink:has_phenotype,HP:0001263,false,infores:fixture,,ECO:0000001,
+MONDO:GENEB,biolink:has_phenotype,HP:0001252,false,infores:fixture,,ECO:0000001,
+MONDO:GENEB,biolink:has_phenotype,HP:0001250,false,infores:fixture,,ECO:0000001,
+MONDO:GENEH,biolink:has_phenotype,HP:0001263,false,infores:fixture,,ECO:0000001,
+MONDO:GENEH,biolink:has_phenotype,HP:0001252,false,infores:fixture,,ECO:0000001,
+MONDO:GENEZ,biolink:has_phenotype,HP:0001250,false,infores:fixture,,ECO:0000001,
+MONDO:GENEZ,biolink:has_phenotype,HP:0001251,true,infores:fixture,,ECO:0000001,
+HGNC:GENEB,biolink:causes,MONDO:GENEB,false,infores:fixture,,ECO:0000001,
+HGNC:GENEH,biolink:causes,MONDO:GENEH,false,infores:fixture,,ECO:0000001,
+HGNC:GENEZ,biolink:gene_associated_with_condition,MONDO:GENEZ,false,infores:fixture,,ECO:0000001,

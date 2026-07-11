@@ -47,6 +47,16 @@
           "declaredSources": ["https://data.monarchinitiative.org/monarch-kg/2026-04-14/monarch-kg.duckdb"],
           "sqlFile": "relations/monarch_gene_disease_evidence.sql"
         }
+      },
+      {
+        "id": "monarch_phenotype_hypotheses",
+        "title": "Ranked phenotype-supported hypotheses",
+        "kind": "virtual",
+        "resolver": "duckdb.sql_materialize",
+        "params": {
+          "table": "monarch_phenotype_hypotheses",
+          "sqlFile": "relations/monarch_phenotype_hypotheses.sql"
+        }
       }
     ],
     "operations": [
@@ -62,7 +72,6 @@
           "properties": {
             "phenotype_ids": {
               "type": "array",
-              "minItems": 1,
               "items": { "type": "string", "pattern": "^HP:[0-9]+$" },
               "description": "Accepted HPO CURIEs."
             },
@@ -70,7 +79,7 @@
           }
         },
         "notes": [
-          "The host attaches the pinned Monarch DuckDB snapshot read-only as the monarch catalog.",
+          "The host supplies the manifest-declared canonical graph as the monarch catalog; fixture and remote compositions carry their own source receipts.",
           "Exact and ancestor/descendant matches remain distinguishable in the result components.",
           "Negated phenotype assertions are excluded; association predicates and knowledge sources remain visible.",
           "This operation proposes hypotheses for downstream variant search and review. It does not diagnose a case."
@@ -80,7 +89,8 @@
           "requiredResources": [
             "case_phenotype_ancestors",
             "monarch_disease_phenotype_matches",
-            "monarch_gene_disease_evidence"
+            "monarch_gene_disease_evidence",
+            "monarch_phenotype_hypotheses"
           ],
           "sqlFile": "operations/monarch_phenotype_hypotheses.sql"
         }

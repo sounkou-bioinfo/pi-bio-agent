@@ -1,0 +1,11 @@
+id,category,name,symbol
+MONDO:GENEB,biolink:Disease,GENEB developmental disorder,
+MONDO:GENEH,biolink:Disease,GENEH recessive disorder,
+MONDO:GENEZ,biolink:Disease,GENEZ seizure disorder,
+HGNC:GENEB,biolink:Gene,GENEB,GENEB
+HGNC:GENEH,biolink:Gene,GENEH,GENEH
+HGNC:GENEZ,biolink:Gene,GENEZ,GENEZ
+HP:0001263,biolink:PhenotypicFeature,Global developmental delay,
+HP:0001252,biolink:PhenotypicFeature,Hypotonia,
+HP:0001250,biolink:PhenotypicFeature,Seizure,
+HP:0001251,biolink:PhenotypicFeature,Ataxia,
