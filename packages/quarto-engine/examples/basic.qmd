@@ -1,0 +1,50 @@
+---
+title: "Pi Bio Quarto engine"
+engine: pi-bio
+---
+
+# Trusted Node/TypeScript cells
+
+The engine keeps cells in one Node process for this document. `piBio` is a
+small output adapter; scientific work still goes through the pi-bio-agent SDK
+or CLI and its host-provided capabilities.
+
+```{ts .pi-bio}
+import { summarizeTotal } from "./helper.ts";
+
+const values: number[] = [1, 2, 3, 4];
+const total = values.reduce((sum, value) => sum + value, 0);
+console.log({ total, mean: total / values.length });
+console.log(summarizeTotal(total));
+```
+
+```{ts .pi-bio}
+const doubled = values.map((value) => value * 2);
+piBio.json({ values, doubled, largeCount: 9007199254740993n });
+console.log("user-output-preserved");
+```
+
+```{r .pi-bio}
+cat("R is an explicit host runtime")
+```
+
+```{bash .pi-bio}
+printf 'shell is an explicit host runtime\\n'
+```
+
+```{ts .pi-bio}
+import { runBioQueryFromManifest } from "pi-bio-agent";
+
+const query = await runBioQueryFromManifest({
+  cwd: ".",
+  dbPath: ":memory:",
+  manifestPath: "examples/manifest.json",
+  runId: "quarto-engine-sdk",
+  sql: "SELECT consequence, count(*) AS n FROM variants GROUP BY consequence ORDER BY consequence",
+});
+if (!query.ok) throw new Error(query.error);
+piBio.json(query.result.rows);
+```
+
+`pi-bio` cells run with the permissions of the Node process that renders the
+document. They are trusted code, not a sandbox.

@@ -24,8 +24,8 @@ Instructions for coding agents working in this repository.
 ## Monorepo Layout And Boundary Discipline
 
 - The repository root is the public `pi-bio-agent` package. `packages/workbench` is the first-party application
-  package in this same repository, with its own manifests, SQL, API, and tests. There is no second canonical
-  workbench checkout or repository to keep in sync.
+  package and `packages/quarto-engine` is the first-party rendering adapter in this same repository, each with its
+  own manifests/code and tests. There is no second canonical workbench checkout or repository to keep in sync.
 - Keep the package boundary real: the workbench consumes the root package surface, never `src/` internals. Its package
   metadata retains the GitHub package contract for external consumers; local lockstep development happens in this
   workspace and is not a reason to publish sibling filesystem paths or duplicate the core.
@@ -35,8 +35,8 @@ Instructions for coding agents working in this repository.
 - Do not add a second lifecycle, resolver, transport, graph model, auth layer, or schema merely because the first
   consumer finds the existing surface inconvenient. Name the concrete consumers, reconcile the contracts, then add
   one shared primitive with dogfood and tests.
-- `npm run check` checks core. `npm run check:all` checks core and workbench. Root CI is the canonical workspace gate;
-  do not add a nested package workflow.
+- `npm run check` checks core. `npm run check:all` checks core, workbench, and Quarto engine. Root CI is the canonical
+  workspace gate; do not add nested package workflows.
 - npm scripts are a flat namespace; the existing `check:`, `build:`, `readme:`, `provision:`, `install:`, and
   `dogfood:` prefixes are sufficient grouping. Keep one parameterized installer (`npm run install:skill -- --host …`)
   rather than adding an alias for every host.

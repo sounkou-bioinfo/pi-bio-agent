@@ -91,8 +91,10 @@
     "check:skills": "node scripts/validate-skills.mjs",
     "check:workbench": "npm run check --workspace=packages/workbench",
     "build:workbench": "npm run build --workspace=packages/workbench",
-    "check:all": "npm run check && npm run check:workbench",
-    "build:all": "npm run build && npm run build:workbench"
+    "check:quarto": "npm run check --workspace=packages/quarto-engine",
+    "build:quarto": "npm run build --workspace=packages/quarto-engine",
+    "check:all": "npm run check && npm run check:workbench && npm run check:quarto",
+    "build:all": "npm run build && npm run build:workbench && npm run build:quarto"
   },
   "pi": {
     "extensions": [

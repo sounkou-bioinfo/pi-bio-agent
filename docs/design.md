@@ -67,6 +67,16 @@ ports, using a real workbench example to define state, async, output, and proven
 to core or use it to create a second compute/ledger abstraction. Do not add copied result snapshots or a second
 handwritten API description to make a page look complete.
 
+The Quarto adapter makes the host-extension boundary concrete. Quarto's
+extension discovery is trusted rendering code: it selects a package, runs
+marked cells, and receives Markdown back. It is not a scientific extension
+registry. The manifest/operation and injected host-port contracts remain the
+scientific boundary, and the adapter must call the existing SDK/CLI when a
+cell performs work that needs DuckDB, receipts, replay, CAS, or observations.
+The current adapter deliberately keeps those concerns out of the engine and
+tests the rendered view against the real SDK path in
+`packages/quarto-engine/examples/basic.qmd`.
+
 ## Hard-Learned Lessons
 
 These are not slogans; they are constraints learned in implementation and tests. Keep them visible when changing

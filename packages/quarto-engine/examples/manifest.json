@@ -1,0 +1,30 @@
+{
+  "schema": "pi-bio.manifest.v1",
+  "id": "quarto-engine-variants",
+  "version": "0.1.0",
+  "title": "Quarto engine variants",
+  "description": "Small declared resource used by the Quarto engine SDK dogfood.",
+  "provides": {
+    "resolvers": [
+      {
+        "id": "duckdb.file_scan",
+        "version": "0.1.0",
+        "title": "DuckDB file scan",
+        "description": "Read a declared local table resource.",
+        "output": { "mode": "table" }
+      }
+    ],
+    "resources": [
+      {
+        "id": "variants",
+        "title": "Variants",
+        "kind": "virtual",
+        "resolver": "duckdb.file_scan",
+        "params": {
+          "path": "data/variants.csv",
+          "table": "variants"
+        }
+      }
+    ]
+  }
+}
