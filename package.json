@@ -16,6 +16,9 @@
   "engines": {
     "node": ">=20"
   },
+  "workspaces": [
+    "packages/*"
+  ],
   "type": "module",
   "keywords": [
     "pi-package",
@@ -94,7 +97,11 @@
     "prepare": "node scripts/build-if-available.mjs",
     "readme:tools": "node scripts/generate-readme-tools.mjs",
     "check:readme-tools": "node scripts/generate-readme-tools.mjs --check",
-    "check:skills": "node scripts/validate-skills.mjs"
+    "check:skills": "node scripts/validate-skills.mjs",
+    "check:workbench": "npm run check --workspace=packages/workbench",
+    "build:workbench": "npm run build --workspace=packages/workbench",
+    "check:all": "npm run check && npm run check:workbench",
+    "build:all": "npm run build && npm run build:workbench"
   },
   "pi": {
     "extensions": [

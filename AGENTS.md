@@ -21,6 +21,15 @@ Instructions for coding agents working in this repository.
 - For memory, graph, and provenance work, read `docs/memory-and-knowledge-unification.md`, `docs/ontology-and-knowledge-graphs.md`, and `docs/concurrency.md`.
 - For user-facing behavior, check both `README.Rmd` and the rendered `README.md`; keep them consistent when editing README prose.
 
+## Monorepo Packages
+
+- The root is the public `pi-bio-agent` package. `packages/workbench` is a first-party application consumer with its
+  own package identity, manifests, SQL, API, and tests.
+- Keep the package boundary real: the workbench imports the root package surface, never `src/` internals. A generic
+  need belongs in core; a clinical choice belongs in the workbench.
+- `npm run check` checks core. `npm run check:all` checks core and workbench. The workspace is the lockstep
+  development path; the workbench's standalone metadata still names the GitHub package contract.
+
 ## Avoid Docs Sprawl
 
 - Do not add a new docs file unless no existing doc has the right ownership.

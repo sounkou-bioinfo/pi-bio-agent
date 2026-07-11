@@ -4,6 +4,12 @@
 
 # pi-bio-agent
 
+This repository is also the first-party workspace for
+`packages/workbench`, the clinical-genomics application binding. The
+root package remains the public `pi-bio-agent` substrate; the workbench
+consumes it as a package and keeps domain SQL/manifests out of the
+substrate. Run `npm run check:all` to check both packages.
+
 [![CI](https://github.com/sounkou-bioinfo/pi-bio-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/sounkou-bioinfo/pi-bio-agent/actions/workflows/ci.yml)
 [![License: GPL
 v2+](https://img.shields.io/badge/License-GPL%20v2%2B-blue.svg)](LICENSE)
@@ -237,10 +243,10 @@ pi-bio-agent reproduce .pi/bio-agent/runs/readme-variant-counts/replay.json
   "reproduced": true,
   "matched": true,
   "expected": [
-    "sha256:02c21c9e54d35d4173d5ca2ca13f96d40e4bd9887a66c9ecef94bec189a856c8"
+    "sha256:503a0f38badbe135aaf78d0893df64ef1f38610ea048d811ee378b7cffaa68c1"
   ],
   "produced": [
-    "sha256:02c21c9e54d35d4173d5ca2ca13f96d40e4bd9887a66c9ecef94bec189a856c8"
+    "sha256:503a0f38badbe135aaf78d0893df64ef1f38610ea048d811ee378b7cffaa68c1"
   ],
   "missing": [],
   "extra": [],

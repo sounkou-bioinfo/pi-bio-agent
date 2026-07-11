@@ -4,12 +4,15 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const tsc = join(packageRoot, "node_modules", "typescript", "bin", "tsc");
+const localTsc = join(packageRoot, "node_modules", "typescript", "bin", "tsc");
+const tscCommand = existsSync(localTsc) ? process.execPath : "tsc";
+const tscPrefix = existsSync(localTsc) ? [localTsc] : [];
 const requiredDist = [
   join(packageRoot, "dist", "index.js"),
   join(packageRoot, "dist", "cli", "bin.js"),
 ];
-if (!existsSync(tsc)) {
+const tscProbe = spawnSync(tscCommand, [...tscPrefix, "--version"], { cwd: packageRoot, stdio: "ignore" });
+if (tscProbe.status !== 0) {
   const missing = requiredDist.filter((path) => !existsSync(path));
   if (missing.length === 0) {
     chmodSync(join(packageRoot, "dist", "cli", "bin.js"), 0o755);
@@ -25,7 +28,7 @@ if (!existsSync(tsc)) {
 }
 
 rmSync(join(packageRoot, "dist"), { recursive: true, force: true });
-const build = spawnSync(process.execPath, [tsc, "-p", "tsconfig.build.json"], {
+const build = spawnSync(tscCommand, [...tscPrefix, "-p", "tsconfig.build.json"], {
   cwd: packageRoot,
   stdio: "inherit",
 });

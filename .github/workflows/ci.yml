@@ -51,6 +51,17 @@ jobs:
       - name: Build package
         run: npm run build
 
+      - name: Provision workbench extensions
+        run: |
+          npm run provision:duckhts --workspace=packages/workbench
+          npm run provision:ducknng --workspace=packages/workbench
+
+      - name: Check workbench package
+        run: npm run check:workbench
+
+      - name: Build workbench package
+        run: npm run build:workbench
+
       - name: Verify package contents
         run: npm pack --dry-run
 
