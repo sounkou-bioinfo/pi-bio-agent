@@ -56,6 +56,8 @@ Instructions for coding agents working in this repository.
   point to a test, script, manifest, operation, or generated example that exercises it.
 - `README.qmd` is the executable README source and `README.md` is its generated artifact. Example READMEs and tool
   inventories follow the same source/generator/check pattern; do not hand-edit their output.
+- Treat script-level literate docs as generated artifacts: `scripts/*.md` (dogfood evidence) are now sourced from
+  sibling `scripts/*.qmd` files. Edit the `.qmd` source and run `npm run scripts:qmd` to regenerate.
 - Quarto is suitable for future polyglot reports and can run TypeScript project scripts through its bundled Deno. Its
   Observable-JS cells are browser/reactive code, not a Node/DuckDB execution surface. Keep core Node/TypeScript claims
   in `test/`, `scripts/`, or package examples and link or generate them into prose.

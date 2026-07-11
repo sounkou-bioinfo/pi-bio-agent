@@ -1,15 +1,23 @@
+
+
 # JobRunner NNG compute profile (dogfood)
 
-`node scripts/nng-job-runner.mjs` is a cross-process **status-transport smoke** for the L1 `JobRunner` ledger shape
-over ducknng RPC. It is not a complete distributed compute backend.
+`node scripts/nng-job-runner.mjs` is a cross-process **status-transport
+smoke** for the L1 `JobRunner` ledger shape over ducknng RPC. It is not
+a complete distributed compute backend.
 
-A separate worker process simulates work and reports each phase (`running` → `succeeded`) by running a
-`recordObservation`-shaped `INSERT` over `ducknng_run_rpc` against the coordinator's shared DuckDB. The
-coordinator reads the job's status straight out of the **same `job:<runId>:status` slot** with the unchanged L1
-`observationAsOfKey`. The job-store code does not change — only dispatch + the worker are new, and the worker is
-**any language that speaks NNG**: node here, R via `nanonext`/`mirai`, Python via `pynng`.
+A separate worker process simulates work and reports each phase
+(`running` → `succeeded`) by running a `recordObservation`-shaped
+`INSERT` over `ducknng_run_rpc` against the coordinator’s shared DuckDB.
+The coordinator reads the job’s status straight out of the **same
+`job:<runId>:status` slot** with the unchanged L1 `observationAsOfKey`.
+The job-store code does not change — only dispatch + the worker are new,
+and the worker is **any language that speaks NNG**: node here, R via
+`nanonext`/`mirai`, Python via `pynng`.
 
-The smoke proves that a remote process can update the same durable status slot the local runner reads. It does not
-claim a queue lease, execute the replay spec, record a result/artifact, honor cancellation, or survive a coordinator
-restart. Those are covered separately by queue/checkpoint tests and must be composed with a real worker in the
+The smoke proves that a remote process can update the same durable
+status slot the local runner reads. It does not claim a queue lease,
+execute the replay spec, record a result/artifact, honor cancellation,
+or survive a coordinator restart. Those are covered separately by
+queue/checkpoint tests and must be composed with a real worker in the
 workbench.
