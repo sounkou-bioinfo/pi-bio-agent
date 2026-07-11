@@ -80,7 +80,7 @@
     "provision:duckhts": "node --input-type=module -e \"import {DuckDBInstance} from '@duckdb/node-api'; const c=await(await DuckDBInstance.create(':memory:')).connect(); await c.run('INSTALL duckhts FROM community;'); await c.run('LOAD duckhts;'); console.log('duckhts installed + loaded');\"",
     "provision:ducknng-owned": "bash scripts/provision-ducknng-owned.sh",
     "install:skill": "node scripts/install-skill.mjs",
-    "pattern:pi-session-trace": "node scripts/pi-session-trace-pattern.mjs",
+    "pattern:pi-session-trace": "node scripts/pattern-session-trace.mjs",
     "pattern:substrate-skill": "npm run build && node scripts/substrate-skill-pattern.mjs",
     "pattern:bring-it-home": "npm run build && node scripts/bring-it-home-pattern.mjs",
     "pattern:ducknng-upload": "node scripts/ducknng-upload-pattern.mjs",

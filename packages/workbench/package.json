@@ -19,7 +19,7 @@
     "test": "rm -rf dist-test && tsc -p tsconfig.test.json && node --test dist-test/test/*.test.js",
     "check": "npm run check:manifest && npm run typecheck && npm test",
     "demo:clinical": "npm run build && node dist/cli.js run",
-    "pattern:monarch": "npm run build && node scripts/run-monarch-inverted-pattern.mjs",
+    "pattern:monarch": "npm run build && node scripts/run-monarch-pattern.mjs",
     "benchmark:grounding": "npm run build && node scripts/run-phenotype-grounding-benchmark.mjs",
     "provision:ducknng": "node --input-type=module -e \"import {DuckDBInstance} from '@duckdb/node-api'; const c=await(await DuckDBInstance.create(':memory:')).connect(); await c.run('INSTALL ducknng FROM community;'); await c.run('LOAD ducknng;'); console.log('ducknng installed + loaded');\"",
     "provision:duckhts": "node --input-type=module -e \"import {DuckDBInstance} from '@duckdb/node-api'; const c=await(await DuckDBInstance.create(':memory:')).connect(); await c.run('INSTALL duckhts FROM community;'); await c.run('LOAD duckhts;'); console.log('duckhts installed + loaded');\"",
