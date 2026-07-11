@@ -16,7 +16,7 @@ This closes the last cell of the topology matrix: **chain**
 (`blackboard-run`) / **push-pull** (`pipeline-fanout`) /
 **shared-write** (this).
 
-Run: `npm run build && node scripts/blackboard-shared.mjs`
+Run: `npm run dogfood:blackboard-shared`
 
 ## Recorded run (2026-06-30)
 

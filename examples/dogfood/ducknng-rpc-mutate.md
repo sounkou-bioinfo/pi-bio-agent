@@ -18,7 +18,7 @@ is **opt-in**: the server must
 `ducknng_register_exec_method(false|true)` (the host security boundary,
 vs quack’s open-by-ATTACH).
 
-Run: `npm run build && node scripts/ducknng-rpc-mutate.mjs`
+Run: `npm run dogfood:ducknng-rpc-mutate`
 
 ## Recorded run (2026-06-30)
 

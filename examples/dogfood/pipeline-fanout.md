@@ -15,7 +15,7 @@ deterministic local variant-chunk classification (same rare/high-
 impact + abstention rule as the SQL operation, in JS), so the run is
 network-free and the concurrency **cap is checked, not asserted**.
 
-Run: `npm run build && node scripts/pipeline-fanout.mjs`
+Run: `npm run dogfood:pipeline-fanout`
 
 ## Recorded run (2026-06-30, timings representative)
 

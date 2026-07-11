@@ -2,18 +2,20 @@
 
 # NNG pair topology — proposer↔verifier duo (evidence)
 
-`node scripts/nng-pair.mjs` — the **pair** NNG topology (1:1
-bidirectional) as the *proposer↔verifier* creative agent use. Two
-**separate OS processes** each hold a pair socket over ipc; the proposer
-offers a variant pathogenicity call and the verifier (an adversarial
-ACMG-ish critic) refutes-or-accepts in a tight back-and-forth until they
-converge. This is the 1:1 debate channel — distinct from survey’s
-fan-out and blackboard’s broadcast.
+`scripts/nng-pair.mjs` is a **dogfood** — the **pair** NNG topology (1:1
+bidirectional) as a reusable *proposer↔verifier* **generic** pattern.
+Two **separate OS processes** each hold a pair socket over ipc; the
+proposer offers a variant pathogenicity call and the verifier (an
+adversarial ACMG-ish critic) refutes-or-accepts in a tight
+back-and-forth until they converge. This is the 1:1 debate channel —
+distinct from survey’s fan-out and blackboard’s broadcast.
 
 It runs over ducknng’s SQL socket layer — `open_socket('pair')` →
 `listen`/`dial_socket` → `send_socket_raw` / `recv_socket_raw_aio` +
 `aio_collect` — the same convention as ducknng’s own
 `ducknng_socket_protocols.test`.
+
+Run: `npm run dogfood:nng-pair`
 
 ## Recorded run (2026-07-02)
 

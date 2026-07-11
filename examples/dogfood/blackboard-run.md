@@ -19,7 +19,7 @@ The DAG is a diamond: `extract -> {annotate, qc} -> classify`.
 **both**. No code anywhere computes that order — it falls out of the
 access lists.
 
-Run: `npm run build && node scripts/blackboard-run.mjs`
+Run: `npm run dogfood:blackboard-run`
 
 ## Recorded run (2026-06-30)
 

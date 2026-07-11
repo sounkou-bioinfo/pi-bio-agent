@@ -58,6 +58,8 @@ Instructions for coding agents working in this repository.
   inventories follow the same source/generator/check pattern; do not hand-edit their output.
 - Treat dogfood literate docs as generated artifacts: `examples/dogfood/*.md` are now sourced from sibling
   `examples/dogfood/*.qmd` files. Edit the `.qmd` source and run `npm run scripts:qmd` to regenerate.
+- Canonicalize runnable generic dogfood on `dogfood:` npm scripts: keep script bodies in `scripts/` but document them through
+  `examples/dogfood/*.qmd` and call them with stable wrapper scripts (`npm run dogfood:*`) in prose and tables.
 - Quarto is suitable for future polyglot reports and can run TypeScript project scripts through its bundled Deno. Its
   Observable-JS cells are browser/reactive code, not a Node/DuckDB execution surface. Keep core Node/TypeScript claims
   in `test/`, `scripts/`, or package examples and link or generate them into prose.

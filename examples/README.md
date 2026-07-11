@@ -44,7 +44,11 @@ orchestrator (piece 1); the agent conducts.
 | `test/study-exec.test.ts` | the **executor** runs workers in topo order with per-step **access-list isolation** + downstream **shared memory**; includes a **TREE** and a **SURVEY/DEBATE** topology (N isolated respondents + an aggregator that fans them in — Fugu's signature) |
 | **live:** [`scripts/live-multi-agent.ts`](dogfood/live-multi-agent.md) | **real multi-agent run** (chain): each step spawns a *separate `pi` process*; they communicate only via access-list artifacts the host threads — no shared db, so the process lock is never touched. `npx tsx scripts/live-multi-agent.ts` |
 | **live:** [`scripts/live-debate.ts`](dogfood/live-debate.md) | **real best-of-N debate** (survey topology): two agents answer the same question independently, an aggregator synthesizes both. `npx tsx scripts/live-debate.ts` |
-
+| **dogfood:** [`scripts/blackboard-run.mjs`](dogfood/blackboard-run.md) | **generic topology:** decentralized pub/sub blackboard (req/rep-free) with no external coordinator. `npm run dogfood:blackboard-run` |
+| **dogfood:** [`scripts/pipeline-fanout.mjs`](dogfood/pipeline-fanout.md) | **generic topology:** bounded `push`/`pull` worker pool (load-balanced tasks, bounded concurrency). `npm run dogfood:pipeline-fanout` |
+| **dogfood:** [`scripts/nng-pair.mjs`](dogfood/nng-pair.md) | **generic topology:** `1:1` pair/debate loop (proposer↔verifier) with separate OS processes. `npm run dogfood:nng-pair` |
+| **dogfood:** [`scripts/nng-survey.mjs`](dogfood/nng-survey.md) | **generic topology:** `1:N` survey/jury loop (multiple providers + quorum) with abstain-safe aggregation. `npm run dogfood:nng-survey` |
+| **dogfood:** [`scripts/nng-job-runner.mjs`](dogfood/nng-job-runner.md) | **generic topology:** req/rep status shape over ducknng (`job:id:status` pattern). `npm run dogfood:nng-job-runner` |
 | `test/blackboard.test.ts` | **pub/sub blackboard** (`src/core/blackboard.ts`): DECENTRALIZED — steps launched concurrently, each awaits its deps from a shared blackboard and publishes its note; order emerges from data deps, **no coordinator** (stigmergy) |
 | `test/pipeline.test.ts` | **push/pull pipeline** (`src/core/pipeline.ts`): N-worker load-balanced pool — the RLM labeling map as a self-balancing queue |
 
@@ -63,8 +67,8 @@ boundary analysis in [`docs/refinments.md`](../docs/refinments.md).
 |---|---|
 | `test/http-cas-reuse.test.ts` | **CAS** — a second db with an empty memo 304s from the shared content store and materializes with **no re-download** (immutable cross-db reuse) |
 | `test/run-store-init-sql.test.ts` | the host **connection-init hook** (`duckdbInitSql`) — where the **host** (never the agent) runs `INSTALL/LOAD` extensions before resolution; it is host-owned and not exposed through any agent tool |
-| **live:** [`scripts/ducknng-rpc-mutate.mjs`](dogfood/ducknng-rpc-mutate.md) | **ducknng RPC** — separate processes **mutate** one shared table in place (`UPDATE`/`DELETE`/upsert) via `ducknng_run_rpc` against a server running native DuckDB, exec opt-in. The mutate-in-place quack can't do; a fact-superseding KG needs it. |
-| **live:** [`scripts/blackboard-shared.mjs`](dogfood/blackboard-shared.md) | **ducknng RPC blackboard** — a decentralized pub/sub diamond DAG across separate processes (publish = `run_rpc` INSERT, await = poll `query_rpc`); order emerges from shared writes, no coordinator. |
+| **live:** [`scripts/ducknng-rpc-mutate.mjs`](dogfood/ducknng-rpc-mutate.md) | **ducknng RPC** — separate processes **mutate** one shared table in place (`UPDATE`/`DELETE`/upsert) via `ducknng_run_rpc` against a server running native DuckDB, exec opt-in. The mutate-in-place quack can't do; a fact-superseding KG needs it. `npm run dogfood:ducknng-rpc-mutate` |
+| **live:** [`scripts/blackboard-shared.mjs`](dogfood/blackboard-shared.md) | **ducknng RPC blackboard** — a decentralized pub/sub diamond DAG across separate processes (publish = `run_rpc` INSERT, await = poll `query_rpc`); order emerges from shared writes, no coordinator. Run with `npm run dogfood:blackboard-shared`. |
 
 ## 5. The COMPUTE pillar & the two-pillar flagship
 SQL is poor at some things (an `lm()` fit, a Bayesian colocalization); those run **out-of-process** over Arrow IPC,

@@ -13,7 +13,7 @@ appears. No coordinator, no client opens the db file, exec opt-in.
 This closes the last cell of the topology matrix: **chain** (`live-multi-agent`) / **survey** (`live-debate`) /
 **pub-sub** (`blackboard-run`) / **push-pull** (`pipeline-fanout`) / **shared-write** (this).
 
-Run: `npm run build && node scripts/blackboard-shared.mjs`
+Run: `npm run dogfood:blackboard-shared`
 
 ## Recorded run (2026-06-30)
 

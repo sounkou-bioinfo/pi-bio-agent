@@ -15,7 +15,7 @@ workers, no LLM) so the emergence is reproducible.
 The DAG is a diamond: `extract -> {annotate, qc} -> classify`. `annotate` and `qc` are independent (either order);
 `classify` waits for **both**. No code anywhere computes that order — it falls out of the access lists.
 
-Run: `npm run build && node scripts/blackboard-run.mjs`
+Run: `npm run dogfood:blackboard-run`
 
 ## Recorded run (2026-06-30)
 

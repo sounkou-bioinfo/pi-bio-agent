@@ -24,7 +24,7 @@ server-backed `SqlConn`: ducknng for NNG topologies and push wakeups,
 DuckDB Quack for attached remote catalogs / query pushdown /
 DuckDB-secret-backed auth where that server surface is available.
 
-Run: `npm run build && node scripts/ducknng-fs.mjs`
+Run: `npm run dogfood:ducknng-fs`
 
 ## Recorded run (2026-06-30)
 
