@@ -138,27 +138,30 @@ receipts and replay, temporal knowledge, typed judgment, and application-derived
 [Biomni](https://github.com/snap-stanford/Biomni) makes a different part of the problem concrete: scientists need help
 choosing and combining methods under data, software, and task constraints. Its current application catalog contains
 hundreds of action descriptions, database adapters, a data lake, software/environment descriptions, know-how documents,
-and a benchmark. That breadth is not automatically skill sprawl. A stable action catalog is useful program data when an
-actor can discover, inspect, compose, execute, and compare its actions.
+and a benchmark. That breadth is a symptom of the method-selection problem, not a catalog we should reproduce and
+maintain. Scientific tools, packages, APIs, environments, and documentation change too quickly for a permanently
+curated list of isolated actions to be our central bet.
 
-The correct closure is therefore not to reject a large catalog. It is to keep the catalog downstream and make its
-descriptors generate the substrate-facing surface:
+The correct closure is composability. External catalogs are volatile discovery inputs; the actor should retrieve or
+ingest the slice relevant to the current task, inspect its contracts, and compose only the resources and methods it
+needs:
 
 ```text
-action descriptors + environment/data metadata
-  -> generated application manifest/catalog relations
-  -> SQL/FTS/graph discovery under task and host constraints
-  -> selected operation or compute action
+external method docs/catalogs + current data/environment
+  -> grounded candidate descriptors
+  -> agent-authored manifest and operation composition
+  -> capability/license/schema inspection
+  -> selected SQL, source-spec, or compute action
   -> Arrow relations and declared artifacts
   -> receipts, replay, CAS, and temporal observations
   -> typed comparison or human review
 ```
 
 The anti-sprawl rule rejects handwritten question-specific helpers and duplicated execution semantics. It does not
-reject 224 stable domain actions, nor does it require an engineer to hand-author 224 manifests. An application may
-generate one catalog manifest containing many typed operations, or generate operation fragments from the upstream
-descriptors. The implementation remains application-owned; the generic execution, evidence, and host-capability
-contracts remain core-owned.
+reject using a large external action space when a task needs it, nor does it require an engineer to hand-author a
+manifest for every possible method. The durable artifact should be the selected, tested, and approved composition;
+catalog indexes and generated descriptors may remain ephemeral or be refreshed from their source. The implementation
+remains application-owned; generic execution, evidence, and host-capability contracts remain core-owned.
 
 Biomni's database functions are especially suitable for source-spec closure. An application should project their
 REST/GraphQL schemas and response shapes into DuckNNG-backed resources, rather than preserve a nested LLM that turns
@@ -185,7 +188,8 @@ reason to shrink the action space back to a handful of bespoke skills.
 - A multi-agent topology does not justify another workflow engine.
 - A durable queue does not justify another async lifecycle.
 - A successful application relation does not belong in core until another concrete use reveals the same primitive;
-  this does not prevent an application from exposing a large generated action catalog over the existing primitives.
+  this does not prevent an application from querying a large external action space or exposing a transient generated
+  action view over the existing primitives.
 - A recorded run proves execution and evidence capture, not biomedical validity or model superiority.
 
 These negative constraints are as important as the inherited ideas. They keep lineage from becoming architecture by

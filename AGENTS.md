@@ -34,10 +34,11 @@ Instructions for coding agents working in this repository.
 - Core owns reusable execution and evidence primitives. The workbench owns clinical composition and policy. If a
   workbench need is generic, stop and add the smallest tested primitive to core; if it is a domain choice, keep it in
   manifests, SQL, fixtures, or host composition. Do not hide a core gap behind an application helper.
-- A broad application action catalog is not the same as skill sprawl. Biomni-like descriptors may be generated into
-  application manifest/catalog relations and expose one stable operation per reusable method when the metadata and
-  output contract support it. The anti-sprawl rule rejects handwritten per-question logic and duplicate runners; it
-  does not reject a large composable action space or require an engineer to hand-author every generated manifest.
+- A broad external action space is not itself a maintained product surface. Biomni-like descriptors may be ingested or
+  generated transiently for the current task, then used to author a tested manifest/operation composition. The durable
+  artifact is the selected composition and its evidence, not a permanently curated list of isolated skills. The
+  anti-sprawl rule rejects handwritten per-question logic and duplicate runners; it does not reject querying a large
+  changing action space when composition requires it.
 - Self-extension is allowed through durable specifications and artifacts: an actor may author a manifest, operation,
   compute program, action descriptor, or skill revision. The host must validate and test it, record implementation,
   input, and environment digests, and apply typed/human approval before activation. Do not let an agent silently

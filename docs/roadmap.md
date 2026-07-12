@@ -76,10 +76,11 @@ Near-term work should be selected from demonstrated pressure in these lanes:
 
 - **Workbench surfaces:** human review, evidence exploration, report graphics, and long-running task UX over the
   existing SDK and durable job lifecycle.
-- **Scientific action catalogs:** ingest Biomni-like method/tool descriptors into generated manifest/catalog relations;
-  let actors discover actions with SQL/FTS/graph queries, filter by data/software/license/capability constraints,
-  execute candidates through compute or source-spec adapters, and compare durable results. The action count is not the
-  problem; handwritten duplicate runners and missing output/evidence contracts are.
+- **Composable method selection:** use Biomni-like catalogs, method documentation, and current environment metadata as
+  refreshable discovery inputs. Ground the relevant candidates, let the actor author a manifest/operation composition,
+  filter it by data/software/license/capability constraints, execute it through compute or source-spec adapters, and
+  compare durable results. Do not turn a changing external action landscape into a permanently maintained list of
+  isolated skills.
 - **Method selection and skill authoring:** exercise the machine-study -> action catalog -> candidate manifest/operation
   -> validation/test -> approval/activation loop. A successful run should produce a revised durable specification or
   skill view, with its input, implementation, environment, and evidence digests recorded in the one ledger. This is
