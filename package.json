@@ -81,6 +81,7 @@
     "provision:ducknng-owned": "bash scripts/provision-ducknng-owned.sh",
     "install:skill": "node scripts/install-skill.mjs",
     "pattern:pi-session-trace": "node scripts/pattern-session-trace.mjs",
+    "pattern:typed-memory-agent": "npm run build && npm run render:typed-memory-agent --workspace=packages/quarto-engine",
     "pattern:substrate-skill": "npm run build && node scripts/substrate-skill-pattern.mjs",
     "pattern:bring-it-home": "npm run build && node scripts/bring-it-home-pattern.mjs",
     "pattern:ducknng-upload": "node scripts/ducknng-upload-pattern.mjs",

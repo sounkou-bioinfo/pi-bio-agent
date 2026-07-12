@@ -5,7 +5,7 @@ import { contentAddressUri, isContentAddressUri } from "../src/core/resources.js
 import { appendRunEvent, defineBioRunSpec, newRunRecord, validateBioRunSpec, type BioRunSpec } from "../src/core/run-spec.js";
 import { bioProjectLayout, casPathForAddress, validateContentAddress } from "../src/core/storage.js";
 import { makeConceptNode, validateReadOnlySelect } from "../src/core/knowledge-graph.js";
-import { deriveStudyPlan, memoryNodeId, parseStudyNoteLinks, studyNoteGraph, studyNoteIndex, studyNoteLinkEdges, studyNoteNode, validateStudyNote, STUDY_DEFAULT_LINK_PREDICATE, type StudyNote } from "../src/core/study.js";
+import { canonicalizeStudyNoteLinks, deriveStudyPlan, memoryNodeId, parseStudyNoteLinks, studyNoteGraph, studyNoteIndex, studyNoteLinkEdges, studyNoteNode, validateStudyNote, STUDY_DEFAULT_LINK_PREDICATE, type StudyNote } from "../src/core/study.js";
 
 const validOperation: BioOperationSpec = {
   id: "variants.classify",
@@ -230,9 +230,9 @@ describe("Study helpers", () => {
     // Dangling is fine: gnomad-frequencies need not exist as a note for the edge to project.
     assert.ok(edges.some((e) => e.from === memoryNodeId("acmg-pm2") && e.to === memoryNodeId("gnomad-frequencies") && e.predicate === "references"));
 
-    // Defensive: a bogus predicate from unvalidated input falls back to the default, not a junk edge.
+    // Defensive readers do not invent semantics for a bogus predicate from unvalidated input.
     const coerced = parseStudyNoteLinks({ body: "", links: [{ to: "x", predicate: "supersedes" as unknown as undefined }] });
-    assert.deepEqual(coerced, [{ to: "x", predicate: "references" }]);
+    assert.deepEqual(coerced, []);
 
     // memoryNodeId rejects non-slug input rather than minting memory:<garbage>.
     assert.throws(() => memoryNodeId("Bad Slug"), /invalid memory slug/);
@@ -245,6 +245,21 @@ describe("Study helpers", () => {
     // so it agrees with validateStudyNote (which rejects the same link).
     const messy = { body: 42, links: [null, "nope", { to: 7 }, { to: "Bad Slug" }, { to: "good-note" }] };
     assert.deepEqual(parseStudyNoteLinks(messy), [{ to: "good-note", predicate: STUDY_DEFAULT_LINK_PREDICATE }]);
+  });
+
+  test("canonicalizeStudyNoteLinks normalizes, defaults, deduplicates, and rejects unknown semantics", () => {
+    assert.equal(canonicalizeStudyNoteLinks(undefined), undefined);
+    assert.deepEqual(canonicalizeStudyNoteLinks([
+      { to: " Source Schema " },
+      { to: "source-schema", predicate: "references" },
+      { to: "Source Schema", predicate: "depends_on" },
+    ]), [
+      { to: "source-schema", predicate: "references" },
+      { to: "source-schema", predicate: "depends_on" },
+    ]);
+    assert.throws(() => canonicalizeStudyNoteLinks([{ to: "source-schema", predicate: "supports" }]), /unknown predicate 'supports'/);
+    assert.throws(() => canonicalizeStudyNoteLinks([{ to: "   " }]), /non-empty target/);
+    assert.throws(() => canonicalizeStudyNoteLinks({ to: "source-schema" }), /must be an array/);
   });
 
   test("projects notes into a memory-family graph snapshot", () => {

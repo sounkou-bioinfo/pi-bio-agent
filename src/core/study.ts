@@ -138,6 +138,40 @@ export function validateStudyNote(note: unknown): string[] {
 /** Untyped `[[slug]]` body links default to this predicate. A note-to-note reference is not an ontology "about" edge, so it gets its own name. */
 export const STUDY_DEFAULT_LINK_PREDICATE: StudyNoteLinkPredicate = "references";
 
+/**
+ * Canonicalize explicitly authored note links at a write boundary. Targets use the same slug normalization as
+ * notes, omitted predicates become `references`, and duplicate (target, predicate) pairs collapse. Invalid runtime
+ * input fails closed instead of being persisted differently from the edge projection.
+ */
+export function canonicalizeStudyNoteLinks(links: unknown): Required<StudyNoteLink>[] | undefined {
+  if (links === undefined) return undefined;
+  if (!Array.isArray(links)) throw new Error("study note links must be an array");
+  const out = new Map<string, Required<StudyNoteLink>>();
+  for (const [index, candidate] of links.entries()) {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+      throw new Error(`study note link ${index} must be an object`);
+    }
+    const link = candidate as { to?: unknown; predicate?: unknown };
+    if (typeof link.to !== "string") throw new Error(`study note link ${index} needs a string target`);
+    let to: string;
+    try {
+      to = normalizeStudySlug(link.to);
+    } catch {
+      throw new Error(`study note link ${index} needs a non-empty target`);
+    }
+    const predicate = link.predicate === undefined
+      ? STUDY_DEFAULT_LINK_PREDICATE
+      : isStudyNoteLinkPredicate(link.predicate)
+        ? link.predicate
+        : undefined;
+    if (!predicate) {
+      throw new Error(`study note link ${index} has unknown predicate '${String(link.predicate)}'`);
+    }
+    out.set(JSON.stringify([to, predicate]), { to, predicate });
+  }
+  return [...out.values()];
+}
+
 // Case-sensitive: body links must already be lowercase slugs, matching what validateStudyNote accepts.
 const WIKILINK_RE = /\[\[([a-z0-9][a-z0-9-]*)\]\]/g;
 
@@ -155,7 +189,9 @@ export function memoryNodeId(slug: string): string {
  * (to, predicate). Pure; dangling targets are allowed and not resolved here. Accepts `unknown` and is
  * fully defensive: a target is taken only if it is *already* a valid slug — the parser agrees with
  * `validateStudyNote` and never silently rewrites a bad target (normalization happens once, in
- * `makeStudyNote`, at authoring time). Unknown predicates fall back to the default.
+ * `makeStudyNote`, at authoring time). An omitted predicate defaults to `references`; an unknown predicate is
+ * ignored here rather than being silently reinterpreted. Write boundaries use `canonicalizeStudyNoteLinks` and
+ * reject it before persistence.
  */
 export function parseStudyNoteLinks(input: unknown): Required<StudyNoteLink>[] {
   if (!input || typeof input !== "object") return [];
@@ -163,7 +199,12 @@ export function parseStudyNoteLinks(input: unknown): Required<StudyNoteLink>[] {
   const out = new Map<string, Required<StudyNoteLink>>();
   const add = (to: unknown, predicate?: unknown) => {
     if (typeof to !== "string" || !STUDY_SLUG_RE.test(to) || to.length > 64) return; // not a slug: skip, don't rewrite
-    const pred = isStudyNoteLinkPredicate(predicate) ? predicate : STUDY_DEFAULT_LINK_PREDICATE;
+    const pred = predicate === undefined
+      ? STUDY_DEFAULT_LINK_PREDICATE
+      : isStudyNoteLinkPredicate(predicate)
+        ? predicate
+        : undefined;
+    if (!pred) return;
     out.set(JSON.stringify([to, pred]), { to, predicate: pred });
   };
   for (const link of Array.isArray(note.links) ? note.links : []) {

@@ -35,6 +35,11 @@ unified-data-model bet instead of sitting beside it as flat last-write-wins file
 - Each `[[slug]]` wikilink (parsed from the note body) and each explicit `links` entry are **edge-like**
   observations that `materializeBioEdgesAsOf(t)` projects into `bio_edges_as_of`, so the memory graph is walkable
   **as of t** through the *same* SemanticSQL closure as facts.
+- Explicit note links are canonicalized at both authoring and public SDK write boundaries: targets become stable
+  slugs, omitted predicates become `references`, exact duplicates collapse, and unknown predicates fail before a
+  database write. The content revision is authoritative; edge observations are its temporal query projection. The
+  [typed-memory agent pattern](../packages/quarto-engine/typed-memory-agent.qmd) proves this across two real,
+  isolated Pi processes and then inspects the shared ledger.
 
 **One store, not a `memory.duckdb`.** Facts, jobs, activation, memory, store-logged runs, and agent session traces
 are all rows in the **same `bio_observations` table in the same DuckDB** as the graph
@@ -270,24 +275,14 @@ file path, and a `note` summary (slug/kind/title/hook/tags).
 
 ## Memory → graph projection
 
-`remember` (`src/hosts/memory-store.ts`) writes a note's `[[links]]` as edge observations into the one
-`bio_observations` log. Two consumers of those edges: (1) `materializeBioEdgesAsOf` (`src/duckdb/observations.ts`)
-folds them into the `bio_edges_as_of` SQL closure **as of the recall clock**: the temporal, SQL-walkable graph
-projection; (2) the `bio_walk_memory` Pi tool, which currently does a **pure in-memory** bounded BFS
-(`walkMemoryGraph`, `src/core/study.ts`) over the **current** notes (`listMemory` at now), not the as-of SQL closure: a walk of `bio_edges_as_of` (time-travelled, SQL) is a deliberate later enhancement. The projections
-(`studyNoteLinkEdges` / `studyNoteNode` / `studyNoteGraph`) stay pure and dangling-tolerant (an edge may
-reference an absent target). The CLI is `src/cli/memory.ts` (`memory list/show/history`, as-of by default),
-compiled via `src/cli/bin.ts` to the `pi-bio-agent` bin.
-
-## Still to do (step 4)
-
-- **Introduce the minimal `KnowledgeUnit` core**, `slug, role, form, title, hook, body,
-  tags, links, sources, createdAt, updatedAt`, nothing more, and make `StudyNote` and
-  `BioSkillDraft` thin views over it; a skill is `form: "skill"` rendered to `SKILL.md`
-  with `/reload` still the activation boundary. Add the promotion lint (lesson 8: a note
-  whose body is a schema or API client should become an operation spec, not a note). Do
-  this only once a second real consumer (e.g. a path that materializes
-  `studyNoteLinkEdges` into the temporal store's `bio_edges_as_of` closure) actually shares the core.
+`remember` (`src/hosts/memory-store.ts`) writes a note's wikilinks and typed links as edge observations into the
+one `bio_observations` log. `materializeBioEdgesAsOf` (`src/duckdb/observations.ts`) folds them into
+`bio_edges_as_of` **as of the recall clock**. Both `bio_graph_window` and `bio_walk_memory` consume that projection;
+the latter joins it to note content as of the same instant and uses the pure `walkMemoryGraph` helper only for its
+bounded BFS. It does not independently re-parse content into a second live graph. The pure projections
+(`studyNoteLinkEdges` / `studyNoteNode` / `studyNoteGraph`) remain useful for validation and detached snapshots.
+The CLI is `src/cli/memory.ts` (`memory list/show/history`, as-of by default), compiled via `src/cli/bin.ts` to the
+`pi-bio-agent` bin.
 
 ## Non-goals
 

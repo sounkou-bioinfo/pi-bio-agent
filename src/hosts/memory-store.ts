@@ -1,5 +1,5 @@
 import type { SqlConn } from "../core/ports.js";
-import { parseStudyNoteLinks, type StudyNoteLink } from "../core/study.js";
+import { canonicalizeStudyNoteLinks, parseStudyNoteLinks, type StudyNoteLink } from "../core/study.js";
 import {
   createBioObservationSchema,
   observationAsOfKey,
@@ -103,6 +103,9 @@ export async function ensureMemorySchema(conn: SqlConn): Promise<void> {
  * as-of + history. `now` is the recordedAt instant.
  */
 export async function remember(conn: SqlConn, note: MemoryContent, wallNow: string, author?: string): Promise<void> {
+  // `remember` is a public SDK boundary, not only an internal target of `bio_remember`. Canonicalize before touching
+  // DuckDB so JavaScript callers cannot persist one relation in content while the graph silently projects another.
+  const links = canonicalizeStudyNoteLinks(note.links);
   await ensureMemorySchema(conn);
   const subject = memorySubjectId(note.slug);
   // LINEARIZABLE + serialized. withSlotLock(subject) serializes same-slug writes across ALL in-process connections
@@ -123,13 +126,13 @@ export async function remember(conn: SqlConn, note: MemoryContent, wallNow: stri
         statementKey: subject,
         subjectId: subject,
         predicate: CONTENT,
-        value: { kind: note.kind, title: note.title, hook: note.hook, body: note.body, tags: note.tags, ...(note.links ? { links: note.links } : {}), ...(note.sources && note.sources.length ? { sources: note.sources } : {}) },
+        value: { kind: note.kind, title: note.title, hook: note.hook, body: note.body, tags: note.tags, ...(links !== undefined ? { links } : {}), ...(note.sources && note.sources.length ? { sources: note.sources } : {}) },
         recordedAt: now,
         source: author,
       });
       if (!inserted) continue; // a concurrent client advanced the slot since we read it — re-read + retry
       const newKeys = new Set<string>();
-      for (const link of parseStudyNoteLinks({ body: note.body, links: note.links })) {
+      for (const link of parseStudyNoteLinks({ body: note.body, links })) {
         const to = memorySubjectId(link.to);
         const key = `${subject}|${link.predicate}|${to}`;
         newKeys.add(key);
@@ -163,6 +166,7 @@ export async function remember(conn: SqlConn, note: MemoryContent, wallNow: stri
 function rowToContent(row: ObservationRow | null): RecalledMemory | null {
   if (!row || row.value_json == null) return null; // a tombstone (forgotten) carries null content
   const v = JSON.parse(row.value_json) as Omit<MemoryContent, "slug">;
+  const links = canonicalizeStudyNoteLinks(v.links);
   return {
     slug: row.subject_id.slice(MEMORY_NS.length),
     kind: v.kind,
@@ -170,7 +174,7 @@ function rowToContent(row: ObservationRow | null): RecalledMemory | null {
     hook: v.hook,
     body: v.body,
     tags: v.tags ?? [],
-    ...(v.links ? { links: v.links } : {}),
+    ...(links !== undefined ? { links } : {}),
     ...(v.sources && v.sources.length ? { sources: v.sources } : {}),
     author: row.source ?? null,
   };

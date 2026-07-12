@@ -136,6 +136,66 @@ describe("temporal memory over bio_observations", () => {
     assert.ok(seen.has(`references|${memorySubjectId("gamma")}`), "references edge present");
     assert.ok(seen.has(`depends_on|${memorySubjectId("gamma")}`), "depends_on typed edge present");
     assert.ok(seen.has(`see_also|${memorySubjectId("delta")}`), "see_also typed edge present");
+    assert.deepEqual((await recall(c, "origin"))?.links, [
+      { to: "gamma", predicate: "references" },
+      { to: "delta", predicate: "see_also" },
+      { to: "gamma", predicate: "depends_on" },
+    ], "the canonical explicit relations round-trip in the authoritative content revision");
+  });
+
+  test("direct SDK memory writes validate links before touching DuckDB", async () => {
+    let calls = 0;
+    const untouched: SqlConn = {
+      all: async () => { calls++; return []; },
+      run: async () => { calls++; },
+    };
+    const invalid = {
+      ...note("invalid", "body"),
+      links: [{ to: "target", predicate: "supports" }],
+    } as unknown as Parameters<typeof remember>[1];
+    await assert.rejects(() => remember(untouched, invalid, T1), /unknown predicate 'supports'/);
+    assert.equal(calls, 0, "invalid relation semantics fail before schema creation or ledger writes");
+  });
+
+  test("typed-link revisions keep recalled content and as-of graph edges aligned", async () => {
+    const c = await conn();
+    await remember(c, {
+      ...note("plan", "first revision"),
+      links: [{ to: "Source Schema" }, { to: "baseline", predicate: "contrasts_with" }],
+    }, T1, "agent:A");
+    await remember(c, {
+      ...note("plan", "second revision"),
+      links: [{ to: "source-schema", predicate: "depends_on" }, { to: "review", predicate: "see_also" }],
+    }, T2, "agent:B");
+
+    assert.deepEqual((await recall(c, "plan", T1))?.links, [
+      { to: "source-schema", predicate: "references" },
+      { to: "baseline", predicate: "contrasts_with" },
+    ]);
+    assert.deepEqual((await recall(c, "plan", T2))?.links, [
+      { to: "source-schema", predicate: "depends_on" },
+      { to: "review", predicate: "see_also" },
+    ]);
+
+    await materializeBioEdgesAsOf(c, T1);
+    let edges = await c.all<{ predicate: string; to_id: string }>(
+      "SELECT predicate, to_id FROM bio_edges_as_of WHERE from_id = ? ORDER BY predicate, to_id",
+      [memorySubjectId("plan")],
+    );
+    assert.deepEqual(edges, [
+      { predicate: "contrasts_with", to_id: memorySubjectId("baseline") },
+      { predicate: "references", to_id: memorySubjectId("source-schema") },
+    ]);
+
+    await materializeBioEdgesAsOf(c, T2);
+    edges = await c.all<{ predicate: string; to_id: string }>(
+      "SELECT predicate, to_id FROM bio_edges_as_of WHERE from_id = ? ORDER BY predicate, to_id",
+      [memorySubjectId("plan")],
+    );
+    assert.deepEqual(edges, [
+      { predicate: "depends_on", to_id: memorySubjectId("source-schema") },
+      { predicate: "see_also", to_id: memorySubjectId("review") },
+    ], "dropped typed relations are retracted rather than lingering as phantom edges");
   });
 
   test("reconciliation only touches MEMORY's own wikilink edges — a foreign edge fact from the same subject survives", async () => {

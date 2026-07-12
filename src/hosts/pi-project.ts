@@ -12,7 +12,7 @@ async function atomicWriteFile(path: string, content: string): Promise<void> {
   await fs.writeFile(tmp, content, "utf8");
   try { await fs.rename(tmp, path); } catch (err) { await fs.rm(tmp, { force: true }); throw err; }
 }
-import { normalizeStudySlug, validateStudyNote, type StudyArtifactKind, type StudyNote, type StudyNoteLink } from "../core/study.js";
+import { canonicalizeStudyNoteLinks, normalizeStudySlug, validateStudyNote, type StudyArtifactKind, type StudyNote, type StudyNoteLink } from "../core/study.js";
 
 export const SKILL_NAME_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
@@ -147,7 +147,7 @@ export function makeStudyNote(params: {
     hook: params.hook,
     body: params.body,
     tags: params.tags ?? [],
-    ...(params.links ? { links: params.links.map((l) => ({ to: normalizeStudySlug(l.to), predicate: l.predicate })) } : {}),
+    ...(params.links !== undefined ? { links: canonicalizeStudyNoteLinks(params.links)! } : {}),
     sources: params.sources ?? [],
     createdAt: now,
     updatedAt: now,

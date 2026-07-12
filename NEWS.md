@@ -8,6 +8,9 @@ is the plan of record; [`docs/refinments.md`](docs/refinments.md) tracks open it
 
 ## Concurrency, security, and correctness
 
+- Typed memory links are now canonicalized and validated at the public SDK write boundary before DuckDB is touched;
+  recalled revisions and temporal graph edges therefore cannot disagree about a target or predicate. A live Quarto
+  pattern runs separate writer and reader Pi agents, then verifies their session trajectories, history, and graph.
 - Concurrent same-slug memory writes are now **linearized** by a compare-and-set
   (`insertObservationIfSlotMax`): one atomic `INSERT … WHERE NOT EXISTS(row ≥ instant)
   … RETURNING` that, on ducknng's serialized lane, commits only if the slot has not

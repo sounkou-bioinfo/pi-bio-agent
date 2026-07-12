@@ -635,7 +635,7 @@ describe("Pi coding-agent extension", () => {
     assert.equal(
       wrote.details.note.links?.some(
         (link: { to: string; predicate?: string }) =>
-          link.to === "opentargets-target-alias" && (link.predicate === undefined || link.predicate === "references"),
+          link.to === "opentargets-target-alias" && link.predicate === "references",
       ),
       true,
     );
@@ -655,6 +655,16 @@ describe("Pi coding-agent extension", () => {
     const tos = graphWindow.details.rows.map((r: { to_id: string }) => r.to_id).sort();
     assert.equal(tos[0], "memory:opentargets-target-alias");
     assert.equal(tos[1], "memory:opentargets-target-node");
+    const memoryWalk = await byName.get("bio_walk_memory")!.execute("id", {
+      start: "opentargets-identifiers",
+      depth: 1,
+    }, undefined, undefined, ctx);
+    assert.equal(memoryWalk.details.edgeCount, 2);
+    assert.deepEqual(
+      memoryWalk.details.graph.edges.map((edge: { predicate: string; to: string }) => `${edge.predicate}|${edge.to}`).sort(),
+      ["references|memory:opentargets-target-alias", "references|memory:opentargets-target-node"],
+      "memory walk and graph window consume the same ledger edge projection",
+    );
 
     // forget = temporal retraction: gone from recall(now), but the store keeps the history
     const forgotten = await byName.get("bio_forget")!.execute("id", { slug: "opentargets-identifiers" }, undefined, undefined, ctx);

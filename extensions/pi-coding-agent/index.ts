@@ -750,7 +750,7 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
     label: "Window graph context",
     description: "Return a bounded one-hop window over the compiled project graph, with total/omitted counts and a continuation handle. Defaults to the temporal `bio_edges_as_of` projection from the shared ledger. Use this instead of asking for a full high-degree graph neighborhood.",
     parameters: Type.Object({
-      startId: Type.String({ description: "Graph node id, e.g. agent:memory:<slug>, MONDO:..., HP:..., run:<id>." }),
+      startId: Type.String({ description: "Graph node id, e.g. memory:<slug>, MONDO:..., HP:..., run:<id>." }),
       table: Type.Optional(Type.String({ description: "Graph table to query. Defaults to bio_edges_as_of. Common: bio_edges_as_of, entailed_edge_as_of, bio_edges, entailed_edge." })),
       direction: Type.Optional(Type.Union([Type.Literal("out"), Type.Literal("in"), Type.Literal("both")], { description: "Edge direction relative to startId. Default out." })),
       predicates: Type.Optional(Type.Array(Type.String(), { description: "Optional predicate filter." })),
@@ -823,7 +823,7 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
   pi.registerTool({
     name: "bio_remember",
     label: "Remember (memory note)",
-    description: "Remember a project-local memory note. APPENDS to the temporal ledger (bio_observations, agent:memory:<slug>): a re-write of the same slug SUPERSEDES the current revision while every prior revision is retained (recall as-of an earlier time still sees it); the store is the source of truth. Also materializes a legible .pi/bio-agent/study-notes/<slug>.json file view (upserted in place). Use for corpus maps, cheatsheets, concept maps, probes, and memories too volatile or broad to become skills.",
+    description: "Remember a project-local memory note. APPENDS to the temporal ledger (bio_observations, memory:<slug>): a re-write of the same slug SUPERSEDES the current revision while every prior revision is retained (recall as-of an earlier time still sees it); the store is the source of truth. Also materializes a legible .pi/bio-agent/study-notes/<slug>.json file view (upserted in place). Use for corpus maps, cheatsheets, concept maps, probes, and memories too volatile or broad to become skills.",
     parameters: Type.Object({
       kind: Type.Union(STUDY_ARTIFACT_KINDS.map((kind) => Type.Literal(kind)), {
         description: "Artifact kind for the study note.",
@@ -901,24 +901,41 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
   pi.registerTool({
     name: "bio_walk_memory",
     label: "Walk bio memory graph",
-    description: "Walk the MEMORY GRAPH: each memory note is a node (memory:<slug>); wikilinks (in body) and typed `links` are edges. With no start, returns the whole memory graph (nodes + edges) so you grasp structure at a glance INSTEAD of reading every note (or re-reading the corpus). With a start slug + depth, returns that note's neighborhood (BFS out N hops, links followed both ways). Memory is a graph, not a flat list — studying is only ONE way it gets populated.",
+    description: "Walk the temporal MEMORY GRAPH projected from bio_observations: each live memory note is a node (memory:<slug>), and its wikilinks/typed links are ledger edges. With no start, returns the whole memory graph. With a start slug + depth, returns that note's neighborhood (BFS out N hops, links followed both ways). Optional asOf time-travels both note content and edges.",
     parameters: Type.Object({
       start: Type.Optional(Type.String({ description: "Start note slug; omit for the whole graph." })),
       depth: Type.Optional(Type.Number({ description: "Hops to walk out from start (default 1)." })),
+      asOf: Type.Optional(Type.String({ description: "ISO time for both memory nodes and graph edges. Default now." })),
     }),
-    async execute(_id, params: { start?: string; depth?: number }, _signal, _onUpdate, ctx) {
+    async execute(_id, params: { start?: string; depth?: number; asOf?: string }, _signal, _onUpdate, ctx) {
       const root = runtimeStudyRoot(ctx.cwd);
-      // walkMemoryGraph reads slug/kind/title/hook/tags + parses [[links]] from body — all carried by MemoryContent.
-      // The store OPEN/READ stays OUTSIDE the try so an infra failure (locked/corrupt store) PROPAGATES as a real tool
-      // error — consistent with bio_list_memory/bio_recall; only the WALK below turns a bad-input error into data.
-      const mems = await withStore(openStore, ctx.cwd, (conn) => listMemory(conn, MEMORY_NOW));
+      const asOf = normalizeAsOf(params.asOf);
+      // Read nodes and relations from one as-of ledger view. Blank the body in the pure graph helper so it consumes
+      // only projected relations and cannot independently re-parse a wikilink that a failed edge write did not record.
+      const graphNotes = await withStore(openStore, ctx.cwd, async (conn) => {
+        const mems = await listMemory(conn, asOf);
+        await materializeBioEdgesAsOf(conn, asOf);
+        const rows = await conn.all<{ from_id: string; predicate: string; to_id: string }>(
+          `SELECT from_id, predicate, to_id FROM bio_edges_as_of
+           WHERE starts_with(from_id, 'memory:') AND starts_with(to_id, 'memory:')`,
+        );
+        const links = new Map<string, NonNullable<StudyNote["links"]>>();
+        for (const row of rows) {
+          if (!STUDY_NOTE_LINK_PREDICATES.includes(row.predicate as typeof STUDY_NOTE_LINK_PREDICATES[number])) continue;
+          const from = row.from_id.slice("memory:".length);
+          const current = links.get(from) ?? [];
+          current.push({ to: row.to_id.slice("memory:".length), predicate: row.predicate as typeof STUDY_NOTE_LINK_PREDICATES[number] });
+          links.set(from, current);
+        }
+        return mems.map((memory) => ({ ...memory, body: "", links: links.get(memory.slug) ?? [] }));
+      });
       try {
-        const graph = walkMemoryGraph(mems as unknown as StudyNote[], { start: params.start, depth: params.depth });
-        return text({ root, start: params.start ?? null, depth: params.start ? params.depth ?? 1 : null, nodeCount: graph.nodes.length, edgeCount: graph.edges.length, graph });
+        const graph = walkMemoryGraph(graphNotes as unknown as StudyNote[], { start: params.start, depth: params.depth });
+        return text({ root, asOf, start: params.start ?? null, depth: params.start ? params.depth ?? 1 : null, nodeCount: graph.nodes.length, edgeCount: graph.edges.length, graph });
       } catch (e) {
         // Return a WALK error AS DATA so the agent can correct itself (e.g. a malformed/unknown start slug) — but a
         // store failure is NOT caught here (it propagated above), so infra faults don't masquerade as a clean result.
-        return text({ root, start: params.start ?? null, error: (e as Error).message });
+        return text({ root, asOf, start: params.start ?? null, error: (e as Error).message });
       }
     },
   });

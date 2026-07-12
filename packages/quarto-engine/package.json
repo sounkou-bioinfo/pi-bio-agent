@@ -12,6 +12,7 @@
   "scripts": {
     "build": "quarto call build-ts-extension src/pi-bio.ts",
     "render:example": "npm run build && quarto render examples/basic.qmd --to markdown --output output.md",
+    "render:typed-memory-agent": "npm run build && quarto render typed-memory-agent.qmd --to gfm --output typed-memory-agent.md",
     "test": "node scripts/test-engine.mjs",
     "check:generated": "npm run build && git diff --exit-code -- _extensions/pi-bio/pi-bio.js",
     "check": "npm run check:generated && npm test"
