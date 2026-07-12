@@ -74,6 +74,12 @@ const BIO_ORIENTATION = [
   "  them (`ncurl_table` is not a resolver — it is SQL inside a `duckdb.sql_materialize` query). (Caveat: a",
   "  file_scan/read_bcf `path` or SQL that hits a REMOTE URI can still reach the network via DuckDB/httpfs — that",
   "  egress is the host's sandbox to police, not a library gate.)",
+  "- ARTIFACTS: never satisfy a scientific plot/report/file request by running Python, R, or shell and writing an",
+  "  arbitrary output into the workspace. Author or reuse a manifest with a `compute.run` resource, declare every",
+  "  output with `mediaType` and `semanticRole`, validate it with `bio_describe_model`, then execute it through",
+  "  `bio_query` or `bio_run_operation`. The process may render the file, but the declared run must capture it in",
+  "  CAS and project `run:<id> --produces--> cas:<digest>` so hosts can display and reproduce it. Bash may author",
+  "  the manifest/script; bash is not the scientific execution record.",
   "- REMEMBER (machine studying): memory is an append-only, as-of, ATTRIBUTED store (the same temporal ledger as",
   "  facts) — `bio_remember` (`[[slug]]` and optional typed `links` support; re-writing supersedes, never clobbers) / `bio_list_memory`",
   "  / `bio_walk_memory` (walk the graph) / `bio_recall`. list/read take an `asOf` time (time-travel), and",
@@ -308,8 +314,9 @@ export interface BioExtensionOptions {
    *  Same explicit, composed-in grant model as `network`. Absent => compute.run fails closed. */
   compute?: { runner: ComputeRunner };
   /** CAS grant: a content-addressed store so `compute.run` can capture declared FILE outputs by digest, and
-   *  runs can serialize result/receipts/replay bytes outside the DB. Absent => file outputs fail closed. */
-  cas?: CasStore;
+   *  runs can serialize result/receipts/replay bytes outside the DB. A factory binds project-local CAS roots to
+   *  the invocation cwd instead of the launcher process cwd. Absent => file outputs fail closed. */
+  cas?: CasStore | ((cwd: string) => CasStore);
   /** Host-owned cross-db remote-cache isolation scope. This is intentionally not a tool parameter: the host decides
    *  whether shared HTTP/CAS reuse is public, per-principal, or disabled. */
   remoteCacheScope?: string;
@@ -333,7 +340,8 @@ export interface BioExtensionOptions {
 export function createBioExtension(options: BioExtensionOptions = {}): (pi: ExtensionAPI) => void {
   const network = options.network;
   const computeGrant = options.compute; // threaded into runs so compute.run can bind
-  const cas = options.cas; // the CAS grant (file outputs + byte serialization); absent => file outputs fail closed
+  const casGrant = options.cas; // file outputs + byte serialization; absent => file outputs fail closed
+  const casFor = (cwd: string): CasStore | undefined => typeof casGrant === "function" ? casGrant(cwd) : casGrant;
   const remoteCacheScope = options.remoteCacheScope;
   const protectedSessionBindings = options.protectedSessionBindings;
   const protectedSessionVariables = options.protectedSessionVariables;
@@ -363,7 +371,7 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
       return { ok: false, reason: "Pi session file is not readable yet", sessionFile, sessionId };
     }
 
-    const sessionCas = cas ?? (usesDefaultLocalStore ? fsCasStore(join(ctx.cwd, ".pi", "bio-agent", "cas")) : undefined);
+    const sessionCas = casFor(ctx.cwd) ?? (usesDefaultLocalStore ? fsCasStore(join(ctx.cwd, ".pi", "bio-agent", "cas")) : undefined);
     if (!sessionCas) {
       return {
         ok: false,
@@ -652,7 +660,7 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
       // not strip unknown keys. network/signal are host-composed, never agent-supplied.
       const { dbPath, manifestPath, operationId, runId } = params;
       return text(await withRunLog(openStore, ctx.cwd, dbPath, async (storeConn) => {
-        const out = await runBioOperationFromManifest({ cwd: ctx.cwd, dbPath, manifestPath, operationId, runId, network, compute: computeGrant, cas, remoteCacheScope, protectedSessionBindings, protectedSessionVariables, signal, store: storeConn, author });
+        const out = await runBioOperationFromManifest({ cwd: ctx.cwd, dbPath, manifestPath, operationId, runId, network, compute: computeGrant, cas: casFor(ctx.cwd), remoteCacheScope, protectedSessionBindings, protectedSessionVariables, signal, store: storeConn, author });
         await recordToolRunLink(storeConn, ctx, id, "bio_run_operation", out.runId);
         return out;
       }));
@@ -675,7 +683,7 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
       // Only schema-approved fields (see bio_run_operation): never spread untrusted params into the host runner.
       const { dbPath, manifestPath, sql, resources, bindings, runId } = params;
       return text(await withRunLog(openStore, ctx.cwd, dbPath, async (storeConn) => {
-        const out = await runBioQueryFromManifest({ cwd: ctx.cwd, dbPath, manifestPath, sql, resources, bindings, runId, network, compute: computeGrant, cas, remoteCacheScope, protectedSessionBindings, protectedSessionVariables, signal, store: storeConn, author });
+        const out = await runBioQueryFromManifest({ cwd: ctx.cwd, dbPath, manifestPath, sql, resources, bindings, runId, network, compute: computeGrant, cas: casFor(ctx.cwd), remoteCacheScope, protectedSessionBindings, protectedSessionVariables, signal, store: storeConn, author });
         await recordToolRunLink(storeConn, ctx, id, "bio_query", out.runId);
         return out;
       }));
@@ -693,7 +701,7 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
     async execute(id, params: { replayPath: string; dbPath?: string }, signal, _onUpdate, ctx) {
       const replay = JSON.parse(await readFile(resolve(ctx.cwd, params.replayPath), "utf8")) as RunReplaySpec;
       const dbPath = params.dbPath ?? ":memory:";
-      const reproduceCas = cas ?? (replay.resultDigest ? fsCasStore(join(ctx.cwd, ".pi", "bio-agent", "cas")) : undefined);
+      const reproduceCas = casFor(ctx.cwd) ?? (replay.resultDigest ? fsCasStore(join(ctx.cwd, ".pi", "bio-agent", "cas")) : undefined);
       return text(await withRunLog(openStore, ctx.cwd, dbPath, async (storeConn) => {
         const result = await reproduceRun({
           cwd: ctx.cwd, replay, dbPath, network, compute: computeGrant, cas: reproduceCas, remoteCacheScope,

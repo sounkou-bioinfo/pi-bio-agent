@@ -6,9 +6,17 @@ const state = {
   active: null,
   transcript: [],
   events: [],
+  commands: [],
   eventSource: null,
   liveText: "",
 };
+
+const WORKBENCH_COMMANDS = [
+  { name: "rename", description: "Rename this session", source: "workbench" },
+  { name: "new", description: "Start a new session", source: "workbench" },
+  { name: "close", description: "Close this session", source: "workbench" },
+  { name: "abort", description: "Stop the running turn", source: "workbench" },
+];
 
 const sessionListeners = new Set();
 let viewController = null;
@@ -23,6 +31,11 @@ const delivery = element("delivery");
 const sendButton = element("send");
 const abortButton = element("abort");
 const closeButton = element("close-session");
+const renameButton = element("rename-session");
+const renameForm = element("rename-form");
+const sessionNameInput = element("session-name");
+const commandMenu = element("command-menu");
+const diagnostics = element("diagnostics");
 
 async function request(path, options = {}) {
   const response = await fetch(path, {
@@ -97,20 +110,34 @@ function toolBlocks(message) {
   return message.content.filter((block) => block?.type === "toolCall");
 }
 
+function toolResult(message) {
+  const details = node("details", `tool-detail${message.errorMessage ? " tool-error" : ""}`);
+  const label = message.errorMessage ? "Failed" : "Finished";
+  details.append(node("summary", null, `${label} ${message.toolName || "tool"}`));
+  const text = messageText(message);
+  if (text) details.append(node("pre", "tool-payload", text));
+  if (message.errorMessage) details.append(node("div", "message-error", message.errorMessage));
+  return details;
+}
+
 function renderTranscript() {
   transcript.replaceChildren();
   element("empty-agent").hidden = Boolean(state.active);
   if (!state.active) return;
   for (const message of state.transcript) {
     const role = message.role ?? "event";
+    if (role === "toolResult") {
+      transcript.append(toolResult(message));
+      continue;
+    }
     const row = node("article", `message message-${role}`);
     row.append(node("div", "message-role", role === "toolResult" ? message.toolName || "tool" : role));
     const text = messageText(message);
     if (text) row.append(node("pre", "message-text", text));
     for (const call of toolBlocks(message)) {
-      const callRow = node("div", "tool-call");
-      callRow.append(node("span", "tool-name", call.name || "tool"));
-      callRow.append(node("code", null, JSON.stringify(call.arguments ?? {})));
+      const callRow = node("details", "tool-detail");
+      callRow.append(node("summary", null, `Called ${call.name || "tool"}`));
+      callRow.append(node("pre", "tool-payload", JSON.stringify(call.arguments ?? {}, null, 2)));
       row.append(callRow);
     }
     if (message.errorMessage) row.append(node("div", "message-error", message.errorMessage));
@@ -133,18 +160,58 @@ function activityLabel(event) {
   if (event.kind === "agent_end") return "Agent settled";
   if (event.kind === "host_error") return "Host error";
   if (event.kind === "session_opened") return payload.resumed ? "Session resumed" : "Session opened";
+  if (event.kind === "session_renamed") return `Renamed to ${payload.name ?? "session"}`;
+  if (event.kind === "compaction_start") return "Compacting context";
+  if (event.kind === "compaction_end") return payload.aborted ? "Compaction stopped" : "Context compacted";
+  if (event.kind === "auto_retry_start") return `Retrying request · attempt ${payload.attempt ?? ""}`;
   return event.kind.replaceAll("_", " ");
+}
+
+function isMeaningfulActivity(event) {
+  return [
+    "session_opened", "session_renamed", "agent_start", "agent_end", "tool_execution_start",
+    "tool_execution_end", "queue_update", "host_error", "compaction_start", "compaction_end",
+    "auto_retry_start", "auto_retry_end",
+  ].includes(event.kind);
 }
 
 function renderActivity() {
   activityList.replaceChildren();
-  for (const event of state.events.slice(-60).reverse()) {
+  const events = state.events.filter(isMeaningfulActivity).slice(-30).reverse();
+  element("activity-count").textContent = events.length ? String(events.length) : "";
+  if (!events.length && state.active) activityList.append(node("p", "muted activity-empty", "No active work"));
+  for (const event of events) {
     const details = node("details", `activity-event activity-${event.kind}`);
     const summary = node("summary");
     summary.append(node("span", "activity-label", activityLabel(event)), node("time", null, timeLabel(event.at)));
     const data = node("pre", "event-json", JSON.stringify(event.payload, null, 2));
     details.append(summary, data);
     activityList.append(details);
+  }
+  renderDiagnostics();
+}
+
+function renderDiagnostics() {
+  element("diagnostic-count").textContent = `${state.events.length} event${state.events.length === 1 ? "" : "s"}`;
+  if (!diagnostics.open) return;
+  const list = element("diagnostic-list");
+  list.replaceChildren();
+  const groups = [];
+  for (const event of state.events.slice(-120)) {
+    const previous = groups.at(-1);
+    if (previous?.kind === event.kind) {
+      previous.count += 1;
+      previous.event = event;
+    } else groups.push({ kind: event.kind, count: 1, event });
+  }
+  for (const group of groups.reverse()) {
+    const details = node("details", "diagnostic-event");
+    const suffix = group.count > 1 ? ` × ${group.count}` : "";
+    details.append(
+      node("summary", null, `${activityLabel(group.event)}${suffix}`),
+      node("pre", "event-json", JSON.stringify(group.event.payload, null, 2)),
+    );
+    list.append(details);
   }
 }
 
@@ -155,6 +222,7 @@ function setControls() {
   sendButton.disabled = !enabled;
   abortButton.disabled = !enabled || state.active?.state !== "running";
   closeButton.disabled = !enabled;
+  renameButton.disabled = !enabled;
   if (state.active?.state === "running" && delivery.value === "prompt") delivery.value = "steer";
   if (state.active?.state !== "running" && delivery.value === "steer") delivery.value = "prompt";
 }
@@ -182,6 +250,13 @@ async function loadTranscript() {
   renderTranscript();
 }
 
+async function loadCommands() {
+  state.commands = [];
+  if (!state.active || !state.info?.capabilities.agentCommands) return;
+  const result = await request(`/v1/agent-sessions/${encodeURIComponent(state.active.sessionId)}/commands`);
+  state.commands = result.commands;
+}
+
 function handleActivity(event) {
   state.events.push(event);
   if (state.events.length > 500) state.events.splice(0, state.events.length - 500);
@@ -191,7 +266,8 @@ function handleActivity(event) {
   }
   if (["message_end", "agent_end"].includes(event.kind)) void loadTranscript();
   if (["agent_start", "agent_end", "queue_update", "host_error"].includes(event.kind)) void refreshActive();
-  renderActivity();
+  if (isMeaningfulActivity(event)) renderActivity();
+  else renderDiagnostics();
 }
 
 function connectEvents() {
@@ -237,6 +313,7 @@ async function selectSession(session) {
     renderSessionFacts();
     setControls();
     await loadTranscript();
+    await loadCommands();
     connectEvents();
     notifySessionChange();
   } catch (error) {
@@ -253,6 +330,91 @@ function showError(error) {
   };
   state.events.push(event);
   renderActivity();
+}
+
+function openRename() {
+  if (!state.active) return;
+  sessionNameInput.value = state.active.name || "";
+  renameForm.hidden = false;
+  sessionNameInput.focus();
+  sessionNameInput.select();
+}
+
+function closeRename() {
+  renameForm.hidden = true;
+}
+
+async function renameSession(name) {
+  if (!state.active) return;
+  state.active = await request(`/v1/agent-sessions/${encodeURIComponent(state.active.sessionId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ name }),
+  });
+  closeRename();
+  await refreshSessions();
+}
+
+function allCommands() {
+  const seen = new Set();
+  const hostCommands = state.active?.state === "idle" ? state.commands : [];
+  return [...WORKBENCH_COMMANDS, ...hostCommands].filter((command) => {
+    if (seen.has(command.name)) return false;
+    seen.add(command.name);
+    return true;
+  });
+}
+
+function closeCommandMenu() {
+  commandMenu.hidden = true;
+  commandMenu.replaceChildren();
+  messageInput.setAttribute("aria-expanded", "false");
+}
+
+function renderCommandMenu() {
+  const value = messageInput.value;
+  if (!value.startsWith("/") || value.includes("\n")) {
+    closeCommandMenu();
+    return;
+  }
+  const query = value.slice(1).split(/\s/, 1)[0].toLowerCase();
+  const commands = allCommands().filter((command) => command.name.toLowerCase().includes(query)).slice(0, 12);
+  commandMenu.replaceChildren();
+  if (!commands.length) {
+    closeCommandMenu();
+    return;
+  }
+  for (const command of commands) {
+    const button = node("button", "command-option");
+    button.type = "button";
+    button.setAttribute("role", "option");
+    button.append(
+      node("code", null, `/${command.name}`),
+      node("span", null, command.description || command.source),
+      node("small", null, command.source),
+    );
+    button.addEventListener("click", () => {
+      messageInput.value = `/${command.name} `;
+      closeCommandMenu();
+      messageInput.focus();
+    });
+    commandMenu.append(button);
+  }
+  commandMenu.hidden = false;
+  messageInput.setAttribute("aria-expanded", "true");
+}
+
+async function executeWorkbenchCommand(text) {
+  const match = /^\/(rename|new|close|abort)(?:\s+(.*))?$/.exec(text);
+  if (!match) return false;
+  const [, command, rawArgs = ""] = match;
+  const args = rawArgs.trim();
+  if (command === "rename") {
+    if (!args) openRename();
+    else await renameSession(args);
+  } else if (command === "new") element("new-session").click();
+  else if (command === "close") closeButton.click();
+  else if (command === "abort") abortButton.click();
+  return true;
 }
 
 element("new-session").addEventListener("click", async () => {
@@ -276,6 +438,7 @@ closeButton.addEventListener("click", async () => {
     state.active = null;
     state.transcript = [];
     state.events = [];
+    state.commands = [];
     state.liveText = "";
     renderTranscript();
     renderActivity();
@@ -293,9 +456,15 @@ element("composer").addEventListener("submit", async (event) => {
   if (!state.active || !messageInput.value.trim()) return;
   sendButton.disabled = true;
   try {
+    const text = messageInput.value.trim();
+    if (await executeWorkbenchCommand(text)) {
+      messageInput.value = "";
+      closeCommandMenu();
+      return;
+    }
     state.active = await request(`/v1/agent-sessions/${encodeURIComponent(state.active.sessionId)}/messages`, {
       method: "POST",
-      body: JSON.stringify({ delivery: delivery.value, text: messageInput.value.trim() }),
+      body: JSON.stringify({ delivery: delivery.value, text }),
     });
     messageInput.value = "";
     setControls();
@@ -306,6 +475,23 @@ element("composer").addEventListener("submit", async (event) => {
     sendButton.disabled = false;
   }
 });
+
+renameButton.addEventListener("click", openRename);
+element("cancel-rename").addEventListener("click", closeRename);
+renameForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  try {
+    await renameSession(sessionNameInput.value.trim());
+  } catch (error) {
+    showError(error);
+  }
+});
+
+messageInput.addEventListener("input", renderCommandMenu);
+messageInput.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") closeCommandMenu();
+});
+diagnostics.addEventListener("toggle", renderDiagnostics);
 
 abortButton.addEventListener("click", async () => {
   if (!state.active) return;

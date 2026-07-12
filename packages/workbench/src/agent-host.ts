@@ -53,6 +53,17 @@ export interface SendAgentMessageRequest {
   text: string;
 }
 
+export interface AgentCommandSummary {
+  name: string;
+  description?: string;
+  source: "extension" | "prompt" | "skill";
+}
+
+export interface AgentCommandList {
+  sessionId: string;
+  commands: AgentCommandSummary[];
+}
+
 /** Browser-facing control plane for an interactive agent host.
  *
  * This port is intentionally not a scientific run, compute runner, memory store, or event ledger. Its activity
@@ -64,6 +75,8 @@ export interface AgentHostPort {
   list(): Promise<AgentSessionSummary[]>;
   open(request?: OpenAgentSessionRequest): Promise<AgentSessionSummary>;
   get(sessionId: string): Promise<AgentSessionSummary | undefined>;
+  rename(sessionId: string, name: string): Promise<AgentSessionSummary>;
+  commands(sessionId: string): Promise<AgentCommandList>;
   send(sessionId: string, request: SendAgentMessageRequest): Promise<AgentSessionSummary>;
   abort(sessionId: string): Promise<AgentSessionSummary>;
   transcript(sessionId: string, limit?: number): Promise<AgentTranscriptPage>;

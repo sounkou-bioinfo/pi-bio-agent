@@ -15,7 +15,8 @@ registerWorkbenchAddon({
     const renderArtifact = (artifact) => {
       const card = host.node("article", "artifact-card");
       const heading = host.node("div", "artifact-heading");
-      heading.append(host.node("h2", null, artifact.semanticRole), host.node("span", "artifact-media", artifact.mediaType));
+      const caption = typeof artifact.attrs?.caption === "string" ? artifact.attrs.caption : artifact.semanticRole;
+      heading.append(host.node("h2", null, caption), host.node("span", "artifact-media", `${artifact.semanticRole} · ${artifact.mediaType}`));
       card.append(heading);
       if (artifact.mediaType.startsWith("image/")) {
         const image = host.node("img", "artifact-image");

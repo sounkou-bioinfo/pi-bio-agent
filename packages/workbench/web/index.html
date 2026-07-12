@@ -41,7 +41,10 @@
         </div>
         <div id="transcript" class="transcript" aria-live="polite"></div>
         <form id="composer" class="composer">
-          <textarea id="message" rows="3" placeholder="Ask Pi to inspect, compose, run, or review..." disabled></textarea>
+          <div class="composer-field">
+            <textarea id="message" rows="3" placeholder="Ask Pi to inspect, compose, run, or review..." aria-controls="command-menu" aria-expanded="false" disabled></textarea>
+            <div id="command-menu" class="command-menu" role="listbox" aria-label="Commands" hidden></div>
+          </div>
           <div class="composer-actions">
             <select id="delivery" aria-label="Message delivery" disabled>
               <option value="prompt">Prompt</option>
@@ -57,9 +60,25 @@
     </main>
 
     <aside class="activity-pane" aria-label="Session activity">
-      <div class="pane-heading"><h2>Activity</h2></div>
+      <div class="pane-heading">
+        <h2>Session</h2>
+        <button id="rename-session" class="text-command" type="button" disabled>Rename</button>
+      </div>
+      <form id="rename-form" class="rename-form" hidden>
+        <label for="session-name">Session name</label>
+        <input id="session-name" maxlength="160" autocomplete="off">
+        <div class="rename-actions">
+          <button id="cancel-rename" class="secondary-command" type="button">Cancel</button>
+          <button class="primary-command" type="submit">Save</button>
+        </div>
+      </form>
       <dl id="session-facts" class="session-facts"></dl>
+      <div class="activity-heading"><h3>Activity</h3><span id="activity-count"></span></div>
       <div id="activity-list" class="activity-list"></div>
+      <details id="diagnostics" class="diagnostics">
+        <summary>Diagnostics <span id="diagnostic-count">0 events</span></summary>
+        <div id="diagnostic-list" class="diagnostic-list"></div>
+      </details>
     </aside>
   </div>
   <script type="module" src="/app.js"></script>

@@ -21,6 +21,7 @@ import { addonDescriptor, type WorkbenchAddon } from "../workbench-addon.js";
 import {
   AnalysisPathSchema,
   AgentActivityPageSchema,
+  AgentCommandListSchema,
   AgentEventQuerySchema,
   AgentSessionListSchema,
   AgentSessionPathSchema,
@@ -33,6 +34,7 @@ import {
   ErrorResponseSchema,
   HealthResponseSchema,
   OpenAgentSessionSchema,
+  RenameAgentSessionSchema,
   RunClinicalAnalysisResponseSchema,
   SendAgentMessageSchema,
   WorkbenchInfoSchema,
@@ -112,6 +114,37 @@ const getAgentSessionRoute = createRoute({
     404: { ...json(ErrorResponseSchema), description: "The active session was not found." },
     503: { ...json(ErrorResponseSchema), description: "No interactive agent host is configured." },
     500: { ...json(ErrorResponseSchema), description: "The agent host could not read the session." },
+  },
+});
+
+const renameAgentSessionRoute = createRoute({
+  method: "patch",
+  path: "/v1/agent-sessions/{sessionId}",
+  tags: ["agent sessions"],
+  summary: "Rename a persisted agent session",
+  request: {
+    params: AgentSessionPathSchema,
+    body: { required: true, content: { "application/json": { schema: RenameAgentSessionSchema } } },
+  },
+  responses: {
+    200: { ...json(AgentSessionSchema), description: "The renamed active session." },
+    404: { ...json(ErrorResponseSchema), description: "The active session was not found." },
+    503: { ...json(ErrorResponseSchema), description: "No interactive agent host is configured." },
+    500: { ...json(ErrorResponseSchema), description: "The agent host could not rename the session." },
+  },
+});
+
+const agentCommandsRoute = createRoute({
+  method: "get",
+  path: "/v1/agent-sessions/{sessionId}/commands",
+  tags: ["agent sessions"],
+  summary: "List commands invokable in the active agent session",
+  request: { params: AgentSessionPathSchema },
+  responses: {
+    200: { ...json(AgentCommandListSchema), description: "Extension, prompt-template, and skill commands." },
+    404: { ...json(ErrorResponseSchema), description: "The active session was not found." },
+    503: { ...json(ErrorResponseSchema), description: "No interactive agent host is configured." },
+    500: { ...json(ErrorResponseSchema), description: "The agent host could not list commands." },
   },
 });
 
@@ -260,6 +293,7 @@ export function createWorkbenchApi(options: WorkbenchApiOptions): OpenAPIHono {
     capabilities: {
       agentSessions: Boolean(options.agentHost),
       agentSteering: Boolean(options.agentHost),
+      agentCommands: Boolean(options.agentHost),
       eventStream: Boolean(options.agentHost),
     },
     addons: [...(options.addons ?? [])]
@@ -322,6 +356,26 @@ export function createWorkbenchApi(options: WorkbenchApiOptions): OpenAPIHono {
       return context.json(AgentSessionSchema.parse(session), 200);
     } catch (error) {
       return sessionError(context, error, "agent_session_read_failed");
+    }
+  });
+
+  app.openapi(renameAgentSessionRoute, async (context) => {
+    if (!options.agentHost) return unavailable(context);
+    const { sessionId } = context.req.valid("param");
+    try {
+      return context.json(AgentSessionSchema.parse(await options.agentHost.rename(sessionId, context.req.valid("json").name)), 200);
+    } catch (error) {
+      return sessionError(context, error, "agent_session_rename_failed");
+    }
+  });
+
+  app.openapi(agentCommandsRoute, async (context) => {
+    if (!options.agentHost) return unavailable(context);
+    const { sessionId } = context.req.valid("param");
+    try {
+      return context.json(AgentCommandListSchema.parse(await options.agentHost.commands(sessionId)), 200);
+    } catch (error) {
+      return sessionError(context, error, "agent_commands_failed");
     }
   });
 

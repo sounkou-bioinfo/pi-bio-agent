@@ -9,5 +9,5 @@ import { fsCasStore } from "../../src/hosts/fs-cas.js";
 // operator who launches Pi does.
 export default createBioExtension({
   compute: { runner: nodeComputeRunner() },
-  cas: fsCasStore(join(process.cwd(), ".pi", "bio-agent", "cas")),
+  cas: (cwd) => fsCasStore(join(cwd, ".pi", "bio-agent", "cas")),
 });

@@ -59,6 +59,37 @@ describe("Pi coding-agent extension", () => {
     ]);
   });
 
+  test("a CAS factory binds scientific runs to the invocation cwd", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "pi-bio-ext-cas-cwd-"));
+    const manifestPath = join(cwd, "manifest.json");
+    await writeFile(manifestPath, JSON.stringify({
+      schema: "pi-bio.manifest.v1",
+      id: "cas-cwd",
+      version: "0.1.0",
+      title: "CAS cwd",
+      description: "CAS factory regression fixture.",
+      provides: {},
+    }));
+    const resolvedCwds: string[] = [];
+    const { tools } = loadExtension(createBioExtension({
+      cas: (invocationCwd) => {
+        resolvedCwds.push(invocationCwd);
+        return fsCasStore(join(invocationCwd, ".pi", "bio-agent", "cas"));
+      },
+    }));
+    const query = tools.find((tool) => tool.name === "bio_query");
+    assert.ok(query);
+    const out = await query!.execute("cas-cwd-call", {
+      dbPath: ":memory:",
+      manifestPath,
+      sql: "SELECT 1 AS ok",
+      runId: "cas-cwd-run",
+    }, undefined, undefined, { cwd });
+    assert.equal(out.details.ok, true);
+    assert.deepEqual(resolvedCwds, [cwd]);
+    assert.match(out.details.casRefs.result, /^sha256:/);
+  });
+
   test("before_agent_start records context digests without storing prompt text", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "pi-bio-ext-prompt-"));
     const { handlers } = loadExtension(createBioExtension({ author: "agent:test" }));
@@ -76,6 +107,7 @@ describe("Pi coding-agent extension", () => {
     const out = await beforeAgentStart!(event, ctx);
     assert.match(out.systemPrompt, /pi-bio-agent extension/);
     assert.match(out.systemPrompt, /MANIFESTS ARE PROGRAMS/);
+    assert.match(out.systemPrompt, /never satisfy a scientific plot\/report\/file request/);
 
     const store = await openBioStore(cwd);
     try {

@@ -4,6 +4,7 @@ import {
   AgentSessionConflictError,
   AgentSessionNotFoundError,
   type AgentActivityEvent,
+  type AgentCommandSummary,
   type AgentHostPort,
   type AgentSessionSummary,
 } from "./agent-host.js";
@@ -27,6 +28,7 @@ interface PiSessionLike {
   followUp(text: string): Promise<void>;
   abort(): Promise<void>;
   setSessionName(name: string): void;
+  availableCommands?(): AgentCommandSummary[];
   dispose(): void;
 }
 
@@ -190,7 +192,26 @@ async function defaultOpenSession(options: PiAgentHostOptions, request: { resume
     ...(options.excludeTools ? { excludeTools: options.excludeTools } : {}),
     ...(options.noTools ? { noTools: options.noTools } : {}),
   });
-  return session;
+  const commandSession = session as typeof session & { availableCommands?: () => AgentCommandSummary[] };
+  commandSession.availableCommands = () => {
+    const extensionCommands = session.extensionRunner.getRegisteredCommands().map((command) => ({
+      name: command.invocationName,
+      ...(command.description ? { description: command.description } : {}),
+      source: "extension" as const,
+    }));
+    const prompts = session.promptTemplates.map((prompt) => ({
+      name: prompt.name,
+      ...(prompt.description ? { description: prompt.description } : {}),
+      source: "prompt" as const,
+    }));
+    const skills = session.resourceLoader.getSkills().skills.map((skill) => ({
+      name: `skill:${skill.name}`,
+      ...(skill.description ? { description: skill.description } : {}),
+      source: "skill" as const,
+    }));
+    return [...extensionCommands, ...prompts, ...skills];
+  };
+  return commandSession;
 }
 
 export function createPiAgentHost(options: PiAgentHostOptions): AgentHostPort {
@@ -310,6 +331,22 @@ export function createPiAgentHost(options: PiAgentHostOptions): AgentHostPort {
     async get(sessionId) {
       const entry = active.get(sessionId);
       return entry ? summary(entry) : undefined;
+    },
+
+    async rename(sessionId, name) {
+      const entry = requireActive(sessionId);
+      const nextName = nonEmpty(name, "session name");
+      entry.session.setSessionName(nextName);
+      append(entry, "session_renamed", { name: nextName });
+      return summary(entry);
+    },
+
+    async commands(sessionId) {
+      const entry = requireActive(sessionId);
+      return {
+        sessionId: entry.session.sessionId,
+        commands: entry.session.availableCommands?.() ?? [],
+      };
     },
 
     async send(sessionId, request) {

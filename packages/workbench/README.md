@@ -109,11 +109,15 @@ npm run serve --workspace=packages/workbench -- \
   8787
 ```
 
-Open <http://127.0.0.1:8787>. The browser opens and resumes persistent Pi sessions, streams bounded activity, accepts
-prompt/steer/follow-up input, aborts or closes an active session, runs the clinical application, renders its evidence
-and review queue, previews CAS-backed figures/reports, and hands run ids back to Pi for ledger/graph inspection. The
-activity stream is UI transport; the scientific record remains the substrate's runs, CAS objects, receipts,
-observations, and checkpoints.
+Open <http://127.0.0.1:8787>. The browser opens, resumes, and renames persistent Pi sessions; discovers invokable
+extension/template/skill commands for slash completion; accepts prompt/steer/follow-up input; and aborts or closes an
+active session. Tool payloads and raw lifecycle deltas stay under collapsible diagnostics rather than dominating the
+conversation. Clinical Evidence shows the fixture inputs and eight checkpointed stages before execution, renders the
+evidence and review queue, and hands run ids back to Pi for ledger/graph inspection.
+
+This host explicitly grants local `compute.run` with the workspace CAS. A plot or report is a declared compute output
+with media/role metadata, then a run/CAS/graph artifact visible in the Artifacts addon. A file written directly by
+Python, R, or shell is merely a workspace side effect and is not presented as scientific evidence.
 
 Zod route schemas validate requests and generate OpenAPI 3.1. The server fixes its workspace and Pi extension at
 startup; callers submit neither host paths nor executable extension configuration, and store/session paths are not

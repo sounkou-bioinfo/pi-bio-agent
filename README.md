@@ -75,8 +75,6 @@ pi \
 
 Manifest path: `.pi/bio-agent/readme-clinvar-tp53.json`
 
-SQL:
-
 ``` sql
 WITH exploded AS (
   SELECT
@@ -402,12 +400,19 @@ adapter, and the same public evidence substrate:
 npm run serve --workspace=packages/workbench -- examples/clinical-genomics 8787
 ```
 
-Open <http://127.0.0.1:8787>. Pi sessions can be opened or resumed,
-prompted, steered, followed up, aborted, and closed while host-approved
-Clinical Evidence and Artifacts addons render review queues and
-CAS-backed figures/reports tied to recorded runs. The live
-conversation/event stream is a presentation surface, not the scientific
-source of truth.
+Open <http://127.0.0.1:8787>. Pi sessions can be opened, resumed,
+renamed, prompted, steered, followed up, aborted, and closed. Slash
+completion exposes invokable Pi commands while host-approved Clinical
+Evidence and Artifacts addons render the explicit checkpoint plan,
+review queues, and CAS-backed figures/reports tied to recorded runs.
+Tool payloads and raw lifecycle deltas are collapsible diagnostics. The
+live conversation/event stream is a presentation surface, not the
+scientific source of truth.
+
+The first-party workbench explicitly grants local `compute.run` with its
+workspace CAS. Agent-produced figures and reports must be declared
+compute outputs so they become run-linked CAS artifacts; an arbitrary
+Python/R/shell file write is not a workbench artifact.
 
 The reference server binds loopback and is not a sandbox. Pi and its
 tools run with the permissions of the launching process. Remote or

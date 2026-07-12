@@ -100,10 +100,13 @@ Cross-cutting constraints from this table are currently enforced by tests in:
 
 - Scheduler backends for SLURM, `targets`, `mirai`, Modal, or another queue should implement `AsyncRunner` and the
   existing checkpoint contract.
-- The workbench now has a Pi-backed interactive host port for open/resume, prompt/steer/follow-up, abort, bounded
-  transcripts, and ephemeral activity. Pi's extension already reduces durable input/lifecycle facts to
+- The workbench now has a Pi-backed interactive host port for open/resume/rename, command discovery,
+  prompt/steer/follow-up, abort, bounded transcripts, and ephemeral activity. Pi's extension already reduces durable input/lifecycle facts to
   `recordHostEvent` and imports the session transcript. Do not promote the browser event vocabulary into core. A
   second host adapter is the next test of whether any control contract beyond the current application port is shared.
+- The workbench's explicit local-compute grant and evidence-status figure exercise the existing `compute.run` ->
+  declared output -> CAS -> `run:<id> produces cas:<digest>` path. Direct process writes are not artifacts. This is
+  application composition over the existing contract, not evidence for a plot-specific core tool.
 - Clinical Evidence and Artifacts now exercise a host-approved `WorkbenchAddon` API/browser pair. Do not broaden it
   into an installation/catalog/configuration system until another deployment needs runtime discovery; do not add
   focus/resize/dock hooks until an editor, terminal, or comparable mounted surface requires them.

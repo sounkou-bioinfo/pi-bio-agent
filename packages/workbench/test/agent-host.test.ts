@@ -10,6 +10,11 @@ class FakePiSession {
   readonly messages: unknown[] = [];
   readonly steering: string[] = [];
   readonly followUps: string[] = [];
+  readonly commandList = [
+    { name: "review", description: "Review the current work", source: "extension" as const },
+    { name: "skill:pi-bio-agent", description: "Use the pi-bio-agent substrate", source: "skill" as const },
+  ];
+  readonly invokedCommands: string[] = [];
   private listeners = new Set<(event: unknown) => void>();
   private finishPrompt?: () => void;
   sessionName?: string;
@@ -29,6 +34,11 @@ class FakePiSession {
   }
 
   async prompt(text: string, options?: { preflightResult?: (success: boolean) => void }) {
+    if (text === "/review") {
+      this.invokedCommands.push(text);
+      options?.preflightResult?.(true);
+      return;
+    }
     this.isStreaming = true;
     this.messages.push({ role: "user", content: text, timestamp: 1 });
     this.emit({ type: "agent_start" });
@@ -74,6 +84,10 @@ class FakePiSession {
     this.sessionName = name;
   }
 
+  availableCommands() {
+    return this.commandList;
+  }
+
   dispose() {
     this.disposed = true;
   }
@@ -114,6 +128,15 @@ test("Pi adapter opens, resumes, steers, and streams without making activity dur
     assert.equal(opened.sessionId, "new-1");
     assert.equal(opened.name, "Browser study");
     assert.equal(opened.state, "idle");
+
+    const renamed = await host.rename(opened.sessionId, "Rare disease review");
+    assert.equal(renamed.name, "Rare disease review");
+    assert.deepEqual((await host.commands(opened.sessionId)).commands, sessions.get(opened.sessionId)!.commandList);
+
+    const commandResult = await host.send(opened.sessionId, { delivery: "prompt", text: "/review" });
+    assert.equal(commandResult.state, "idle");
+    assert.deepEqual(sessions.get(opened.sessionId)!.invokedCommands, ["/review"]);
+    assert.equal(sessions.get(opened.sessionId)!.messages.length, 0, "Pi command dispatch bypasses the model transcript");
 
     const accepted = await host.send(opened.sessionId, { delivery: "prompt", text: "inspect the declared relation" });
     assert.equal(accepted.state, "running", "prompt HTTP acceptance does not wait for the whole agent turn");
@@ -169,6 +192,18 @@ test("agent session HTTP routes validate input and expose bounded host state", a
     assert.equal(created.status, 201);
     const session = await created.json() as { sessionId: string; name: string };
     assert.equal(session.name, "API study");
+
+    const renamed = await app.request(`/v1/agent-sessions/${session.sessionId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "API review" }),
+    });
+    assert.equal(renamed.status, 200);
+    assert.equal((await renamed.json() as { name: string }).name, "API review");
+
+    const commands = await app.request(`/v1/agent-sessions/${session.sessionId}/commands`);
+    assert.equal(commands.status, 200);
+    assert.deepEqual((await commands.json() as { commands: unknown[] }).commands, sessions.get(session.sessionId)!.commandList);
 
     const sent = await app.request(`/v1/agent-sessions/${session.sessionId}/messages`, {
       method: "POST",

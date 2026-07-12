@@ -1,0 +1,47 @@
+{
+  "schema": "pi-bio.manifest.v1",
+  "id": "clinical-genomics-visualizations",
+  "version": "0.1.0",
+  "title": "Clinical genomics evidence visualizations",
+  "description": "Declared, CAS-backed figures derived from recorded clinical evidence packets.",
+  "provides": {
+    "resolvers": [
+      {
+        "id": "compute.run",
+        "version": "0.1.0",
+        "title": "Out-of-process figure rendering",
+        "description": "Render a declared figure from a DuckDB relation and capture it in CAS.",
+        "output": { "mode": "table" }
+      }
+    ],
+    "resources": [
+      {
+        "id": "evidence_status_figure",
+        "title": "Evidence status counts by traversal lane",
+        "kind": "virtual",
+        "resolver": "compute.run",
+        "params": {
+          "table": "evidence_status_figure",
+          "inputSql": "WITH packet AS (SELECT content::JSON AS document FROM read_text(getvariable('packet_path'))), evidence AS (SELECT json_extract_string(item.value, '$.lane') AS lane, json_extract_string(item.value, '$.evidence_status') AS evidence_status FROM packet, json_each(json_extract(document, '$.lanes.direct.rows')) AS item UNION ALL SELECT json_extract_string(item.value, '$.lane') AS lane, json_extract_string(item.value, '$.evidence_status') AS evidence_status FROM packet, json_each(json_extract(document, '$.lanes.inverted.rows')) AS item) SELECT lane, evidence_status, count(*)::INTEGER AS n FROM evidence GROUP BY lane, evidence_status ORDER BY evidence_status, lane",
+          "command": ["Rscript", "./operations/render-evidence-status.R"],
+          "resultTable": "artifacts",
+          "outputs": [
+            {
+              "name": "evidence_status_svg",
+              "path": "evidence-status.svg",
+              "kind": "file",
+              "mediaType": "image/svg+xml",
+              "semanticRole": "figure",
+              "attrs": {
+                "renderer": "R base graphics",
+                "source_relation": "recorded evidence packet lanes",
+                "caption": "Evidence status counts by direct and inverted traversal lane"
+              }
+            }
+          ],
+          "timeoutMs": 60000
+        }
+      }
+    ]
+  }
+}

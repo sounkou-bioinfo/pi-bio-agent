@@ -4,13 +4,35 @@ registerWorkbenchAddon({
   id: "clinical-evidence",
   async mount(container, host) {
     container.innerHTML = `
-      <form id="analysis-form" class="analysis-toolbar">
-        <label for="case-id">Case</label>
-        <input id="case-id" value="CASE-RD-001" autocomplete="off">
-        <button id="run-analysis" class="primary-command" type="submit">Run analysis</button>
-        <button id="ask-agent" class="secondary-command" type="button" disabled>Ask Pi</button>
-      </form>
-      <div id="analysis-status" class="analysis-status"></div>
+      <div class="analysis-launch">
+        <form id="analysis-form" class="analysis-toolbar">
+          <label for="case-id">Case</label>
+          <input id="case-id" value="CASE-RD-001" autocomplete="off">
+          <button id="run-analysis" class="primary-command" type="submit">Run fixture workup</button>
+          <button id="ask-agent" class="secondary-command" type="button" disabled>Ask Pi</button>
+        </form>
+        <section class="analysis-plan" aria-labelledby="analysis-plan-title">
+          <div class="analysis-plan-heading">
+            <div><h2 id="analysis-plan-title">Recorded case workup</h2><p>One synchronous request, eight resumable steps, one CAS-backed evidence packet.</p></div>
+            <dl class="analysis-inputs">
+              <dt>Assembly</dt><dd>GRCh38</dd>
+              <dt>Sources</dt><dd>Declared fixture resources</dd>
+              <dt>VEP</dt><dd>Host-composed endpoint</dd>
+            </dl>
+          </div>
+          <ol id="analysis-steps" class="analysis-steps">
+            <li>Ground narrative to reviewed HPO assertions</li>
+            <li>Rank phenotype-supported disease and gene hypotheses</li>
+            <li>Resolve assembly-pinned candidate intervals</li>
+            <li>Search indexed VCF regions and record coverage</li>
+            <li>Annotate selected alleles through VEP</li>
+            <li>Reconcile direct and inverted evidence</li>
+            <li>Compare the prior assessment</li>
+            <li>Commit packet, receipts, replay, and graph links</li>
+          </ol>
+        </section>
+      </div>
+      <div id="analysis-status" class="analysis-status">Not run</div>
       <div id="analysis-content" class="analysis-content"></div>`;
 
     let analysis = null;
@@ -67,6 +89,19 @@ registerWorkbenchAddon({
       );
       content.append(metrics);
 
+      const workflow = host.node("section", "workflow-result evidence-section");
+      workflow.append(host.node("h2", null, "Recorded workflow"));
+      const workflowFacts = host.node("dl", "workflow-facts");
+      for (const [label, value] of [
+        ["Analysis", analysis.analysisId],
+        ["Packet", analysis.packetUri],
+        ["Executed steps", analysis.workflow.executedSteps],
+        ["Reused steps", analysis.workflow.reusedSteps],
+        ["Replay", analysis.workflow.replayDigest],
+      ]) workflowFacts.append(host.node("dt", null, label), host.node("dd", null, String(value)));
+      workflow.append(workflowFacts);
+      content.append(workflow);
+
       const review = host.node("section", "evidence-section");
       review.append(host.node("h2", null, "Review queue"));
       const reviewList = host.node("div", "review-list");
@@ -94,16 +129,23 @@ registerWorkbenchAddon({
       event.preventDefault();
       const status = container.querySelector("#analysis-status");
       const button = container.querySelector("#run-analysis");
+      const steps = [...container.querySelectorAll("#analysis-steps li")];
       button.disabled = true;
-      status.textContent = "Running";
+      steps.forEach((step) => step.classList.add("running"));
+      status.textContent = "Running 8 checkpointed stages · the response returns after the evidence packet is committed";
       try {
         analysis = await host.request("/v1/clinical-analyses", {
           method: "POST",
           body: JSON.stringify({ caseId: container.querySelector("#case-id").value.trim() }),
         });
-        status.textContent = `Completed · ${analysis.analysisId}`;
+        steps.forEach((step) => {
+          step.classList.remove("running");
+          step.classList.add("complete");
+        });
+        status.textContent = `Completed · ${analysis.analysisId} · ${analysis.workflow.executedSteps} executed · ${analysis.workflow.reusedSteps} reused`;
         render();
       } catch (error) {
+        steps.forEach((step) => step.classList.remove("running"));
         status.textContent = error instanceof Error ? error.message : String(error);
       } finally {
         button.disabled = false;
@@ -113,7 +155,7 @@ registerWorkbenchAddon({
     askButton.addEventListener("click", () => {
       if (!analysis || !host.getActiveSession()) return;
       const runIds = analysis.packet.provenance.runIds.join(", ");
-      host.setAgentDraft(`Inspect analysis ${analysis.analysisId} through the ledger and graph. Start from these run ids: ${runIds}. Verify the evidence and surface abstentions; do not treat this message as the fact source.`);
+      host.setAgentDraft(`Inspect analysis ${analysis.analysisId} through the ledger and graph. Start from these run ids: ${runIds}. Verify the evidence and surface abstentions; do not treat this message as the fact source. If I request a figure, use a declared compute.run output so it is captured in CAS and shown in Artifacts; do not write an untracked plot directly.`);
     });
 
     return { activate: updateAsk, dispose: unsubscribe };

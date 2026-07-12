@@ -31,6 +31,10 @@ Instructions for coding agents working in this repository.
   second host exhibits the same need.
 - The host fixes cwd, extension paths, credentials, model policy, tools, filesystem access, and network/compute
   grants. Browser requests address opaque session ids and must never supply host paths or executable extension code.
+- The first-party workbench explicitly grants local `compute.run` with its workspace CAS. Agent-produced figures,
+  reports, and tables must use declared compute outputs so the run host captures them in CAS and projects them into
+  the artifact graph. A Python/R/shell command that merely writes a file into the workspace is not a workbench
+  artifact and must not be presented as one.
 - The reference server binds loopback. Pi and its extensions run with the permissions of the server process; CSP and
   same-origin HTTP are not a process sandbox. A remote or multi-user deployment needs explicit authentication, TLS,
   admission policy, and an isolation boundary chosen by the operator.

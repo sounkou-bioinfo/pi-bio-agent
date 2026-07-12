@@ -18,7 +18,7 @@ export async function startWorkbenchServer(workspaceArg = "examples/clinical-gen
   const grounding = await loadHostGroundingRuntime(workspace, groundingModule);
   const agentHost = createPiAgentHost({
     cwd: workspace,
-    extensionPaths: [fileURLToPath(import.meta.resolve("pi-bio-agent/pi-extension"))],
+    extensionPaths: [fileURLToPath(import.meta.resolve("pi-bio-agent/pi-extension-compute"))],
   });
   const addons = [createClinicalWorkbenchAddon({
     clinicalWorkspace: workspace,

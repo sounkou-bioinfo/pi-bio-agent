@@ -75,7 +75,7 @@ async function useRecordedPacket(page: import("@playwright/test").Page) {
   });
 }
 
-test("real Pi session control and evidence rendering compose in the browser", async ({ page }) => {
+test("real Pi session control and evidence rendering compose in the browser", async ({ page }, testInfo) => {
   await useRecordedPacket(page);
   const browserErrors: string[] = [];
   page.on("pageerror", (error) => browserErrors.push(error.message));
@@ -89,11 +89,31 @@ test("real Pi session control and evidence rendering compose in the browser", as
   await expect(page.locator("#session-facts")).toContainText("idle");
   await expect(page.locator("#activity-list")).toContainText("Session opened");
 
-  await page.getByRole("button", { name: "Evidence" }).click();
-  await page.getByRole("button", { name: "Run analysis" }).click();
+  await page.locator("#message").fill("/");
+  await expect(page.locator("#command-menu")).toBeVisible();
+  await expect(page.locator("#command-menu")).toContainText("/rename");
+  await expect(page.locator("#command-menu")).toContainText("/skill:pi-bio-agent");
+  await page.locator("#message").fill("/rename Clinical browser review");
+  await page.locator("#send").click();
+  await expect(page.locator("#session-list")).toContainText("Clinical browser review");
+  await expect(page.locator("#activity-list")).toContainText("Renamed to Clinical browser review");
+
+  if (testInfo.project.name === "chromium") {
+    await page.getByRole("button", { name: "Rename", exact: true }).click();
+    await page.locator("#session-name").fill("Fixture evidence review");
+    await page.locator("#rename-form").getByRole("button", { name: "Save" }).click();
+    await expect(page.locator("#session-list")).toContainText("Fixture evidence review");
+  }
+
+  await page.getByRole("button", { name: "Evidence", exact: true }).click();
+  await expect(page.locator("#analysis-steps")).toContainText("Ground narrative to reviewed HPO assertions");
+  await expect(page.locator("#analysis-steps")).toContainText("Commit packet, receipts, replay, and graph links");
+  await page.getByRole("button", { name: "Run fixture workup" }).click();
   await expect(page.locator("#analysis-status")).toContainText("analysis-browser-proof");
+  await expect(page.locator("#analysis-status")).toContainText("8 executed");
   await expect(page.locator("#analysis-content")).toContainText("Direct candidates");
   await expect(page.locator("#analysis-content")).toContainText("GRCh38:1:100:A:T");
+  await expect(page.locator("#analysis-content")).toContainText("Recorded workflow");
   await expect(page.locator("#analysis-content details")).toContainText("Evidence packet JSON");
 
   await page.getByRole("button", { name: "Ask Pi" }).click();
@@ -113,11 +133,11 @@ test("a real clinical browser run is recoverable from CAS", async ({ page }, tes
   test.skip(testInfo.project.name !== "chromium", "one real durable analysis is sufficient");
   test.setTimeout(45_000);
   await page.goto("/");
-  await page.getByRole("button", { name: "Evidence" }).click();
+  await page.getByRole("button", { name: "Evidence", exact: true }).click();
   const responsePromise = page.waitForResponse((response) =>
     response.url().endsWith("/v1/clinical-analyses") && response.request().method() === "POST",
   );
-  await page.getByRole("button", { name: "Run analysis" }).click();
+  await page.getByRole("button", { name: "Run fixture workup" }).click();
   const response = await responsePromise;
   expect(response.status()).toBe(201);
   const created = await response.json() as {

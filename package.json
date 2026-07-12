@@ -61,7 +61,8 @@
       "types": "./dist/hosts/index.d.ts",
       "import": "./dist/hosts/index.js"
     },
-    "./pi-extension": "./extensions/pi-coding-agent/index.ts"
+    "./pi-extension": "./extensions/pi-coding-agent/index.ts",
+    "./pi-extension-compute": "./extensions/pi-coding-agent/index-compute.ts"
   },
   "bin": {
     "pi-bio-agent": "bin/pi-bio-agent.mjs"

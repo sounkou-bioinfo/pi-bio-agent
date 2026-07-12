@@ -275,6 +275,10 @@ export const SendAgentMessageSchema = z.object({
   text: z.string().trim().min(1).max(100_000),
 }).strict().openapi("SendAgentMessage");
 
+export const RenameAgentSessionSchema = z.object({
+  name: z.string().trim().min(1).max(160),
+}).strict().openapi("RenameAgentSession");
+
 export const AgentEventQuerySchema = z.object({
   after: z.coerce.number().int().nonnegative().optional(),
   limit: z.coerce.number().int().min(1).max(1_000).optional(),
@@ -332,6 +336,15 @@ export const AgentTranscriptSchema = z.object({
   omittedCount: z.number().int().nonnegative(),
 }).strict().openapi("AgentTranscript");
 
+export const AgentCommandListSchema = z.object({
+  sessionId: z.string(),
+  commands: z.array(z.object({
+    name: z.string(),
+    description: z.string().optional(),
+    source: z.enum(["extension", "prompt", "skill"]),
+  }).strict()),
+}).strict().openapi("AgentCommandList");
+
 export const CloseAgentSessionResponseSchema = z.object({
   closed: z.literal(true),
   sessionId: z.string(),
@@ -371,6 +384,7 @@ export const WorkbenchInfoSchema = z.object({
   capabilities: z.object({
     agentSessions: z.boolean(),
     agentSteering: z.boolean(),
+    agentCommands: z.boolean(),
     eventStream: z.boolean(),
   }).strict(),
   addons: z.array(z.object({
