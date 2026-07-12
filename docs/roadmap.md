@@ -80,6 +80,10 @@ Near-term work should be selected from demonstrated pressure in these lanes:
   let actors discover actions with SQL/FTS/graph queries, filter by data/software/license/capability constraints,
   execute candidates through compute or source-spec adapters, and compare durable results. The action count is not the
   problem; handwritten duplicate runners and missing output/evidence contracts are.
+- **Method selection and skill authoring:** exercise the machine-study -> action catalog -> candidate manifest/operation
+  -> validation/test -> approval/activation loop. A successful run should produce a revised durable specification or
+  skill view, with its input, implementation, environment, and evidence digests recorded in the one ledger. This is
+  self-extension through data and code artifacts, not unreviewed mutation of core executable code.
 - **Cross-host parity:** thin validated adapters for memory mutation, session ingestion, and host capability binding
   outside Pi.
 - **Large results:** explicit relation, Parquet, or CAS delivery modes instead of implicit full in-memory rows.

@@ -38,6 +38,10 @@ Instructions for coding agents working in this repository.
   application manifest/catalog relations and expose one stable operation per reusable method when the metadata and
   output contract support it. The anti-sprawl rule rejects handwritten per-question logic and duplicate runners; it
   does not reject a large composable action space or require an engineer to hand-author every generated manifest.
+- Self-extension is allowed through durable specifications and artifacts: an actor may author a manifest, operation,
+  compute program, action descriptor, or skill revision. The host must validate and test it, record implementation,
+  input, and environment digests, and apply typed/human approval before activation. Do not let an agent silently
+  mutate core executable code or host capabilities and call that self-extension.
 - Do not add a second lifecycle, resolver, transport, graph model, auth layer, or schema merely because the first
   consumer finds the existing surface inconvenient. Name the concrete consumers, reconcile the contracts, then add
   one shared primitive with pattern and tests.

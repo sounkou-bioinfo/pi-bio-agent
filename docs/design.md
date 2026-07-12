@@ -161,6 +161,33 @@ This boundary supports grounding, schema mapping, candidate disambiguation, revi
 without treating generated prose as measured data. Abstention is a valid typed result when declarations do not
 support a stronger conclusion.
 
+## Method selection and self-extension
+
+The substrate should support an actor that learns how to choose scientific methods under constraints. This is a
+first-party application of machine studying, not a reason to hard-code a method recommender into core:
+
+```text
+study corpus, tool docs, data and environment descriptions
+  -> action/method catalog relations
+  -> candidate method or manifest authored by the actor
+  -> deterministic validation and sandbox test
+  -> recorded comparison, approval, and activation
+  -> a revised manifest, operation, or host skill
+```
+
+This is self-extension through durable specifications, not unrestricted mutation of the substrate or silent changes
+to executable capabilities. The actor may create a new manifest, operation, compute program, or skill revision. The
+host validates the candidate, records its implementation/input/environment digests, runs its declared tests, and
+requires the applicable typed or human approval before activation. A rejected or superseded revision remains in the
+ledger as history.
+
+The current pieces are deliberately separate and composable: study scaffolds produce `skill_draft` and other typed
+notes; the action catalog is application data; manifest and SQL validators check candidates; the harness-adaptation
+path validates and tests operation candidates; skill revisions use the temporal observation ledger; runs and action
+cache provide execution evidence. A method-selection application should compose these pieces before asking core for a
+new abstraction. Repeated friction in candidate output contracts, environment selection, or stateful kernel sessions
+is the evidence that can promote the smallest missing contract.
+
 ## Host capabilities and permissions
 
 The package records and gates effects; it is not a sandbox. By default, a host adapter runs with the permissions of
