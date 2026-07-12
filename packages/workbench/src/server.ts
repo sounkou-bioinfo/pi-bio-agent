@@ -10,6 +10,8 @@ import { localMonarchFixtureRuntime } from "./monarch-host.js";
 import { localCandidateVariantSearchRuntime } from "./candidate-variant-search.js";
 import { defaultVepAnnotationRuntime } from "./clinical-genomics.js";
 
+export const WORKBENCH_EXCLUDED_PI_TOOLS = ["bash"] as const;
+
 export async function startWorkbenchServer(workspaceArg = "examples/clinical-genomics", portArg = "8787", groundingModule?: string): Promise<ServerType> {
   const workspace = resolve(workspaceArg);
   const port = Number(portArg);
@@ -19,6 +21,7 @@ export async function startWorkbenchServer(workspaceArg = "examples/clinical-gen
   const agentHost = createPiAgentHost({
     cwd: workspace,
     extensionPaths: [fileURLToPath(import.meta.resolve("pi-bio-agent/pi-extension-compute"))],
+    excludeTools: [...WORKBENCH_EXCLUDED_PI_TOOLS],
   });
   const addons = [createClinicalWorkbenchAddon({
     clinicalWorkspace: workspace,

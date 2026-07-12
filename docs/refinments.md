@@ -106,7 +106,11 @@ Cross-cutting constraints from this table are currently enforced by tests in:
   second host adapter is the next test of whether any control contract beyond the current application port is shared.
 - The workbench's explicit local-compute grant and evidence-status figure exercise the existing `compute.run` ->
   declared output -> CAS -> `run:<id> produces cas:<digest>` path. Direct process writes are not artifacts. This is
-  application composition over the existing contract, not evidence for a plot-specific core tool.
+  application composition over the existing contract, not evidence for a plot-specific core tool. The reference
+  host therefore excludes Pi's raw bash tool rather than wrapping arbitrary commands as fake compute runs. Hosts
+  that retain bash get session-level command/result audit; scientific process execution still requires declared
+  `compute.run` inputs and outputs. Inline tool-result media can remain a `session_image` audit artifact, but shell
+  filesystem side effects are not discovered or promoted.
 - Clinical Evidence and Artifacts now exercise a host-approved `WorkbenchAddon` API/browser pair. Do not broaden it
   into an installation/catalog/configuration system until another deployment needs runtime discovery; do not add
   focus/resize/dock hooks until an editor, terminal, or comparable mounted surface requires them.

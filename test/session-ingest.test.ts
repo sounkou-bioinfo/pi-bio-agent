@@ -92,6 +92,40 @@ describe("session JSONL ingestion into the observation ledger", () => {
     assert.ok(edges.some((e) => e.from_id === `toolcall:s1:${toolCallId}` && e.predicate === "produces" && e.to_id.startsWith("cas:sha256:")));
   });
 
+  test("audits Pi bash as a host effect without promoting filesystem side effects to artifacts", async () => {
+    const dir = await tmp("pi-bio-session-bash-");
+    const sessionFile = join(dir, "session.jsonl");
+    const cas = fsCasStore(join(dir, "cas"));
+    const c = await conn();
+    const toolCallId = "call_bash";
+    const lines = [
+      { type: "session", id: "bash-session", timestamp: "2026-07-05T10:00:00.000Z", cwd: dir },
+      { type: "message", id: "u1", timestamp: "2026-07-05T10:00:01.000Z", message: { role: "user", content: "Run a host command" } },
+      {
+        type: "message", id: "a1", parentId: "u1", timestamp: "2026-07-05T10:00:02.000Z",
+        message: {
+          role: "assistant", provider: "openai", model: "gpt-test",
+          content: [{ type: "toolCall", id: toolCallId, name: "bash", arguments: { command: "printf result > unmanaged.txt" } }],
+        },
+      },
+      {
+        type: "message", id: "tr1", parentId: "a1", timestamp: "2026-07-05T10:00:03.000Z",
+        message: { role: "toolResult", toolCallId, toolName: "bash", isError: false, content: [{ type: "text", text: "(no output)" }] },
+      },
+    ];
+    await fs.writeFile(sessionFile, `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`);
+
+    const out = await ingestSessionJsonl({ conn: c, cas, sessionPath: sessionFile, source: "test" });
+    assert.equal(out.toolCalls, 1);
+    assert.equal(out.artifacts, 0, "a shell-written path is not a declared scientific artifact");
+    const tools = await sessionToolTrajectory(c, "bash-session");
+    assert.equal(tools[0]!.name, "bash");
+    assert.match(tools[0]!.argsDigest ?? "", /^sha256:/);
+    assert.match(tools[0]!.resultDigest ?? "", /^sha256:/);
+    assert.equal(tools[0]!.isError, false);
+    assert.deepEqual(await sessionArtifacts(c, "bash-session"), []);
+  });
+
   test("fails closed on an invalid explicit timestamp", async () => {
     const dir = await tmp("pi-bio-session-badtime-");
     const sessionFile = join(dir, "bad.jsonl");

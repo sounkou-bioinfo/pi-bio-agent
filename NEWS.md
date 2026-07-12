@@ -2,7 +2,8 @@
 
 - Workbench Pi sessions now expose persisted renaming and slash-command discovery, compact streaming diagnostics,
   and explicit clinical workup stages. The workbench grants recorded local compute for declared CAS-backed figure
-  outputs; direct untracked plot/report writes are outside the scientific execution path.
+  outputs and excludes Pi's raw bash tool; direct untracked plot/report writes are outside the scientific execution
+  path, while hosts that retain bash audit it through session ingestion rather than treating it as a scientific run.
 
 Changes to **pi-bio-agent**, newest first (GNU/R changelog convention). Pre-1.0: the
 API and manifest schema may still move. The roadmap ([`docs/roadmap.md`](docs/roadmap.md))

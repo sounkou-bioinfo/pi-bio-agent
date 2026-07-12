@@ -35,6 +35,11 @@ Instructions for coding agents working in this repository.
   reports, and tables must use declared compute outputs so the run host captures them in CAS and projects them into
   the artifact graph. A Python/R/shell command that merely writes a file into the workspace is not a workbench
   artifact and must not be presented as one.
+- The reference workbench excludes Pi's built-in `bash` tool. Agents may author manifests and scripts with file
+  tools, but process execution must be an explicit `compute.run` resource resolved through `bio_query` or a declared
+  operation. Other hosts may expose Pi bash; session ingestion audits its command/result digests, but it does not
+  promote arbitrary filesystem side effects into scientific artifacts. Inline media in a tool result may still be
+  retained as a `session_image` audit artifact; that is distinct from a run-linked declared output.
 - The reference server binds loopback. Pi and its extensions run with the permissions of the server process; CSP and
   same-origin HTTP are not a process sandbox. A remote or multi-user deployment needs explicit authentication, TLS,
   admission policy, and an isolation boundary chosen by the operator.

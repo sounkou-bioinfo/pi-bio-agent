@@ -75,6 +75,8 @@ pi \
 
 Manifest path: `.pi/bio-agent/readme-clinvar-tp53.json`
 
+SQL:
+
 ``` sql
 WITH exploded AS (
   SELECT
@@ -90,7 +92,8 @@ WITH exploded AS (
     AND POS BETWEEN 43044295 AND 43125483
     AND sig IS NOT NULL
     AND TRIM(sig) <> ''
-), deduped AS (
+),
+deduped AS (
   SELECT DISTINCT
     CHROM,
     POS,
@@ -412,7 +415,15 @@ scientific source of truth.
 The first-party workbench explicitly grants local `compute.run` with its
 workspace CAS. Agent-produced figures and reports must be declared
 compute outputs so they become run-linked CAS artifacts; an arbitrary
-Python/R/shell file write is not a workbench artifact.
+Python/R/shell file write is not a workbench artifact. The reference
+host excludes Pi’s built-in `bash`: agents author manifests and scripts
+with file tools, then explicitly resolve `compute.run` through
+`bio_query` or a declared operation. Hosts that expose Pi bash still
+capture its command/result digests in the session ledger, but those
+audited host effects do not become run-linked scientific artifacts.
+Inline media returned by any tool may separately be retained as a
+`session_image` audit artifact; arbitrary filesystem side effects are
+never discovered or promoted automatically.
 
 The reference server binds loopback and is not a sandbox. Pi and its
 tools run with the permissions of the launching process. Remote or
