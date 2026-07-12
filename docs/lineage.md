@@ -133,6 +133,50 @@ The opportunity is an open, reproducible workbench for human, model, and automat
 plane. The differentiator is not a larger tool menu. It is compositional SQL/code over declared sources, portable
 receipts and replay, temporal knowledge, typed judgment, and application-derived abstractions.
 
+## Biomni and the scientific action space
+
+[Biomni](https://github.com/snap-stanford/Biomni) makes a different part of the problem concrete: scientists need help
+choosing and combining methods under data, software, and task constraints. Its current application catalog contains
+hundreds of action descriptions, database adapters, a data lake, software/environment descriptions, know-how documents,
+and a benchmark. That breadth is not automatically skill sprawl. A stable action catalog is useful program data when an
+actor can discover, inspect, compose, execute, and compare its actions.
+
+The correct closure is therefore not to reject a large catalog. It is to keep the catalog downstream and make its
+descriptors generate the substrate-facing surface:
+
+```text
+action descriptors + environment/data metadata
+  -> generated application manifest/catalog relations
+  -> SQL/FTS/graph discovery under task and host constraints
+  -> selected operation or compute action
+  -> Arrow relations and declared artifacts
+  -> receipts, replay, CAS, and temporal observations
+  -> typed comparison or human review
+```
+
+The anti-sprawl rule rejects handwritten question-specific helpers and duplicated execution semantics. It does not
+reject 224 stable domain actions, nor does it require an engineer to hand-author 224 manifests. An application may
+generate one catalog manifest containing many typed operations, or generate operation fragments from the upstream
+descriptors. The implementation remains application-owned; the generic execution, evidence, and host-capability
+contracts remain core-owned.
+
+Biomni's database functions are especially suitable for source-spec closure. An application should project their
+REST/GraphQL schemas and response shapes into DuckNNG-backed resources, rather than preserve a nested LLM that turns
+natural language into an opaque Python request. Numerical, imaging, docking, and R/Python/CLI actions can use the
+generic `compute.run` and declared artifact path, with a characterization layer that supplies output schemas where
+the upstream action metadata is loose.
+
+Its persistent Python namespace also exposes a useful host surface. An NNG-backed stateful kernel using nanonext,
+pynng, or another NNG client is transport-level work, not a new scientific theory. The reusable contract still needs
+ordered evaluation per session, session identity, environment and capability receipts, failure/restart semantics,
+artifact capture, and a checkpoint or snapshot policy. Implement it as a host/application compute profile first; promote
+a session contract to core when the Biomni closure and another real application demonstrate the same lifecycle.
+
+This closes over the method-selection problem directly: the actor searches a declared action space, filters it by
+available data, software, licenses, and host capabilities, runs candidate methods, compares durable evidence, and asks
+for a typed judgment where the choice is not mechanical. That is a first-class application of the substrate, not a
+reason to shrink the action space back to a handful of bespoke skills.
+
 ## What each comparison does not justify
 
 - A useful external API does not justify a source-specific TypeScript client when a manifest and general resolver
@@ -140,7 +184,8 @@ receipts and replay, temporal knowledge, typed judgment, and application-derived
 - A graph export does not justify a second graph store when a projection can be queried in DuckDB.
 - A multi-agent topology does not justify another workflow engine.
 - A durable queue does not justify another async lifecycle.
-- A successful application relation does not belong in core until another concrete use reveals the same primitive.
+- A successful application relation does not belong in core until another concrete use reveals the same primitive;
+  this does not prevent an application from exposing a large generated action catalog over the existing primitives.
 - A recorded run proves execution and evidence capture, not biomedical validity or model superiority.
 
 These negative constraints are as important as the inherited ideas. They keep lineage from becoming architecture by

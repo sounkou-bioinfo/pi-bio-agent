@@ -76,6 +76,10 @@ Near-term work should be selected from demonstrated pressure in these lanes:
 
 - **Workbench surfaces:** human review, evidence exploration, report graphics, and long-running task UX over the
   existing SDK and durable job lifecycle.
+- **Scientific action catalogs:** ingest Biomni-like method/tool descriptors into generated manifest/catalog relations;
+  let actors discover actions with SQL/FTS/graph queries, filter by data/software/license/capability constraints,
+  execute candidates through compute or source-spec adapters, and compare durable results. The action count is not the
+  problem; handwritten duplicate runners and missing output/evidence contracts are.
 - **Cross-host parity:** thin validated adapters for memory mutation, session ingestion, and host capability binding
   outside Pi.
 - **Large results:** explicit relation, Parquet, or CAS delivery modes instead of implicit full in-memory rows.

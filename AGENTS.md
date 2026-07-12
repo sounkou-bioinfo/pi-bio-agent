@@ -34,6 +34,10 @@ Instructions for coding agents working in this repository.
 - Core owns reusable execution and evidence primitives. The workbench owns clinical composition and policy. If a
   workbench need is generic, stop and add the smallest tested primitive to core; if it is a domain choice, keep it in
   manifests, SQL, fixtures, or host composition. Do not hide a core gap behind an application helper.
+- A broad application action catalog is not the same as skill sprawl. Biomni-like descriptors may be generated into
+  application manifest/catalog relations and expose one stable operation per reusable method when the metadata and
+  output contract support it. The anti-sprawl rule rejects handwritten per-question logic and duplicate runners; it
+  does not reject a large composable action space or require an engineer to hand-author every generated manifest.
 - Do not add a second lifecycle, resolver, transport, graph model, auth layer, or schema merely because the first
   consumer finds the existing surface inconvenient. Name the concrete consumers, reconcile the contracts, then add
   one shared primitive with pattern and tests.
@@ -162,6 +166,11 @@ the missing core contract and promote only that contract, not an application-spe
 - Compute is async from the bottom: `ComputeRunner` is `submit/status/collect/cancel`, future-shaped like
   nanonext/mirai/future. A local child process, an NNG worker, a scheduler, an Absurd-style durable queue, and a
   stateful REPL/session are implementations of that one lifecycle.
+- A stateful Python/R or other scientific kernel is a valid compute profile. NNG transport through nanonext, pynng, or
+  another client is straightforward; the substantive contract is ordered session evaluation, restart/failure
+  semantics, environment and capability evidence, artifact capture, and checkpoint/snapshot policy. Keep the first
+  implementation host/application-owned and promote the smallest session contract after a second concrete consumer
+  demonstrates the same motion.
 - `compute.run` is the current manifest resolver that materializes one compute result into DuckDB tables/artifacts.
   It consumes the async runner by submitting and then collecting because table materialization needs the value.
 - The durable run queue/ledger is a run-specialized `AsyncRunner` backend over replay specs, not a second compute
