@@ -1,5 +1,5 @@
 // packages/quarto-engine/src/pi-bio.ts
-import { dirname } from "node:path";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 var ENGINE_NAME = "pi-bio";
 var CELL_LANGUAGE = "pi-bio";
 var PROCESS_TIMEOUT_MS = 12e4;
@@ -15,7 +15,8 @@ var renderValue = (value) => {
     return String(value);
   }
 };
-var renderEvent = (event) => {
+var markdownLabel = (value) => String(value ?? "figure").replaceAll("[", "\\[").replaceAll("]", "\\]");
+var renderEvent = (event, context) => {
   const value = renderValue(event.value);
   if (event.kind === "markdown") return value;
   if (event.kind === "json") {
@@ -26,12 +27,37 @@ ${value}
 \`\`\`
 `;
   }
+  if (event.kind === "figure") {
+    if (!event.value || typeof event.value !== "object" || Array.isArray(event.value)) {
+      throw new Error("pi-bio figure output must be an object");
+    }
+    const figure = event.value;
+    if (typeof figure.path !== "string" || figure.path.length === 0) {
+      throw new Error("pi-bio figure output requires a non-empty path");
+    }
+    const absolutePath = isAbsolute(figure.path) ? resolve(figure.path) : resolve(context.projectDir, figure.path);
+    const projectRelative = relative(context.projectDir, absolutePath);
+    if (projectRelative.startsWith(".." + sep) || isAbsolute(projectRelative)) {
+      throw new Error(`pi-bio figure path escapes the project: ${figure.path}`);
+    }
+    if (!Deno.statSync(absolutePath).isFile) throw new Error(`pi-bio figure path is not a file: ${figure.path}`);
+    context.supporting.add(absolutePath);
+    const documentRelative = relative(context.sourceDir, absolutePath).split(sep).join("/") || absolutePath.split(sep).pop();
+    const image = `![${markdownLabel(figure.alt)}](${encodeURI(documentRelative)})`;
+    const caption = typeof figure.caption === "string" && figure.caption.length > 0 ? `
+
+${figure.caption}` : "";
+    return `
+
+${image}${caption}
+`;
+  }
   return `<pre><code>${escapeHtml(value)}</code></pre>`;
 };
-var renderCellOutput = (cell, events) => {
+var renderCellOutput = (cell, events, context) => {
   const cellEvents = events.filter((event) => event.cell === cell.id);
   if (cellEvents.length === 0) return "";
-  const body = cellEvents.map(renderEvent).join("\n");
+  const body = cellEvents.map((event) => renderEvent(event, context)).join("\n");
   return [
     `<details class="pi-bio-output">`,
     `<summary>Output: ${escapeHtml(cell.id)}</summary>`,
@@ -97,7 +123,7 @@ const __piBioJson = (value) => {
   }
 };
 const __piBioEmit = (kind, level, value) => {
-  const encoded = kind === "json" ? __piBioJson(value) : __piBioEncode(value);
+  const encoded = kind === "json" || kind === "figure" ? __piBioJson(value) : __piBioEncode(value);
   __piBioEvents.push({ cell: __piBioContext.getStore() ?? __piBioCell, kind, level, value: encoded });
 };
 const __piBioRunProcess = (language, source) => {
@@ -133,6 +159,10 @@ globalThis.piBio = Object.freeze({
   display: (value) => __piBioEmit("text", "display", value),
   json: (value) => __piBioEmit("json", "display", value),
   markdown: (value) => __piBioEmit("markdown", "display", String(value)),
+  figure: (path, options = {}) => __piBioEmit("figure", "display", {
+    ...(options && typeof options === "object" ? options : {}),
+    path: String(path),
+  }),
 });
 const __piBioFail = (error) => {
   __piBioError = {
@@ -262,7 +292,7 @@ var engine = {
     return normalized === CELL_LANGUAGE;
   },
   canFreeze: false,
-  generatesFigures: false,
+  generatesFigures: true,
   launch: (context) => ({
     name: ENGINE_NAME,
     canFreeze: false,
@@ -302,13 +332,20 @@ var engine = {
           runtime.error.stack
         ].filter(Boolean).join("\n"));
       }
+      const projectDir = resolve(options.projectDir ?? Deno.cwd());
+      const sourceDir = dirname(quarto.path.absolute(options.target.source));
+      const renderContext = {
+        projectDir,
+        sourceDir,
+        supporting: /* @__PURE__ */ new Set()
+      };
       const processed = [];
       let cellIndex = 0;
       for (const cell of chunks.cells) {
         processed.push(sourceForOutput(cell.sourceVerbatim.value));
         if (isPiBioCell(cell)) {
           const sourceCell = cells[cellIndex++];
-          const output = renderCellOutput(sourceCell, runtime.events);
+          const output = renderCellOutput(sourceCell, runtime.events, renderContext);
           if (output) processed.push(`
 
 ${output}
@@ -318,7 +355,9 @@ ${output}
       return {
         engine: ENGINE_NAME,
         markdown: processed.join(""),
-        supporting: [],
+        supporting: [
+          ...renderContext.supporting
+        ],
         filters: []
       };
     },

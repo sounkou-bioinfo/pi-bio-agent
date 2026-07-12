@@ -7,6 +7,9 @@ document, so async code and values can be used across cells. Explicit
 `r`, `python`, and `bash`/`sh` cells are delegated to host processes at
 their document position. `console` output is captured, and
 `piBio.json()` / `piBio.markdown()` provide structured document output.
+`piBio.figure()` emits a file-backed derived view; the engine validates
+the path, returns it through Quarto’s supporting-file contract, and
+inserts a relative Markdown image.
 
 The engine is an adapter over the `pi-bio-agent` SDK and CLI. It does
 not own DuckDB execution, manifests, SQL validation, compute, CAS,
@@ -27,8 +30,11 @@ project.
 This engine is a Quarto host extension, not a second `pi-bio-agent`
 runtime. Quarto calls it to execute explicitly marked cells and replace
 those cells with rendered output. `piBio.json()` and `piBio.markdown()`
-are presentation helpers; they do not create CAS objects, receipts,
-runs, or ledger observations by themselves.
+are presentation helpers, and `piBio.figure()` is a supporting-file
+presentation helper; they do not create CAS objects, receipts, runs, or
+ledger observations by themselves. Scientific code should pin the input
+relation, run, and artifact through the normal SDK/CAS path before
+presenting a figure.
 
 Scientific work must call the existing SDK/CLI surfaces. A manifest
 query or operation run then owns its normal DuckDB result, receipt,
@@ -92,6 +98,11 @@ Use cells like these (illustrative syntax):
 ``` ts
 const rows = await loadRows();
 piBio.json({ count: rows.length });
+```
+
+``` ts
+await writeFile("figure.svg", svgText);
+piBio.figure("figure.svg", { alt: "A derived view", caption: "Rendered from a pinned relation." });
 ```
 
 ``` r

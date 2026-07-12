@@ -24,6 +24,13 @@ piBio.json({ values, doubled, largeCount: 9007199254740993n });
 console.log("user-output-preserved");
 ```
 
+```{ts .pi-bio}
+import { writeFile } from "node:fs/promises";
+
+await writeFile(".quarto-engine-figure.svg", `<svg xmlns="http://www.w3.org/2000/svg" width="160" height="60"><rect width="160" height="60" fill="#2f6f73"/><text x="12" y="36" fill="white">derived view</text></svg>`);
+piBio.figure(".quarto-engine-figure.svg", { alt: "A derived figure", caption: "A file-backed view emitted through Quarto supporting files." });
+```
+
 ```{r .pi-bio}
 cat("R is an explicit host runtime")
 ```

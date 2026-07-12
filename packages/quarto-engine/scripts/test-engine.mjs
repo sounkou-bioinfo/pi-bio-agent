@@ -17,6 +17,7 @@ await execFileAsync("quarto", ["render", "examples/basic.qmd", "--to", "markdown
 
 const rendered = await fs.readFile(output, "utf8");
 await fs.rm(output, { force: true });
+await fs.rm(join(root, ".quarto-engine-figure.svg"), { force: true });
 
 for (const needle of [
   "Trusted Node/TypeScript cells",
@@ -24,6 +25,9 @@ for (const needle of [
   "total=10",
   "doubled",
   "9007199254740993n",
+  "A derived figure",
+  "![A derived figure](../.quarto-engine-figure.svg)",
+  "A file-backed view emitted through Quarto supporting files.",
   "R is an explicit host runtime",
   "shell is an explicit host runtime",
   "stop_gained",
