@@ -95,6 +95,13 @@ Files and domain formats should enter through DuckDB readers, community extensio
 resolver. `duckdb.file_scan`, `duckdb.sql_materialize`, and extension table functions are preferred to bespoke
 parsers. CAS stores immutable bytes; a resource records how bytes or live data become a relation.
 
+DuckDB is already the default stateful scientific REPL. Temporary tables, materialized relations, graph projections,
+and CAS handles let an actor keep a large working set outside the prompt and inspect bounded slices as needed. This
+is the generic answer to context rot and the RLM-shaped case: the actor partitions, queries, joins, and reduces data in
+the database instead of repeatedly loading the whole table into context. A persistent Python, R, or other kernel over
+NNG can complement this surface for methods that need process-local state; it is not required to make the workbench
+stateful.
+
 ### Network
 
 `ducknng` makes HTTP responses, RPC-backed shared state, and NNG communication available through DuckDB-facing

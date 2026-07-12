@@ -4,8 +4,9 @@
 policy, evidence packets, APIs, and future UI surfaces are composed. The root package remains the policy-free
 execution and evidence substrate.
 
-The first application is [clinical genomics](examples/clinical-genomics/application.md). Its executable QMD is the
-application narrative and proof; the rendered Markdown is committed for ordinary readers.
+The workbench includes [clinical genomics](examples/clinical-genomics/application.md) and the generic
+[method-selection application](examples/method-selection/application.md). Their executable QMD files are the
+application narratives and proofs; rendered Markdown is committed for ordinary readers.
 
 ## Package boundary
 
@@ -48,10 +49,17 @@ npm run provision:ducknng --workspace=packages/workbench
 npm run provision:duckhts --workspace=packages/workbench
 npm run check:workbench
 npm run application:clinical
+npm run application:method-selection
 ```
 
 The application QMD runs a hermetic local VEP-compatible endpoint, verifies transient retry, executes all eight
 steps, resumes the same analysis from checkpoints, and renders a collapsed evidence summary.
+
+The method-selection QMD studies a refreshable action relation, discovers the method with SQL under host constraints,
+authors a manifest operation, runs it, validates and approves the candidate, writes the approved skill revision into the
+same ledger, and walks the resulting graph. DuckDB remains the stateful work surface; external catalogs and optional
+NNG/embedded kernels are application inputs. The path is deliberately model-light and can be driven by a skill-only
+CLI host or a weaker agent: schema inspection and bounded SQL carry the scientific state instead of prompt context.
 
 Run the package CLI directly when an application document is not needed:
 

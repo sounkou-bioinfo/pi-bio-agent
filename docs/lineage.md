@@ -169,11 +169,15 @@ natural language into an opaque Python request. Numerical, imaging, docking, and
 generic `compute.run` and declared artifact path, with a characterization layer that supplies output schemas where
 the upstream action metadata is loose.
 
-Its persistent Python namespace also exposes a useful host surface. An NNG-backed stateful kernel using nanonext,
-pynng, or another NNG client is transport-level work, not a new scientific theory. The reusable contract still needs
-ordered evaluation per session, session identity, environment and capability receipts, failure/restart semantics,
-artifact capture, and a checkpoint or snapshot policy. Implement it as a host/application compute profile first; promote
-a session contract to core when the Biomni closure and another real application demonstrate the same lifecycle.
+Its persistent Python namespace also exposes a useful optional host surface, but it is not the substrate's first
+stateful mechanism. DuckDB already gives the actor a persistent relational REPL: large tables, temporary relations,
+graph windows, and CAS handles stay outside context while SQL performs partitioning, joins, and reductions. That is
+the generic way to close over context rot and RLM-shaped work. An NNG-backed Python, R, or other kernel using nanonext,
+pynng, or another client is transport-level work, not a new scientific theory; it complements DuckDB for methods that
+need process-local state. Its reusable contract still needs ordered evaluation per session, session identity,
+environment and capability receipts, failure/restart semantics, artifact capture, and a checkpoint or snapshot policy.
+An embedded runtime such as a DuckTinyCC-backed profile is another host choice. Promote only the smallest session
+contract after multiple consumers demonstrate the same lifecycle.
 
 This closes over the method-selection problem directly: the actor searches a declared action space, filters it by
 available data, software, licenses, and host capabilities, runs candidate methods, compares durable evidence, and asks

@@ -79,8 +79,14 @@ The executable [clinical genomics application](../packages/workbench/examples/cl
 composes grounded phenotype assertions, a foreign graph, indexed VCF reads, bounded VEP retry, SQL evidence,
 checkpoints, CAS, and observations. It owns its clinical evidence policy downstream.
 
+The executable [method-selection application](../packages/workbench/examples/method-selection/application.md) composes
+refreshable method descriptions, DuckDB schema discovery, host-constraint filtering, an agent-authored manifest,
+candidate validation/approval, skill revision, CAS, and a ledger graph. It demonstrates composability over a changing
+tool landscape rather than maintenance of an isolated skill catalog.
+
 ```sh
 npm run application:clinical
+npm run application:method-selection
 ```
 
 Repeated application friction may justify a new core abstraction only after another application or generic pattern

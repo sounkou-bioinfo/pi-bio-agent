@@ -43,6 +43,10 @@ Instructions for coding agents working in this repository.
   compute program, action descriptor, or skill revision. The host must validate and test it, record implementation,
   input, and environment digests, and apply typed/human approval before activation. Do not let an agent silently
   mutate core executable code or host capabilities and call that self-extension.
+- Method-selection applications should remain usable by weaker or skill-only hosts. Keep routing inputs, schemas,
+  catalogs, candidate contracts, and large data in DuckDB/CAS; require the actor to inspect and compose bounded SQL or
+  declared operations rather than serialize the working set into prompt context. A model is optional for mechanical
+  selection and only needed at an irreducible judgment boundary.
 - Do not add a second lifecycle, resolver, transport, graph model, auth layer, or schema merely because the first
   consumer finds the existing surface inconvenient. Name the concrete consumers, reconcile the contracts, then add
   one shared primitive with pattern and tests.
@@ -171,6 +175,10 @@ the missing core contract and promote only that contract, not an application-spe
 - Compute is async from the bottom: `ComputeRunner` is `submit/status/collect/cancel`, future-shaped like
   nanonext/mirai/future. A local child process, an NNG worker, a scheduler, an Absurd-style durable queue, and a
   stateful REPL/session are implementations of that one lifecycle.
+- DuckDB itself is the default stateful scientific REPL: keep large tables, temporary relations, graph projections,
+  and CAS handles outside prompt context, then use bounded SQL windows and reductions. This is the generic context-rot
+  and RLM-shaped composition. Persistent NNG-backed Python/R/other kernels or embedded runtimes complement DuckDB for
+  process-local state; they are optional host profiles, not prerequisites for stateful work.
 - A stateful Python/R or other scientific kernel is a valid compute profile. NNG transport through nanonext, pynng, or
   another client is straightforward; the substantive contract is ordered session evaluation, restart/failure
   semantics, environment and capability evidence, artifact capture, and checkpoint/snapshot policy. Keep the first
