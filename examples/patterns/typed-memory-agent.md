@@ -145,7 +145,7 @@ Output: cell-3
         "bio_remember",
         "bio_remember"
       ],
-      "final": "Revision was recorded successfully."
+      "final": "The revision was recorded in memory."
     },
     {
       "session": "typed-memory-reader",
@@ -154,7 +154,7 @@ Output: cell-3
         "bio_walk_memory",
         "bio_graph_window"
       ],
-      "final": "The two current predicates from analysis-plan are **depends_on** and **see_also**."
+      "final": "The two current predicates from `analysis-plan` are **depends_on** and **see_also**."
     }
   ],
   "memory": {

@@ -56,10 +56,13 @@ Instructions for coding agents working in this repository.
   point to a test, script, manifest, operation, or generated example that exercises it.
 - `README.qmd` is the executable README source and `README.md` is its generated artifact. Example READMEs and tool
   inventories follow the same source/generator/check pattern; do not hand-edit their output.
-- Treat pattern literate docs as generated artifacts: `examples/patterns/*.md` are now sourced from sibling
-  `examples/patterns/*.qmd` files. Edit the `.qmd` source and run `npm run scripts:qmd` to regenerate.
-- Canonicalize runnable generic pattern on `pattern:` npm scripts: keep script bodies in `scripts/` but document them through
-  `examples/patterns/*.qmd` and call them with stable wrapper scripts (`npm run pattern:*`) in prose and tables.
+- Treat pattern literate docs as generated artifacts: `examples/patterns/*.md` are sourced from sibling
+  `examples/patterns/*.qmd` files. Edit the `.qmd` source. `npm run scripts:qmd` regenerates deterministic documents;
+  credentialed live-agent QMDs are deliberately skipped there and rendered by their dedicated `npm run pattern:*`
+  command, which must commit the resulting Markdown evidence.
+- Put logic used only by an executable document directly in its QMD. Keep code in `scripts/` only when it is a shared
+  executable or a stable non-Quarto entry point, and expose runnable patterns through `npm run pattern:*` in prose and
+  tables. A wrapper must not exist merely to keep the real implementation outside the literate source.
 - Quarto is suitable for future polyglot reports and can run TypeScript project scripts through its bundled Deno. Its
   Observable-JS cells are browser/reactive code, not a Node/DuckDB execution surface. Keep core Node/TypeScript claims
   in `test/`, `scripts/`, or package examples and link or generate them into prose.

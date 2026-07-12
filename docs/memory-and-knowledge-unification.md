@@ -38,7 +38,7 @@ unified-data-model bet instead of sitting beside it as flat last-write-wins file
 - Explicit note links are canonicalized at both authoring and public SDK write boundaries: targets become stable
   slugs, omitted predicates become `references`, exact duplicates collapse, and unknown predicates fail before a
   database write. The content revision is authoritative; edge observations are its temporal query projection. The
-  [typed-memory agent pattern](../packages/quarto-engine/typed-memory-agent.qmd) proves this across two real,
+  [typed-memory agent pattern](../examples/patterns/typed-memory-agent.qmd) proves this across two real,
   isolated Pi processes and then inspects the shared ledger.
 
 **One store, not a `memory.duckdb`.** Facts, jobs, activation, memory, store-logged runs, and agent session traces
