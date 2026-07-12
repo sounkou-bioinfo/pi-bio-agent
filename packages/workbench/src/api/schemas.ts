@@ -258,3 +258,125 @@ export const ErrorResponseSchema = z.object({
     message: z.string(),
   }).strict(),
 }).strict().openapi("ErrorResponse");
+
+export const AgentSessionPathSchema = z.object({
+  sessionId: z.string().trim().min(1).max(256)
+    .describe("Host session identifier. The server resolves it without accepting a filesystem path.")
+    .openapi({ param: { name: "sessionId", in: "path" } }),
+});
+
+export const OpenAgentSessionSchema = z.object({
+  name: z.string().trim().min(1).max(160).optional(),
+  resumeSessionId: z.string().trim().min(1).max(256).optional(),
+}).strict().openapi("OpenAgentSession");
+
+export const SendAgentMessageSchema = z.object({
+  delivery: z.enum(["prompt", "steer", "follow_up"]),
+  text: z.string().trim().min(1).max(100_000),
+}).strict().openapi("SendAgentMessage");
+
+export const AgentEventQuerySchema = z.object({
+  after: z.coerce.number().int().nonnegative().optional(),
+  limit: z.coerce.number().int().min(1).max(1_000).optional(),
+});
+
+export const AgentTranscriptQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(500).optional(),
+});
+
+export const AgentSessionSchema = z.object({
+  sessionId: z.string(),
+  host: z.string(),
+  state: z.enum(["available", "idle", "running"]),
+  name: z.string().optional(),
+  model: z.object({ provider: z.string(), id: z.string() }).strict().optional(),
+  thinkingLevel: z.string().optional(),
+  messageCount: z.number().int().nonnegative(),
+  pendingMessageCount: z.number().int().nonnegative(),
+  resumable: z.boolean(),
+  createdAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime(),
+  lastError: z.string().optional(),
+}).strict().openapi("AgentSession");
+
+export const AgentSessionListSchema = z.object({
+  sessions: z.array(AgentSessionSchema),
+}).strict().openapi("AgentSessionList");
+
+const JsonValueSchema = z.union([
+  z.string(),
+  z.number(),
+  z.boolean(),
+  z.null(),
+  z.array(z.any()),
+  z.record(z.string(), z.any()),
+]);
+
+export const AgentActivityEventSchema = z.object({
+  cursor: z.number().int().positive(),
+  at: z.iso.datetime(),
+  kind: z.string(),
+  payload: JsonValueSchema,
+}).strict().openapi("AgentActivityEvent");
+
+export const AgentActivityPageSchema = z.object({
+  sessionId: z.string(),
+  events: z.array(AgentActivityEventSchema),
+  nextCursor: z.number().int().nonnegative(),
+  truncated: z.boolean(),
+}).strict().openapi("AgentActivityPage");
+
+export const AgentTranscriptSchema = z.object({
+  sessionId: z.string(),
+  messages: z.array(JsonValueSchema),
+  omittedCount: z.number().int().nonnegative(),
+}).strict().openapi("AgentTranscript");
+
+export const CloseAgentSessionResponseSchema = z.object({
+  closed: z.literal(true),
+  sessionId: z.string(),
+}).strict().openapi("CloseAgentSessionResponse");
+
+export const ArtifactReferenceSchema = z.object({
+  casUri: z.string(),
+  digest: z.string(),
+  mediaType: z.string(),
+  semanticRole: z.string(),
+  sizeBytes: z.number().int().nonnegative(),
+  sourceNode: z.string(),
+  relation: z.string(),
+  recordedAt: z.iso.datetime(),
+  producerRun: z.string().nullable(),
+  attrs: z.record(z.string(), z.any()),
+  contentUrl: z.string(),
+}).strict().openapi("ArtifactReference");
+
+export const ArtifactReferenceListSchema = z.object({
+  artifacts: z.array(ArtifactReferenceSchema),
+}).strict().openapi("ArtifactReferenceList");
+
+export const ArtifactListQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(500).default(100),
+});
+
+export const ArtifactDigestPathSchema = z.object({
+  digest: z.string().trim().min(1).max(128)
+    .describe("A sha256 content digest validated by the substrate before CAS access.")
+    .openapi({ param: { name: "digest", in: "path" } }),
+});
+
+export const WorkbenchInfoSchema = z.object({
+  service: z.literal("pi-bio-workbench"),
+  agentHost: z.string().nullable(),
+  capabilities: z.object({
+    agentSessions: z.boolean(),
+    agentSteering: z.boolean(),
+    eventStream: z.boolean(),
+  }).strict(),
+  addons: z.array(z.object({
+    id: z.string(),
+    label: z.string(),
+    order: z.number().int(),
+    browserEntry: z.string(),
+  }).strict()),
+}).strict().openapi("WorkbenchInfo");

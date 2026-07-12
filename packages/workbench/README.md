@@ -1,12 +1,16 @@
 # pi-bio-workbench
 
 `pi-bio-workbench` is the first-party application package over `pi-bio-agent`. It is where domain relations, review
-policy, evidence packets, APIs, and future UI surfaces are composed. The root package remains the policy-free
+policy, evidence packets, APIs, and browser surfaces are composed. The root package remains the policy-free
 execution and evidence substrate.
 
 The workbench includes [clinical genomics](examples/clinical-genomics/application.md) and the generic
 [method-selection application](examples/method-selection/application.md). Their executable QMD files are the
 application narratives and proofs; rendered Markdown is committed for ordinary readers.
+
+The browser shell loads host-approved `WorkbenchAddon` pairs. Clinical Evidence contributes the analysis API and
+review pane; Artifacts contributes temporal-ledger projection, verified CAS byte serving, and figure/report previews.
+Addons use the same public SDK and store rather than creating application-local persistence.
 
 ## Package boundary
 
@@ -20,7 +24,7 @@ second runner, ledger, CAS, graph, retry system, or workflow engine.
 | async compute and durable checkpoints | clinical step definitions |
 | CAS, receipts, replay, observations | evidence packet and review queue |
 | graph projection and foreign sources | phenotype and case-evidence semantics |
-| public SDK and host ports | CLI, API, and future UI surfaces |
+| public SDK and host ports | CLI, API, browser, and agent-host adapters |
 
 Applications are also the main abstraction pressure surface. A workbench workaround does not become a core feature
 by convenience. The same motion must appear in another application or generic pattern, conflict with no stronger
@@ -39,7 +43,11 @@ Both lanes close into `case_evidence`. Coverage states distinguish an unsearched
 with no supporting variant. Missing population frequency remains an abstention. The complete relations stay in the
 analysis DuckDB; the review-bearing packet and checkpoints use CAS references.
 
-This is evidence routing. It does not claim ACMG/AMP classification, diagnosis, or clinical validity.
+This is evidence routing. It does not claim ACMG/AMP classification, diagnosis, or clinical validity. The next
+application closure can extend the same resumable study from uploaded VCF/TSV/CSV plus a case narrative through HPO
+grounding, phenotype/gene retrieval, indexed range restriction, VEP, typed ACMG evidence proposals, phenotype
+reranking, literature evidence, and gated review. VEP annotations alone are not an ACMG classification: population,
+inheritance/segregation, de novo, functional, curated, and review evidence remain explicit inputs.
 
 ## Run
 
@@ -97,20 +105,43 @@ targeted search and review, not a diagnosis.
 
 ```sh
 npm run serve --workspace=packages/workbench -- \
-  packages/workbench/examples/clinical-genomics \
+  examples/clinical-genomics \
   8787
 ```
 
-Zod route schemas validate requests and generate OpenAPI 3.1. The server fixes its workspace at startup; callers do
-not submit host paths, and host store paths are not part of the HTTP response contract.
+Open <http://127.0.0.1:8787>. The browser opens and resumes persistent Pi sessions, streams bounded activity, accepts
+prompt/steer/follow-up input, aborts or closes an active session, runs the clinical application, renders its evidence
+and review queue, previews CAS-backed figures/reports, and hands run ids back to Pi for ledger/graph inspection. The
+activity stream is UI transport; the scientific record remains the substrate's runs, CAS objects, receipts,
+observations, and checkpoints.
+
+Zod route schemas validate requests and generate OpenAPI 3.1. The server fixes its workspace and Pi extension at
+startup; callers submit neither host paths nor executable extension configuration, and store/session paths are not
+part of the HTTP contract. `AgentHostPort` is host-neutral. The first adapter embeds Pi's public SDK; Pi-specific
+session and dynamic-tool mechanics do not enter the browser protocol.
+
+### Permissions and deployment
+
+The reference server binds `127.0.0.1` and applies a same-origin content-security policy. This protects the local HTTP
+surface from accidental network exposure; it is not process isolation. Pi, its tools, extensions, and any process or
+network access they invoke run with the permissions of the user who launched the server. The default bio extension
+still fails closed for its own ungranted resolver ports, but Pi's built-in shell has the operator's ordinary system
+access.
+
+Do not expose this reference server directly to a network. A remote or multi-user deployment must add authentication,
+TLS, per-principal admission, credential policy, and an appropriate process/container/microVM boundary. DuckNNG can
+provide authenticated shared SQL and worker transport; that does not itself sandbox the Pi process.
 
 ## Checks
 
 ```sh
 npm run check:workbench
+npm run test:web --workspace=packages/workbench
 npm run application:clinical
 npm run benchmark:grounding --workspace=packages/workbench
 ```
 
-The grounding benchmark tests retrieval-contract behavior with recorded proposals and reviews. It is not a
-model-quality claim.
+Playwright starts the real loopback server and a local VEP fixture, opens a real Pi SDK session without spending a
+model turn, executes and reads back a real CAS-backed clinical analysis, renders a real CAS-backed SVG figure,
+exercises SSE, and checks desktop/mobile geometry. The grounding benchmark tests retrieval-contract behavior with
+recorded proposals and reviews. Neither is a model-quality claim.

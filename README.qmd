@@ -1,99 +1,112 @@
 ---
+engine: pi-bio
 format: gfm
 ---
 
 <!-- README.md is generated from README.qmd — please edit this file, then `npm run readme:qmd`. -->
-<!-- The `pi` and `biocli` chunks run real commands. Rendering needs a built `dist/`, Pi, and model credentials. -->
+<!-- The marked cells run real commands through the first-party pi-bio engine. Rendering needs built packages, Pi, and model credentials. -->
 
-```{r setup, include = FALSE}
-knitr::opts_chunk$set(comment = "")
+```{ts .pi-bio}
+#| include: false
+import { spawnSync } from "node:child_process";
+import { mkdirSync, rmSync } from "node:fs";
+import { resolve } from "node:path";
 
-wrap_prompt <- function(p, width = 56) {
-  words <- strsplit(p, " ")[[1]]
-  lines <- character(0)
-  cur <- ""
-  for (w in words) {
-    if (nzchar(cur) && nchar(cur) + nchar(w) + 1 > width) {
-      lines <- c(lines, cur)
-      cur <- w
+const fence = "```";
+const continuation = "\\";
+
+const sanitizeOutput = (value: string): string => {
+  const cwd = resolve(process.cwd());
+  return value
+    .replaceAll(cwd + "/", "")
+    .replaceAll(cwd, ".")
+    .replaceAll("/.pi/bio-agent/", ".pi/bio-agent/")
+    .replace(/rare_high_impact\.report-[0-9]+-[0-9a-f]+/g, "rare_high_impact.report-<run>")
+    .replace(/query-[0-9]+-[0-9a-f]+/g, "query-<run>")
+    .replace(/reproduce-readme-variant-counts-[0-9]+/g, "reproduce-readme-variant-counts-<run>")
+    .replace(/pid[ =][0-9]+/g, "pid <pid>")
+    .replace(/\/tmp\/pi-bio-handoff-cas-[0-9]+/g, "/tmp/pi-bio-handoff-cas-<run>")
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .join("\n")
+    .trim();
+};
+
+const execute = (program: string, args: string[], timeout = 120_000): string => {
+  const result = spawnSync(program, args, {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    maxBuffer: 8 * 1024 * 1024,
+    timeout,
+  });
+  const output = sanitizeOutput([result.stdout, result.stderr].filter(Boolean).join("\n"));
+  if (result.error || result.status !== 0) {
+    throw new Error(`${program} failed (${result.error?.message ?? result.status}):\n${output}`);
+  }
+  return output;
+};
+
+const runBioCli = (args: string[], command: string, json = true): void => {
+  const output = execute("node", ["dist/cli/bin.js", ...args]);
+  piBio.markdown([
+    `${fence} sh`,
+    command,
+    fence,
+  ].join("\n"));
+  if (json) {
+    piBio.json(JSON.parse(output));
+  } else {
+    piBio.markdown(`${fence}\n${output}\n${fence}`);
+  }
+};
+
+const wrapPrompt = (prompt: string, width = 56): string => {
+  const lines: string[] = [];
+  let line = "";
+  for (const word of prompt.split(" ")) {
+    if (line && line.length + word.length + 1 > width) {
+      lines.push(line);
+      line = word;
     } else {
-      cur <- if (nzchar(cur)) paste(cur, w) else w
+      line = line ? `${line} ${word}` : word;
     }
   }
-  lines <- c(lines, cur)
-  paste(vapply(seq_along(lines), function(i) {
-    paste0('  "', lines[i], if (i < length(lines)) " " else "", '"', if (i < length(lines)) " \\" else "")
-  }, ""), collapse = "\n")
-}
+  if (line) lines.push(line);
+  return lines.map((value, index) => `  ${JSON.stringify(value + (index < lines.length - 1 ? " " : ""))}${index < lines.length - 1 ? " \\" : ""}`).join("\n");
+};
 
-sanitize_paths <- function(txt) {
-  wd <- normalizePath(getwd(), winslash = "/", mustWork = FALSE)
-  txt <- gsub(paste0(wd, "/"), "", txt, fixed = TRUE)
-  txt <- gsub(wd, ".", txt, fixed = TRUE)
-  txt <- gsub("rare_high_impact\\.report-[0-9]+-[0-9a-f]+", "rare_high_impact.report-<run>", txt, perl = TRUE)
-  txt <- gsub("query-[0-9]+-[0-9a-f]+", "query-<run>", txt, perl = TRUE)
-  txt <- gsub("reproduce-readme-variant-counts-[0-9]+", "reproduce-readme-variant-counts-<run>", txt, perl = TRUE)
-  txt <- gsub("pid[ =][0-9]+", "pid <pid>", txt, perl = TRUE)
-  txt <- gsub("/tmp/pi-bio-handoff-cas-[0-9]+", "/tmp/pi-bio-handoff-cas-<run>", txt, perl = TRUE)
-  txt <- gsub("[ \t]+(?=\n|$)", "", txt, perl = TRUE)
-  txt
-}
-
-render_json_output <- function(txt, summary = "JSON output") {
-  paste0(
-    "<details>\n",
-    "<summary>", summary, "</summary>\n\n",
-    "``` json\n", txt, "\n```\n\n",
-    "</details>\n"
-  )
-}
-
-knitr::knit_engines$set(pi = function(options) {
-  prompt <- paste(options$code, collapse = " ")
-  model <- if (!is.null(options$model)) options$model else "openai-codex/gpt-5.3-codex"
-  thinking <- if (!is.null(options$thinking)) options$thinking else "high"
-  tools <- if (!is.null(options$tools)) options$tools else "read,write,bio_describe_model,bio_query,bio_list_duckdb_extensions"
-  tmo <- if (!is.null(options$timeout)) options$timeout else 300
-  must_contain <- if (!is.null(options$mustContain)) as.character(options$mustContain) else character(0)
-  dir.create(".pi/bio-agent", recursive = TRUE, showWarnings = FALSE)
-  if (!is.null(options$removeBefore)) unlink(options$removeBefore, force = TRUE)
-  args <- c("--model", model, "--thinking", thinking, "--no-extensions", "-e", "extensions/pi-coding-agent/index.ts", "--tools", tools, "-p", "--no-session", prompt)
-  out <- suppressWarnings(system2("pi", shQuote(args), stdout = TRUE, stderr = TRUE, timeout = tmo))
-  status <- attr(out, "status")
-  out_txt <- sanitize_paths(paste(out, collapse = "\n"))
-  if (!is.null(status) && status != 0) stop("pi render failed (exit ", status, "):\n", out_txt)
-  for (needle in must_contain) {
-    if (nzchar(needle) && !grepl(needle, out_txt, fixed = TRUE)) stop("pi render did not produce required output '", needle, "':\n", out_txt)
+const runPi = (prompt: string, options: { removeBefore?: string; mustContain?: string[] } = {}): void => {
+  const model = "openai-codex/gpt-5.3-codex";
+  const thinking = "high";
+  const tools = "read,write,bio_describe_model,bio_query,bio_list_duckdb_extensions";
+  mkdirSync(".pi/bio-agent", { recursive: true });
+  if (options.removeBefore) rmSync(options.removeBefore, { force: true });
+  const output = execute("pi", [
+    "--model", model,
+    "--thinking", thinking,
+    "--no-extensions",
+    "-e", "extensions/pi-coding-agent/index.ts",
+    "--tools", tools,
+    "-p", "--no-session", prompt,
+  ], 300_000);
+  for (const expected of options.mustContain ?? []) {
+    if (!output.includes(expected)) throw new Error(`Pi output is missing '${expected}':\n${output}`);
   }
-  knitr::asis_output(paste0(
-    "``` sh\npi \\\n",
-    "  --model ", model, " \\\n",
-    "  --thinking ", thinking, " \\\n",
-    "  --no-extensions \\\n",
-    "  -e extensions/pi-coding-agent/index.ts \\\n",
-    "  --tools ", tools, " \\\n",
-    "  -p --no-session \\\n",
-    wrap_prompt(prompt), "\n```\n\n",
-    out_txt, "\n"
-  ))
-})
-
-knitr::knit_engines$set(biocli = function(options) {
-  args <- paste(options$code, collapse = " ")
-  out <- suppressWarnings(system(paste("node dist/cli/bin.js", args, "2>&1"), intern = TRUE))
-  status <- attr(out, "status")
-  out_txt <- sanitize_paths(paste(out, collapse = "\n"))
-  if (!is.null(status) && status != 0) stop("biocli render failed (exit ", status, "): ", args, "\n", out_txt)
-  lang <- if (grepl("^\\s*[\\[{]", out_txt)) "json" else ""
-  # wrap each flag onto its own continuation line so long commands don't overflow the README
-  cmd <- gsub(" --", " \\\\\n  --", paste("pi-bio-agent", args))
-  rendered <- if (lang == "json") {
-    render_json_output(out_txt, "Command JSON output")
-  } else {
-    paste0("``` ", lang, "\n", out_txt, "\n```\n")
-  }
-  knitr::asis_output(paste0("``` sh\n", cmd, "\n```\n\n", rendered))
-})
+  piBio.markdown([
+    `${fence} sh`,
+    "pi \\",
+    `  --model ${model} ${continuation}`,
+    `  --thinking ${thinking} ${continuation}`,
+    "  --no-extensions \\",
+    "  -e extensions/pi-coding-agent/index.ts \\",
+    `  --tools ${tools} ${continuation}`,
+    "  -p --no-session \\",
+    wrapPrompt(prompt),
+    fence,
+    "",
+    output,
+  ].join("\n"));
+};
 
 ```
 
@@ -138,14 +151,24 @@ tabix range read through `duckhts`, so it should complete in seconds rather than
 download the whole ClinVar VCF. ClinVar is live data; the rows below are the
 result from this README render, not a pinned truth table.
 
-```{pi, timeout=300, removeBefore=".pi/bio-agent/readme-clinvar-tp53.json", mustContain=c("Pathogenic", "GROUP BY", "UNNEST", "|")}
-Create .pi/bio-agent/readme-clinvar-tp53.json for the raw ClinVar VCF URL https://ftp.ncbi.nlm.nih.gov/pub/clinvar/vcf_GRCh38/clinvar.vcf.gz, region 17:43044295-43125483, table clinvar, using duckhts.read_bcf. Run bio_query to count clinical-significance buckets in that region. Inspect the schema if needed; avoid double-counting multi-valued significance entries. Return only the manifest path, the SQL, and a Markdown result table.
+```{ts .pi-bio}
+#| echo: false
+const clinvarPrompt = "Create .pi/bio-agent/readme-clinvar-tp53.json for the raw ClinVar VCF URL https://ftp.ncbi.nlm.nih.gov/pub/clinvar/vcf_GRCh38/clinvar.vcf.gz, region 17:43044295-43125483, table clinvar, using duckhts.read_bcf. Run bio_query to count clinical-significance buckets in that region. Inspect the schema if needed; avoid double-counting multi-valued significance entries. The SQL must itself filter CHROM = '17' and POS BETWEEN 43044295 AND 43125483 instead of treating resolver pushdown as the semantic filter. Return only the manifest path, the SQL, and a Markdown result table.";
+runPi(clinvarPrompt, {
+  removeBefore: ".pi/bio-agent/readme-clinvar-tp53.json",
+  mustContain: ["Pathogenic", "POS BETWEEN", "GROUP BY", "UNNEST", "|"],
+});
 ```
 
 The same query with no model in the loop:
 
-```{biocli}
-query .pi/bio-agent/readme-clinvar-tp53.json --db :memory: --init-sql "INSTALL duckhts FROM community; LOAD duckhts;" --sql "WITH distinct_calls AS (SELECT DISTINCT CHROM, POS, REF, ALT, significance FROM clinvar, UNNEST(INFO_CLNSIG) AS u(significance)) SELECT significance, COUNT(*) AS n FROM distinct_calls GROUP BY significance ORDER BY n DESC"
+```{ts .pi-bio}
+#| echo: false
+const clinvarSql = "WITH exploded AS (SELECT CHROM, POS, ID, REF, ALT, TRIM(sig) AS clinical_significance FROM clinvar CROSS JOIN UNNEST(COALESCE(INFO_CLNSIG, [])) AS sigs(sig) WHERE CHROM = '17' AND POS BETWEEN 43044295 AND 43125483 AND sig IS NOT NULL AND TRIM(sig) <> ''), deduped AS (SELECT DISTINCT CHROM, POS, ID, REF, ALT, clinical_significance FROM exploded) SELECT clinical_significance AS clinical_significance_bucket, COUNT(*) AS variant_count FROM deduped GROUP BY clinical_significance_bucket ORDER BY variant_count DESC, clinical_significance_bucket";
+runBioCli(
+  ["query", ".pi/bio-agent/readme-clinvar-tp53.json", "--db", ":memory:", "--init-sql", "INSTALL duckhts FROM community; LOAD duckhts;", "--sql", clinvarSql],
+  `pi-bio-agent query .pi/bio-agent/readme-clinvar-tp53.json \\\n  --db :memory: \\\n  --init-sql "INSTALL duckhts FROM community; LOAD duckhts;" \\\n  --sql ${JSON.stringify(clinvarSql)}`,
+);
 ```
 
 ## Start
@@ -159,18 +182,30 @@ pi install git:github.com/sounkou-bioinfo/pi-bio-agent
 
 Use the CLI without Pi:
 
-```{r cli-ledger-reset, include=FALSE}
-unlink(c(".pi/bio-agent/readme-store.duckdb", ".pi/bio-agent/readme-store.duckdb.wal"), force = TRUE)
+```{ts .pi-bio}
+#| include: false
+for (const path of [".pi/bio-agent/readme-store.duckdb", ".pi/bio-agent/readme-store.duckdb.wal"]) {
+  rmSync(path, { force: true });
+}
 ```
 
-```{biocli}
-query examples/variant-counts/manifest.json --db :memory: --run-id readme-variant-counts --ledger .pi/bio-agent/readme-store.duckdb --author readme --sql "SELECT consequence, count(*) AS n FROM variants GROUP BY consequence ORDER BY consequence"
+```{ts .pi-bio}
+#| echo: false
+const variantCountSql = "SELECT consequence, count(*) AS n FROM variants GROUP BY consequence ORDER BY consequence";
+runBioCli(
+  ["query", "examples/variant-counts/manifest.json", "--db", ":memory:", "--run-id", "readme-variant-counts", "--ledger", ".pi/bio-agent/readme-store.duckdb", "--author", "readme", "--sql", variantCountSql],
+  `pi-bio-agent query examples/variant-counts/manifest.json \\\n  --db :memory: \\\n  --run-id readme-variant-counts \\\n  --ledger .pi/bio-agent/readme-store.duckdb \\\n  --author readme \\\n  --sql ${JSON.stringify(variantCountSql)}`,
+);
 ```
 
 Verify that run against a fresh database:
 
-```{biocli}
-reproduce .pi/bio-agent/runs/readme-variant-counts/replay.json
+```{ts .pi-bio}
+#| echo: false
+runBioCli(
+  ["reproduce", ".pi/bio-agent/runs/readme-variant-counts/replay.json"],
+  "pi-bio-agent reproduce .pi/bio-agent/runs/readme-variant-counts/replay.json",
+);
 ```
 
 Use it as a library:
@@ -254,6 +289,22 @@ pi-bio-agent query credentialed-manifest.json \
 `clinvar-read`; `CLINVAR_TOKEN` is supplied by the host environment or secret manager, and the secret never appears
 in the manifest, SQL, or argv.
 
+## Browser workbench
+
+The first-party workbench composes a browser, a Pi SDK agent-host adapter, and the same public evidence substrate:
+
+```sh
+npm run serve --workspace=packages/workbench -- examples/clinical-genomics 8787
+```
+
+Open <http://127.0.0.1:8787>. Pi sessions can be opened or resumed, prompted, steered, followed up, aborted, and closed
+while host-approved Clinical Evidence and Artifacts addons render review queues and CAS-backed figures/reports tied to
+recorded runs. The live conversation/event stream is a presentation surface, not the scientific source of truth.
+
+The reference server binds loopback and is not a sandbox. Pi and its tools run with the permissions of the launching
+process. Remote or multi-user deployment requires explicit authentication, TLS, credential/admission policy, and an
+operator-chosen isolation boundary.
+
 ## Ledger
 
 Runs, facts, memory, job status, session traces, and artifacts are rows in
@@ -289,17 +340,28 @@ run-looking strings.
 
 Window an edge-shaped graph table without loading the whole neighborhood:
 
-```{r graph-window-pattern-reset, include=FALSE}
-dir.create(".pi/bio-agent", recursive = TRUE, showWarnings = FALSE)
-unlink(c(".pi/bio-agent/readme-graph-window.duckdb", ".pi/bio-agent/readme-graph-window.duckdb.wal"), force = TRUE)
+```{ts .pi-bio}
+#| include: false
+mkdirSync(".pi/bio-agent", { recursive: true });
+for (const path of [".pi/bio-agent/readme-graph-window.duckdb", ".pi/bio-agent/readme-graph-window.duckdb.wal"]) {
+  rmSync(path, { force: true });
+}
 ```
 
-```{biocli}
-query examples/graph-window/manifest.json --db .pi/bio-agent/readme-graph-window.duckdb --sql "SELECT count(*) AS n FROM bio_edges"
+```{ts .pi-bio}
+#| echo: false
+runBioCli(
+  ["query", "examples/graph-window/manifest.json", "--db", ".pi/bio-agent/readme-graph-window.duckdb", "--sql", "SELECT count(*) AS n FROM bio_edges"],
+  'pi-bio-agent query examples/graph-window/manifest.json \\\n  --db .pi/bio-agent/readme-graph-window.duckdb \\\n  --sql "SELECT count(*) AS n FROM bio_edges"',
+);
 ```
 
-```{biocli}
-graph-window --db .pi/bio-agent/readme-graph-window.duckdb --table bio_edges --start run:readme --direction both --limit 10
+```{ts .pi-bio}
+#| echo: false
+runBioCli(
+  ["graph-window", "--db", ".pi/bio-agent/readme-graph-window.duckdb", "--table", "bio_edges", "--start", "run:readme", "--direction", "both", "--limit", "10"],
+  "pi-bio-agent graph-window \\\n  --db .pi/bio-agent/readme-graph-window.duckdb \\\n  --table bio_edges \\\n  --start run:readme \\\n  --direction both \\\n  --limit 10",
+);
 ```
 
 ## Examples
@@ -317,8 +379,12 @@ example blocks drift.
 
 Example connector, no TypeScript client:
 
-```{biocli, cache=TRUE}
-query examples/connectors/uniprot.json --db :memory: --init-sql "LOAD ducknng; SET VARIABLE tls = ducknng_tls_config_from_pem(NULL, NULL, NULL, '', 1)" --bindings '{"uniprot_acc":"P04637"}' --sql "SELECT primaryAccession, uniProtkbId, sequence.length aa FROM uniprot_entry"
+```{ts .pi-bio}
+#| echo: false
+runBioCli(
+  ["query", "examples/connectors/uniprot.json", "--db", ":memory:", "--init-sql", "LOAD ducknng; SET VARIABLE tls = ducknng_tls_config_from_pem(NULL, NULL, NULL, '', 1)", "--bindings", '{"uniprot_acc":"P04637"}', "--sql", "SELECT primaryAccession, uniProtkbId, sequence.length aa FROM uniprot_entry"],
+  `pi-bio-agent query examples/connectors/uniprot.json \\\n  --db :memory: \\\n  --init-sql "LOAD ducknng; SET VARIABLE tls = ducknng_tls_config_from_pem(NULL, NULL, NULL, '', 1)" \\\n  --bindings '{"uniprot_acc":"P04637"}' \\\n  --sql "SELECT primaryAccession, uniProtkbId, sequence.length aa FROM uniprot_entry"`,
+);
 ```
 
 ## Pi tools

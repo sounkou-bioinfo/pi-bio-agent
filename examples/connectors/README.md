@@ -1,10 +1,11 @@
 # Scientific-database connectors — each is a manifest, zero TypeScript
 
-Hosted AI-for-science products advertise "60+ connected scientific databases." Here a connector is just a
-**manifest**: a `duckdb.sql_materialize` resource whose SQL is a `ducknng_ncurl_table(...)` HTTP request, so the JSON
-response is parsed straight into a DuckDB table. **No client code, no new `.ts`** — a new database is a new file.
+Hosted AI-for-science products advertise "60+ connected scientific databases." Here a connector is a
+**manifest** over a host-provisioned DuckDB extension or fetch port. HTTP JSON commonly uses
+`ducknng_ncurl_table(...)`; a foreign SQL catalog uses DuckDB's MySQL/Postgres extension and ordinary SQL.
+**No client code, no new `.ts`** — a new database is usually a new file.
 
-Starter pack (each hits the real public REST API; the accession is the agent's binding):
+Starter pack (each reaches a real public source; the identifier is the agent's binding):
 
 | connector | database | binding | endpoint |
 |---|---|---|---|
@@ -13,10 +14,11 @@ Starter pack (each hits the real public REST API; the accession is the agent's b
 | [`mygene.json`](mygene.json) | MyGene / BioThings | `{gene_id}` | `mygene.info/v3/gene/{id}` |
 | [`reactome.json`](reactome.json) | Reactome | `{reactome_id}` | `reactome.org/ContentService/data/query/{id}` |
 | [`opentargets-graphql.json`](opentargets-graphql.json) | OpenTargets Platform GraphQL | `{ensembl_id}` | `api.platform.opentargets.org/api/v4/graphql` |
+| [`ensembl-mysql.json`](ensembl-mysql.json) | Ensembl 116 core | `{gene_symbol}` | `ensembldb.ensembl.org/homo_sapiens_core_116_38` |
 
-Add another (Ensembl, ClinVar, ChEMBL, GEO, …) by pointing a new manifest at a new URL — the
-shape doesn't change. See [`variant-annotation`](../variant-annotation/) for a POST/batch connector (Ensembl VEP)
-and [`ols4-grounding`](../ols4-grounding/) for an ontology-service connector.
+Add another (ClinVar, ChEMBL, GEO, …) by declaring the source through an existing DuckDB or host port. See
+[`variant-annotation`](../variant-annotation/) for a POST/batch connector (Ensembl VEP) and
+[`ols4-grounding`](../ols4-grounding/) for an ontology-service connector.
 
 ## Running one
 
@@ -40,6 +42,21 @@ injects no `fetch`, so the `http.get` path fails closed until the host binds one
 > never be complete, so the library stays permissive and records what ran; a host that wants strict no-egress must
 > not install network extensions into a shared DuckDB home (or must isolate that home per trust boundary) — the
 > same egress residue as an `httpfs` replacement scan (see `src/core/sql-guard.ts`).
+
+Foreign catalogs follow the same host boundary. This live Ensembl query requires the host to provision DuckDB's
+official `mysql` extension, admit egress to the public server, attach the release database read-only, and pin that
+database name in the manifest receipt:
+
+```sh
+pi-bio-agent query examples/connectors/ensembl-mysql.json --db :memory: \
+  --init-sql "LOAD mysql; SET mysql_experimental_filter_pushdown=true; ATTACH 'host=ensembldb.ensembl.org user=anonymous port=3306 database=homo_sapiens_core_116_38 ssl_mode=disabled' AS ensembl (TYPE mysql, READ_ONLY)" \
+  --bindings '{"gene_symbol":"BRCA2"}' \
+  --sql "SELECT * FROM ensembl_gene"
+```
+
+The filter-pushdown setting keeps the selective gene-symbol predicate on the public MySQL server instead of reading
+the source tables in full. The attached catalog remains available to schema-discovery SQL during the run. Release `116`, database
+`homo_sapiens_core_116_38`, and assembly `GRCh38` are data identity; `latest` would not be a reproducible source pin.
 
 ## Auth, MCP, and streaming (the reach)
 
@@ -69,4 +86,6 @@ safe order is:
 Two connectors go beyond REST: [`mcp.json`](mcp.json) (MCP over SQL) and
 [`clinvar-region.json`](clinvar-region.json) — a **ClinVar VCF region read live over HTTP by `duckhts`** (an
 htslib tabix range read, not a whole-file download), where the agent discovers the schema and composes the
-summary. Secrets stay on the host boundary; the manifest names the shape, the host supplies the auth.
+summary. The resource region selects index blocks efficiently; answer SQL should still state the exact coordinate
+predicate because pushdown is not the semantic filter. Secrets stay on the host boundary; the manifest names the
+shape, the host supplies the auth.

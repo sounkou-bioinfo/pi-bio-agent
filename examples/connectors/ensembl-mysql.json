@@ -1,0 +1,28 @@
+{
+  "schema": "pi-bio.manifest.v1",
+  "id": "connector-ensembl-mysql",
+  "version": "0.1.0",
+  "title": "Ensembl 116 core through DuckDB MySQL",
+  "description": "The host attaches Ensembl's public MySQL database read-only; the manifest materializes a release-pinned gene interval with ordinary SQL. The gene symbol is the binding {gene_symbol}. No Ensembl client or source-specific resolver is required.",
+  "provides": {
+    "resolvers": [{
+      "id": "duckdb.sql_materialize",
+      "version": "0.1.0",
+      "title": "SQL materialize",
+      "description": "Materialize a table from a read-only SELECT over a host-attached foreign catalog.",
+      "output": { "mode": "table" }
+    }],
+    "resources": [{
+      "id": "ensembl_gene",
+      "title": "Release-pinned Ensembl gene interval",
+      "kind": "virtual",
+      "resolver": "duckdb.sql_materialize",
+      "params": {
+        "table": "ensembl_gene",
+        "extensions": ["mysql"],
+        "declaredSources": ["mysql://anonymous@ensembldb.ensembl.org:3306/homo_sapiens_core_116_38"],
+        "sql": "SELECT g.stable_id AS ensembl_gene_id, x.display_label AS gene_symbol, sr.name AS seq_region, g.seq_region_start, g.seq_region_end, g.seq_region_strand, cs.version AS assembly, ed.db_name AS xref_source FROM ensembl.gene g JOIN ensembl.xref x ON x.xref_id = g.display_xref_id JOIN ensembl.external_db ed ON ed.external_db_id = x.external_db_id JOIN ensembl.seq_region sr ON sr.seq_region_id = g.seq_region_id JOIN ensembl.coord_system cs ON cs.coord_system_id = sr.coord_system_id WHERE x.display_label = getvariable('gene_symbol') AND cs.name = 'chromosome' ORDER BY g.is_current DESC, g.stable_id"
+      }
+    }]
+  }
+}

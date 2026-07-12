@@ -3,6 +3,13 @@ import type { VirtualResourceSpec } from "./resources.js";
 
 type JsonRecord = Record<string, unknown>;
 
+interface BaseTableRef {
+  table: string;
+  schema: string;
+  catalog: string;
+  system: boolean;
+}
+
 const SYSTEM_SCHEMAS = new Set(["information_schema", "pg_catalog", "duckdb_catalog"]);
 const SYSTEM_TABLES = new Set([
   "duckdb_columns",
@@ -23,6 +30,7 @@ const SYSTEM_TABLES = new Set([
   "duckdb_types",
   "duckdb_variables",
   "duckdb_views",
+  "pragma_table_info",
 ]);
 
 export interface QueryResourceInference {
@@ -81,7 +89,7 @@ function collectStringConstants(value: unknown, out: Set<string>): void {
   for (const item of Object.values(value)) collectStringConstants(item, out);
 }
 
-function collectBaseTables(value: unknown, ctes: ReadonlySet<string>, out: Map<string, { table: string; system: boolean }>): void {
+function collectBaseTables(value: unknown, ctes: ReadonlySet<string>, out: Map<string, BaseTableRef>): void {
   if (Array.isArray(value)) {
     for (const item of value) collectBaseTables(item, ctes, out);
     return;
@@ -90,10 +98,13 @@ function collectBaseTables(value: unknown, ctes: ReadonlySet<string>, out: Map<s
   if (value.type === "BASE_TABLE" && typeof value.table_name === "string" && value.table_name) {
     const table = value.table_name;
     const schema = typeof value.schema_name === "string" ? value.schema_name : "";
-    const key = normalizeIdent(table);
-    if (!ctes.has(key)) {
-      const system = SYSTEM_SCHEMAS.has(normalizeIdent(schema)) || SYSTEM_TABLES.has(key);
-      out.set(key, { table, system });
+    const catalog = typeof value.catalog_name === "string" ? value.catalog_name : "";
+    const tableKey = normalizeIdent(table);
+    const isUnqualifiedCte = !catalog && !schema && ctes.has(tableKey);
+    if (!isUnqualifiedCte) {
+      const system = SYSTEM_SCHEMAS.has(normalizeIdent(schema)) || SYSTEM_TABLES.has(tableKey);
+      const refKey = [catalog, schema, table].map(normalizeIdent).join(".");
+      out.set(refKey, { table, schema, catalog, system });
     }
   }
   if (
@@ -102,7 +113,12 @@ function collectBaseTables(value: unknown, ctes: ReadonlySet<string>, out: Map<s
     typeof value.function.function_name === "string" &&
     SYSTEM_TABLES.has(normalizeIdent(value.function.function_name))
   ) {
-    out.set(`function:${normalizeIdent(value.function.function_name)}`, { table: value.function.function_name, system: true });
+    out.set(`function:${normalizeIdent(value.function.function_name)}`, {
+      table: value.function.function_name,
+      schema: "",
+      catalog: "",
+      system: true,
+    });
   }
   for (const item of Object.values(value)) collectBaseTables(item, ctes, out);
 }
@@ -137,7 +153,7 @@ export async function inferQueryResources(conn: SqlConn, sql: string, resources:
   const ast = await parseSqlAst(conn, sql);
   const ctes = new Set<string>();
   collectCteNames(ast, ctes);
-  const baseTables = new Map<string, { table: string; system: boolean }>();
+  const baseTables = new Map<string, BaseTableRef>();
   collectBaseTables(ast, ctes, baseTables);
   const constants = new Set<string>();
   collectStringConstants(ast, constants);
@@ -145,9 +161,15 @@ export async function inferQueryResources(conn: SqlConn, sql: string, resources:
   const requestedTables = new Map<string, string>();
   const unknownTables: string[] = [];
   const readsSystemCatalog = [...baseTables.values()].some((ref) => ref.system);
-  for (const [key, ref] of baseTables) {
-    if (tableToResources.has(key)) requestedTables.set(key, declaredTables.get(key) ?? ref.table);
-    else if (!ref.system) unknownTables.push(ref.table);
+  for (const ref of baseTables.values()) {
+    const key = normalizeIdent(ref.table);
+    const schema = normalizeIdent(ref.schema);
+    const localManifestNamespace = !ref.catalog && (!schema || schema === "main" || schema === "temp");
+    if (localManifestNamespace && tableToResources.has(key)) {
+      requestedTables.set(key, declaredTables.get(key) ?? ref.table);
+    } else if (localManifestNamespace && !ref.system) {
+      unknownTables.push(ref.table);
+    }
   }
   if (readsSystemCatalog) {
     for (const constant of constants) {

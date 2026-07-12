@@ -1,7 +1,10 @@
 import { resolve } from "node:path";
 import { DuckDBInstance, type DuckDBConnection } from "@duckdb/node-api";
+import { describeTable } from "../core/schema-discovery.js";
 import { duckdbNodeConn } from "../duckdb/node-api.js";
 import { parseGraphWindowContinuation, queryGraphWindow, type GraphQueryWindowOptions } from "../duckdb/graph-window.js";
+import { materializeBioEdgesAsOf } from "../duckdb/observations.js";
+import { MEMORY_NOW } from "../hosts/memory-store.js";
 import { parseFlags } from "./run.js";
 
 export interface GraphWindowCliDeps {
@@ -13,7 +16,7 @@ export interface GraphWindowCliDeps {
 const USAGE = [
   "usage: pi-bio-agent graph-window --db <path|:memory:> --start <node-id> [--table bio_edges] [--direction out|in|both] [--predicates p1,p2] [--limit n] [--offset n]",
   "       pi-bio-agent graph-window --db <path|:memory:> --continuation <graph-window:...>",
-  "  Pages an existing DuckDB graph table with columns from_id, predicate, to_id. Use this for ledger/KG inspection without loading a whole neighborhood.",
+  "  Pages a DuckDB graph table with columns from_id, predicate, to_id. With no --table, an observation ledger is projected to its latest bio_edges_as_of table automatically.",
 ].join("\n");
 
 function parseIntegerFlag(raw: string | undefined, name: string): number | undefined {
@@ -74,7 +77,16 @@ export async function mainGraphWindow(argv: string[], deps: GraphWindowCliDeps):
     instance = await DuckDBInstance.create(dbPath);
     connection = await instance.connect();
     const { dbPath: _dbPath, ...windowOpts } = opts;
-    const window = await queryGraphWindow(duckdbNodeConn(connection), windowOpts);
+    const conn = duckdbNodeConn(connection);
+    if (
+      windowOpts.table === undefined &&
+      (await describeTable(conn, "bio_edges")).length === 0 &&
+      (await describeTable(conn, "bio_observations")).length > 0
+    ) {
+      await materializeBioEdgesAsOf(conn, MEMORY_NOW);
+      windowOpts.table = "bio_edges_as_of";
+    }
+    const window = await queryGraphWindow(conn, windowOpts);
     deps.out(JSON.stringify(window, null, 2));
     return 0;
   } catch (e) {

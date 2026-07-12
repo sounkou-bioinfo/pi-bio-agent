@@ -127,7 +127,7 @@ piBio.json({
 
 <summary>
 
-Output: cell-1
+JSON output: cell-1
 </summary>
 
 ``` json
@@ -164,7 +164,7 @@ Output: cell-1
     "value": "from-sdk-host",
     "replayManifestId": "sdk-host-resolver"
   },
-  "policyStatementsSeen": 14,
+  "policyStatementsSeen": 15,
   "ledgerRuns": [
     "run:sdk-host-query",
     "run:sdk-host-resolver"

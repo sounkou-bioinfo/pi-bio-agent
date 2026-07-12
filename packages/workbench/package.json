@@ -17,13 +17,14 @@
     "check:manifest": "node scripts/generate-clinical-manifest.mjs --check",
     "typecheck": "tsc --noEmit",
     "test": "rm -rf dist-test && tsc -p tsconfig.test.json && node --test dist-test/test/*.test.js",
-    "check": "npm run check:manifest && npm run typecheck && npm test",
+    "check": "npm run check:manifest && npm run typecheck && npm test && npm run test:web",
     "demo:clinical": "npm run build && node dist/cli.js run",
     "pattern:monarch": "npm run build && node scripts/run-monarch-pattern.mjs",
     "benchmark:grounding": "npm run build && node scripts/run-phenotype-grounding-benchmark.mjs",
     "provision:ducknng": "node --input-type=module -e \"import {DuckDBInstance} from '@duckdb/node-api'; const c=await(await DuckDBInstance.create(':memory:')).connect(); await c.run('INSTALL ducknng FROM community;'); await c.run('LOAD ducknng;'); console.log('ducknng installed + loaded');\"",
     "provision:duckhts": "node --input-type=module -e \"import {DuckDBInstance} from '@duckdb/node-api'; const c=await(await DuckDBInstance.create(':memory:')).connect(); await c.run('INSTALL duckhts FROM community;'); await c.run('LOAD duckhts;'); console.log('duckhts installed + loaded');\"",
-    "serve": "npm run build && node dist/server.js"
+    "serve": "npm run build && node dist/server.js",
+    "test:web": "npm run build && tsc -p tsconfig.test.json && playwright test"
   },
   "dependencies": {
     "@hono/node-server": "^2.0.8",
@@ -33,8 +34,16 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.78.0",
+    "@playwright/test": "^1.55.0",
     "@duckdb/node-api": "1.5.2-r.2",
     "@types/node": "^24.0.0",
     "typescript": "^5.8.3"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": { "optional": true }
   }
 }

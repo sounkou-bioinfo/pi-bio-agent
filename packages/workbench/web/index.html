@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>pi-bio workbench</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">pi</span>
+        <span>pi-bio workbench</span>
+      </div>
+      <div class="service-state">
+        <span id="service-dot" class="status-dot"></span>
+        <span id="service-label">Connecting</span>
+      </div>
+    </header>
+
+    <aside class="session-pane" aria-label="Agent sessions">
+      <div class="pane-heading">
+        <h2>Sessions</h2>
+        <div class="pane-actions">
+          <button id="close-session" class="icon-command" type="button" title="Close active session" aria-label="Close active session" disabled>&times;</button>
+          <button id="new-session" class="icon-command" type="button" title="New Pi session" aria-label="New Pi session">+</button>
+        </div>
+      </div>
+      <div id="session-list" class="session-list"></div>
+    </aside>
+
+    <main class="workspace">
+      <nav id="view-tabs" class="view-tabs" aria-label="Workbench views"></nav>
+
+      <section id="agent-view" class="view active" aria-label="Agent conversation">
+        <div id="empty-agent" class="empty-state">
+          <h1>pi-bio workbench</h1>
+          <p>Open a session to begin.</p>
+        </div>
+        <div id="transcript" class="transcript" aria-live="polite"></div>
+        <form id="composer" class="composer">
+          <textarea id="message" rows="3" placeholder="Ask Pi to inspect, compose, run, or review..." disabled></textarea>
+          <div class="composer-actions">
+            <select id="delivery" aria-label="Message delivery" disabled>
+              <option value="prompt">Prompt</option>
+              <option value="steer">Steer</option>
+              <option value="follow_up">Follow up</option>
+            </select>
+            <button id="abort" class="secondary-command" type="button" disabled>Abort</button>
+            <button id="send" class="primary-command" type="submit" disabled>Send</button>
+          </div>
+        </form>
+      </section>
+
+    </main>
+
+    <aside class="activity-pane" aria-label="Session activity">
+      <div class="pane-heading"><h2>Activity</h2></div>
+      <dl id="session-facts" class="session-facts"></dl>
+      <div id="activity-list" class="activity-list"></div>
+    </aside>
+  </div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

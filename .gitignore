@@ -22,3 +22,5 @@ README_files/
 
 /.quarto/
 **/*.quarto_ipynb
+**/test-results/
+**/playwright-report/

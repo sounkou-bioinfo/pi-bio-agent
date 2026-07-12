@@ -10,6 +10,7 @@ import { DuckDBInstance } from "@duckdb/node-api";
 import type { SqlConn } from "../src/core/ports.js";
 import { mainGraphWindow } from "../src/cli/graph-window.js";
 import { duckdbNodeConn } from "../src/duckdb/node-api.js";
+import { createBioObservationSchema, recordObservationLink } from "../src/duckdb/observations.js";
 
 const execFileAsync = promisify(execFile);
 const testDir = dirname(fileURLToPath(import.meta.url));
@@ -37,6 +38,30 @@ async function writeDb(path: string, fn: (conn: SqlConn) => Promise<void>): Prom
 }
 
 describe("cli: graph-window over existing DuckDB graph tables", () => {
+  test("projects an observation ledger automatically when no graph table is named", async () => {
+    const dbPath = await tempDb();
+    await writeDb(dbPath, async (conn) => {
+      await createBioObservationSchema(conn);
+      await recordObservationLink(conn, {
+        subjectId: "run:r1",
+        predicate: "uses_resource",
+        objectId: "resource:variants",
+        recordedAt: "2026-07-12T00:00:00.000Z",
+        source: "test",
+      });
+    });
+
+    const s = sink();
+    const code = await mainGraphWindow(["--db", dbPath, "--start", "run:r1"], s.deps);
+    assert.equal(code, 0, s.err.join("\n"));
+    const printed = JSON.parse(s.out.join("\n")) as {
+      table: string;
+      rows: Array<{ from_id: string; predicate: string; to_id: string }>;
+    };
+    assert.equal(printed.table, "bio_edges_as_of");
+    assert.deepEqual(printed.rows, [{ from_id: "run:r1", predicate: "uses_resource", to_id: "resource:variants" }]);
+  });
+
   test("pages a ledger-style bio_edges table without a manifest", async () => {
     const dbPath = await tempDb();
     await writeDb(dbPath, async (conn) => {

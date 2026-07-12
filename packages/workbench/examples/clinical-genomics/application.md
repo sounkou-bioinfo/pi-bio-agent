@@ -162,7 +162,7 @@ piBio.json({
 
 <summary>
 
-Output: cell-2
+JSON output: cell-2
 </summary>
 
 ``` json
@@ -255,6 +255,51 @@ is rare.
 It does not establish ACMG/AMP classification, diagnosis, clinical
 validity, or live-source stability. Those are application evaluation and
 review concerns.
+
+## Benchmark contract
+
+Two evaluation levels must remain separate:
+
+1.  **ACMG evidence and class concordance.** [Ma et
+    al.](https://doi.org/10.1101/2025.06.03.25328923) describe 150
+    ClinGen expert-panel variants in Supplementary Table 12 and 150
+    ClinVar VUS/conflicting variants in Supplementary Table 13. An exact
+    reproduction requires those row-level tables, criterion strengths,
+    source publications, and the authors’ human labels. A fresh sample
+    of three-star ClinVar rows is useful differential testing, but it is
+    not the published benchmark.
+2.  **Retrospective reanalysis yield.** The OpenAI/Boston Children’s
+    [rare-disease
+    study](https://openai.com/index/diagnose-rare-childhood-diseases/)
+    reports solved-case recovery and 18 confirmed diagnoses from 376
+    previously unsolved cases. Those case packets are not a public
+    fixture here. It is a product and study-design target:
+    evidence-linked hypotheses, duplicate runs, expert adjudication,
+    confirmatory testing, false-positive workload, and diagnostic yield.
+
+The current executable fixture tests substrate correctness, not model or
+clinical quality. A case benchmark adapter should accept case and truth
+bundles as host paths, project them into declared DuckDB relations, run
+one case or a bounded cohort through the same checkpoint graph, and
+write per-case predictions plus aggregate metrics to the ledger/CAS. It
+must not embed patient data, private paths, or a second scoring system
+in TypeScript.
+
+## Next case-workup closure
+
+The same inverted lane can drive a broader one-study case workup from
+host-approved VCF/TSV/CSV uploads and a case narrative: grounded HPO
+assertions, phenotype/disease/gene retrieval, assembly-pinned range
+restriction, bounded VEP annotation, typed ACMG evidence proposals,
+phenotype reranking, literature evidence, and a gated conclusion. “One
+study” means one resumable checkpoint graph, not one prompt or opaque
+function.
+
+VEP is annotation evidence, not an ACMG classifier. Population
+frequency, inheritance and segregation, de novo status, functional
+assays, curated assertions, phenotype fit, and reviewer judgment must
+remain separately sourced; missing inputs produce abstentions rather
+than inferred criteria.
 
 ## How applications change core
 

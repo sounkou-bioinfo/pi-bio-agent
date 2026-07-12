@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { pathToFileURL } from "node:url";
 import type { VepAnnotationRuntime } from "../src/clinical-genomics.js";
 
 export type VepFixture = {
@@ -25,9 +26,13 @@ function reply(response: ServerResponse, status: number, value: unknown): void {
   response.end(body);
 }
 
-export async function startVepFixture(failuresBeforeSuccess = 2): Promise<VepFixture> {
+export async function startVepFixture(failuresBeforeSuccess = 2, port = 0): Promise<VepFixture> {
   let requests = 0;
   const server = createServer(async (request, response) => {
+    if (request.method === "GET" && request.url === "/healthz") {
+      reply(response, 200, { ok: true });
+      return;
+    }
     if (request.method !== "POST" || request.url !== "/vep") {
       reply(response, 404, { error: "not_found" });
       return;
@@ -64,7 +69,7 @@ export async function startVepFixture(failuresBeforeSuccess = 2): Promise<VepFix
   });
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolve);
+    server.listen(port, "127.0.0.1", resolve);
   });
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("VEP fixture did not bind a TCP port");
@@ -79,4 +84,14 @@ export async function startVepFixture(failuresBeforeSuccess = 2): Promise<VepFix
     requests: () => requests,
     close: () => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())),
   };
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const port = Number(process.argv[2] ?? "8792");
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("fixture port must be an integer from 1 to 65535");
+  const fixture = await startVepFixture(2, port);
+  console.log(`VEP fixture listening on http://127.0.0.1:${port}`);
+  const close = async () => { await fixture.close(); process.exit(0); };
+  process.once("SIGINT", () => { void close(); });
+  process.once("SIGTERM", () => { void close(); });
 }

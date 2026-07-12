@@ -82,7 +82,7 @@ instance.closeSync();
 
 <summary>
 
-Output: cell-1
+JSON output: cell-1
 </summary>
 
 ``` json

@@ -55,19 +55,26 @@ ${image}${caption}
   return `<pre><code>${escapeHtml(value)}</code></pre>`;
 };
 var renderCellOutput = (cell, events, context) => {
+  if (!cell.output) return "";
   const cellEvents = events.filter((event) => event.cell === cell.id);
   if (cellEvents.length === 0) return "";
-  const body = cellEvents.map((event) => renderEvent(event, context)).join("\n");
-  return [
-    `<details class="pi-bio-output">`,
-    `<summary>Output: ${escapeHtml(cell.id)}</summary>`,
-    "",
-    body,
-    "",
-    "</details>"
-  ].join("\n");
+  return cellEvents.map((event) => {
+    const body = renderEvent(event, context);
+    if (event.kind === "markdown" || event.kind === "figure") return body;
+    const label = event.kind === "json" ? "JSON output" : "Output";
+    return [
+      `<details class="pi-bio-output">`,
+      `<summary>${label}: ${escapeHtml(cell.id)}</summary>`,
+      "",
+      body,
+      "",
+      "</details>"
+    ].join("\n");
+  }).join("\n");
 };
-var sourceForOutput = (source) => {
+var sourceForOutput = (cell) => {
+  if (!cell.echo) return "";
+  const source = cell.sourceVerbatim;
   for (const language of [
     "ts",
     "typescript",
@@ -80,6 +87,17 @@ var sourceForOutput = (source) => {
     }
   }
   return source;
+};
+var optionIsFalse = (value) => value === false || value === "false";
+var cellVisibility = (options) => {
+  if (optionIsFalse(options?.include)) return {
+    echo: false,
+    output: false
+  };
+  return {
+    echo: !optionIsFalse(options?.echo),
+    output: !optionIsFalse(options?.output)
+  };
 };
 var workerSource = (cells) => {
   const cellBlocks = cells.map((cell) => [
@@ -95,14 +113,14 @@ var workerSource = (cells) => {
     "await new Promise((resolve) => setImmediate(resolve));"
   ].join("\n")).join("\n\n");
   return `
-import { AsyncLocalStorage } from "node:async_hooks";
-import { spawnSync } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { AsyncLocalStorage as __PiBioAsyncLocalStorage } from "node:async_hooks";
+import { spawnSync as __piBioSpawnSync } from "node:child_process";
+import { writeFileSync as __piBioWriteFileSync } from "node:fs";
 const __piBioEvents = [];
 let __piBioCell = "process";
 let __piBioError;
 const __piBioResultFile = process.argv[2];
-const __piBioContext = new AsyncLocalStorage();
+const __piBioContext = new __PiBioAsyncLocalStorage();
 const __piBioEncode = (value) => {
   if (typeof value === "string") return value;
   try {
@@ -133,7 +151,7 @@ const __piBioRunProcess = (language, source) => {
       ? ["python3", ["-"], source]
       : ["bash", ["--noprofile", "--norc", "-e", "-o", "pipefail", "-c", source], undefined];
   const [program, args, input] = command;
-  const result = spawnSync(program, args, {
+  const result = __piBioSpawnSync(program, args, {
     encoding: "utf8",
     input,
     maxBuffer: ${PROCESS_MAX_BUFFER},
@@ -177,7 +195,7 @@ process.on("uncaughtException", __piBioFail);
 process.on("unhandledRejection", __piBioFail);
 process.on("exit", () => {
   try {
-    writeFileSync(__piBioResultFile, JSON.stringify({ events: __piBioEvents, error: __piBioError }), "utf8");
+    __piBioWriteFileSync(__piBioResultFile, JSON.stringify({ events: __piBioEvents, error: __piBioError }), "utf8");
   } catch {
     // The parent reports a missing result file with the captured process output.
   }
@@ -311,11 +329,15 @@ var engine = {
       const chunks = await quarto.markdownRegex.breakQuartoMd(options.target.markdown);
       const cells = [];
       for (const cell of chunks.cells) {
-        if (isPiBioCell(cell)) cells.push({
-          id: `cell-${cells.length + 1}`,
-          language: cellLanguage(cell),
-          source: cell.source.value
-        });
+        if (isPiBioCell(cell)) {
+          cells.push({
+            id: `cell-${cells.length + 1}`,
+            language: cellLanguage(cell),
+            source: cell.source.value,
+            sourceVerbatim: cell.sourceVerbatim.value,
+            ...cellVisibility(cell.options)
+          });
+        }
       }
       if (cells.length === 0) {
         return {
@@ -342,14 +364,16 @@ var engine = {
       const processed = [];
       let cellIndex = 0;
       for (const cell of chunks.cells) {
-        processed.push(sourceForOutput(cell.sourceVerbatim.value));
         if (isPiBioCell(cell)) {
           const sourceCell = cells[cellIndex++];
+          processed.push(sourceForOutput(sourceCell));
           const output = renderCellOutput(sourceCell, runtime.events, renderContext);
           if (output) processed.push(`
 
 ${output}
 `);
+        } else {
+          processed.push(cell.sourceVerbatim.value);
         }
       }
       return {

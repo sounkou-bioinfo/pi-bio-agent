@@ -117,8 +117,11 @@ declared inputs, receipts, and replayable evidence.
    neighborhood:
 
    ```sh
-   pi-bio-agent graph-window --db store.duckdb --table bio_edges_as_of --start "run:<id>" --direction both
+   pi-bio-agent graph-window --db store.duckdb --start "run:<id>" --direction both
    ```
+
+   With no `--table`, a `bio_observations` ledger is projected to its latest `bio_edges_as_of` table automatically.
+   Name `--table` only when walking an already edge-shaped external graph or a deliberately materialized snapshot.
 
    If the result includes a `continuation.pointer.uri`, resume with:
 

@@ -175,7 +175,7 @@ piBio.json({
 
 <summary>
 
-Output: cell-1
+JSON output: cell-1
 </summary>
 
 ``` json
@@ -341,7 +341,7 @@ ledger.close();
 
 <summary>
 
-Output: cell-2
+JSON output: cell-2
 </summary>
 
 ``` json

@@ -119,15 +119,33 @@ adapters. That is useful application precedent. Its large specialist/skill surfa
 repository is testing: can many scientific questions collapse into schema discovery, manifest data, SQL/code, and a
 small number of evidence-aware host ports?
 
+[Piclaw](https://github.com/rcarmo/piclaw) is the closest Pi web-host reference. Its implementation embeds Pi SDK
+sessions behind HTTP/SSE, separates substantial pane extensions from timeline-native structured interactions and a
+lightweight browser-event bridge, supports steering/follow-up/session persistence, and uses staged tool discovery to
+conserve context. Those are useful application patterns. The workbench should adopt the pane lifecycle and transport
+separation as graph, artifact, report, and terminal views appear. It should not copy Piclaw's broad built-in catalog or
+introduce a second SQLite message/task state model beside `bio_observations`, jobs, CAS, and Pi session JSONL.
+Piclaw describes itself as a single-user personal assistant. Its authenticated HTTP/SSE/WebSocket endpoints are the
+control plane of that application, not a published host-neutral embedding SDK. Here the public `pi-bio-agent` SDK is
+the programmatic boundary; the narrower Piclaw lesson adopted by the workbench is paired host/browser addons and pane
+lifecycle, not its endpoint inventory or persistence model.
+
 [BioBTree](https://github.com/tamerh/biobtree) is complementary infrastructure rather than a competing agent core.
 Its cross-database mappings, REST/MCP service, and Biolink-typed KGX export can enter as declared resources or a
 foreign graph projection. A real integration should preserve qualifiers, primary knowledge sources, licensing, and
 source versions; a one-line mapping result is not enough evidence for every entailed biomedical relation.
 
-[Claude Science](https://claude.com/product/claude-science) represents the hosted product target: integrated
-scientific search, analysis, and collaboration. The first-party workbench can compete at the application layer while
-remaining open and host-neutral underneath. It should reuse the same public SDK and evidence plane rather than
-forking scientific semantics into UI services.
+[Claude Science](https://www.anthropic.com/news/claude-science-ai-workbench) is the direct product benchmark. Its beta
+combines a coordinating agent and specialists, curated scientific skills/connectors, local/SSH/HPC and on-demand
+compute, session forks, reviewer agents, native scientific artifacts, figure/manuscript iteration, and an auditable
+history. That is the appropriate end-to-end application scope, not a reason to copy its implementation or maintain a
+matching catalog. The first-party workbench should compete across those workflows while remaining open and
+host-neutral underneath, deriving reusable mechanics back into core only after application pressure repeats them.
+
+The first browser slice exercises this direction with Pi session control and clinical evidence/review over the same
+public SDK. Its differentiator is structural: conversations and live UI events are not the evidence store; declared
+relations, compute, receipts, CAS, replay, temporal observations, and graph windows remain independently inspectable
+by Pi, another host, a human, or automation.
 
 The opportunity is an open, reproducible workbench for human, model, and automated actors over the same evidence
 plane. The differentiator is not a larger tool menu. It is compositional SQL/code over declared sources, portable

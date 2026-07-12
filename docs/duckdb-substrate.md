@@ -14,6 +14,8 @@ DuckDB is the default tabular and graph substrate for `pi-bio-agent`.
 - SQL gives the agent a compact, inspectable execution language.
 - Table functions expose bio formats without one-off parsers.
 - Query plans, projection pushdown, filters, joins, and indexes reduce context pressure.
+- Source region/range pushdown selects work efficiently; it is not a substitute for explicit semantic predicates in
+  the consuming SQL. Keep exact chromosome/coordinate filters in the query when the answer depends on that interval.
 - Code/SQL over graph tables is the preferred LLM-graph interaction mode; large graph neighborhoods should be
   queried, not serialized into prompts.
 - Results can be surfaced to R, Python, CLI, Pi tools, or future services.
@@ -53,6 +55,19 @@ The host still owns egress, extension provisioning, TLS material, credentials, a
 fails closed when the extension is absent; it does not install or silently replace the transport. The library records
 the declared source, host capability/profile receipt, run result, and retry/failure outcome where the host supplies
 the run store and CAS.
+
+Remote data is not limited to HTTP-shaped APIs. DuckDB's official MySQL and Postgres extensions can attach a
+host-admitted foreign catalog read-only; `duckdb.sql_materialize` then queries it with ordinary SQL. The host owns
+extension provisioning, egress, credentials, and `ATTACH`. The manifest records the remote database/release as a
+declared source and contains only the source query. `examples/connectors/ensembl-mysql.json` exercises this against
+the release-pinned Ensembl human core database. Do not add a source-specific resolver where a foreign catalog and
+schema discovery already close the gap.
+
+Foreign-catalog references are explicit ambient host inputs, not manifest resource outputs. Resource forcing follows
+unqualified and `main`-qualified local tables while leaving a qualified relation such as `ensembl.gene` to the
+host-attached catalog. Local schema probes use `pragma_table_info` rather than unscoped `information_schema` scans;
+the latter can enumerate remote metadata after an attach. For selective MySQL queries, the host should enable
+DuckDB's filter pushdown or use `mysql_query` when the complete join must execute on the remote server.
 
 ## Stable views
 
@@ -107,6 +122,7 @@ ontology_mappings
 2. Prefer a scoped read-only SQL query before dumping data into context.
 3. Do not hide semantics in filenames or JSON blobs when a typed edge/table should exist.
 4. Always record assembly and coordinate system for genomic spans.
-5. Always preserve provenance for derived facts.
-6. For graph inference, prefer graph-as-SQL/code over graph-as-prompt. Prompt text is the instruction channel, not
+5. Treat file/extension range pushdown as an optimization and state exact interval semantics in SQL.
+6. Always preserve provenance for derived facts.
+7. For graph inference, prefer graph-as-SQL/code over graph-as-prompt. Prompt text is the instruction channel, not
    the graph transport.

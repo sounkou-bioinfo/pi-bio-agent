@@ -1,14 +1,17 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createWorkbenchApi } from "../src/api/app.js";
+import { createClinicalWorkbenchAddon, createWorkbenchApi } from "../src/api/app.js";
 import { loadRecordedGroundingRuntime } from "../src/recorded-grounding.js";
 import { localMonarchFixtureRuntime } from "../src/monarch-host.js";
 import { localCandidateVariantSearchRuntime } from "../src/candidate-variant-search.js";
 import { startVepFixture } from "./vep-fixture.js";
+import { fsCasStore, openBioStore, recordArtifactReference } from "pi-bio-agent";
+import { createArtifactWorkbenchAddon } from "../src/artifact-addon.js";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const fixtureRoot = join(repoRoot, "examples", "clinical-genomics");
@@ -21,14 +24,15 @@ async function appFixture() {
   });
   const vep = await startVepFixture();
   return {
-    app: createWorkbenchApi({
+    app: createWorkbenchApi({ addons: [createClinicalWorkbenchAddon({
       clinicalWorkspace: workspace,
       grounding: await loadRecordedGroundingRuntime(join(workspace, "data", "grounding_proposals.json")),
       hypotheses: localMonarchFixtureRuntime(workspace),
       variantSearch: localCandidateVariantSearchRuntime(workspace),
       vep: vep.runtime,
       clock: () => "2026-07-05T12:00:00Z",
-    }),
+    }), createArtifactWorkbenchAddon(workspace)] }),
+    workspace,
     close: vep.close,
   };
 }
@@ -45,6 +49,8 @@ test("OpenAPI and runtime validation share the clinical analysis schemas", async
     };
     assert.ok(document.paths["/v1/clinical-analyses"]);
     assert.ok(document.paths["/v1/clinical-analyses/{analysisId}"]);
+    assert.ok(document.paths["/v1/artifacts"]);
+    assert.ok(document.paths["/v1/artifacts/{digest}/content"]);
     assert.ok(document.components.schemas.EvidencePacket);
     assert.equal(JSON.stringify(document).includes("exampleDir"), false, "host workspace paths are not request data");
     assert.equal(JSON.stringify(document).includes("storePath"), false, "host store paths are not response data");
@@ -59,6 +65,47 @@ test("OpenAPI and runtime validation share the clinical analysis schemas", async
 
     const invalidId = await app.request("/v1/clinical-analyses/bad$id");
     assert.equal(invalidId.status, 400);
+  } finally {
+    await fixture.close();
+  }
+});
+
+test("artifact addon projects ledger references and serves verified CAS bytes", async () => {
+  const fixture = await appFixture();
+  try {
+    const bytes = Buffer.from("<svg xmlns='http://www.w3.org/2000/svg' width='120' height='60'><rect width='120' height='60' fill='white'/><path d='M10 50 L45 20 L80 35 L110 10' stroke='#176b50' fill='none'/></svg>");
+    const digest = createHash("sha256").update(bytes).digest("hex");
+    const cas = fsCasStore(join(fixture.workspace, ".pi", "bio-agent", "cas"));
+    await cas.put({ algorithm: "sha256", digest }, bytes);
+    const store = await openBioStore(fixture.workspace);
+    try {
+      await recordArtifactReference(store.conn, {
+        artifact: { digest: `sha256:${digest}`, mediaType: "image/svg+xml", semanticRole: "figure", sizeBytes: bytes.length },
+        subjectId: "run:artifact-api-proof",
+        predicate: "produces",
+        recordedAt: "2026-07-05T12:00:00Z",
+        attrs: { plotting_system: "fixture" },
+      });
+    } finally {
+      store.close();
+    }
+
+    const list = await fixture.app.request("/v1/artifacts");
+    assert.equal(list.status, 200);
+    const body = await list.json() as { artifacts: Array<{ digest: string; mediaType: string; sourceNode: string; contentUrl: string }> };
+    const artifact = body.artifacts.find((item) => item.digest === `sha256:${digest}`);
+    assert.equal(artifact?.mediaType, "image/svg+xml");
+    assert.equal(artifact?.sourceNode, "run:artifact-api-proof");
+    assert.equal(artifact?.contentUrl, `/v1/artifacts/${digest}/content`);
+
+    const content = await fixture.app.request(artifact!.contentUrl);
+    assert.equal(content.status, 200);
+    assert.equal(content.headers.get("content-type"), "image/svg+xml");
+    assert.match(content.headers.get("content-security-policy") ?? "", /sandbox/);
+    assert.deepEqual(Buffer.from(await content.arrayBuffer()), bytes);
+
+    const invalid = await fixture.app.request("/v1/artifacts/not-a-digest/content");
+    assert.equal(invalid.status, 400);
   } finally {
     await fixture.close();
   }

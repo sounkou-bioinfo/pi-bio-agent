@@ -60,7 +60,8 @@
     "./hosts": {
       "types": "./dist/hosts/index.d.ts",
       "import": "./dist/hosts/index.js"
-    }
+    },
+    "./pi-extension": "./extensions/pi-coding-agent/index.ts"
   },
   "bin": {
     "pi-bio-agent": "bin/pi-bio-agent.mjs"
@@ -73,11 +74,11 @@
     "check:docs": "node scripts/generate-docs-index.mjs --check",
     "readme:qmd": "npm run build && quarto render README.qmd --to gfm --output README.md",
     "patterns:qmd": "npm run build && npm run build:quarto && bash -lc 'for f in blackboard-run blackboard-shared ducknng-fs ducknng-rpc-mutate map-reduce-labeling memory-over-ducknng nng-job-runner nng-pair nng-survey pipeline-fanout sdk-host-embedding substrate-skill; do quarto render examples/patterns/$f.qmd --to gfm || exit 1; done'",
-    "check:patterns:qmd": "npm run patterns:qmd && git diff --quiet -- examples/patterns/*.md",
+    "check:patterns:qmd": "node scripts/check-generated-files.mjs examples/patterns/*.md -- npm run patterns:qmd",
     "application:clinical": "npm run build && npm run build:workbench && npm run build:quarto && quarto render packages/workbench/examples/clinical-genomics/application.qmd --to gfm",
     "application:method-selection": "npm run build && npm run build:quarto && quarto render packages/workbench/examples/method-selection/application.qmd --to gfm",
     "application:method-selection-agent": "npm run build && npm run build:quarto && quarto render packages/workbench/examples/method-selection/agent.qmd --to gfm",
-    "check:application:qmd": "npm run application:clinical && npm run application:method-selection && git diff --quiet -- packages/workbench/examples/clinical-genomics/application.md packages/workbench/examples/method-selection/application.md",
+    "check:application:qmd": "node scripts/check-generated-files.mjs packages/workbench/examples/clinical-genomics/application.md -- npm run application:clinical && node scripts/check-generated-files.mjs packages/workbench/examples/method-selection/application.md -- npm run application:method-selection",
     "check:executable-docs": "npm run check:patterns:qmd && npm run check:application:qmd",
     "readme:examples": "npm run build && node scripts/generate-example-readmes.mjs",
     "check:examples": "npm run build && node scripts/generate-example-readmes.mjs --check",

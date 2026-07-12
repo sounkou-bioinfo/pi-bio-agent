@@ -100,8 +100,13 @@ Cross-cutting constraints from this table are currently enforced by tests in:
 
 - Scheduler backends for SLURM, `targets`, `mirai`, Modal, or another queue should implement `AsyncRunner` and the
   existing checkpoint contract.
-- Runtime steer/interrupt/abort hooks should reduce host events to `recordHostEvent`; core should not invent an
-  event taxonomy.
+- The workbench now has a Pi-backed interactive host port for open/resume, prompt/steer/follow-up, abort, bounded
+  transcripts, and ephemeral activity. Pi's extension already reduces durable input/lifecycle facts to
+  `recordHostEvent` and imports the session transcript. Do not promote the browser event vocabulary into core. A
+  second host adapter is the next test of whether any control contract beyond the current application port is shared.
+- Clinical Evidence and Artifacts now exercise a host-approved `WorkbenchAddon` API/browser pair. Do not broaden it
+  into an installation/catalog/configuration system until another deployment needs runtime discovery; do not add
+  focus/resize/dock hooks until an editor, terminal, or comparable mounted surface requires them.
 - External systems such as `rv`, ChEMBL, OpenTargets, BioBTree, Nextflow, or FHIR should first enter as resources,
   SQL materialization, graph projection, or `compute.run`.
 - Cross-source node normalization should be added after two real KGs repeat the same identifier/category/label

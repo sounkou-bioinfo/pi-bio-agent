@@ -44,7 +44,9 @@ duckdb .pi/bio-agent/store.duckdb \
    LIMIT 20"
 ```
 
-Graph edges:
+`bio_edges_as_of` is a projection, not a second source of truth. The `graph-window` command below materializes its
+latest state when the database contains `bio_observations` but no default graph table. After that, direct SQL can
+inspect the projection:
 
 ```sh
 duckdb .pi/bio-agent/store.duckdb \
@@ -71,7 +73,6 @@ For graph-shaped rows, prefer a bounded window over dumping a neighborhood into 
 ```sh
 pi-bio-agent graph-window \
   --db .pi/bio-agent/store.duckdb \
-  --table bio_edges_as_of \
   --start "run:<runId>" \
   --direction both \
   --limit 50

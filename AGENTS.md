@@ -50,6 +50,14 @@ Instructions for coding agents working in this repository.
 - Do not add a second lifecycle, resolver, transport, graph model, auth layer, or schema merely because the first
   consumer finds the existing surface inconvenient. Name the concrete consumers, reconcile the contracts, then add
   one shared primitive with pattern and tests.
+- Interactive application surfaces may inject agent-host adapters, but host conversation state is not scientific
+  state. Keep Pi-specific session and dynamic-tool APIs in the workbench's Pi adapter; exchange run ids, CAS refs,
+  graph windows, checkpoints, and observations across the core boundary. Promote a generic control primitive only
+  after another host repeats the same motion.
+- `WorkbenchAddon` is an application contract, not a core extension system. It pairs host-approved API registration
+  with one browser module while continuing to use the public ledger/CAS/run SDK. Clinical Evidence and Artifacts are
+  the concrete instances. Do not add an installer, catalog, private addon store, or arbitrary browser code supplied
+  by requests; the embedding host chooses and serves addon code.
 - `npm run check` checks core. `npm run check:all` checks core, workbench, and Quarto engine. Root CI is the canonical
   workspace gate; do not add nested package workflows.
 - npm scripts are a flat namespace; the existing `check:`, `build:`, `readme:`, `provision:`, `install:`, and
@@ -115,6 +123,9 @@ Instructions for coding agents working in this repository.
 - Hard-earned constraints must not live only in comments or tests. When code discovers a subtle boundary, lift it into the owning existing doc with links to the code and test that prove it.
 - Keep these lessons especially visible: parser/AST-backed SQL validation and hermeticity, `duckdb.sql_materialize` as the general materialization primitive, ducknng `ncurl` fanout and retry semantics, RPC-backed shared state, CAS versus freshness, and async compute durability versus receipt/CAS evidence.
 - Also surface graph-inference lessons: prompting over serialized graph context is the baseline to beat, not the design target. Code/SQL over graph tables is the preferred interaction mode, especially for long text, high-degree graphs, heterophily, partial labels, or noisy/missing structure.
+- Foreign SQL catalogs are already part of the DuckDB closure. Qualified relations such as `ensembl.gene` are
+  host-attached inputs, not undeclared manifest outputs. Keep local metadata probes on `pragma_table_info` so an
+  attached catalog is not enumerated accidentally, and enable source-side filter pushdown for selective remote joins.
 - Prefer a short "lesson" paragraph in `docs/design.md`, `docs/refinments.md`, or the relevant example README over another standalone doc.
 - If the lesson depends on a negative result, say that directly. Example: `ducknng_ncurl_table` is right for one response table; chunk fanout needs scalar AIO handles plus host orchestration today.
 

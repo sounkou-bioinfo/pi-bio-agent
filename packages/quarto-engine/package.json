@@ -14,8 +14,8 @@
     "render:example": "npm run build && quarto render examples/basic.qmd --to markdown --output output.md",
     "readme:qmd": "npm run build && quarto render README.qmd --to gfm --output README.md",
     "test": "node scripts/test-engine.mjs",
-    "check:generated": "npm run build && git diff --exit-code -- ../../_extensions/pi-bio/pi-bio.js",
-    "check:readme": "npm run readme:qmd && git diff --exit-code -- README.md",
+    "check:generated": "node scripts/test-engine.mjs --check-generated",
+    "check:readme": "node scripts/test-engine.mjs --check-readme",
     "check": "npm run check:generated && npm test && npm run check:readme"
   },
   "dependencies": {

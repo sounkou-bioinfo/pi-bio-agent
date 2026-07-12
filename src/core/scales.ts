@@ -24,7 +24,11 @@ export async function materializeScaleMembers(registry: BioRegistry, conn: SqlCo
   // persistent dbPath replaying a prior run: same columns, safe to CREATE OR REPLACE) from a RESOURCE that
   // clobbered the name (a different schema): the latter fails closed rather than being silently overwritten (which
   // would hand the operation the WRONG table / misleading binder errors). Manifests must not target `scale_members`.
-  const cols = await conn.all<{ column_name: string }>(`SELECT column_name FROM information_schema.columns WHERE table_name = ?`, [SCALE_MEMBERS_TABLE]);
+  await conn.run(`CREATE TABLE IF NOT EXISTS ${SCALE_MEMBERS_TABLE} (scale_id TEXT, member_id TEXT, label TEXT, rank INTEGER, PRIMARY KEY (scale_id, member_id))`);
+  const cols = await conn.all<{ column_name: string }>(
+    "SELECT name AS column_name FROM pragma_table_info(?) ORDER BY cid",
+    [SCALE_MEMBERS_TABLE],
+  );
   if (cols.length > 0) {
     const have = new Set(cols.map((c) => c.column_name.toLowerCase()));
     const ours = ["scale_id", "member_id", "label", "rank"];

@@ -191,6 +191,35 @@ Agent sessions, run events, job checkpoints, host events, and domain facts may e
 ingestion adapters. Their schemas differ, but their temporal and provenance mechanics do not. Human-readable note
 files are optional derived views.
 
+## Interactive workbench boundary
+
+The browser has two planes that must not collapse into each other:
+
+```text
+browser conversation and activity -> AgentHostPort -> Pi SDK (first adapter)
+browser evidence and review        -> public SDK -> runs / jobs / CAS / observations / graph
+```
+
+The agent-host port owns open/resume, prompt, steer, follow-up, abort, bounded transcript, and ephemeral activity
+subscription. Its event buffer exists for responsive presentation and reconnect; it is not the scientific ledger.
+The browser hands durable ids and CAS/graph references to an agent, and reloads scientific state from the evidence
+plane. This keeps the application usable when the actor is Pi, another model host, a human, or automation.
+
+Pi's runtime tool registration and active-tool mutation are useful implementation details. They can progressively
+disclose coarse capabilities without restarting a session and, where the provider supports it, without invalidating
+the whole prompt cache. They do not justify a generic core tool-mutation API or a tool per source/question. A future
+host-neutral capability profile must be derived from at least one additional host; until then it stays in the Pi
+adapter.
+
+The browser distinguishes three application surfaces, following the useful separation proven by Piclaw: persistent
+panes for substantial viewers/editors, durable timeline or evidence records for approvals and receipts, and SSE only
+for transient live signals. The first `WorkbenchAddon` contract was derived only after two paired application cases
+existed: Clinical Evidence contributes analysis routes plus a pane, and Artifacts contributes ledger/CAS routes plus a
+figure/report pane. The host approves and serves each browser module and registers its API contribution at startup.
+There is deliberately no runtime catalog, browser-supplied module path, addon KV store, or new scientific storage
+model. Agent control remains shell infrastructure. Add focus/resize, dock placement, or installation only when a real
+editor/terminal or deployment repeats those needs.
+
 ## Typed judgment
 
 Deterministic code should mint identifiers, parse formats, compute candidates, apply mappings, and produce diffs.

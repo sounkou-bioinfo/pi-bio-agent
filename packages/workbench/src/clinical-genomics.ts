@@ -76,15 +76,20 @@ export interface VepAnnotationRuntime {
 
 /** Default CLI/server composition; library callers should inject their own endpoint and host policy. */
 export function defaultVepAnnotationRuntime(): VepAnnotationRuntime {
+  const url = process.env.PI_BIO_VEP_URL ?? "https://rest.ensembl.org/vep/human/region";
+  const protocol = new URL(url).protocol;
+  if (protocol !== "http:" && protocol !== "https:") throw new Error("PI_BIO_VEP_URL must use http or https");
   return {
-    url: process.env.PI_BIO_VEP_URL ?? "https://rest.ensembl.org/vep/human/region",
+    url,
     headersJson: process.env.PI_BIO_VEP_HEADERS_JSON ?? "[{\"name\":\"Content-Type\",\"value\":\"application/json\"},{\"name\":\"Accept\",\"value\":\"application/json\"}]",
     ...(process.env.PI_BIO_VEP_PROFILE_ID ? { profileId: process.env.PI_BIO_VEP_PROFILE_ID } : {}),
     sourceId: process.env.PI_BIO_VEP_SOURCE_ID ?? "https://rest.ensembl.org/vep/human/region",
     sourceVersion: process.env.PI_BIO_VEP_SOURCE_VERSION ?? "live",
     duckdbInitSql: [
       "LOAD ducknng",
-      "SET VARIABLE vep_tls_config_id = ducknng_tls_config_from_pem(NULL, NULL, NULL, '', 1)",
+      protocol === "https:"
+        ? "SET VARIABLE vep_tls_config_id = ducknng_tls_config_from_pem(NULL, NULL, NULL, '', 1)"
+        : "SET VARIABLE vep_tls_config_id = 0",
     ],
   };
 }

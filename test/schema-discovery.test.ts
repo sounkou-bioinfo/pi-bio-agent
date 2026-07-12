@@ -22,6 +22,15 @@ describe("schema discovery (no record-type taxonomy)", () => {
     assert.deepEqual(cols.map((c) => c.name), ["variant_key", "allele_frequency"]);
   });
 
+  test("describeTable reads the local relation when another catalog is attached", async () => {
+    const conn = await memoryConn();
+    await conn.run("CREATE TABLE t AS SELECT 1 AS local_column");
+    await conn.run("ATTACH ':memory:' AS foreign_catalog");
+    await conn.run("CREATE TABLE foreign_catalog.t AS SELECT 1 AS foreign_column");
+    const cols = await describeTable(conn, "t");
+    assert.deepEqual(cols.map((c) => c.name), ["local_column"]);
+  });
+
   test("assertColumnsPresent passes for present columns and fails clearly otherwise", async () => {
     const conn = await memoryConn();
     await conn.run("CREATE TABLE t AS SELECT 'k' AS variant_key");

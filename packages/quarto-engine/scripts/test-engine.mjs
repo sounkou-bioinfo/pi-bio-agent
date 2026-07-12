@@ -6,9 +6,44 @@ import { fileURLToPath } from "node:url";
 
 const execFileAsync = promisify(execFile);
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+const workspaceRoot = join(root, "../..");
+const generatedEngine = join(workspaceRoot, "_extensions/pi-bio/pi-bio.js");
 const output = join(root, "output.md");
 const failureDocument = join(root, ".quarto-engine-failure.qmd");
 const failureOutput = join(root, ".quarto-engine-failure.md");
+const visibilityDocument = join(root, ".quarto-engine-visibility.qmd");
+const visibilityOutput = join(root, ".quarto-engine-visibility.md");
+
+if (process.argv.includes("--check-generated")) {
+  const before = await fs.readFile(generatedEngine, "utf8");
+  await execFileAsync("quarto", ["call", "build-ts-extension", "packages/quarto-engine/src/pi-bio.ts"], {
+    cwd: workspaceRoot,
+    maxBuffer: 1024 * 1024,
+  });
+  const after = await fs.readFile(generatedEngine, "utf8");
+  if (after !== before) {
+    await fs.writeFile(generatedEngine, before, "utf8");
+    throw new Error("generated pi-bio engine is stale; run npm run build --workspace=packages/quarto-engine");
+  }
+  console.log("pi-bio-quarto: generated engine is current");
+  process.exit(0);
+}
+
+if (process.argv.includes("--check-readme")) {
+  const readme = join(root, "README.md");
+  const before = await fs.readFile(readme, "utf8");
+  await execFileAsync("quarto", ["render", "README.qmd", "--to", "gfm", "--output", "README.md"], {
+    cwd: root,
+    maxBuffer: 1024 * 1024,
+  });
+  const after = await fs.readFile(readme, "utf8");
+  if (after !== before) {
+    await fs.writeFile(readme, before, "utf8");
+    throw new Error("generated Quarto README is stale; run npm run readme:qmd --workspace=packages/quarto-engine");
+  }
+  console.log("pi-bio-quarto: generated README is current");
+  process.exit(0);
+}
 
 await execFileAsync("quarto", ["render", "examples/basic.qmd", "--to", "markdown", "--output", "output.md"], {
   cwd: root,
@@ -40,6 +75,44 @@ for (const needle of [
 
 if (rendered.includes("Error:") || rendered.includes("Hello from pi-bio")) {
   throw new Error("Quarto engine output contains an unexpected failure/example marker");
+}
+
+await fs.writeFile(visibilityDocument, `---
+title: "Quarto engine visibility"
+engine: pi-bio
+---
+
+\`\`\`{ts .pi-bio}
+#| include: false
+const hiddenValue = "state-survives-hidden-cell";
+console.log("HIDDEN_OUTPUT");
+\`\`\`
+
+\`\`\`{ts .pi-bio}
+#| echo: false
+piBio.markdown(hiddenValue);
+\`\`\`
+
+\`\`\`{ts .pi-bio}
+#| output: false
+console.log("SUPPRESSED_OUTPUT");
+\`\`\`
+`, "utf8");
+try {
+  await execFileAsync("quarto", ["render", ".quarto-engine-visibility.qmd", "--to", "markdown", "--output", ".quarto-engine-visibility.md"], {
+    cwd: root,
+    maxBuffer: 1024 * 1024,
+  });
+  const visibility = await fs.readFile(visibilityOutput, "utf8");
+  if (!visibility.includes("state-survives-hidden-cell")) throw new Error("hidden cell state was not available downstream");
+  for (const forbidden of ["HIDDEN_OUTPUT", "piBio.markdown(hiddenValue)"]) {
+    if (visibility.includes(forbidden)) throw new Error(`Quarto visibility option leaked '${forbidden}'`);
+  }
+  if (!visibility.includes('console.log("SUPPRESSED_OUTPUT")')) throw new Error("output=false unexpectedly hid source");
+  if (visibility.split("SUPPRESSED_OUTPUT").length !== 2) throw new Error("output=false leaked runtime output");
+} finally {
+  await fs.rm(visibilityDocument, { force: true });
+  await fs.rm(visibilityOutput, { force: true });
 }
 
 let previous = -1;

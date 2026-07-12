@@ -16,6 +16,33 @@ Instructions for coding agents working in this repository.
   or compute, receipts, CAS, and recorded judgments, not from generated prose.
 - This is pre-1.0 work. Delete false models instead of preserving them behind compatibility shims.
 
+## Browser And Agent Hosts
+
+- The browser is an application surface over two distinct planes. `AgentHostPort` controls an interactive host
+  session (`open/resume`, prompt, steer, follow-up, abort, bounded transcript, ephemeral activity). Scientific state
+  remains in runs, jobs, CAS, receipts, graph relations, and observations. Never make the browser event stream the
+  only record of a scientific claim, result, approval, or artifact.
+- Pi is the first `AgentHostPort` adapter, not the workbench protocol. Keep Pi SDK types and mechanics inside the Pi
+  adapter. A Codex, MCP, CLI, human, or automation surface should be able to implement the same session intent or use
+  the evidence plane without pretending to support Pi-specific methods.
+- Pi's dynamic `registerTool` / `setActiveTools` behavior is an adapter optimization for progressive disclosure and
+  application state transitions. Do not expose raw tool mutation over the browser API and do not use it to recreate
+  a per-source or per-question tool catalog. Promote a host-neutral capability-activation contract only after a
+  second host exhibits the same need.
+- The host fixes cwd, extension paths, credentials, model policy, tools, filesystem access, and network/compute
+  grants. Browser requests address opaque session ids and must never supply host paths or executable extension code.
+- The reference server binds loopback. Pi and its extensions run with the permissions of the server process; CSP and
+  same-origin HTTP are not a process sandbox. A remote or multi-user deployment needs explicit authentication, TLS,
+  admission policy, and an isolation boundary chosen by the operator.
+- Browser changes require Playwright coverage over the real local server and a real Pi session startup. Keep
+  scientific fixtures deterministic, test desktop and mobile geometry, and inspect screenshots before declaring the
+  surface complete.
+- `WorkbenchAddon` is the paired application contribution contract derived from Clinical Evidence and CAS-backed
+  Artifacts: the host registers its API routes and advertises a same-origin browser module; that module mounts into a
+  tab and may implement activate/deactivate/dispose. Addons use the public SDK and canonical store. They do not own a
+  private database, install themselves, accept browser-supplied module paths, or turn transient SSE events into
+  durable state. Add focus/resize or dock semantics only when a concrete editor/terminal surface needs them.
+
 ## Thin Binding Rule
 
 - Manifests and SQL are the workbench program. Keep them declarative and small: one template is authored and the
@@ -85,6 +112,13 @@ Instructions for coding agents working in this repository.
   judgment.
 - Live sources, volatile SQL, host effects, auth profiles, and region reads must be recorded honestly. Host policy owns
   network, filesystem, credentials, process isolation, and extension provisioning; this repository is not a sandbox.
+
+## Clinical Benchmarks
+
+- Keep substrate correctness, variant-classification concordance, case prioritization, and retrospective diagnostic
+  yield as separate claims and test suites. A hermetic fixture is not a clinical benchmark.
+- Ma et al. 2025 is a 300-variant ACMG evidence/classification benchmark described in Supplementary Tables 12-13;
+  do not replace its exact rows with a new ClinVar sample and call that a reproduction.
 
 ## API And Checks
 

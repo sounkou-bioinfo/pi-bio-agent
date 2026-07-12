@@ -6,6 +6,27 @@ is the plan of record; [`docs/refinments.md`](docs/refinments.md) tracks open it
 
 # pi-bio-agent (development version)
 
+## Workbench
+
+- The clinical application now separates its hermetic substrate proof from variant-level ACMG concordance and
+  retrospective reanalysis-yield benchmarks.
+- Added the first end-to-end browser workbench slice. A host-neutral `AgentHostPort` now fronts a Pi SDK adapter for
+  persistent session open/resume, prompt/steer/follow-up, abort, bounded transcript, and SSE activity. The browser
+  composes that control plane with the existing clinical evidence packet and review queue while keeping runs, CAS,
+  receipts, checkpoints, graph, and observations as the durable scientific state.
+- Added real browser infrastructure with Playwright and Chromium. The package gate starts the loopback server, opens a
+  real Pi session without a model turn, checks SSE and evidence rendering, executes one real fixture-backed clinical
+  analysis through DuckNNG, verifies its CAS read-back, and checks desktop/mobile geometry.
+- Active Pi sessions can now be explicitly closed through the API/browser while retaining their persisted history,
+  and reconnect pages report when their cursor predates the bounded activity ring.
+- Added the host-approved `WorkbenchAddon` pair derived from two real consumers. Clinical Evidence registers its API
+  and browser pane; Artifacts projects current ledger references, serves verified CAS bytes under a sandbox CSP, and
+  renders real plot/report artifacts without adding a second store or runtime addon catalog.
+- VEP host composition now uses TLS only for HTTPS endpoints, so an injected local HTTP service follows the same
+  DuckNNG fanout path without receiving an incompatible TLS handle.
+- The reference server now binds loopback and emits a restrictive same-origin CSP. This is an HTTP exposure boundary,
+  not a sandbox; Pi and its tools retain the launching process's permissions.
+
 ## Concurrency, security, and correctness
 
 - Typed memory links are now canonicalized and validated at the public SDK write boundary before DuckDB is touched;
@@ -25,6 +46,10 @@ is the plan of record; [`docs/refinments.md`](docs/refinments.md) tracks open it
 
 ## Documentation
 
+- Added a live Ensembl 116 connector over DuckDB's official MySQL extension, proving that connector manifests close
+  over host-attached foreign SQL catalogs as well as HTTP APIs without a source-specific client or resolver.
+- Resource forcing now distinguishes local manifest outputs from qualified host catalogs, local schema discovery no
+  longer enumerates attached remote metadata, and `graph-window` projects an observation ledger automatically.
 - Consolidated the conceptual model into one architecture checksum and one lineage reference; removed overlapping
   design histories, status ledgers, and the speculative core clinical document. Memory documentation now describes
   the implemented single `bio_observations` source of truth without proposing a second memory system.
@@ -35,6 +60,9 @@ is the plan of record; [`docs/refinments.md`](docs/refinments.md) tracks open it
   distinguish contract mechanics, live compatibility, applications, and biomedical validity.
 - The Quarto engine has one generated workspace artifact and its own README is executable QMD. Private workspace
   packages now consume the root checkout in lockstep instead of pinned historical Git revisions.
+- The root README now executes through that engine instead of custom knitr engines. Quarto cell visibility is
+  honored, document imports cannot collide with generated runtime bindings, and JSON/log output is collapsed while
+  Markdown and figures remain visible.
 - Added a live method-selection application proof: `gpt-5.3-codex-spark` runs with only the packaged skill and CLI,
   authors an operation manifest, and is checked through result, replay, session import, ledger, and graph evidence.
 - Recorded the rendering boundary: Quarto is the publication shell, G2 is the interactive workbench renderer, `ggsql`

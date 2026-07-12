@@ -53,6 +53,12 @@ unhandled rejection still fails the render, but may occur after later
 synchronous code has run; asynchronous work that affects document order
 must be awaited.
 
+Quarto’s `include`, `echo`, and `output` cell options are honored. This
+lets a document keep host-composition code executable but hidden while
+rendering the scientific command and result. Markdown and figures render
+directly; text and JSON outputs are collapsed so logs and structured
+payloads do not dominate the document.
+
 ## Permissions And Containerization
 
 The engine has no built-in permission system. Node cells run with the
@@ -163,7 +169,7 @@ piBio.json({
 
 <summary>
 
-Output: cell-1
+JSON output: cell-1
 </summary>
 
 ``` json

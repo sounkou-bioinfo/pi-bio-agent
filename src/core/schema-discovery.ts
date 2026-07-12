@@ -11,13 +11,24 @@ export interface DiscoveredColumn {
   type: string;
 }
 
-/** Discover a materialized table's columns (information_schema). The positive form of "what shape is this?". */
+function isMissingTableCatalogError(error: unknown): boolean {
+  return error instanceof Error &&
+    error.message.startsWith("Catalog Error: Table with name ") &&
+    error.message.includes(" does not exist!");
+}
+
+/** Discover a materialized table's columns without enumerating attached catalogs. */
 export async function describeTable(conn: SqlConn, table: string): Promise<DiscoveredColumn[]> {
-  const rows = await conn.all<{ column_name: string; data_type: string }>(
-    "SELECT column_name, data_type FROM information_schema.columns WHERE table_name = ? ORDER BY ordinal_position",
-    [table],
-  );
-  return rows.map((r) => ({ name: r.column_name, type: r.data_type }));
+  try {
+    const rows = await conn.all<{ column_name: string; data_type: string }>(
+      "SELECT name AS column_name, type AS data_type FROM pragma_table_info(?) ORDER BY cid",
+      [table],
+    );
+    return rows.map((r) => ({ name: r.column_name, type: r.data_type }));
+  } catch (error) {
+    if (isMissingTableCatalogError(error)) return [];
+    throw error;
+  }
 }
 
 /** Assert a discovered table has the columns a consumer needs. Consumer-local — never a global record type. */
