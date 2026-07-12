@@ -3,7 +3,7 @@ format: gfm
 ---
 
 <!-- README.md is generated from README.qmd — please edit this file, then `npm run readme:qmd`. -->
-<!-- The `pi`, `pattern`, and `biocli` chunks run real commands. Rendering needs a built `dist/`, Pi, and model credentials. -->
+<!-- The `pi` and `biocli` chunks run real commands. Rendering needs a built `dist/`, Pi, and model credentials. -->
 
 ```{r setup, include = FALSE}
 knitr::opts_chunk$set(comment = "")
@@ -95,42 +95,6 @@ knitr::knit_engines$set(biocli = function(options) {
   knitr::asis_output(paste0("``` sh\n", cmd, "\n```\n\n", rendered))
 })
 
-knitr::knit_engines$set(pattern = function(options) {
-  cmd <- paste(options$code, collapse = " ")
-  out <- suppressWarnings(system(paste(cmd, "2>&1"), intern = TRUE))
-  status <- attr(out, "status")
-  out_txt <- sanitize_paths(paste(out, collapse = "\n"))
-  if (!is.null(status) && status != 0) stop("pattern render failed (exit ", status, "): ", cmd, "\n", out_txt)
-  start <- regexpr("\\{\\n  \"pattern\"", out_txt)
-  if (start < 0) stop("pattern render did not print summary JSON:\n", out_txt)
-  summary <- jsonlite::fromJSON(substr(out_txt, start, nchar(out_txt)), simplifyVector = FALSE)
-  artifact_roles <- Filter(function(x) !is.null(x$semanticRole), summary$trainingCorpus$artifactRoles)
-  artifact_roles <- lapply(artifact_roles, function(x) Filter(Negate(is.null), x))
-  proof <- list(
-    observationCounts = summary$observationCounts[c("executes", "invoked_by", "tool_call", "run", "host_event", "job_step_checkpoint")],
-    ducknngProfile = summary$ducknngProfileReceipt[c("version", "receiptChanged", "subjectRestriction")],
-    casMetadata = summary$hostCapabilityRun[c("casMetadataRefs", "artifactCasMetadataRefs")],
-    graphProjection = list(
-      external = summary$externalProjection[c("edgeCount", "closureCount")],
-      internal = list(
-        edgeCountAtLeast4 = summary$internalProjection$edgeCount >= 4,
-        closureCountAtLeast3 = summary$internalProjection$closureCount >= 3
-      )
-    ),
-    trainingCorpus = c(
-      summary$trainingCorpus[c("toolCalls", "runs", "artifacts", "hostEvents", "hostEventLinks", "parquetReadbackRows")],
-      list(artifactRoles = artifact_roles)
-    ),
-    governanceHostEvents = summary$governanceHostEvents[c("count", "linkCount", "kinds", "eventTypes")],
-    sdkConsumer = summary$sdkConsumer[c("publicExportsOnly", "runtimeImports", "packageSource")],
-    queueCancel = summary$queueCancel[c("staleWriteRejected", "resumedPhase")],
-    renvEnvironment = summary$renvEnvironment[c("rVersion", "bioconductor", "envStatus", "artifactRows")]
-  )
-  knitr::asis_output(paste0("``` sh\n", cmd, "\n```\n\n", render_json_output(
-    jsonlite::toJSON(proof, pretty = TRUE, auto_unbox = TRUE),
-    "Pattern proof JSON"
-  )))
-})
 ```
 
 # pi-bio-agent
@@ -437,9 +401,9 @@ guidance; manifests, SQL, receipts, CAS, and observations remain the computation
 
 ## Docs
 
-Start with the [user guide](docs/guide.md): write a manifest, run an operation. Then
-read [design notes](docs/design.md) for the core contracts and [roadmap](docs/roadmap.md)
-for current work. The full [docs index](docs/INDEX.md) is generated from frontmatter.
+Start with the [user guide](docs/guide.md): write a manifest, inspect its schema, and compose a query. Then read the
+[conceptual architecture](docs/design.md), [lineage](docs/lineage.md), and [roadmap](docs/roadmap.md). The full
+[docs index](docs/INDEX.md) is generated from frontmatter.
 
 ## References & lineage
 
@@ -473,22 +437,17 @@ npm run check     # typecheck + tests + docs/readme/examples staleness gates (th
 `npm run provision:ducknng-owned` verifies the owned retry/auth/upload/TLS/RPC surface. Runtime Pi APIs are peer
 dependencies supplied by Pi itself.
 
-### Maintainer proof (pattern)
+### Executable examples
 
-This is executable maintainer evidence, not a product workflow or a biomedical answer source. It runs one compact
-composition of the shipped ledger, graph, host-capability, CAS, compute, and review primitives so changes are tested
-against the substrate rather than only described in prose. Its proof JSON is collapsed in the rendered README.
+The deterministic QMD patterns execute their own SDK, DuckDB, and DuckNNG code and render collapsed results:
 
-Run it from the repository root:
-
-```{pattern}
-npm run pattern:bring-it-home
+```sh
+npm run patterns:qmd
+npm run application:clinical
 ```
 
-It exercises host-event receipts, step checkpoints/resume, SemanticSQL projection,
-ducknng profile receipts, SDK exports, figure/report CAS artifacts, and real process
-compute when R is available. SemanticSQL compatibility is pinned to the concrete generated-view names at upstream
-commit `83503077e867419c18a211d97105d8ead554e947`; it is not a claim of equivalence with every future generator.
+The clinical application is downstream policy, while generic patterns exercise reusable substrate mechanics. The
+full gate rerenders both and rejects stale Markdown.
 
 Run the Pi session trace pattern after installing the extension and configuring an
 image-capable model:

@@ -1,39 +1,138 @@
+# NNG survey quorum
 
 
-# NNG survey topology — multi-provider jury (evidence)
+One surveyor broadcasts a typed evidence question to three separate
+respondent processes. Their deterministic rules stand in for
+heterogeneous providers; the surveyor reduces the responses and abstains
+unless a strict majority exists.
 
-`scripts/nng-survey.mjs` is a **pattern** — the **survey** NNG topology
-(surveyor/respondent) as a *multi-provider jury* (a **generic** reusable
-pattern). One surveyor process broadcasts a question (“classify this
-variant”) to N respondent processes — each a distinct “provider” (a
-different judgment rule standing in for Claude / GPT / a
-deterministic-SQL responder) — then fans-in the answers and takes a
-**quorum**, abstaining when they disagree (our grounding doctrine).
-Fan-out + fan-in — distinct from pair’s 1:1 and blackboard’s broadcast.
+``` ts
+import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import { spawn } from "node:child_process";
+import { promises as fs } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { DuckDBInstance } from "@duckdb/node-api";
+import { resolveDucknngRuntime } from "../../scripts/ducknng-runtime.mjs";
 
-Over ducknng’s SQL socket layer: `open_socket('surveyor'|'respondent')`
-→ `listen`/`dial_socket` → `send_socket_raw` / `recv_socket_raw_aio` +
-`aio_collect`.
+const providers = ["provider-A", "provider-B", "provider-C"];
+const socketPath = join(tmpdir(), `pi-bio-survey-${randomUUID()}.ipc`);
+const url = `ipc://${socketPath}`;
+const { instanceConfig, loadSql } = await resolveDucknngRuntime();
+const instance = await DuckDBInstance.create(":memory:", instanceConfig);
+const connection = await instance.connect();
+await connection.run(loadSql);
+const one = async (sql) => (await connection.runAndReadAll(sql)).getRowObjects()[0];
+const socketId = String((await one("SELECT (ducknng_open_socket('surveyor')).socket_id AS id")).id);
+await one(`SELECT (ducknng_listen_socket(${socketId}, '${url}', 134217728, 0::UBIGINT)).ok AS ok`);
+const send = (value) => one(`SELECT (ducknng_send_socket_raw(${socketId}::UBIGINT, from_hex('${Buffer.from(JSON.stringify(value)).toString("hex")}'), 3000)).ok AS ok`);
+const receive = async () => {
+  const handle = (await one(`SELECT ducknng_recv_socket_raw_aio(${socketId}::UBIGINT, 6000) AS handle`)).handle;
+  const row = await one(`SELECT ok, hex(frame) AS frame FROM ducknng_aio_collect(list_value(${String(handle)}::UBIGINT), 6000)`);
+  return row?.frame ? JSON.parse(Buffer.from(row.frame, "hex").toString("utf8")) : null;
+};
 
-Run: `npm run pattern:nng-survey`
+const respondentSource = `
+import { DuckDBInstance } from "@duckdb/node-api";
+import { resolveDucknngRuntime } from "./scripts/ducknng-runtime.mjs";
+const { instanceConfig, loadSql } = await resolveDucknngRuntime();
+const instance = await DuckDBInstance.create(":memory:", instanceConfig);
+const connection = await instance.connect();
+await connection.run(loadSql);
+const one = async (sql) => (await connection.runAndReadAll(sql)).getRowObjects()[0];
+const socketId = String((await one("SELECT (ducknng_open_socket('respondent')).socket_id AS id")).id);
+await one(\`SELECT (ducknng_dial_socket(\${socketId}, '\${process.env.SURVEY_URL}', 2000, 0::UBIGINT)).ok AS ok\`);
+const receive = async () => {
+  const handle = (await one(\`SELECT ducknng_recv_socket_raw_aio(\${socketId}::UBIGINT, 6000) AS handle\`)).handle;
+  const row = await one(\`SELECT ok, hex(frame) AS frame FROM ducknng_aio_collect(list_value(\${String(handle)}::UBIGINT), 6000)\`);
+  return row?.frame ? JSON.parse(Buffer.from(row.frame, "hex").toString("utf8")) : null;
+};
+const survey = await receive();
+const name = process.env.SURVEY_PROVIDER;
+const evidence = survey.evidence;
+const call = name === "provider-A"
+  ? (evidence.includes("PVS1") && evidence.includes("PM2") ? "likely_pathogenic" : "uncertain_significance")
+  : name === "provider-B"
+    ? (evidence.includes("PVS1") ? "likely_pathogenic" : "uncertain_significance")
+    : (evidence.length >= 3 ? "pathogenic" : "uncertain_significance");
+const response = { provider: name, call, pid: process.pid };
+const bytes = Buffer.from(JSON.stringify(response)).toString("hex");
+await one(\`SELECT (ducknng_send_socket_raw(\${socketId}::UBIGINT, from_hex('\${bytes}'), 3000)).ok AS ok\`);
+await one(\`SELECT ducknng_close_socket(\${socketId})\`);
+process.stdout.write(JSON.stringify(response));
+connection.closeSync();
+instance.closeSync();
+`;
+const children = providers.map((provider) => new Promise((resolveRespondent, reject) => {
+  const child = spawn(process.execPath, ["--input-type=module", "--eval", respondentSource], {
+    cwd: process.cwd(), env: { ...process.env, SURVEY_URL: url, SURVEY_PROVIDER: provider }, stdio: ["ignore", "pipe", "pipe"],
+  });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk) => { stdout += chunk; });
+  child.stderr.on("data", (chunk) => { stderr += chunk; });
+  child.on("error", reject);
+  child.on("close", (code) => code === 0 ? resolveRespondent(JSON.parse(stdout)) : reject(new Error(stderr)));
+}));
 
-## Recorded run (2026-07-02, stable across repeats)
+await new Promise((resolveDelay) => setTimeout(resolveDelay, 600));
+await send({ question: "classify", evidence: ["PVS1", "PM2"] });
+const responses = [];
+for (let index = 0; index < providers.length; index += 1) responses.push(await receive());
+await Promise.all(children);
+const orderedResponses = [...responses].sort((left, right) => left.provider.localeCompare(right.provider));
+const tally = orderedResponses.reduce((counts, response) => ({ ...counts, [response.call]: (counts[response.call] ?? 0) + 1 }), {});
+const [top, count] = Object.entries(tally).sort((left, right) => right[1] - left[1])[0];
+const verdict = count > providers.length / 2 ? top : "abstain_no_quorum";
+assert.equal(verdict, "likely_pathogenic");
+assert.equal(new Set(responses.map((response) => response.pid)).size, 3);
+piBio.json({
+  pattern: "nng-survey",
+  responses: orderedResponses.map(({ provider, call }) => ({ provider, call })),
+  tally: Object.fromEntries(Object.entries(tally).sort(([left], [right]) => left.localeCompare(right))),
+  verdict,
+});
+await one(`SELECT ducknng_close_socket(${socketId})`);
+connection.closeSync();
+instance.closeSync();
+await fs.rm(socketPath, { force: true });
+```
 
-    === NNG survey topology: a surveyor polls 3 provider processes and takes a quorum ===
-      [surveyor pid 695237] surveying 3 providers: classify variant (evidence PVS1,PM2)
-      [provider-B] answered 'likely_pathogenic'
-      [provider-A] answered 'likely_pathogenic'
-      [provider-C] answered 'uncertain_significance'
-      [surveyor] <- provider-B: likely_pathogenic
-      [surveyor] <- provider-A: likely_pathogenic
-      [surveyor] <- provider-C: uncertain_significance
-      [surveyor] tally={"likely_pathogenic":2,"uncertain_significance":1} -> JURY VERDICT: likely_pathogenic
-    PROVED: one surveyor fanned a question out to N separate provider processes and reduced their answers to a quorum
+<details class="pi-bio-output">
 
-The providers are interchangeable — swapping a rule for a real model
-call (any vendor) needs no change to the topology; that is the
-*provider-agnostic* point. One of the family of topology demos:
-`pipeline-fanout` (push/pull), `blackboard-shared` (pub/sub),
-`nng-job-runner` (req/rep), `nng-pair` (pair, proposer↔verifier), and
-this survey jury. All reachable through the one socket convention
-(verified: a bus round-trip also probes clean).
+<summary>
+
+Output: cell-1
+</summary>
+
+``` json
+{
+  "pattern": "nng-survey",
+  "responses": [
+    {
+      "provider": "provider-A",
+      "call": "likely_pathogenic"
+    },
+    {
+      "provider": "provider-B",
+      "call": "likely_pathogenic"
+    },
+    {
+      "provider": "provider-C",
+      "call": "uncertain_significance"
+    }
+  ],
+  "tally": {
+    "likely_pathogenic": 2,
+    "uncertain_significance": 1
+  },
+  "verdict": "likely_pathogenic"
+}
+```
+
+</details>
+
+This proves survey transport, process separation, and abstain-capable
+reduction. It does not validate the illustrative classification rules or
+show that provider diversity improves scientific judgment.

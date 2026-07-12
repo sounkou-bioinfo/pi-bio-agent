@@ -1,5 +1,5 @@
 #!/usr/bin/env Rscript
-# The COMPUTE pillar of the coloc flagship: read the HARMONIZED multi-tissue locus bundle from the INPUT Arrow
+# Read the harmonized multi-tissue locus bundle from the input Arrow
 # path (Arrow IPC), run colocalization (coloc.abf — Giambartolomei 2014) PER TISSUE, write the posteriors
 # PP.H0..PP.H4 per tissue to the OUTPUT Arrow path. The in/out paths are the LAST TWO command-line ARGUMENTS
 # (argv, not env vars). This is a thing SQL is poor at (per-SNP approximate Bayes

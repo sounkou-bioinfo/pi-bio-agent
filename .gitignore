@@ -19,3 +19,6 @@ README_files/
 /*.bcf
 /*.bam
 /*.bai
+
+/.quarto/
+**/*.quarto_ipynb

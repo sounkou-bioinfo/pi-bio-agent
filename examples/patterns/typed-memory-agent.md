@@ -1,8 +1,6 @@
 # Typed memory across real Pi agents
 
 
-# Agent-authored relations, ledger-backed
-
 This live pattern starts two separate Pi processes against one project.
 The writer has only `bio_remember`; the reader has only recall and graph
 tools. Neither receives a skill, repository context, or a bespoke
@@ -145,7 +143,7 @@ Output: cell-3
         "bio_remember",
         "bio_remember"
       ],
-      "final": "The revision was recorded in memory."
+      "final": "The revision was recorded."
     },
     {
       "session": "typed-memory-reader",
@@ -154,7 +152,7 @@ Output: cell-3
         "bio_walk_memory",
         "bio_graph_window"
       ],
-      "final": "The two current predicates from `analysis-plan` are **depends_on** and **see_also**."
+      "final": "From `analysis-plan`, the two current predicates are **`depends_on`** and **`see_also`**."
     }
   ],
   "memory": {

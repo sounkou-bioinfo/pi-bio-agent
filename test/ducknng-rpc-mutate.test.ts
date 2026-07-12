@@ -6,7 +6,7 @@ import { DuckDBInstance } from "@duckdb/node-api";
 // do (its local-catalog storage shim throws on UPDATE/DELETE/ON CONFLICT). Deterministic and self-contained:
 // ducknng ships the server, so one DuckDBInstance hosts an RPC server over a table and a SEPARATE instance (its
 // own catalog = a cross-process-equivalent client) mutates it via ducknng_run_rpc. No external network. This is
-// the test backing scripts/ducknng-rpc-mutate.mjs.
+// the test backing examples/patterns/ducknng-rpc-mutate.qmd.
 const ducknngAvailable = await (async () => {
   try {
     const c = await (await DuckDBInstance.create(":memory:", { allow_unsigned_extensions: "true" })).connect();

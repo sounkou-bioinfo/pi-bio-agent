@@ -48,8 +48,9 @@ in core**: the test that rejects the speculative zoo (Feature/Sample/Cohort/Matr
 3. **Fact / relation**: a temporal, evidenced graph assertion.
 4. **Declaration**: a registered capability/operation/view/term-set/predicate/resolver (via a manifest).
 5. **Run**: the ledger that produces facts/handles with provenance.
-6. **Memory**: machine-studying notes as time-stamped, authored revisions in the one `bio_observations` ledger
-   (`memory:`), projected into the graph. Append-only, as-of-recallable, tombstone-retractable. *Not facts.*
+6. **Authored memory**: a typed observation payload for time-stamped notes in the same `bio_observations` ledger,
+   projected into the graph. It is append-only, as-of-recallable, and tombstone-retractable. The slot preserves the
+   semantic distinction between authored context and measured facts; it is not a second storage system.
 
 ## Boundaries
 
@@ -237,7 +238,7 @@ the model can choose or abstain, but it can never mint an id the substrate did n
 ## Application manifests
 
 A manifest is the registration boundary for concrete application behavior. It declares serializable specs;
-**do not prebuild a giant framework: let the flagship pull each `provides.*` kind into existence.**
+**do not prebuild a giant framework: let repeated application pressure pull each `provides.*` kind into existence.**
 (A manifest is the program: a named bag of `provides.*`, with no taxonomy tag the substrate must
 interpret.)
 
@@ -273,7 +274,7 @@ type BioOperationTransport = "duckdb.sql";
   `python`, `bcftools`, `nextflow`, and `snakemake` are argv choices for that backend, never separate transports:
   one backend, not `runDeseq2()`/`runGatk()` sprawl. If an application wants a process-first authoring surface later,
   it should be syntax over `compute.run`, not a second operation lifecycle (see
-  [design notes](design.md#execution-beyond-sql-shell-r-and-workflows-as-compute-operations)).
+  [conceptual architecture](design.md#compute)).
 
 Core defines only the **contract**; actual execution lives in adapters with policy, provenance, timeouts, CAS
 receipts, and tests. CLI/R/Python tools are first-class, `bcftools`/`duckhts`, Bioconductor, scanpy/pysam, but
@@ -308,4 +309,5 @@ and analysis as manifest SQL, not per-source TypeScript.
 | Run | `BioRunSpec`/`Record`/`Event` + host producer (`bio_run_operation` → run/result/receipts persisted) | richer run lifecycle (resume, budgets) |
 | Memory | temporal notes in `bio_observations` (`memory:`: `remember`/`forget`/`recall`, as-of + history + author, projected into the graph) | richer recall ranking / cross-agent trust policy |
 
-Everything in the right column is built **consumer-driven**, when the flagship or a real manifest needs it, never speculatively.
+Everything in the right column is built **consumer-driven**, when repeated applications or a real manifest need it,
+never speculatively.

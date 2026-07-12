@@ -64,7 +64,18 @@ inline rows versus a materialized relation/Parquet/CAS handle, while preserving 
 and treating UI/model truncation as presentation metadata.
 
 Evidence: [operations.ts](../src/core/operations.ts), [run-store.ts](../src/hosts/run-store.ts),
-[sdk-host-embedding.mjs](../scripts/sdk-host-embedding.mjs).
+[sdk-host-embedding.qmd](../examples/patterns/sdk-host-embedding.qmd).
+
+### Cross-host memory mutation parity
+
+The SDK owns validated memory writes, retractions, recall, and history. Pi exposes both mutation and inspection,
+while the CLI currently emphasizes inspection. Non-Pi hosts need a thin JSON/stdin CLI adapter for the same
+`MemoryContent` and retraction contracts, with ordinary ledger receipts. This is surface parity over the existing
+observation store, not a new memory service or file format.
+
+Evidence: [memory-store.ts](../src/hosts/memory-store.ts),
+[memory-store.test.ts](../test/memory-store.test.ts),
+[typed-memory-agent.qmd](../examples/patterns/typed-memory-agent.qmd).
 
 ## Maintainer risk/perimeter matrix (core guarantees vs host obligations)
 
@@ -96,9 +107,9 @@ Cross-cutting constraints from this table are currently enforced by tests in:
 - Cross-source node normalization should be added after two real KGs repeat the same identifier/category/label
   reconciliation.
 - Renderer-specific report metadata and training labels belong to their first consumers.
-- Fugu-shaped orchestration and RLM-shaped recursive model calls belong first in the workbench agent harness. The
-  current access-list and map/reduce examples prove only data-plane mechanics; they are not model orchestration or
-  machine-studying evaluations.
+- Fugu-shaped orchestration and RLM-shaped recursive model calls belong first in an application agent harness. The
+  current access-list and map/reduce examples prove data-plane mechanics, not learned orchestration or
+  machine-studying quality.
 - A DuckTinyCC-backed C-FFI or ducknng filesystem lane remains research until a manifest needs a table function that
   existing DuckDB extensions, process compute, or host adapters cannot supply.
 
@@ -118,4 +129,4 @@ Do not reopen these without contradictory evidence:
 - host-neutral skill installation and executable conformance checks;
 - packed SDK consumer pattern and owned-extension CI lanes.
 
-The proof map and next application move are in [bring-it-home-plan.md](bring-it-home-plan.md).
+The current proof levels and application-driven next work are in [roadmap.md](roadmap.md).

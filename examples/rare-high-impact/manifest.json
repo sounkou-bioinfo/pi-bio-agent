@@ -3,7 +3,7 @@
   "id": "rare-high-impact",
   "version": "0.1.0",
   "title": "Rare high-impact variants",
-  "description": "The abstention flagship: count rare loss-of-function variants, abstaining on unknown frequency (a naive count over-calls ~110; refusing to call no-frequency 'rare' collapses it to the defensible few). The abstention INSIGHT is the safety-relevant part, and it is a PRINCIPLE the agent applies \u2014 an ad-hoc query that abstains is exactly as safe. This is a DECLARED, TESTED operation only because it is the flagship's deterministic regression reference (the test asserts the abstention structurally) with a pinned SQL digest in the receipt for audit \u2014 NOT because pinning is safer. Most questions are ad-hoc: the agent composes the SQL.",
+  "description": "Classify loss-of-function candidates into explicit included, missing-frequency, common, non-high-impact, and benign buckets. Missing allele frequency is an abstention, not evidence of rarity. The named operation is a stable regression contract; other questions over these resources should use ad-hoc SQL.",
   "provides": {
     "resolvers": [
       {

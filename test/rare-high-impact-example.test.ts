@@ -37,8 +37,8 @@ const RARE_HIGH_IMPACT_SQL = [
   "SELECT bucket, CAST(count(*) AS INTEGER) AS n FROM classified GROUP BY bucket ORDER BY bucket",
 ].join("\n");
 
-// The whole "skill" is this manifest — pure data. No code is question-specific.
-const flagshipManifest: BioManifest = {
+// The repeated classification is manifest data; no question-specific runtime implementation is required.
+const exampleManifest: BioManifest = {
   schema: "pi-bio.manifest.v1",
   id: "rare-high-impact-variants",
   version: "0.1.0",
@@ -68,18 +68,18 @@ async function memoryConn(): Promise<SqlConn> {
 }
 function freshRegistry() {
   const r = createBioRegistry();
-  r.registerManifest(flagshipManifest);
+  r.registerManifest(exampleManifest);
   r.bindResolverImpl("inline.table", inlineTableResolver);
   return r;
 }
 const runFlagship = (registry: ReturnType<typeof createBioRegistry>, conn: SqlConn) =>
   // resources omitted on purpose — the runner derives them from the operation's requiredResources
-  runOperation(registry, conn, { operationId: "rare_high_impact.report", runId: "flagship-run-1", now: "2026-06-28T00:00:00Z" });
+  runOperation(registry, conn, { operationId: "rare_high_impact.report", runId: "rare-high-impact-run-1", now: "2026-06-28T00:00:00Z" });
 // the operation's SQL already returned per-bucket counts; just index them
 const bucketCount = (rows: Array<Record<string, unknown>>, bucket: string) =>
   Number((rows.find((r) => r.bucket === bucket)?.n as number | undefined) ?? 0);
 
-describe("flagship: rare high-impact variants (data over generic primitives)", () => {
+describe("example: rare high-impact classification over generic primitives", () => {
   test("the manifest registers specs only — the snapshot is pure data (no impl leaks)", () => {
     const snap = freshRegistry().snapshot();
     assert.equal(snap.operations[0]?.id, "rare_high_impact.report");
@@ -90,7 +90,7 @@ describe("flagship: rare high-impact variants (data over generic primitives)", (
   test("resolution fails closed: incomplete list, unknown resource, and declared-but-unbound resolver", async () => {
     const conn = await memoryConn();
     const r = createBioRegistry();
-    r.registerManifest(flagshipManifest); // no impl bound
+    r.registerManifest(exampleManifest); // no impl bound
     const op = (resources?: string[]) => runOperation(r, conn, { operationId: "rare_high_impact.report", resources, runId: "x", now: "t" });
     // an explicit list must cover the operation's declared requiredResources
     await assert.rejects(() => op(["annotated_variants"]), /do not cover required resource\(s\): so_loss_of_function/);
@@ -115,18 +115,17 @@ describe("flagship: rare high-impact variants (data over generic primitives)", (
     assert.equal(op?.notes?.length, 2); // caveats travel with the operation as manifest data
   });
 
-  test("safety gate: the flagship carries no diagnosis / clinical-recommendation framing", () => {
+  test("safety gate: the example carries no diagnosis or clinical-recommendation framing", () => {
     // A headline gate (roadmap §2): a run must never frame its answer as diagnosis or clinical advice. The
     // only natural-language surface that travels with a run is the manifest/operation prose (title,
     // description, notes) — the result itself is bucket counts. Assert that prose stays classificatory and
-    // abstaining, never clinical-directive. (A flagship safety-framing assertion, not a core validator —
-    // policing prose in the runner would be bio-logic in code; here it guards the canonical example.)
+    // abstaining, never clinical-directive. This is an example-level assertion, not a core prose validator.
     const r = freshRegistry();
     const op = r.getOperation("rare_high_impact.report")!;
     const snap = r.snapshot();
-    const prose = [snap.manifests[0]?.title, flagshipManifest.description, op.title, op.description, ...(op.notes ?? [])].join("\n").toLowerCase();
+    const prose = [snap.manifests[0]?.title, exampleManifest.description, op.title, op.description, ...(op.notes ?? [])].join("\n").toLowerCase();
     const clinicalFraming = /\b(diagnos\w*|prescrib\w*|treatment|disease-causing|medical advice|actionable variant|you (?:have|should|are at|may have)|consult (?:a|your) (?:doctor|physician|clinician|provider)|risk of (?:disease|cancer))\b/;
-    assert.ok(!clinicalFraming.test(prose), `flagship prose must not carry clinical framing, found in: ${prose}`);
+    assert.ok(!clinicalFraming.test(prose), `example prose must not carry clinical framing, found in: ${prose}`);
     // present, not merely absent-of-harm: the abstention caveat (the safety thesis) actually rides along
     assert.ok(op.notes?.some((n) => /abstain|unknown allele frequency/i.test(n)), "the abstention caveat must be present in operation notes");
   });

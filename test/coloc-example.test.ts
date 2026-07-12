@@ -7,7 +7,7 @@ import { join, resolve } from "node:path";
 import { runBioQueryFromManifest } from "../src/hosts/run-store.js";
 import { nodeComputeRunner } from "../src/process/node-compute-runner.js";
 
-// The two-pillar flagship end to end, MULTI-TISSUE: GWAS + per-tissue eQTL loci -> SQL allele HARMONIZATION
+// Multi-tissue composition: GWAS + per-tissue eQTL loci -> SQL allele harmonization
 // (DATA pillar) -> out-of-process R coloc.abf PER TISSUE over Arrow IPC (COMPUTE pillar; per-tissue = the
 // partition+map) -> colocalization posteriors per tissue. The synthetic locus discriminates three outcomes:
 // Whole_Blood SHARES the causal (rs6) with the GWAS (high PP.H4); Liver has a DIFFERENT causal (rs3) -> PP.H3;
@@ -34,7 +34,7 @@ async function rows(sql: string): Promise<Array<Record<string, unknown>>> {
   return (JSON.parse(await fs.readFile(join(out.runDir, "result.json"), "utf8")) as { rows: Array<Record<string, unknown>> }).rows;
 }
 
-describe("example: post-GWAS colocalization is a manifest — the two-pillar flagship (multi-tissue)", { skip: rArrowAvailable ? false : "Rscript + R 'nanoarrow' not available" }, () => {
+describe("example: post-GWAS colocalization composes SQL harmonization and R compute", { skip: rArrowAvailable ? false : "Rscript + R 'nanoarrow' not available" }, () => {
   test("DATA pillar: SQL harmonization aligns/flips/drops per tissue", async () => {
     const h = await rows("SELECT tissue, count(*) AS n FROM harmonized GROUP BY tissue ORDER BY tissue");
     const byTissue = Object.fromEntries(h.map((r) => [r.tissue, Number(r.n)]));

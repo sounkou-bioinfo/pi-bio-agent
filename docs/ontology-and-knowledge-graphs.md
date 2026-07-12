@@ -26,7 +26,7 @@ observations, artifacts, and the agent's own study notes (`memory:<slug>` subjec
 observations (projected into `bio_edges_as_of`) instead of a separate notes index: **memory is a subject
 family in the one log, not a parallel system.** The "memory and KG stop being two systems" point in
 [`memory-and-knowledge-unification.md`](./memory-and-knowledge-unification.md) is the local symptom of
-this global bet; the study/[machine-studying](./machine-studying-lineage.md) angle is one consumer of
+this global bet; the [machine-studying](./lineage.md#machine-studying) angle is one consumer of
 the substrate, not its foundation.
 
 **The harness records authored declarations in the same graph, not its running code.** When a run has a supplied

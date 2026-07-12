@@ -1,0 +1,86 @@
+---
+title: "Partitioned labeling and deterministic reduction"
+engine: pi-bio
+format: gfm
+---
+
+This pattern isolates the mechanics often associated with RLM-style long-context work. Unlabeled rows are partitioned
+across separate processes; each process applies a deterministic SQL stand-in for semantic labeling; the host merges
+the returned artifacts and performs an exact reduction. There is no model recursion or quality claim.
+
+```{ts .pi-bio}
+import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { DuckDBInstance } from "@duckdb/node-api";
+
+const context = [
+  "How many moons orbit Mars", "Who painted the ceiling", "Where is the capital city", "Define a covalent bond",
+  "How old is the universe", "Who invented calypso", "Where is the river", "What planet is red",
+  "How many years in a decade", "Who wrote the play", "Define entropy", "Where do salmon spawn",
+].map((instance, index) => ({ id: index + 1, instance }));
+const workerSource = `
+import { DuckDBInstance } from "@duckdb/node-api";
+let input = "";
+for await (const chunk of process.stdin) input += chunk;
+const rows = JSON.parse(input);
+const instance = await DuckDBInstance.create(":memory:");
+const connection = await instance.connect();
+await connection.run("CREATE TABLE part(id INTEGER, instance VARCHAR)");
+for (const row of rows) await connection.run("INSERT INTO part VALUES (?, ?)", [row.id, row.instance]);
+const labels = (await connection.runAndReadAll(\`
+  SELECT id, CASE
+    WHEN lower(instance) LIKE '%how many%' OR lower(instance) LIKE '%how old%' THEN 'number'
+    WHEN lower(instance) LIKE '%who%' THEN 'human'
+    WHEN lower(instance) LIKE '%where%' THEN 'location'
+    WHEN lower(instance) LIKE '%define%' THEN 'description'
+    ELSE 'entity' END AS label
+  FROM part ORDER BY id
+\`)).getRowObjects().map((row) => ({ id: Number(row.id), label: row.label }));
+process.stdout.write(JSON.stringify({ pid: process.pid, labels }));
+connection.closeSync();
+instance.closeSync();
+`;
+const runWorker = (partition) => new Promise((resolveWorker, reject) => {
+  const child = spawn(process.execPath, ["--input-type=module", "--eval", workerSource], {
+    cwd: process.cwd(), stdio: ["pipe", "pipe", "pipe"],
+  });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk) => { stdout += chunk; });
+  child.stderr.on("data", (chunk) => { stderr += chunk; });
+  child.on("error", reject);
+  child.on("close", (code) => code === 0 ? resolveWorker(JSON.parse(stdout)) : reject(new Error(stderr)));
+  child.stdin.end(JSON.stringify(partition));
+});
+
+const partitionSize = Math.ceil(context.length / 3);
+const partitions = Array.from({ length: 3 }, (_, index) => context.slice(index * partitionSize, (index + 1) * partitionSize));
+const workers = await Promise.all(partitions.map(runWorker));
+assert.equal(new Set(workers.map((worker) => worker.pid)).size, 3);
+const labels = workers.flatMap((worker) => worker.labels);
+
+const instance = await DuckDBInstance.create(":memory:");
+const connection = await instance.connect();
+await connection.run("CREATE TABLE labels(id INTEGER, label VARCHAR)");
+for (const row of labels) await connection.run("INSERT INTO labels VALUES (?, ?)", [row.id, row.label]);
+const counts = (await connection.runAndReadAll("SELECT label, count(*) AS n FROM labels GROUP BY label ORDER BY label"))
+  .getRowObjects().map((row) => ({ label: row.label, n: Number(row.n) }));
+connection.closeSync();
+instance.closeSync();
+assert.deepEqual(counts, [
+  { label: "description", n: 2 },
+  { label: "entity", n: 1 },
+  { label: "human", n: 3 },
+  { label: "location", n: 3 },
+  { label: "number", n: 3 },
+]);
+piBio.json({
+  pattern: "partitioned-labeling-reduce",
+  partitions: partitions.map((partition) => partition.map((row) => row.id)),
+  labels,
+  counts,
+});
+```
+
+The executable result proves process isolation, artifact merge, and deterministic reduction. A real RLM experiment
+must replace the stand-in map with recursive model calls and compare quality and budget against a baseline.

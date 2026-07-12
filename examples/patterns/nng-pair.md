@@ -1,37 +1,178 @@
+# NNG pair proposer and verifier
 
 
-# NNG pair topology — proposer↔verifier duo (evidence)
+The document owns one side of a pair socket and launches the proposer in
+a separate process. A deterministic verifier rejects an unsupported
+call, the proposer refines it, and the two converge over DuckNNG’s SQL
+socket surface.
 
-`scripts/nng-pair.mjs` is a **pattern** — the **pair** NNG topology (1:1
-bidirectional) as a reusable *proposer↔verifier* **generic** pattern.
-Two **separate OS processes** each hold a pair socket over ipc; the
-proposer offers a variant pathogenicity call and the verifier (an
-adversarial ACMG-ish critic) refutes-or-accepts in a tight
-back-and-forth until they converge. This is the 1:1 debate channel —
-distinct from survey’s fan-out and blackboard’s broadcast.
+``` ts
+import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import { spawn } from "node:child_process";
+import { promises as fs } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { DuckDBInstance } from "@duckdb/node-api";
+import { resolveDucknngRuntime } from "../../scripts/ducknng-runtime.mjs";
 
-It runs over ducknng’s SQL socket layer — `open_socket('pair')` →
-`listen`/`dial_socket` → `send_socket_raw` / `recv_socket_raw_aio` +
-`aio_collect` — the same convention as ducknng’s own
-`ducknng_socket_protocols.test`.
+const socketPath = join(tmpdir(), `pi-bio-pair-${randomUUID()}.ipc`);
+const url = `ipc://${socketPath}`;
+const { instanceConfig, loadSql } = await resolveDucknngRuntime();
+const instance = await DuckDBInstance.create(":memory:", instanceConfig);
+const connection = await instance.connect();
+await connection.run(loadSql);
+const one = async (sql) => (await connection.runAndReadAll(sql)).getRowObjects()[0];
+const socketId = String((await one("SELECT (ducknng_open_socket('pair')).socket_id AS id")).id);
+await one(`SELECT (ducknng_listen_socket(${socketId}, '${url}', 134217728, 0::UBIGINT)).ok AS ok`);
+const hex = (value) => Buffer.from(JSON.stringify(value), "utf8").toString("hex");
+const send = (value) => one(`SELECT (ducknng_send_socket_raw(${socketId}::UBIGINT, from_hex('${hex(value)}'), 3000)).ok AS ok`);
+const receive = async () => {
+  const handle = (await one(`SELECT ducknng_recv_socket_raw_aio(${socketId}::UBIGINT, 6000) AS handle`)).handle;
+  const row = await one(`SELECT ok, hex(frame) AS frame FROM ducknng_aio_collect(list_value(${String(handle)}::UBIGINT), 6000)`);
+  return row?.frame ? JSON.parse(Buffer.from(row.frame, "hex").toString("utf8")) : null;
+};
 
-Run: `npm run pattern:nng-pair`
+const proposerSource = `
+import { DuckDBInstance } from "@duckdb/node-api";
+import { resolveDucknngRuntime } from "./scripts/ducknng-runtime.mjs";
+const { instanceConfig, loadSql } = await resolveDucknngRuntime();
+const instance = await DuckDBInstance.create(":memory:", instanceConfig);
+const connection = await instance.connect();
+await connection.run(loadSql);
+const one = async (sql) => (await connection.runAndReadAll(sql)).getRowObjects()[0];
+const socketId = String((await one("SELECT (ducknng_open_socket('pair')).socket_id AS id")).id);
+await one(\`SELECT (ducknng_dial_socket(\${socketId}, '\${process.env.PAIR_URL}', 2000, 0::UBIGINT)).ok AS ok\`);
+const hex = (value) => Buffer.from(JSON.stringify(value), "utf8").toString("hex");
+const send = (value) => one(\`SELECT (ducknng_send_socket_raw(\${socketId}::UBIGINT, from_hex('\${hex(value)}'), 3000)).ok AS ok\`);
+const receive = async () => {
+  const handle = (await one(\`SELECT ducknng_recv_socket_raw_aio(\${socketId}::UBIGINT, 6000) AS handle\`)).handle;
+  const row = await one(\`SELECT ok, hex(frame) AS frame FROM ducknng_aio_collect(list_value(\${String(handle)}::UBIGINT), 6000)\`);
+  return row?.frame ? JSON.parse(Buffer.from(row.frame, "hex").toString("utf8")) : null;
+};
+const proposals = [
+  { call: "pathogenic", confidence: 0.9, evidence: ["PVS1"] },
+  { call: "likely_pathogenic", confidence: 0.7, evidence: ["PVS1", "PM2"] },
+];
+const transcript = [];
+for (const proposal of proposals) {
+  await send(proposal);
+  const verdict = await receive();
+  transcript.push({ proposal, verdict });
+  if (verdict.verdict === "accept") break;
+}
+await one(\`SELECT ducknng_close_socket(\${socketId})\`);
+process.stdout.write(JSON.stringify({ pid: process.pid, transcript }));
+connection.closeSync();
+instance.closeSync();
+`;
+const proposerPromise = new Promise((resolveProposer, reject) => {
+  const child = spawn(process.execPath, ["--input-type=module", "--eval", proposerSource], {
+    cwd: process.cwd(), env: { ...process.env, PAIR_URL: url }, stdio: ["ignore", "pipe", "pipe"],
+  });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk) => { stdout += chunk; });
+  child.stderr.on("data", (chunk) => { stderr += chunk; });
+  child.on("error", reject);
+  child.on("close", (code) => code === 0 ? resolveProposer(JSON.parse(stdout)) : reject(new Error(stderr)));
+});
 
-## Recorded run (2026-07-02)
+const verifierTranscript = [];
+for (let round = 0; round < 2; round += 1) {
+  const proposal = await receive();
+  const verdict = proposal.call === "likely_pathogenic" && proposal.evidence.includes("PVS1") && proposal.evidence.includes("PM2")
+    ? { verdict: "accept", reason: "two declared criteria support the lower tier" }
+    : { verdict: "refine", reason: "one criterion does not support the proposed tier" };
+  verifierTranscript.push({ proposal, verdict });
+  await send(verdict);
+  if (verdict.verdict === "accept") break;
+}
+const proposer = await proposerPromise;
+assert.deepEqual(verifierTranscript.map((round) => round.verdict.verdict), ["refine", "accept"]);
+assert.equal(proposer.transcript.at(-1).proposal.call, "likely_pathogenic");
+piBio.json({ pattern: "nng-pair", proposer: { transcript: proposer.transcript }, verifierTranscript });
+await one(`SELECT ducknng_close_socket(${socketId})`);
+connection.closeSync();
+instance.closeSync();
+await fs.rm(socketPath, { force: true });
+```
 
-    === NNG pair topology: a proposer↔verifier duo converges 1:1 (two SEPARATE processes) ===
-      [verifier pid 602449] pair socket listening
-      [proposer pid 602516] round 1: proposing call=pathogenic conf=0.9
-      [verifier] round 1: proposal call=pathogenic evidence=[PVS1] -> REFINE (one criterion can't reach pathogenic — add a second (e.g. PM2 rarity))
-      [proposer pid 602516] round 2: proposing call=likely_pathogenic conf=0.7
-      [verifier] round 2: proposal call=likely_pathogenic evidence=[PVS1,PM2] -> ACCEPT (PVS1 (LoF) + PM2 (rare) supports likely_pathogenic)
-      [proposer] verifier ACCEPTED 'likely_pathogenic' — converged in 2 round(s)
-    PROVED: a 1:1 pair channel carried an adversarial propose→refute→refine loop to convergence
+<details class="pi-bio-output">
 
-The verdict rule is a deterministic stand-in for the semantic judgment a
-critic sub-agent (or a second model provider) would make — so the demo
-is reproducible. One of the family of topology demos alongside
-`pipeline-fanout` (push/pull), `blackboard-shared` (pub/sub), and
-`nng-job-runner` (req/rep worker). All NNG protocols are reachable the
-same way (verified: a bus round-trip probes clean); each is a thin use
-of the one socket convention, not a new abstraction.
+<summary>
+
+Output: cell-1
+</summary>
+
+``` json
+{
+  "pattern": "nng-pair",
+  "proposer": {
+    "transcript": [
+      {
+        "proposal": {
+          "call": "pathogenic",
+          "confidence": 0.9,
+          "evidence": [
+            "PVS1"
+          ]
+        },
+        "verdict": {
+          "verdict": "refine",
+          "reason": "one criterion does not support the proposed tier"
+        }
+      },
+      {
+        "proposal": {
+          "call": "likely_pathogenic",
+          "confidence": 0.7,
+          "evidence": [
+            "PVS1",
+            "PM2"
+          ]
+        },
+        "verdict": {
+          "verdict": "accept",
+          "reason": "two declared criteria support the lower tier"
+        }
+      }
+    ]
+  },
+  "verifierTranscript": [
+    {
+      "proposal": {
+        "call": "pathogenic",
+        "confidence": 0.9,
+        "evidence": [
+          "PVS1"
+        ]
+      },
+      "verdict": {
+        "verdict": "refine",
+        "reason": "one criterion does not support the proposed tier"
+      }
+    },
+    {
+      "proposal": {
+        "call": "likely_pathogenic",
+        "confidence": 0.7,
+        "evidence": [
+          "PVS1",
+          "PM2"
+        ]
+      },
+      "verdict": {
+        "verdict": "accept",
+        "reason": "two declared criteria support the lower tier"
+      }
+    }
+  ]
+}
+```
+
+</details>
+
+The pattern proves a 1:1 transport and deterministic refinement loop.
+Its rule is illustrative, not an ACMG/AMP classifier or evidence that
+adversarial model debate improves accuracy.

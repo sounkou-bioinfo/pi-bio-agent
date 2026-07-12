@@ -1,4 +1,4 @@
-// LIVE flagship driver: real WGS chr22 -> duckhts region read -> chunked VEP /region annotation (the
+// Live region driver: real WGS chr22 -> duckhts region read -> chunked VEP /region annotation (the
 // src/duckdb/ncurl-fanout.ts launch->drain->retry loop) -> parse -> join ClinVar -> rare + high-impact (rhi).
 // Hits Ensembl REST live. Run:  npm run build && node examples/wgs-chr22-annotation/live.mjs
 // Point VCF/CLINVAR at your own bgzipped + tabix-indexed GRCh38 files (the sample VCF needs a .tbi:

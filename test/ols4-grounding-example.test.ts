@@ -34,7 +34,7 @@ async function startFixture(): Promise<{ base: string; close(): void }> {
   return { base, close: () => inst.closeSync() };
 }
 
-describe("example: OLS4 grounding is SQL all the way down (ducknng_ncurl)", { skip: ducknngAvailable ? false : "ducknng unavailable (provision: INSTALL ducknng FROM community on a matching DuckDB)" }, () => {
+describe("example: OLS4 candidate retrieval through declared DuckNNG HTTP and SQL", { skip: ducknngAvailable ? false : "ducknng unavailable (provision: INSTALL ducknng FROM community on a matching DuckDB)" }, () => {
   test("local ducknng server -> ncurl_table fetch+parse -> SQL grounding, all SQL, no external network", async () => {
     const fixture = await startFixture();
     try {

@@ -1,39 +1,75 @@
 ---
+title: "Cross-process mutable SQL over DuckNNG RPC"
+engine: pi-bio
 format: gfm
 ---
 
-# Cross-process shared MUTABLE state over ducknng RPC — evidence
+The server explicitly registers DuckNNG's exec method. Separate clients then perform native DuckDB `INSERT`,
+`UPDATE`, `DELETE`, and `ON CONFLICT` statements against one server-owned table.
 
-`scripts/ducknng-rpc-mutate.mjs` is a **pattern** and the **replacement for the old quack demo** — and it does
-what quack *cannot*. Separate agent **processes** mutate one shared table **in place** (`UPDATE` / `DELETE` /
-`ON CONFLICT` upsert) over `ducknng_run_rpc(url, sql, tls)`.
+```{ts .pi-bio}
+import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { DuckDBInstance } from "@duckdb/node-api";
+import { resolveDucknngRuntime } from "../../scripts/ducknng-runtime.mjs";
 
-**Why ducknng can and quack can't (architectural, verified at quack HEAD `29fc039` / DuckDB 1.5.4):** quack makes
-the remote table a **local catalog entry**, so DuckDB's planner calls `GetStorageInfo` / `PlanUpdate` /
-`PlanDelete` on quack's storage shim — all still `throw NotImplementedException`. So quack remote writes are
-**append-only**. ducknng instead sends a **SQL string to a server running native DuckDB** (no shim), so the full
-write surface works. Exec is **opt-in**: the server must `ducknng_register_exec_method(false|true)` (the host
-security boundary, vs quack's open-by-ATTACH).
+const { instanceConfig, loadSql } = await resolveDucknngRuntime();
+const instance = await DuckDBInstance.create(":memory:", instanceConfig);
+const server = await instance.connect();
+await server.run(loadSql);
+await server.run("CREATE TABLE shared (k INTEGER PRIMARY KEY, v INTEGER)");
+await server.run("INSERT INTO shared VALUES (1, 10), (2, 20)");
+await server.run("SELECT ducknng_start_server('mutate', 'tcp://127.0.0.1:0', 1, 134217728, 300000, 0::UBIGINT)");
+await server.run("SELECT ducknng_register_exec_method(false)");
+const url = String((await server.runAndReadAll("SELECT listen FROM ducknng_list_servers() WHERE name='mutate'")).getRows()[0][0]);
 
-Run: `npm run pattern:ducknng-rpc-mutate`
+const clientSource = `
+import { DuckDBInstance } from "@duckdb/node-api";
+import { resolveDucknngRuntime } from "./scripts/ducknng-runtime.mjs";
+const { instanceConfig, loadSql } = await resolveDucknngRuntime();
+const instance = await DuckDBInstance.create(":memory:", instanceConfig);
+const connection = await instance.connect();
+await connection.run(loadSql);
+const row = (await connection.runAndReadAll(
+  "SELECT * FROM ducknng_run_rpc(?, ?, 0::UBIGINT)",
+  [process.env.RPC_URL, process.env.RPC_SQL],
+)).getRowObjects()[0];
+process.stdout.write(JSON.stringify(
+  { pid: process.pid, sql: process.env.RPC_SQL, row },
+  (_key, value) => typeof value === "bigint" ? Number(value) : value,
+));
+connection.closeSync();
+instance.closeSync();
+`;
+const mutate = (sql) => new Promise((resolveMutation, reject) => {
+  const child = spawn(process.execPath, ["--input-type=module", "--eval", clientSource], {
+    cwd: process.cwd(), env: { ...process.env, RPC_URL: url, RPC_SQL: sql }, stdio: ["ignore", "pipe", "pipe"],
+  });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk) => { stdout += chunk; });
+  child.stderr.on("data", (chunk) => { stderr += chunk; });
+  child.on("error", reject);
+  child.on("close", (code) => code === 0 ? resolveMutation(JSON.parse(stdout)) : reject(new Error(stderr)));
+});
 
-## Recorded run (2026-06-30)
-
+const mutations = [];
+mutations.push(await mutate("INSERT INTO shared VALUES (3, 30)"));
+mutations.push(await mutate("UPDATE shared SET v = 99 WHERE k = 1"));
+mutations.push(await mutate("DELETE FROM shared WHERE k = 2"));
+mutations.push(await mutate("INSERT INTO shared VALUES (3, 5) ON CONFLICT (k) DO UPDATE SET v = excluded.v"));
+const rows = (await server.runAndReadAll("SELECT k, v FROM shared ORDER BY k")).getRowObjects();
+assert.deepEqual(rows.map((row) => [Number(row.k), Number(row.v)]), [[1, 99], [3, 5]]);
+assert.equal(new Set(mutations.map((mutation) => mutation.pid)).size, 4);
+piBio.json({
+  pattern: "ducknng-rpc-mutation",
+  mutations: mutations.map(({ sql, row }) => ({ sql, row })),
+  finalRows: rows,
+});
+await server.run("SELECT ducknng_stop_server('mutate')");
+server.closeSync();
+instance.closeSync();
 ```
-=== SHARED MUTABLE STATE over ducknng RPC: separate processes UPDATE/DELETE one table (quack can't) ===
 
-  [server pid 2150760] owns table 'shared' (seed: k1=10,k2=20); exec method registered
-  [agent inserter pid 2150842] OK INSERT INTO shared VALUES (3, 30)  (rows_changed=1)
-  [agent updater  pid 2150904] OK UPDATE shared SET v = 99 WHERE k = 1  (rows_changed=1)
-  [agent deleter  pid 2150966] OK DELETE FROM shared WHERE k = 2  (rows_changed=1)
-  [agent upserter pid 2151028] OK INSERT INTO shared VALUES (3, 5) ON CONFLICT (k) DO UPDATE SET v = excluded.v  (rows_changed=1)
-  [server] FINAL shared table (mutated in place by SEPARATE client processes): k1=99, k3=5
-```
-
-**What it proves:** four distinct processes mutated one shared table in place over ducknng RPC — an `UPDATE`, a
-`DELETE`, and an `ON CONFLICT` upsert, none of which quack supports. The server ran each SQL string on native
-DuckDB; exec was opt-in. Final state `k1=99` (updated), `k2` gone (deleted), `k3=5` (inserted 30 → upserted 5) is
-exactly right. This is the **mutate-in-place** shared-state primitive that a fact-superseding KG — Phase-4
-`activate`/`rollback`, revising/expiring facts as judgments change — actually needs, and it's why we **own
-ducknng and drop quack**: quack gives ergonomic shared *append*; ducknng RPC gives shared *mutate*, opt-in and
-explicit, on a stack we control and backport across DuckDB versions.
+The pattern proves native mutable SQL over an explicitly admitted RPC service. It does not make arbitrary remote SQL
+safe; the host still owns method registration, SQL authorization, credentials, and transport policy.

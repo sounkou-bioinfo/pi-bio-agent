@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { DuckDBInstance } from "@duckdb/node-api";
 
-// The committed artifact behind "every NNG protocol is reachable" (docs/closes-over.md): a real round-trip over a
+// The committed artifact behind the NNG reachability claim (docs/lineage.md): a real round-trip over a
 // BUS socket via ducknng's SQL socket layer (open_socket → listen/dial → send/recv_aio → aio_collect), the exact
 // convention the topology demos and ducknng's own conformance test use. Gated on ducknng availability like the
 // other ducknng examples (INSTALL ducknng FROM community on a matching DuckDB).

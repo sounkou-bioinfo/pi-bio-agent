@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { DuckDBInstance } from "@duckdb/node-api";
 
-// Locks the cross-process BLACKBOARD over ducknng RPC (scripts/blackboard-shared.mjs): publish = run_rpc INSERT,
+// Locks the cross-process blackboard over DuckNNG RPC (examples/patterns/blackboard-shared.qmd): publish = run_rpc INSERT,
 // await = poll query_rpc SELECT until a SIBLING catalog's publish lands. This is the stigmergic coordination the
 // mutate test doesn't cover (there the same client reads its own writes; here an AWAITER blocks on a PUBLISHER's
 // write, across separate catalogs = the cross-process case). Deterministic, self-contained (ducknng's own server).

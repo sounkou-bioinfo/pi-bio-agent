@@ -78,7 +78,7 @@ const FILTER_SQL = [
   "ORDER BY gene_symbol",
 ].join("\n");
 
-describe("example: a ClawBio Variant Annotation-shaped skill is a manifest, SQL all the way down (ducknng_ncurl)", { skip: ducknngAvailable ? false : "ducknng unavailable (provision: INSTALL ducknng FROM community on a matching DuckDB)" }, () => {
+describe("example: batched VEP-shaped annotation through declared DuckNNG HTTP and SQL", { skip: ducknngAvailable ? false : "ducknng unavailable (provision: INSTALL ducknng FROM community on a matching DuckDB)" }, () => {
   test("POSTs a BATCH of ids via ncurl_table, ducknng parses the nested envelope, SQL unnests + filters rare+high-impact+pathogenic", async () => {
     const fixture = await startFixture();
     try {

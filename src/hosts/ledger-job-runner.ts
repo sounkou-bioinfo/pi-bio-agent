@@ -5,7 +5,7 @@ import { observationAsOfKey } from "../duckdb/observations.js";
 // The DISTRIBUTED JobRunner (L1's second real impl). Where the in-memory runner holds status in process memory,
 // this runner's status/result live in the SHARED observation ledger: a remote worker — any language, over any
 // transport — reports its phase into the `job:<runId>:status` slot (e.g. via ducknng RPC, see
-// scripts/nng-job-runner.mjs), and the runner just READS it. `submit` only DISPATCHES the job; the worker owns
+// examples/patterns/nng-job-runner.qmd), and the runner just READS it. `submit` only DISPATCHES the job; the worker owns
 // execution + reporting. Because status is data-in-SQL, not process memory, a job survives a restart and crosses
 // machines/languages, and this runner drops into the job-store UNCHANGED (pollBioJob sees the worker's already-
 // recorded phase and, since it is unchanged, does not double-record).

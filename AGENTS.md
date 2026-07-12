@@ -17,7 +17,9 @@ Instructions for coding agents working in this repository.
 ## Start Here
 
 - Read `docs/INDEX.md` before opening random docs. Use it to find the existing home for an idea.
-- For architecture work, read `docs/design.md`, `docs/abstraction-derivation.md`, `docs/duckdb-substrate.md`, `docs/closes-over.md`, and `docs/refinments.md`.
+- For architecture work, start with `docs/design.md`, the conceptual checksum. Then read only the focused document
+  that owns the change: `docs/domain-model.md`, `docs/duckdb-substrate.md`, `docs/lineage.md`, or
+  `docs/refinments.md`.
 - For memory, graph, and provenance work, read `docs/memory-and-knowledge-unification.md`, `docs/ontology-and-knowledge-graphs.md`, and `docs/concurrency.md`.
 - For user-facing behavior, check `README.qmd` and the rendered `README.md`; keep them consistent when editing README prose.
 
@@ -57,18 +59,15 @@ Instructions for coding agents working in this repository.
 - `README.qmd` is the executable README source and `README.md` is its generated artifact. Example READMEs and tool
   inventories follow the same source/generator/check pattern; do not hand-edit their output.
 - Treat pattern literate docs as generated artifacts: `examples/patterns/*.md` are sourced from sibling
-  `examples/patterns/*.qmd` files. Edit the `.qmd` source. `npm run scripts:qmd` regenerates deterministic documents;
+  `examples/patterns/*.qmd` files. Edit the `.qmd` source. `npm run patterns:qmd` regenerates deterministic documents;
   credentialed live-agent QMDs are deliberately skipped there and rendered by their dedicated `npm run pattern:*`
   command, which must commit the resulting Markdown evidence.
 - Put logic used only by an executable document directly in its QMD. Keep code in `scripts/` only when it is a shared
   executable or a stable non-Quarto entry point, and expose runnable patterns through `npm run pattern:*` in prose and
   tables. A wrapper must not exist merely to keep the real implementation outside the literate source.
-- Quarto is suitable for future polyglot reports and can run TypeScript project scripts through its bundled Deno. Its
-  Observable-JS cells are browser/reactive code, not a Node/DuckDB execution surface. Keep core Node/TypeScript claims
-  in `test/`, `scripts/`, or package examples and link or generate them into prose.
-- If a workbench report proves that persistent local Node/TypeScript cells are needed, add a package-level Quarto
-  engine adapter. It may translate Markdown cells to the existing CLI/SDK and host ports; it must not implement a
-  second scientific runtime, ledger, CAS, or compute lifecycle in core.
+- The workspace-level `pi-bio` Quarto engine is the persistent local Node/TypeScript execution surface. It may call
+  the existing CLI/SDK and host ports; it must not implement a second scientific runtime, ledger, CAS, or compute
+  lifecycle. R, Python, and shell cells are explicit host processes.
 - A `text` fence or explicitly labeled pseudocode/diagram is illustrative. A `ts`, `sql`, or `sh` block should be
   runnable or included from the source that the checks execute. Never paste live JSON/results into docs when a renderer
   or example generator can produce them.
@@ -88,6 +87,9 @@ Instructions for coding agents working in this repository.
 ## Pattern Rule
 
 - The point of pattern-based proofing is to reveal immanent primitives and exercise the library.
+- Applications are the primary pressure surface. Express a need downstream first, observe the same motion in another
+  application or generic pattern, reconcile it with existing contracts, then promote the smallest policy-free
+  primitive to core. Move both consumers back to the public surface and delete their workarounds.
 - A primitive is justified by concrete instances already in the repo, ideally two or three of them. Name those instances before adding the abstraction.
 - When two abstractions appear to conflict, reconcile them before adding another surface. Start from concrete cases,
   find the shared motion, delete or collapse the weaker boundary, and document the resulting primitive. Do not
@@ -139,7 +141,7 @@ the missing core contract and promote only that contract, not an application-spe
   cancellation. Their tests exercise transient and permanent failures.
 - `examples/wgs-chr22-annotation/live.mjs` already proves the real online-annotation path: an indexed `duckhts`
   region read, Ensembl VEP `/region` batches of at most 200 variants, bounded `ncurlFanout`, response parsing,
-  ClinVar joining, and SQL reduction. `scripts/pipeline-fanout.mjs` separately patterns the bounded worker-pool
+  ClinVar joining, and SQL reduction. `examples/patterns/pipeline-fanout.qmd` separately proves the bounded worker-pool
   topology. Reuse and generalize this path; do not reopen whether an agent can execute rate-limited VEP calls.
 - Narrative-to-ontology grounding does not require a phenotype-mapper service or another mandatory package.
   SemanticSQL-generated label/synonym views, DuckDB FTS or ordinary SQL, graph projection/closure, candidate

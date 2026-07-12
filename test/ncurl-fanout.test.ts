@@ -8,7 +8,7 @@ import { ncurlFanout } from "../src/duckdb/ncurl-fanout.js";
 // server is the fixture; its POST route (a) VALIDATES the request body has a non-empty `variants` array (else
 // 400) and (b) returns 503 for the first TWO calls then 200 (a server-side sequence) — so the retry path is
 // genuinely exercised, not just the happy path. No external network, no mock. (This is the host-side loop the
-// WGS-chr22 flagship uses to annotate a whole VCF against VEP's batch /region endpoint.)
+// WGS region example uses to annotate selected variants against VEP's batch /region endpoint.)
 
 const ducknngAvailable = await (async () => {
   try {

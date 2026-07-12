@@ -2,7 +2,7 @@
 
 <!-- README.md is generated from README.qmd — please edit this file, then `npm run readme:qmd`. -->
 
-<!-- The `pi`, `pattern`, and `biocli` chunks run real commands. Rendering needs a built `dist/`, Pi, and model credentials. -->
+<!-- The `pi` and `biocli` chunks run real commands. Rendering needs a built `dist/`, Pi, and model credentials. -->
 
 # pi-bio-agent
 
@@ -70,43 +70,47 @@ pi \
   "SQL, and a Markdown result table."
 ```
 
-Manifest path: `.pi/bio-agent/readme-clinvar-tp53.json`
-
-SQL:
+`.pi/bio-agent/readme-clinvar-tp53.json`
 
 ``` sql
-WITH distinct_calls AS (
-  SELECT DISTINCT
+WITH exploded AS (
+  SELECT
     CHROM,
     POS,
     REF,
     ALT,
-    significance
-  FROM clinvar,
-    UNNEST(INFO_CLNSIG) AS u(significance)
-  WHERE significance IS NOT NULL
+    TRIM(sig) AS clinical_significance
+  FROM clinvar
+  CROSS JOIN UNNEST(COALESCE(INFO_CLNSIG, [])) AS u(sig)
+  WHERE CHROM = '17'
+    AND POS BETWEEN 43044295 AND 43125483
+    AND sig IS NOT NULL
+    AND TRIM(sig) <> ''
+), deduped AS (
+  SELECT DISTINCT CHROM, POS, REF, ALT, clinical_significance
+  FROM exploded
 )
 SELECT
-  significance AS clinical_significance,
-  COUNT(*) AS n
-FROM distinct_calls
-GROUP BY clinical_significance
-ORDER BY n DESC, clinical_significance;
+  clinical_significance AS clinical_significance_bucket,
+  COUNT(*) AS variant_count
+FROM deduped
+GROUP BY clinical_significance_bucket
+ORDER BY variant_count DESC, clinical_significance_bucket;
 ```
 
-| clinical_significance                        |    n |
-|----------------------------------------------|-----:|
-| Pathogenic                                   | 3593 |
-| Conflicting_classifications_of_pathogenicity | 2917 |
-| Likely_benign                                | 2891 |
-| Uncertain_significance                       | 2445 |
-| Benign                                       |  704 |
-| Likely_pathogenic                            |  263 |
-| Pathogenic/Likely_pathogenic                 |  227 |
-| Benign/Likely_benign                         |   94 |
-| not_provided                                 |   49 |
-| no_classification_for_the_single_variant     |    2 |
-| no_classifications_from_unflagged_records    |    1 |
+| clinical_significance_bucket                 | variant_count |
+|----------------------------------------------|--------------:|
+| Pathogenic                                   |          3590 |
+| Conflicting_classifications_of_pathogenicity |          2917 |
+| Likely_benign                                |          2891 |
+| Uncertain_significance                       |          2445 |
+| Benign                                       |           704 |
+| Likely_pathogenic                            |           263 |
+| Pathogenic/Likely_pathogenic                 |           227 |
+| Benign/Likely_benign                         |            94 |
+| not_provided                                 |            49 |
+| no_classification_for_the_single_variant     |             2 |
+| no_classifications_from_unflagged_records    |             1 |
 
 The same query with no model in the loop:
 
@@ -129,7 +133,7 @@ Command JSON output
   "ok": true,
   "runId": "query-<run>",
   "status": "succeeded",
-  "rowCount": 11,
+  "rowCount": 102,
   "artifacts": {
     "run": ".pi/bio-agent/runs/query-<run>/run.json",
     "result": ".pi/bio-agent/runs/query-<run>/result.json",
@@ -138,47 +142,411 @@ Command JSON output
   "runDir": ".pi/bio-agent/runs/query-<run>",
   "rows": [
     {
-      "significance": "Pathogenic",
-      "n": 3593
-    },
-    {
-      "significance": "Conflicting_classifications_of_pathogenicity",
-      "n": 2917
+      "significance": "Uncertain_significance",
+      "n": 2314917
     },
     {
       "significance": "Likely_benign",
-      "n": 2891
-    },
-    {
-      "significance": "Uncertain_significance",
-      "n": 2445
+      "n": 1087925
     },
     {
       "significance": "Benign",
-      "n": 704
+      "n": 208885
+    },
+    {
+      "significance": "Pathogenic",
+      "n": 184486
+    },
+    {
+      "significance": "Conflicting_classifications_of_pathogenicity",
+      "n": 163902
     },
     {
       "significance": "Likely_pathogenic",
-      "n": 263
-    },
-    {
-      "significance": "Pathogenic/Likely_pathogenic",
-      "n": 227
+      "n": 118376
     },
     {
       "significance": "Benign/Likely_benign",
-      "n": 94
+      "n": 64680
+    },
+    {
+      "significance": "Pathogenic/Likely_pathogenic",
+      "n": 40213
     },
     {
       "significance": "not_provided",
-      "n": 49
+      "n": 6757
+    },
+    {
+      "significance": "drug_response",
+      "n": 1885
+    },
+    {
+      "significance": "other",
+      "n": 1520
     },
     {
       "significance": "no_classification_for_the_single_variant",
-      "n": 2
+      "n": 668
+    },
+    {
+      "significance": "risk_factor",
+      "n": 357
+    },
+    {
+      "significance": "association",
+      "n": 335
+    },
+    {
+      "significance": "_low_penetrance",
+      "n": 205
     },
     {
       "significance": "no_classifications_from_unflagged_records",
+      "n": 146
+    },
+    {
+      "significance": "Uncertain_significance/Uncertain_risk_allele",
+      "n": 142
+    },
+    {
+      "significance": "Affects",
+      "n": 137
+    },
+    {
+      "significance": "Likely_risk_allele",
+      "n": 91
+    },
+    {
+      "significance": "Pathogenic|other",
+      "n": 72
+    },
+    {
+      "significance": "Pathogenic|drug_response",
+      "n": 40
+    },
+    {
+      "significance": "protective",
+      "n": 38
+    },
+    {
+      "significance": "Uncertain_risk_allele",
+      "n": 36
+    },
+    {
+      "significance": "VUS-high",
+      "n": 32
+    },
+    {
+      "significance": "VUS-mid",
+      "n": 24
+    },
+    {
+      "significance": "Conflicting_classifications_of_pathogenicity|other",
+      "n": 21
+    },
+    {
+      "significance": "Uncertain_significance/VUS-high",
+      "n": 19
+    },
+    {
+      "significance": "Benign|risk_factor",
+      "n": 18
+    },
+    {
+      "significance": "Likely_pathogenic|drug_response",
+      "n": 17
+    },
+    {
+      "significance": "Conflicting_classifications_of_pathogenicity|risk_factor",
+      "n": 17
+    },
+    {
+      "significance": "Pathogenic|risk_factor",
+      "n": 16
+    },
+    {
+      "significance": "Likely_pathogenic/Likely_risk_allele",
+      "n": 14
+    },
+    {
+      "significance": "Benign|other",
+      "n": 13
+    },
+    {
+      "significance": "Benign/Likely_benign|other",
+      "n": 12
+    },
+    {
+      "significance": "Benign|association",
+      "n": 11
+    },
+    {
+      "significance": "Likely_benign|other",
+      "n": 11
+    },
+    {
+      "significance": "VUS-low",
+      "n": 11
+    },
+    {
+      "significance": "confers_sensitivity",
+      "n": 10
+    },
+    {
+      "significance": "Uncertain_significance|other",
+      "n": 10
+    },
+    {
+      "significance": "Uncertain_significance/VUS-mid",
+      "n": 9
+    },
+    {
+      "significance": "Pathogenic/Likely_risk_allele",
+      "n": 8
+    },
+    {
+      "significance": "Uncertain_significance|association",
+      "n": 7
+    },
+    {
+      "significance": "Conflicting_classifications_of_pathogenicity|association",
+      "n": 7
+    },
+    {
+      "significance": "Uncertain_significance|drug_response",
+      "n": 7
+    },
+    {
+      "significance": "Pathogenic/Likely_pathogenic/Pathogenic",
+      "n": 7
+    },
+    {
+      "significance": "Pathogenic|Affects",
+      "n": 7
+    },
+    {
+      "significance": "Pathogenic/Pathogenic",
+      "n": 7
+    },
+    {
+      "significance": "Uncertain_significance|risk_factor",
+      "n": 7
+    },
+    {
+      "significance": "Pathogenic/Likely_pathogenic/Likely_risk_allele",
+      "n": 5
+    },
+    {
+      "significance": "Likely_pathogenic|association",
+      "n": 5
+    },
+    {
+      "significance": "Benign|drug_response",
+      "n": 5
+    },
+    {
+      "significance": "Likely_benign|drug_response",
+      "n": 5
+    },
+    {
+      "significance": "Likely_pathogenic/Pathogenic",
+      "n": 5
+    },
+    {
+      "significance": "Pathogenic/Likely_pathogenic|other",
+      "n": 5
+    },
+    {
+      "significance": "Likely_pathogenic|risk_factor",
+      "n": 5
+    },
+    {
+      "significance": "Benign|protective",
+      "n": 4
+    },
+    {
+      "significance": "protective|risk_factor",
+      "n": 4
+    },
+    {
+      "significance": "association_not_found",
+      "n": 4
+    },
+    {
+      "significance": "Pathogenic|association",
+      "n": 4
+    },
+    {
+      "significance": "Likely_benign|drug_response|other",
+      "n": 4
+    },
+    {
+      "significance": "Pathogenic/Likely_pathogenic|risk_factor",
+      "n": 4
+    },
+    {
+      "significance": "Likely_pathogenic/Likely_pathogenic",
+      "n": 4
+    },
+    {
+      "significance": "Uncertain_significance/VUS-low",
+      "n": 3
+    },
+    {
+      "significance": "Benign/Likely_benign|drug_response|other",
+      "n": 3
+    },
+    {
+      "significance": "Conflicting_classifications_of_pathogenicity|drug_response",
+      "n": 3
+    },
+    {
+      "significance": "Benign|Affects",
+      "n": 3
+    },
+    {
+      "significance": "drug_response|risk_factor",
+      "n": 2
+    },
+    {
+      "significance": "Pathogenic|protective",
+      "n": 2
+    },
+    {
+      "significance": "Benign/Likely_benign|association",
+      "n": 2
+    },
+    {
+      "significance": "Pathogenic/Likely_pathogenic|drug_response",
+      "n": 2
+    },
+    {
+      "significance": "Benign/Likely_benign|drug_response",
+      "n": 2
+    },
+    {
+      "significance": "Conflicting_classifications_of_pathogenicity|protective",
+      "n": 2
+    },
+    {
+      "significance": "Established_risk_allele",
+      "n": 2
+    },
+    {
+      "significance": "Conflicting_classifications_of_pathogenicity|other|risk_factor",
+      "n": 2
+    },
+    {
+      "significance": "Conflicting_classifications_of_pathogenicity|association|risk_factor",
+      "n": 2
+    },
+    {
+      "significance": "Likely_benign|risk_factor",
+      "n": 2
+    },
+    {
+      "significance": "drug_response|other",
+      "n": 1
+    },
+    {
+      "significance": "Conflicting_classifications_of_pathogenicity|Affects",
+      "n": 1
+    },
+    {
+      "significance": "_low_penetrance|risk_factor",
+      "n": 1
+    },
+    {
+      "significance": "Benign|Affects|association|other",
+      "n": 1
+    },
+    {
+      "significance": "Pathogenic/Likely_pathogenic|association",
+      "n": 1
+    },
+    {
+      "significance": "Pathogenic/Likely_pathogenic/Likely_pathogenic",
+      "n": 1
+    },
+    {
+      "significance": "association|protective",
+      "n": 1
+    },
+    {
+      "significance": "Benign/Likely_benign|other|risk_factor",
+      "n": 1
+    },
+    {
+      "significance": "association|risk_factor",
+      "n": 1
+    },
+    {
+      "significance": "Likely_pathogenic|protective",
+      "n": 1
+    },
+    {
+      "significance": "Pathogenic/Likely_pathogenic/Established_risk_allele",
+      "n": 1
+    },
+    {
+      "significance": "Pathogenic|confers_sensitivity",
+      "n": 1
+    },
+    {
+      "significance": "Likely_benign|association",
+      "n": 1
+    },
+    {
+      "significance": "Likely_benign|Affects|association",
+      "n": 1
+    },
+    {
+      "significance": "Benign/Likely_benign|risk_factor",
+      "n": 1
+    },
+    {
+      "significance": "Likely_pathogenic|Affects",
+      "n": 1
+    },
+    {
+      "significance": "Uncertain_risk_allele|risk_factor",
+      "n": 1
+    },
+    {
+      "significance": "_low_penetrance/Established_risk_allele|risk_factor",
+      "n": 1
+    },
+    {
+      "significance": "Uncertain_significance|Affects",
+      "n": 1
+    },
+    {
+      "significance": "_low_penetrance|other",
+      "n": 1
+    },
+    {
+      "significance": "other|risk_factor",
+      "n": 1
+    },
+    {
+      "significance": "Conflicting_classifications_of_pathogenicity|drug_response|other",
+      "n": 1
+    },
+    {
+      "significance": "Established_risk_allele|association",
+      "n": 1
+    },
+    {
+      "significance": "association|drug_response|risk_factor",
+      "n": 1
+    },
+    {
+      "significance": "Benign|confers_sensitivity",
+      "n": 1
+    },
+    {
+      "significance": "confers_sensitivity|other",
       "n": 1
     }
   ]
@@ -660,10 +1028,11 @@ receipts, CAS, and observations remain the computation.
 
 ## Docs
 
-Start with the [user guide](docs/guide.md): write a manifest, run an
-operation. Then read [design notes](docs/design.md) for the core
-contracts and [roadmap](docs/roadmap.md) for current work. The full
-[docs index](docs/INDEX.md) is generated from frontmatter.
+Start with the [user guide](docs/guide.md): write a manifest, inspect
+its schema, and compose a query. Then read the [conceptual
+architecture](docs/design.md), [lineage](docs/lineage.md), and
+[roadmap](docs/roadmap.md). The full [docs index](docs/INDEX.md) is
+generated from frontmatter.
 
 ## References & lineage
 
@@ -707,119 +1076,19 @@ local `duckhts.read_bcf` tests. `npm run provision:ducknng-owned`
 verifies the owned retry/auth/upload/TLS/RPC surface. Runtime Pi APIs
 are peer dependencies supplied by Pi itself.
 
-### Maintainer proof (pattern)
+### Executable examples
 
-This is executable maintainer evidence, not a product workflow or a
-biomedical answer source. It runs one compact composition of the shipped
-ledger, graph, host-capability, CAS, compute, and review primitives so
-changes are tested against the substrate rather than only described in
-prose. Its proof JSON is collapsed in the rendered README.
-
-Run it from the repository root:
+The deterministic QMD patterns execute their own SDK, DuckDB, and
+DuckNNG code and render collapsed results:
 
 ``` sh
-npm run pattern:bring-it-home
+npm run patterns:qmd
+npm run application:clinical
 ```
 
-<details>
-
-<summary>
-
-Pattern proof JSON
-</summary>
-
-``` json
-{
-  "observationCounts": {
-    "executes": 1,
-    "invoked_by": 1,
-    "tool_call": 1,
-    "run": 2,
-    "host_event": 6,
-    "job_step_checkpoint": 2
-  },
-  "ducknngProfile": {
-    "version": "2",
-    "receiptChanged": true,
-    "subjectRestriction": {
-      "restricted": true,
-      "count": 2,
-      "digest": "sha256:ceee9bcb816bd665d011958ad04d1fdfdcb0230ac619ea4a59afaedc002dc953"
-    }
-  },
-  "casMetadata": {
-    "casMetadataRefs": 4,
-    "artifactCasMetadataRefs": 2
-  },
-  "graphProjection": {
-    "external": {
-      "edgeCount": 3,
-      "closureCount": 3
-    },
-    "internal": {
-      "edgeCountAtLeast4": true,
-      "closureCountAtLeast3": true
-    }
-  },
-  "trainingCorpus": {
-    "toolCalls": 1,
-    "runs": 2,
-    "artifacts": 3,
-    "hostEvents": 6,
-    "hostEventLinks": 13,
-    "parquetReadbackRows": 1,
-    "artifactRoles": [
-      {
-        "sourceNode": "run:pattern-host-capability",
-        "mediaType": "image/svg+xml",
-        "semanticRole": "figure",
-        "plottingSystem": "inline-svg"
-      },
-      {
-        "sourceNode": "run:pattern-host-capability",
-        "mediaType": "text/html",
-        "semanticRole": "report"
-      }
-    ]
-  },
-  "governanceHostEvents": {
-    "count": 2,
-    "linkCount": 4,
-    "kinds": [
-      "workbench.governance.approval_submitted",
-      "workbench.governance.approval_decided"
-    ],
-    "eventTypes": [
-      "approval_submitted",
-      "approval_decided"
-    ]
-  },
-  "sdkConsumer": {
-    "publicExportsOnly": true,
-    "runtimeImports": true,
-    "packageSource": "npm-pack"
-  },
-  "queueCancel": {
-    "staleWriteRejected": true,
-    "resumedPhase": "cancelled"
-  },
-  "renvEnvironment": {
-    "rVersion": "4.6.0",
-    "bioconductor": "3.22",
-    "envStatus": "matched",
-    "artifactRows": 1
-  }
-}
-```
-
-</details>
-
-It exercises host-event receipts, step checkpoints/resume, SemanticSQL
-projection, ducknng profile receipts, SDK exports, figure/report CAS
-artifacts, and real process compute when R is available. SemanticSQL
-compatibility is pinned to the concrete generated-view names at upstream
-commit `83503077e867419c18a211d97105d8ead554e947`; it is not a claim of
-equivalence with every future generator.
+The clinical application is downstream policy, while generic patterns
+exercise reusable substrate mechanics. The full gate rerenders both and
+rejects stale Markdown.
 
 Run the Pi session trace pattern after installing the extension and
 configuring an image-capable model:

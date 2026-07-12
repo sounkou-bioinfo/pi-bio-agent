@@ -1,75 +1,25 @@
-# Example: out-of-process compute (R `lm` over Arrow IPC) — the COMPUTE pillar
+# Out-of-process R compute over Arrow IPC
 
-The compute pillar as a manifest: a DuckDB table is handed to an **out-of-process** computation (here R) over
-**Arrow IPC**, and the result is handed back as a table — under the same resolver / receipt / fail-closed model
-as every other resource. This is the COMPUTE half of the two-pillar bet (the NETWORK half is `ducknng_ncurl` /
-the chunked VEP fanout); together they are what makes the coloc flagship (colocalization in R) expressible.
+`compute.run` materializes `points`, exports the declared input SQL as Arrow IPC, invokes `Rscript compute.R`, and
+loads the returned Arrow table as `lm_fit`. The host injects `ComputeRunner`; without it the resolver fails closed.
 
-```
-points (file_scan)  --SELECT x,y-->  Arrow IPC file  -->  Rscript ./compute.R <in> <out>  -->  Arrow IPC file  -->  lm_fit table
-                       DuckDB COPY (FORMAT arrow)            in/out paths = the last two argv       read_arrow()
+```text
+DuckDB relation -> Arrow IPC -> host process -> Arrow IPC -> DuckDB relation
 ```
 
-## The skill is data, not code
+The command is an argv array, not a shell string. The manifest base resolves the script path. Timeout, cancellation,
+output limits, process-group termination, and environment evidence belong to the compute runner. Process isolation
+and deployment policy remain host responsibilities; a runner is a capability, not a sandbox.
 
-```json
-{ "id": "lm_fit", "resolver": "compute.run",
-  "params": { "table": "lm_fit", "inputSql": "SELECT x, y FROM points",
-              "command": ["Rscript", "./compute.R"], "timeoutMs": 60000 } }
+```sh
+pi-bio-agent query examples/compute-run/manifest.json \
+  --db :memory: \
+  --compute local \
+  --init-sql "INSTALL nanoarrow FROM community; LOAD nanoarrow" \
+  --sql "SELECT * FROM lm_fit"
 ```
 
-The `compute.run` resolver does the marshalling — `COPY (inputSql) TO in.arrow (FORMAT arrow)`, run the
-command with the **in/out Arrow paths appended as the last two argv entries** (not env vars — argv is explicit
-and never inherited down a process tree), `read_arrow(out.arrow)` back into `table` — so the **data contract
-stays in SQL + Arrow**. The script is the only domain code, and it is a tiny, language-agnostic contract: *read
-the input path, write the output path (the last two args)*. The same generic resolver runs any R / Python / Go /
-shell tool — point a new manifest at a new `command`, **zero new TypeScript**. The `command` is an **argv array,
-never a shell string** (no shell to inject into), and a `./script` reference is resolved relative to the manifest.
-
-`compute.R` fits an ordinary-least-squares regression (`lm`) — a thing SQL is poor at — and returns the
-coefficients + R²:
-
-```r
-args <- commandArgs(trailingOnly = TRUE)          # the last two args are <in.arrow> <out.arrow>
-df  <- as.data.frame(read_nanoarrow(args[length(args) - 1]))
-out <- tryCatch(                                  # errors-as-values: a degenerate fit -> status="error", not a crash
-  { fit <- lm(y ~ x, data = df)
-    data.frame(n = nrow(df), slope = coef(fit)["x"], intercept = coef(fit)["(Intercept)"],
-               r_squared = summary(fit)$r.squared, status = "ok") },
-  error = function(e) data.frame(n = nrow(df), slope = NA, intercept = NA, r_squared = NA,
-                                 status = paste0("error: ", conditionMessage(e))))
-write_nanoarrow(out, args[length(args)])
-```
-
-## Why out-of-process (not FFI)
-
-A computation that crashes, OOMs, or hangs is contained in the **child** — it cannot take down the agent. The
-runner kills the child on `timeoutMs` or on the run's `AbortSignal`. The exchange is typed columnar Arrow IPC
-(via the `nanoarrow` DuckDB extension on the DuckDB side, the lightweight `nanoarrow` package on the R side —
-DuckDB writes the Arrow IPC **stream** format, so R uses `read_nanoarrow`/`write_nanoarrow`), not text parsing.
-
-## Running it — compute is the host's opt-in
-
-Spawning a process is a **capability the host grants by composition**, exactly like network: the host injects a
-`ComputeRunner` (`nodeComputeRunner()`), and without it the `compute.run` resource **fails closed** (the
-agent can never spawn a process on its own). The host also provisions the Arrow codec (`INSTALL nanoarrow FROM
-community`). A non-zero exit, a timeout, or a clean exit that wrote **no** output file all throw — the run
-records the failure, never a silent empty table.
-
-**Scope (do not over-trust it):** binding a `ComputeRunner` grants the agent's manifests the ability to run the
-commands they declare. It is *not* a sandbox — enforce real isolation (a restricted user, a container,
-seccomp, resource limits) at the **host** boundary, and only inject a runner for manifests you trust to name
-safe commands.
-
-`test/compute-run-example.test.ts` runs this manifest end to end through the host with a **real spawned
-Rscript** (no mock) and asserts the fitted slope ≈ 2, intercept ≈ 1, R² > 0.99 over `data/points.csv` (which is
-≈ `y = 2x + 1`), plus the fail-closed-without-a-runner path.
-
-## Recorded run
-
-This block is **generated by running the manifest through the substrate** (`npm run readme:examples`) — literate
-programming: the agent spawns the real `Rscript`, the substrate's `result.json` is the output, and `npm run
-check` fails if it drifts (it skips when R `nanoarrow` is absent). Not hand-pasted.
+## Generated result
 
 <!-- BEGIN GENERATED:lm-run (npm run readme:examples — do not edit by hand) -->
 *Generated by `npm run readme:examples` — the agent running the manifest (real spawned `Rscript`).*
@@ -81,3 +31,6 @@ check` fails if it drifts (it skips when R `nanoarrow` is absent). Not hand-past
 
 The points are ≈ `y = 2x + 1`; the out-of-process `lm()` recovers **slope 1.997**, **intercept 1.027**, **R² 0.9994** over 10 rows.
 <!-- END GENERATED:lm-run -->
+
+The example establishes the compute transport and a real R result. It does not imply that arbitrary generated code
+is trusted or reproducible without pinned inputs and environment evidence.

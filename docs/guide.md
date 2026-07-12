@@ -144,7 +144,7 @@ introspection over whatever relations the host made visible.
 ### When to declare an operation
 
 An **operation** is a *pinned, named, versioned, tested* query: the special case worth saving when a query is
-subtle, reused, or safety-critical (the flagship "rare high-impact variants" abstention is the canonical
+subtle, reused, or safety-critical (the rare-high-impact abstention regression is the canonical
 example: getting "unknown frequency ≠ rare" right deserves a tested spec, not re-derivation each time). Declare
 it under `provides.operations` and run it with `bio_run_operation` / `runBioOperationFromManifest({ …,
 operationId })`. For everything exploratory, prefer `bio_query`: most manifests declare only resources.
@@ -183,7 +183,7 @@ when unbound.
 The library is **not a network/filesystem sandbox**: whether a remote read or `httpfs` is possible is your
 deployment's decision (container, sandbox, the Pi runtime). The substrate records what ran; the host governs
 what may run. A strict "no external I/O" profile is a few lines wrapping the `SqlConn` you inject (see
-[design notes](design.md#powerful-by-default-host-controlled-effects-provenance-aware-not-policy-obsessed)).
+[conceptual architecture](design.md#host-capabilities-and-permissions)).
 
 For training or publication exports, use `materializeTrainingCorpus` or `exportTrainingCorpusParquet` from
 `pi-bio-agent/hosts`. These are derived temporary projections over the observation ledger, not new storage: messages

@@ -14,7 +14,7 @@ import { replaySpecDigest, type RunReplaySpec } from "../src/core/reproducibilit
 
 // The DISTRIBUTED JobRunner: status/result live in the shared observation ledger; a remote worker (any language,
 // any transport) reports its phase into the job:<runId>:status slot. Here the injected `dispatch` simulates that
-// worker by writing the same rows a real ducknng-RPC worker would (scripts/nng-job-runner.mjs does it for real).
+// worker by writing the same rows the executable DuckNNG RPC pattern writes.
 const replay = (runId: string): RunReplaySpec => ({ schema: "pi-bio.run_replay_spec.v1", runId, kind: "query", sql: "SELECT 1" });
 const ducknngAvailable = await (async () => {
   let inst: DuckDBInstance | undefined;

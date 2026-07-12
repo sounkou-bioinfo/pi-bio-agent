@@ -4,8 +4,6 @@ engine: pi-bio
 format: gfm
 ---
 
-# Agent-authored relations, ledger-backed
-
 This live pattern starts two separate Pi processes against one project. The writer has only `bio_remember`; the
 reader has only recall and graph tools. Neither receives a skill, repository context, or a bespoke prompt-side
 memory format. The Quarto document is the executable harness, while `bio_observations` remains the evidence store.

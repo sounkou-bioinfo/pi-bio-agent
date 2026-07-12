@@ -1,0 +1,110 @@
+# Skill-only host through the CLI
+
+
+This pattern exercises the package as a non-Pi host sees it: install the
+procedural skill, discover manifests, inspect schema, run a declared
+operation through the CLI, verify the ledger, and reproduce the run. The
+skill supplies onboarding; the CLI/SDK remains the implementation.
+
+``` ts
+import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
+import { promises as fs } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { promisify } from "node:util";
+import { DuckDBInstance } from "@duckdb/node-api";
+import { duckdbNodeConn } from "../../dist/duckdb/node-api.js";
+
+const exec = promisify(execFile);
+const root = process.cwd();
+const cli = resolve(root, "dist/cli/bin.js");
+const call = async (cwd, args) => JSON.parse((await exec(process.execPath, [cli, ...args], {
+  cwd, maxBuffer: 8 * 1024 * 1024,
+})).stdout);
+
+const host = await fs.mkdtemp(join(tmpdir(), "pi-bio-skill-host-"));
+const installed = await call(root, ["install-skill", "--dest", join(host, "skills")]);
+const skill = await fs.readFile(join(installed.installed, "SKILL.md"), "utf8");
+assert.match(skill, /Manifest Versus Ad-Hoc Query/);
+assert.match(skill, /Ledger and graph inspection/);
+assert.equal(skill.includes("urllib"), false);
+
+const catalog = await call(root, ["catalog", "--root", "examples", "--query", "rare"]);
+const entry = catalog.entries.find((candidate) => candidate.manifestPath === "examples/rare-high-impact/manifest.json");
+assert.ok(entry);
+
+const workdir = await fs.mkdtemp(join(tmpdir(), "pi-bio-skill-run-"));
+await fs.cp(resolve(root, "examples/rare-high-impact"), workdir, { recursive: true });
+const described = await call(workdir, ["query", "manifest.json", "--db", ":memory:", "--sql", "DESCRIBE annotated_variants"]);
+assert.deepEqual(described.rows.map((row) => row.column_name), [
+  "variant_key", "consequence", "allele_frequency", "clinical_significance",
+]);
+const run = await call(workdir, [
+  "run", "manifest.json", "--db", ":memory:", "--operation", "rare_high_impact.report",
+  "--run-id", "substrate-skill-qmd", "--ledger", "auto", "--author", "skill-only-host",
+]);
+assert.equal(run.ok, true);
+const buckets = Object.fromEntries(run.rows.map((row) => [row.bucket, Number(row.n)]));
+assert.equal(buckets.included, 1);
+assert.equal(buckets.no_frequency, 1);
+assert.equal(buckets.benign, 1);
+
+const reproduced = await call(workdir, ["reproduce", join(run.runDir, "replay.json")]);
+assert.equal(reproduced.reproduced, true);
+assert.equal(reproduced.matched, true);
+const instance = await DuckDBInstance.create(join(workdir, ".pi/bio-agent/store.duckdb"));
+const connection = duckdbNodeConn(await instance.connect());
+const facts = await connection.all("SELECT subject_id FROM bio_observations WHERE predicate = 'run'");
+await connection.close?.();
+assert.deepEqual(facts.map((row) => row.subject_id), ["run:substrate-skill-qmd"]);
+
+piBio.json({
+  pattern: "skill-only-cli-host",
+  discoveredManifest: entry.manifestPath,
+  schema: described.rows.map((row) => row.column_name),
+  runId: run.runId,
+  buckets,
+  ledgerRunFacts: facts.length,
+  reproduced: { reproduced: reproduced.reproduced, matched: reproduced.matched },
+});
+```
+
+<details class="pi-bio-output">
+
+<summary>
+
+Output: cell-1
+</summary>
+
+``` json
+{
+  "pattern": "skill-only-cli-host",
+  "discoveredManifest": "examples/rare-high-impact/manifest.json",
+  "schema": [
+    "variant_key",
+    "consequence",
+    "allele_frequency",
+    "clinical_significance"
+  ],
+  "runId": "substrate-skill-qmd",
+  "buckets": {
+    "benign": 1,
+    "included": 1,
+    "no_frequency": 1,
+    "not_high_impact": 1,
+    "not_rare": 1
+  },
+  "ledgerRunFacts": 1,
+  "reproduced": {
+    "reproduced": true,
+    "matched": true
+  }
+}
+```
+
+</details>
+
+This proves that a host with only the packaged skill and CLI can reach
+the same substrate. It does not test how well a particular weak model
+follows the skill; that requires a separate budgeted harness comparison.

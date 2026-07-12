@@ -31,6 +31,18 @@ Instructions for coding agents working in this repository.
   smallest application-specific SQL around it.
 - Do not create a new schema/version/helper merely to label an internal intermediate. A persisted artifact, public API,
   replay contract, or independently consumed relation must earn its own contract; otherwise use ordinary SQL rows.
+- Treat executable application QMDs as the primary application narrative. They should call the public package,
+  assert the contract they describe, and render bounded evidence. Do not maintain a second prose design document
+  that restates the workflow without executing it.
+
+## Immanent Core Abstractions
+
+- The workbench is where missing primitives become visible through repeated use. Implement application policy here
+  first with manifests, SQL, and existing ports.
+- Promote a primitive only after another application or generic pattern exhibits the same motion. Name both
+  consumers, reconcile the proposed contract with existing core abstractions, and move only policy-free mechanics.
+- After promotion, route every consumer through the public `pi-bio-agent` API and delete local adapters. A core
+  abstraction that leaves its motivating application on a private path is incomplete.
 
 ## Proven Core Capabilities
 

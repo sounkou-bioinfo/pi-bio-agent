@@ -3,7 +3,7 @@
   "id": "ols4-grounding",
   "version": "0.2.0",
   "title": "OLS4 term grounding (SQL-native via ducknng_ncurl)",
-  "description": "A metacurator-shaped grounding skill (disambiguate: a text term -> one CURIE or abstain, https://github.com/seandavi/metacurator), SQL all the way down. The HTTP fetch is ducknng_ncurl_table — a SQL table function — so there is NO TS resolver: the URL is composed in SQL (getvariable + url_encode), agent params are DuckDB session variables, and the JSON response is parsed into a table by ducknng. The host provisions ducknng (duckdbInitSql: INSTALL ducknng FROM community; LOAD ducknng; and a TLS config for HTTPS) and the agent supplies {query}. NOT a ClawBio skill (ClawBio has no OLS skill); the named concrete is metacurator's disambiguate. http.get is a separate TS resolver path for hosts that deliberately choose injected JS fetch.",
+  "description": "Retrieve OLS4 candidates through a declared DuckNNG HTTP materialization. The actor supplies the query, inspects source-provided CURIEs and labels, and selects a validated candidate or abstains. The host owns network, TLS, credentials, and extension provisioning.",
   "provides": {
     "resolvers": [
       { "id": "duckdb.sql_materialize", "version": "0.1.0", "title": "SQL materialize", "description": "Materialize a table from a read-only SELECT (here, a ducknng_ncurl_table HTTP fetch).", "output": { "mode": "table" } }

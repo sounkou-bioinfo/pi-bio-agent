@@ -11,7 +11,7 @@ import type { StudyWorker } from "./study-exec.js";
 // an injected SqlConn (src/hosts/sql-blackboard.ts, single-db). DESIGNED-but-not-yet-shipped backends (do not
 // reach for these as if they exist — they are the cross-process roadmap, not an API): a ducknng-served shared
 // table (publish = ducknng_run_rpc INSERT, await = poll ducknng_query_rpc SELECT — prototyped only in
-// scripts/blackboard-shared.mjs), or a ducknng pub/sub socket (publish = pub send, await = sub recv by prefix).
+// examples/patterns/blackboard-shared.qmd), or a DuckNNG pub/sub socket (publish = pub send, await = sub recv by prefix).
 // A CAS-backed blackboard (publish = put at the slug's address, await = poll has) is INTENTIONALLY NOT provided:
 // CAS entries are not GC roots, so blackboard notes living in CAS would be swept by collectGarbage — exactly the
 // shared-CAS hazard collectGarbage now fails closed on. A shared blackboard belongs on the ducknng-RPC table (a

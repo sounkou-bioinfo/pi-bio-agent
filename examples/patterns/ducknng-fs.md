@@ -1,62 +1,212 @@
+# CAS bytes with SQL metadata over DuckNNG
 
 
-# A content-addressed FS as SQL-over-ducknng + CAS — evidence
+This research pattern composes a mutable metadata tree served over
+DuckNNG RPC with immutable content-addressed bytes. It exercises
+filesystem-like semantics without claiming a FUSE implementation or a
+production distributed filesystem.
 
-`scripts/ducknng-fs.mjs` is a **pattern** (ridiculous-but-cool): a
-POSIX-shaped distributed file system built as a **composition of
-existing, tested primitives** — no new substrate. Same split as [Latch
-Data](https://blog.latch.bio/p/latch-data-a-distributed-file-system)
-(Postgres metadata + S3 bytes + FUSE):
+``` ts
+import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { promises as fs } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { DuckDBInstance } from "@duckdb/node-api";
+import { duckdbNodeConn } from "../../dist/duckdb/node-api.js";
+import { createDucknngSqlConn } from "../../dist/hosts/ducknng-sql-conn.js";
+import { resolveDucknngRuntime } from "../../scripts/ducknng-runtime.mjs";
 
-| Latch Data | here |
-|----|----|
-| Postgres metadata tree | a DuckDB `fs_node` table behind a server-backed `SqlConn` (ducknng RPC here; Quack attach/query is another candidate) |
-| S3/GCP object bytes | **CAS-of-bytes** (content-addressed) |
-| FUSE + GraphQL sync | a FUSE host-port (**unbuilt** — the one new piece) |
+const casDir = await fs.mkdtemp(join(tmpdir(), "pi-bio-ducknng-fs-"));
+const { instanceConfig, loadSql } = await resolveDucknngRuntime();
+const put = async (bytes) => {
+  const digest = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+  const path = join(casDir, digest.replace(":", "_"));
+  await fs.writeFile(path, bytes, { flag: "wx" }).catch((error) => {
+    if (error.code !== "EEXIST") throw error;
+  });
+  return { digest, size: bytes.length };
+};
 
-`mkdir`/`write`/`read`/`ls -R`/`mv`/`rm` are each a SQL statement RPC’d
-to the metadata server (+ CAS for bytes): `mkdir`/`mv`/`rm` are
-`INSERT`/`UPDATE`/`DELETE`; `ls -R` is a recursive CTE; bytes are
-content-addressed. **Dedup, snapshots, and provenance fall out for
-free.** This original pattern uses ducknng `exec` because it proves
-mutable shared state directly. The more general target is any
-server-backed `SqlConn`: ducknng for NNG topologies and push wakeups,
-DuckDB Quack for attached remote catalogs / query pushdown /
-DuckDB-secret-backed auth where that server surface is available.
+const serverInstance = await DuckDBInstance.create(":memory:", instanceConfig);
+const server = await serverInstance.connect();
+const clientInstance = await DuckDBInstance.create(":memory:", instanceConfig);
+const client = await clientInstance.connect();
+try {
+  await server.run(loadSql);
+  await server.run("CREATE SEQUENCE fs_seq START 2");
+  await server.run("CREATE TABLE fs_node (id BIGINT PRIMARY KEY, parent_id BIGINT, name TEXT, kind TEXT, digest TEXT, size BIGINT)");
+  await server.run("INSERT INTO fs_node VALUES (1, NULL, '/', 'dir', NULL, NULL)");
+  await server.run("SELECT ducknng_start_server('fs', 'tcp://127.0.0.1:0', 2, 134217728, 300000, 0::UBIGINT)");
+  await server.run("SELECT ducknng_register_exec_method(false)");
+  const url = String((await server.runAndReadAll("SELECT listen FROM ducknng_list_servers() WHERE name='fs'")).getRows()[0][0]);
 
-Run: `npm run pattern:ducknng-fs`
+  await client.run(loadSql);
+  const remote = createDucknngSqlConn({ client: duckdbNodeConn(client), url });
+  const resolvePath = async (path) => {
+    let id = 1;
+    for (const part of path.split("/").filter(Boolean)) {
+      const rows = await remote.all("SELECT id FROM fs_node WHERE parent_id = ? AND name = ?", [id, part]);
+      assert.equal(rows.length, 1, `missing path ${path}`);
+      id = Number(rows[0].id);
+    }
+    return id;
+  };
+  const parentAndName = (path) => {
+    const parts = path.split("/").filter(Boolean);
+    return { parent: `/${parts.slice(0, -1).join("/")}`, name: parts.at(-1) };
+  };
+  const mkdir = async (path) => {
+    const { parent, name } = parentAndName(path);
+    await remote.run("INSERT INTO fs_node SELECT nextval('fs_seq'), ?, ?, 'dir', NULL, NULL", [await resolvePath(parent), name]);
+  };
+  const write = async (path, content) => {
+    const object = await put(Buffer.from(content));
+    const { parent, name } = parentAndName(path);
+    const parentId = await resolvePath(parent);
+    await remote.run("DELETE FROM fs_node WHERE parent_id = ? AND name = ?", [parentId, name]);
+    await remote.run("INSERT INTO fs_node SELECT nextval('fs_seq'), ?, ?, 'file', ?, ?", [parentId, name, object.digest, object.size]);
+  };
+  const tree = () => remote.all(`WITH RECURSIVE walk(id, path, kind, digest, size) AS (
+    SELECT id, '', kind, digest, size FROM fs_node WHERE id = 1
+    UNION ALL
+    SELECT node.id, walk.path || '/' || node.name, node.kind, node.digest, node.size
+    FROM fs_node node JOIN walk ON node.parent_id = walk.id
+  ) SELECT path, kind, digest, size FROM walk WHERE id <> 1 ORDER BY path`);
 
-## Recorded run (2026-06-30)
+  await mkdir("/data");
+  await mkdir("/data/sub");
+  await write("/data/a.txt", "hello");
+  await write("/data/sub/b.txt", "hello");
+  await write("/data/c.txt", "world");
+  const before = await tree();
+  assert.equal((await fs.readdir(casDir)).length, 2, "equal bytes must deduplicate");
 
-    # after mkdir + 3 writes  (ls -R / = a recursive CTE over the ducknng-served tree)
-      d /data
-      - /data/a.txt            5b sha256:2cf24dba5fb0…
-      - /data/c.txt            5b sha256:486ea46224d1…
-      d /data/sub
-      - /data/sub/b.txt        5b sha256:2cf24dba5fb0…
+  const cId = await resolvePath("/data/c.txt");
+  await remote.run("UPDATE fs_node SET parent_id = ?, name = 'c.txt' WHERE id = ?", [await resolvePath("/data/sub"), cId]);
+  const moved = await tree();
+  const subId = await resolvePath("/data/sub");
+  await remote.run(`DELETE FROM fs_node WHERE id IN (
+    WITH RECURSIVE descendants(id) AS (
+      SELECT ?::BIGINT UNION ALL SELECT node.id FROM fs_node node JOIN descendants parent ON node.parent_id = parent.id
+    ) SELECT id FROM descendants
+  )`, [subId]);
+  const after = await tree();
 
-      CAS objects: 2  (3 files, 2 distinct contents -> DEDUP)
-      read /data/sub/b.txt -> "hello"
+  assert.ok(moved.some((row) => row.path === "/data/sub/c.txt"));
+  assert.deepEqual(after.map((row) => row.path), ["/data", "/data/a.txt"]);
+  piBio.json({
+    pattern: "cas-plus-rpc-metadata",
+    casObjectsForThreeFiles: 2,
+    before,
+    afterMove: moved,
+    afterRecursiveDelete: after,
+  });
+  await server.run("SELECT ducknng_stop_server('fs')");
+} finally {
+  client.closeSync();
+  clientInstance.closeSync();
+  server.closeSync();
+  serverInstance.closeSync();
+  await fs.rm(casDir, { recursive: true, force: true });
+}
+```
 
-    # after mv /data/c.txt -> /data/sub/c.txt   (mv = UPDATE over RPC)
-      d /data
-      - /data/a.txt            5b sha256:2cf24dba5fb0…
-      d /data/sub
-      - /data/sub/b.txt        5b sha256:2cf24dba5fb0…
-      - /data/sub/c.txt        5b sha256:486ea46224d1…
+<details class="pi-bio-output">
 
-    # after rm -r /data/sub   (rm -r = recursive DELETE over RPC)
-      d /data
-      - /data/a.txt            5b sha256:2cf24dba5fb0…
+<summary>
 
-**What it proves:** `a.txt` and `sub/b.txt` (both `"hello"`) share one
-digest → **2 CAS objects for 3 files** (dedup). The directory tree is
-mutated in place over ducknng RPC (`mkdir`/`mv`/`rm` =
-`INSERT`/`UPDATE`/`DELETE`), and `ls -R` is a recursive CTE over the
-served tree. The two *hard* pieces (a mutable metadata graph over RPC +
-content- addressed bytes) were already built and tested — so a
-distributed FS is a **composition**, with dedup/versioning/
-provenance/`du` for free. FUSE (a host port like `ComputeRunner`) would
-make it actually mountable. Push belongs outside the metadata truth: use
-it to wake watchers or workers after a committed SQL/CAS update, not as
-the authoritative file state.
+Output: cell-1
+</summary>
+
+``` json
+{
+  "pattern": "cas-plus-rpc-metadata",
+  "casObjectsForThreeFiles": 2,
+  "before": [
+    {
+      "path": "/data",
+      "kind": "dir",
+      "digest": null,
+      "size": null
+    },
+    {
+      "path": "/data/a.txt",
+      "kind": "file",
+      "digest": "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "size": "5n"
+    },
+    {
+      "path": "/data/c.txt",
+      "kind": "file",
+      "digest": "sha256:486ea46224d1bb4fb680f34f7c9ad96a8f24ec88be73ea8e5a6c65260e9cb8a7",
+      "size": "5n"
+    },
+    {
+      "path": "/data/sub",
+      "kind": "dir",
+      "digest": null,
+      "size": null
+    },
+    {
+      "path": "/data/sub/b.txt",
+      "kind": "file",
+      "digest": "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "size": "5n"
+    }
+  ],
+  "afterMove": [
+    {
+      "path": "/data",
+      "kind": "dir",
+      "digest": null,
+      "size": null
+    },
+    {
+      "path": "/data/a.txt",
+      "kind": "file",
+      "digest": "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "size": "5n"
+    },
+    {
+      "path": "/data/sub",
+      "kind": "dir",
+      "digest": null,
+      "size": null
+    },
+    {
+      "path": "/data/sub/b.txt",
+      "kind": "file",
+      "digest": "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "size": "5n"
+    },
+    {
+      "path": "/data/sub/c.txt",
+      "kind": "file",
+      "digest": "sha256:486ea46224d1bb4fb680f34f7c9ad96a8f24ec88be73ea8e5a6c65260e9cb8a7",
+      "size": "5n"
+    }
+  ],
+  "afterRecursiveDelete": [
+    {
+      "path": "/data",
+      "kind": "dir",
+      "digest": null,
+      "size": null
+    },
+    {
+      "path": "/data/a.txt",
+      "kind": "file",
+      "digest": "sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+      "size": "5n"
+    }
+  ]
+}
+```
+
+</details>
+
+The example proves composability of mutable SQL metadata and immutable
+CAS bytes. FUSE, authorization policy, remote CAS transport, crash
+recovery, and production filesystem semantics remain host/application
+work.

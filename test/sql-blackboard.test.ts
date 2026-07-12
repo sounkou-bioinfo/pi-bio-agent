@@ -7,7 +7,7 @@ import type { SqlConn } from "../src/core/ports.js";
 import type { StudyNote } from "../src/core/study.js";
 
 // A real transport for the decentralized blackboard: a SQL table over an injected SqlConn (single-DB here). The
-// cross-process variant runs over ducknng RPC (scripts/blackboard-shared.mjs). Proves publish/await over the
+// cross-process variant runs over DuckNNG RPC in examples/patterns/blackboard-shared.qmd. Proves publish/await over the
 // table, both orders, idempotency, and timeout.
 
 async function memoryConn(): Promise<SqlConn> {

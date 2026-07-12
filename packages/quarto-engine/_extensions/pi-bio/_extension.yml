@@ -1,7 +1,1 @@
-title: Pi Bio
-author: Sounkou Mahamane Toure
-version: 0.1.0
-quarto-required: ">=1.9.0"
-contributes:
-  engines:
-    - path: pi-bio.js
+../../../../_extensions/pi-bio/_extension.yml

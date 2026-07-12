@@ -10,13 +10,15 @@
     "node": ">=22.6"
   },
   "scripts": {
-    "build": "quarto call build-ts-extension src/pi-bio.ts",
+    "build": "cd ../.. && quarto call build-ts-extension packages/quarto-engine/src/pi-bio.ts",
     "render:example": "npm run build && quarto render examples/basic.qmd --to markdown --output output.md",
+    "readme:qmd": "npm run build && quarto render README.qmd --to gfm --output README.md",
     "test": "node scripts/test-engine.mjs",
-    "check:generated": "npm run build && git diff --exit-code -- _extensions/pi-bio/pi-bio.js",
-    "check": "npm run check:generated && npm test"
+    "check:generated": "npm run build && git diff --exit-code -- ../../_extensions/pi-bio/pi-bio.js",
+    "check:readme": "npm run readme:qmd && git diff --exit-code -- README.md",
+    "check": "npm run check:generated && npm test && npm run check:readme"
   },
   "dependencies": {
-    "pi-bio-agent": "git+https://github.com/sounkou-bioinfo/pi-bio-agent.git#0d910af"
+    "pi-bio-agent": "file:../.."
   }
 }

@@ -144,7 +144,7 @@ export async function runQuery(
 
 /**
  * Run a *declared* operation — a named, versioned, tested query that earned a spec (subtle/reused/safety-
- * critical, like the abstention flagship). It is just `runQuery` with the SQL + resources taken from the
+ * critical, like a stable abstention regression). It is just `runQuery` with the SQL + resources taken from the
  * registered spec. For everything else, the caller writes SQL live and calls `runQuery` directly; a manifest
  * needs to declare only its resources, not an operation per question.
  */

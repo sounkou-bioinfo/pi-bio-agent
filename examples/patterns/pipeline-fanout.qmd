@@ -1,44 +1,61 @@
 ---
+title: "Bounded pipeline fanout"
+engine: pi-bio
 format: gfm
 ---
 
-# Pipeline (push/pull) topology — evidence
+`runPipeline` drains ordered tasks through a fixed number of worker lanes. This is the local topology underlying
+bounded annotation batches; HTTP retry and response materialization remain the responsibility of the DuckNNG fanout
+resolver.
 
-`scripts/pipeline-fanout.mjs` is a **pattern** of the **pipeline** (nng push/pull) topology — a **bounded work
-pool**. `runPipeline(tasks, worker, concurrency)` runs at most `concurrency` lanes pulling from a shared cursor,
-so N tasks drain through a fixed pool and results come back **in task order** even though they complete out of
-order. This is exactly the shape of chunked, rate-limited annotation: split a whole VCF into batches and push them
-through a pool of ≤ K in-flight requests — the role `src/duckdb/ncurl-fanout.ts` plays for the per-round
-`ncurl_aio` fanout. Here each "request" is a deterministic local variant-chunk classification (same rare/high-
-impact + abstention rule as the SQL operation, in JS), so the run is network-free and the concurrency **cap is
-checked, not asserted**.
+```{ts .pi-bio}
+import assert from "node:assert/strict";
+import { runPipeline } from "../../dist/core/pipeline.js";
 
-Run: `npm run pattern:pipeline-fanout`
+const concurrency = 3;
+const chunks = Array.from({ length: 9 }, (_, index) => ({
+  id: `chunk-${index}`,
+  variants: [
+    { af: index % 4 === 0 ? null : 0.0001 * (index + 1), highImpact: index % 2 === 0 },
+    { af: 0.2, highImpact: true },
+    { af: null, highImpact: false },
+  ],
+}));
 
-## Recorded run (2026-06-30, timings representative)
+let inFlight = 0;
+let maxInFlight = 0;
+const completionOrder = [];
+const rows = await runPipeline(chunks, async (chunk, index) => {
+  inFlight += 1;
+  maxInFlight = Math.max(maxInFlight, inFlight);
+  await new Promise((resolveDelay) => setTimeout(resolveDelay, Math.max(10, 70 - index * 8)));
+  completionOrder.push(chunk.id);
+  inFlight -= 1;
+  return {
+    chunk: chunk.id,
+    included: chunk.variants.filter((variant) => variant.highImpact && variant.af !== null && variant.af < 0.01).length,
+    abstained: chunk.variants.filter((variant) => variant.af === null).length,
+  };
+}, concurrency);
 
+assert.ok(maxInFlight <= concurrency);
+assert.deepEqual(rows.map((row) => row.chunk), chunks.map((chunk) => chunk.id));
+assert.deepEqual([...completionOrder].sort(), chunks.map((chunk) => chunk.id).sort());
+const completedOutOfOrder = completionOrder.some((id, index) => id !== rows[index].chunk);
+assert.equal(completedOutOfOrder, true);
+
+piBio.json({
+  pattern: "bounded-pipeline",
+  concurrency,
+  maxInFlight,
+  completedOutOfOrder,
+  returnedOrder: rows.map((row) => row.chunk),
+  totals: {
+    included: rows.reduce((sum, row) => sum + row.included, 0),
+    abstained: rows.reduce((sum, row) => sum + row.abstained, 0),
+  },
+});
 ```
-=== PIPELINE (push/pull) topology: 9 chunks through a pool of 3 lanes ===
 
-per-chunk results (returned IN TASK ORDER, regardless of completion order):
-  chunk-0   included=0  abstained=2
-  chunk-1   included=0  abstained=1
-  chunk-2   included=1  abstained=1
-  ...
-  chunk-8   included=0  abstained=2
-
-totals: included=2  abstained=12  (across 9 chunks)
-max lanes ever in flight: 3  (cap = 3)
-completion order (work-stealing, NOT task order): chunk-2, chunk-1, chunk-0, chunk-3, chunk-5, chunk-4, chunk-8, chunk-7, chunk-6
-wall time: ~124ms  (serial would be ~225ms; the pool overlaps them)
-
-cap-respected invariant: HELD; results-in-task-order: HELD
-```
-
-**What it proves:** 9 tasks drained through exactly 3 lanes — `max lanes ever in flight` never exceeded the cap —
-faster than serial (the lanes overlap the per-chunk latency), and the completion order (`chunk-2, chunk-1,
-chunk-0, …`) is genuinely scrambled by work-stealing while `runPipeline` still reassembles results **in task
-order**. That is the push/pull work-pool a rate-limited whole-VCF annotation fanout needs: bound K in-flight
-requests, let fast chunks pull the next, `UNION` the results in order. The same abstention discipline as the
-classification operation rides along (12 unknown-frequency variants abstained, only 2 defensibly `included`),
-showing the topology is orthogonal to the per-task logic — a scaffold choice, not an executor change.
+The assertions establish bounded concurrency and stable task-order results despite out-of-order completion. They do
+not establish endpoint rate-limit behavior; the DuckNNG fanout tests and VEP application cover that contract.

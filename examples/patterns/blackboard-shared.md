@@ -1,60 +1,150 @@
+# Cross-process SQL blackboard
 
 
-# Shared-write blackboard (pub/sub × shared writes, cross-process) — evidence
+A DuckNNG server owns one `board` table. Four separate Node processes
+use the typed remote `SqlConn`; publishing is an `INSERT`, and awaiting
+a dependency is a parameterized polling query. The application logic is
+in this document.
 
-`scripts/blackboard-shared.mjs` is a **pattern** composing two others:
-the decentralized **blackboard** (pub/sub) topology of
-`blackboard-run.md` and **cross-process shared state** over **ducknng
-RPC** (quack is dropped for the mutable shared-state demos). Each agent
-is a **separate OS process** that coordinates *only* through one shared
-blackboard table on a ducknng server through `createDucknngSqlConn` —
-publish = remote `INSERT`, await = poll remote `SELECT` until the row
-appears. No coordinator, no client opens the db file, exec opt-in.
+``` ts
+import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { DuckDBInstance } from "@duckdb/node-api";
+import { resolveDucknngRuntime } from "../../scripts/ducknng-runtime.mjs";
 
-This closes the last cell of the topology matrix: **chain**
-(`live-multi-agent`) / **survey** (`live-debate`) / **pub-sub**
-(`blackboard-run`) / **push-pull** (`pipeline-fanout`) /
-**shared-write** (this).
+const { instanceConfig, loadSql } = await resolveDucknngRuntime();
+const instance = await DuckDBInstance.create(":memory:", instanceConfig);
+const server = await instance.connect();
+await server.run(loadSql);
+await server.run("CREATE TABLE board (slug TEXT PRIMARY KEY, note JSON)");
+await server.run("SELECT ducknng_start_server('board', 'tcp://127.0.0.1:0', 4, 134217728, 300000, 0::UBIGINT)");
+await server.run("SELECT ducknng_register_exec_method(false)");
+const url = String((await server.runAndReadAll("SELECT listen FROM ducknng_list_servers() WHERE name='board'")).getRows()[0][0]);
 
-Run: `npm run pattern:blackboard-shared`
+const clientSource = `
+import { DuckDBInstance } from "@duckdb/node-api";
+import { duckdbNodeConn } from "./dist/duckdb/node-api.js";
+import { createDucknngSqlConn } from "./dist/hosts/ducknng-sql-conn.js";
+import { resolveDucknngRuntime } from "./scripts/ducknng-runtime.mjs";
+const { instanceConfig, loadSql } = await resolveDucknngRuntime();
+const instance = await DuckDBInstance.create(":memory:", instanceConfig);
+const raw = await instance.connect();
+await raw.run(loadSql);
+const remote = createDucknngSqlConn({ client: duckdbNodeConn(raw), url: process.env.BOARD_URL });
+const deps = JSON.parse(process.env.BOARD_DEPS);
+for (const dep of deps) {
+  while ((await remote.all("SELECT 1 AS present FROM board WHERE slug = ?", [dep])).length === 0) {
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 30));
+  }
+}
+const slug = process.env.BOARD_SLUG;
+await remote.run("INSERT INTO board VALUES (?, ?)", [slug, JSON.stringify({ slug, dependsOn: deps })]);
+process.stdout.write(JSON.stringify({ slug, deps, pid: process.pid }));
+raw.closeSync();
+instance.closeSync();
+`;
+const spawnClient = (slug, deps) => new Promise((resolveClient, reject) => {
+  const child = spawn(process.execPath, ["--input-type=module", "--eval", clientSource], {
+    cwd: process.cwd(),
+    env: { ...process.env, BOARD_URL: url, BOARD_SLUG: slug, BOARD_DEPS: JSON.stringify(deps) },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk) => { stdout += chunk; });
+  child.stderr.on("data", (chunk) => { stderr += chunk; });
+  child.on("error", reject);
+  child.on("close", (code) => code === 0 ? resolveClient(JSON.parse(stdout)) : reject(new Error(stderr)));
+});
 
-## Recorded run (2026-06-30)
+const clients = await Promise.all([
+  spawnClient("extract", []),
+  spawnClient("annotate", ["extract"]),
+  spawnClient("qc", ["extract"]),
+  spawnClient("classify", ["annotate", "qc"]),
+]);
+const publicationRows = (await server.runAndReadAll("SELECT rowid, slug, note FROM board ORDER BY rowid")).getRowObjects();
+const publicationIndex = new Map(publicationRows.map((row, index) => [row.slug, index]));
+const dependencyOrderValid =
+  publicationIndex.get("extract") < publicationIndex.get("annotate") &&
+  publicationIndex.get("extract") < publicationIndex.get("qc") &&
+  publicationIndex.get("annotate") < publicationIndex.get("classify") &&
+  publicationIndex.get("qc") < publicationIndex.get("classify");
+assert.equal(dependencyOrderValid, true);
+assert.equal(new Set(clients.map((client) => client.pid)).size, 4);
+const rows = publicationRows
+  .map(({ slug, note }) => ({ slug, note }))
+  .sort((left, right) => String(left.slug).localeCompare(String(right.slug)));
+piBio.json({
+  pattern: "cross-process-blackboard",
+  clients: clients.map(({ slug, deps }) => ({ slug, deps })),
+  dependencyOrderValid,
+  rows,
+});
+await server.run("SELECT ducknng_stop_server('board')");
+server.closeSync();
+instance.closeSync();
+```
 
-    === SHARED-WRITE BLACKBOARD over ducknng RPC: a decentralized pub/sub DAG across SEPARATE processes ===
+<details class="pi-bio-output">
 
-      [server pid 2152156] ducknng server owns the shared blackboard table
-      [agent extract  pid 2152230] published (root)
-      [agent qc       pid 2152234] published after [extract]
-      [agent annotate pid 2152231] published after [extract]
-      [agent classify pid 2152237] published after [annotate, qc]
-      [server] FINAL board (rows written by SEPARATE client processes): extract, qc, annotate, classify
+<summary>
 
-**What it proves:** five distinct OS processes (one server, four agents)
-coordinated a diamond DAG (`extract → {annotate, qc} → classify`)
-through ONE shared table over ducknng RPC. `extract` published first
-because the other three polled for it via `query_rpc`; `classify`
-published **last** because it blocked on *both* `annotate` and `qc` —
-with no coordinator and no shared file handle. The pub/sub order emerged
-from the shared **writes**.
+Output: cell-1
+</summary>
 
-## Why ducknng, not quack (the transport decision)
+``` json
+{
+  "pattern": "cross-process-blackboard",
+  "clients": [
+    {
+      "slug": "extract",
+      "deps": []
+    },
+    {
+      "slug": "annotate",
+      "deps": [
+        "extract"
+      ]
+    },
+    {
+      "slug": "qc",
+      "deps": [
+        "extract"
+      ]
+    },
+    {
+      "slug": "classify",
+      "deps": [
+        "annotate",
+        "qc"
+      ]
+    }
+  ],
+  "dependencyOrderValid": true,
+  "rows": [
+    {
+      "slug": "annotate",
+      "note": "{\"slug\":\"annotate\",\"dependsOn\":[\"extract\"]}"
+    },
+    {
+      "slug": "classify",
+      "note": "{\"slug\":\"classify\",\"dependsOn\":[\"annotate\",\"qc\"]}"
+    },
+    {
+      "slug": "extract",
+      "note": "{\"slug\":\"extract\",\"dependsOn\":[]}"
+    },
+    {
+      "slug": "qc",
+      "note": "{\"slug\":\"qc\",\"dependsOn\":[\"extract\"]}"
+    }
+  ]
+}
+```
 
-A blackboard publish is **monotonic append** (first-writer-wins, one
-owner per slug), which is all both quack and ducknng support. But the
-moment you need **mutate-in-place** across processes —
-`UPDATE`/`DELETE`/upsert, e.g. superseding a fact as a judgment changes
-(the Phase-4 `activate`/`rollback` shape) — quack **cannot**: it makes
-the remote table a local catalog entry, so DuckDB calls
-`GetStorageInfo`/`PlanUpdate`/`PlanDelete` on quack’s storage shim,
-which still `throw NotImplementedException` at quack HEAD (`29fc039`,
-DuckDB 1.5.4). ducknng RPC runs the SQL string on a server with **native
-DuckDB** (no shim), so the full write surface works (see
-`ducknng-rpc-mutate.md`: a client mutated a server table to
-`k1=99, k3=5` via remote `UPDATE`/`DELETE`/upsert).
+</details>
 
-So the ducknng path replaces quack here: one transport covers the whole
-topology matrix *and* both shared-state shapes (append for the
-blackboard, mutate for a fact-superseding KG), with opt-in exec as the
-host security boundary. The in-process `sqlBlackboard`
-(`src/hosts/sql-blackboard.ts`) remains the single-DB transport for the
-deterministic unit test.
+This proves cross-process shared writes and dependency-driven ordering
+over one server-owned relation. Authorization, TLS policy, persistence,
+and multi-machine deployment remain host responsibilities.

@@ -40,8 +40,8 @@ may inject a different service. The client opens only a throwaway `:memory:` Duc
 owns **no** shared state, holds
 **no** file lock; the *server* is the single writer.
 
-**This mode is a RUNNABLE example: [`scripts/memory-over-ducknng.mjs`](../scripts/memory-over-ducknng.mjs)**
-(`npm run pattern:memory-over-ducknng`, [evidence](../examples/patterns/memory-over-ducknng.qmd)). It starts a ducknng
+**This mode is an executable example: [memory-over-ducknng.qmd](../examples/patterns/memory-over-ducknng.qmd)**
+(`npm run pattern:memory-over-ducknng`). It starts a DuckNNG
 server owning the store and spawns **two separate agent processes**; `agent:A` `remember`s and `agent:B` (a
 distinct OS process) `recall`s it: `"null variant in a LoF gene" by agent:A`, attributed, **no file lock**. The
 memory-store functions are reused unchanged: they take a `SqlConn`, and there the conn routes over RPC:
@@ -87,12 +87,12 @@ clobber. A model host decides which revisions enter a worker's context.
 
 The transport is pattern-driven end to end:
 
-- `scripts/blackboard-shared.mjs`: **four distinct OS processes** coordinate a diamond DAG through **one shared
+- [blackboard-shared.qmd](../examples/patterns/blackboard-shared.qmd): **four distinct OS processes** coordinate a diamond DAG through **one shared
   table on a ducknng server**; no process opens the db file, no coordinator, and the pub/sub order emerges from the
   shared writes. (Run: `npm run pattern:blackboard-shared`.)
-- `scripts/ducknng-rpc-mutate.mjs`: `UPDATE` / `DELETE` / `ON CONFLICT` upsert run on the **server's native
+- [ducknng-rpc-mutate.qmd](../examples/patterns/ducknng-rpc-mutate.qmd): `UPDATE` / `DELETE` / `ON CONFLICT` upsert run on the **server's native
   DuckDB** (mutate-in-place shared state: exactly what supersession/tombstones need), exec opt-in.
-- `scripts/nng-job-runner.mjs`: a separate worker process writes a `job:<id>:status` observation over RPC that
+- [nng-job-runner.qmd](../examples/patterns/nng-job-runner.qmd): a separate worker process writes a `job:<id>:status` observation over RPC that
   the coordinator reads back with the same `observationAsOfKey`: a language-agnostic distributed backend.
 - `npm run pattern:ssh-remote-worker`: packs the library, installs it in a fresh directory on an SSH host, sends an
   authenticated remote `SqlConn` through a reverse tunnel, claims a durable job, and reproduces a CAS-backed run

@@ -1,52 +1,50 @@
 ---
+title: "Dependency-driven blackboard"
+engine: pi-bio
 format: gfm
 ---
 
-# Blackboard (pub/sub) topology — evidence
+Every step starts concurrently. A step waits only for the note ids in its access list, then publishes its own note.
+No scheduler computes a topological order; the order emerges from the declared data dependencies.
 
-`scripts/blackboard-run.mjs` is a **pattern** of the **blackboard** (nng pub/sub) topology — **decentralized, no
-coordinator**. `runScaffoldOnBlackboard` launches *every* step at the same time (`Promise.all` over all steps);
-a step that names upstream notes in its access list **blocks on `awaitNote(slug)`** until those are published,
-then runs and publishes its own (publish = post to the board, await = subscribe). So the execution order is **not
-computed by a scheduler — it emerges from the data dependencies**. Same `StudyWorker` contract as the chain
-(`live-multi-agent`) and survey (`live-debate`) patterns; only the topology differs. It is deterministic (canned
-workers, no LLM) so the emergence is reproducible.
+```{ts .pi-bio}
+import assert from "node:assert/strict";
+import { memoryBlackboard, runScaffoldOnBlackboard } from "../../dist/core/blackboard.js";
 
-The DAG is a diamond: `extract -> {annotate, qc} -> classify`. `annotate` and `qc` are independent (either order);
-`classify` waits for **both**. No code anywhere computes that order — it falls out of the access lists.
+const scaffold = {
+  schema: "pi-bio.study_scaffold.v1",
+  corpusId: "variant-board",
+  objective: "classify variants on a blackboard",
+  steps: [
+    { id: "extract", subtask: "extract variant rows", produces: "corpus_map", accessList: {} },
+    { id: "annotate", subtask: "annotate consequence", produces: "cheatsheet", accessList: { notes: ["extract"] } },
+    { id: "qc", subtask: "check frequency", produces: "concept_map", accessList: { notes: ["extract"] } },
+    { id: "classify", subtask: "combine annotation and QC", produces: "index", accessList: { notes: ["annotate", "qc"] } },
+  ],
+};
 
-Run: `npm run pattern:blackboard-run`
+const delays = { extract: 20, annotate: 40, qc: 25, classify: 10 };
+const published = [];
+const worker = async ({ step, notes }) => {
+  await new Promise((resolveDelay) => setTimeout(resolveDelay, delays[step.id]));
+  published.push({ id: step.id, after: notes.map((note) => note.slug) });
+  return { body: `${step.id}(${notes.map((note) => note.slug).join("+") || "root"})`, hook: step.subtask };
+};
 
-## Recorded run (2026-06-30)
+const notes = await runScaffoldOnBlackboard(scaffold, worker, memoryBlackboard(), { now: "T1" });
+const order = published.map((entry) => entry.id);
+assert.ok(order.indexOf("extract") < order.indexOf("annotate"));
+assert.ok(order.indexOf("extract") < order.indexOf("qc"));
+assert.equal(order.at(-1), "classify");
 
+piBio.json({
+  pattern: "blackboard",
+  topology: "extract -> {annotate, qc} -> classify",
+  publicationOrder: published,
+  notes: notes.map((note) => ({ slug: note.slug, body: note.body })),
+  invariant: "extract precedes both branches; classify is last",
+});
 ```
-=== BLACKBOARD (pub/sub) topology: all steps launched at once; order EMERGES from data deps ===
 
-publish order (as it happened on the board):
-  +022ms  extract publishes
-  +047ms  qc publishes <- [extract]
-  +063ms  annotate publishes <- [extract]
-  +073ms  classify publishes <- [annotate, qc]
-
-final notes (by id):
-  extract    body=extract(root)
-  annotate   body=annotate(extract)
-  qc         body=qc(extract)
-  classify   body=classify(annotate+qc)
-
-emergent-order invariant (extract first, classify last, no scheduler): HELD
-```
-
-**What it proves:** all four steps were launched simultaneously, yet `extract` published first (both `annotate`
-and `qc` blocked on it), and `classify` published **last** because it blocked on *both* `annotate` and `qc` —
-with nothing computing a topological order. `qc` (a shorter beat) published before `annotate` even though both
-depend only on `extract`, showing the two truly ran concurrently and the board, not a scheduler, sequenced them.
-This is stigmergic coordination: the order is a *consequence* of the access lists (publish/subscribe over shared
-memory). This is a deterministic coordination mechanism that a multi-agent host may use; it is not Fugu's learned
-orchestrator or function-call memory. The
-deterministic mechanics also back the chain/survey patterns — same executor, different scaffold.
-
-> Shared-**write** variant: this demo's board is in-process (`memoryBlackboard`). The same `Blackboard` interface
-> backs a SQL board (`src/hosts/sql-blackboard.ts`, publish = `INSERT`, await = poll `SELECT`), which over
-> **ducknng RPC** (see `blackboard-shared.md`) makes the board itself a cross-process shared write — the
-> decentralized topology and shared writes composed.
+This proves deterministic access-list coordination in one process. The shared SQL variant exercises the same
+publish/await contract across processes; it does not turn this pattern into Fugu's learned orchestrator.
