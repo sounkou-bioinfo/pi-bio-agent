@@ -50,6 +50,7 @@ npm run provision:duckhts --workspace=packages/workbench
 npm run check:workbench
 npm run application:clinical
 npm run application:method-selection
+npm run application:method-selection-agent
 ```
 
 The application QMD runs a hermetic local VEP-compatible endpoint, verifies transient retry, executes all eight
@@ -60,6 +61,11 @@ authors a manifest operation, runs it, validates and approves the candidate, wri
 same ledger, and walks the resulting graph. DuckDB remains the stateful work surface; external catalogs and optional
 NNG/embedded kernels are application inputs. The path is deliberately model-light and can be driven by a skill-only
 CLI host or a weaker agent: schema inspection and bounded SQL carry the scientific state instead of prompt context.
+
+`examples/method-selection/agent.qmd` is the live boundary proof. It invokes `gpt-5.3-codex-spark` with only the
+packaged skill, `read`/`write`/`bash`, and the `pi-bio-agent` CLI. The agent authors the selected manifest and operation;
+the harness independently checks the result, replay, session import, ledger, and graph. Run it only when the host has
+configured model credentials; it is intentionally not part of the deterministic package check.
 
 Run the package CLI directly when an application document is not needed:
 

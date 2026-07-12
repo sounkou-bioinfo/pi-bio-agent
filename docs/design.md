@@ -112,6 +112,39 @@ One-response materialization, bounded fanout, and retry are distinct mechanics. 
 `ducknng_ncurl_table`, `ducknng.http_fanout`, `ncurlFanout`, and host-fetch policy paths rather than adding a
 source-specific HTTP client.
 
+### Rendering and graphics are views
+
+Quarto is the document and publishing boundary, not a second scientific substrate. Its TypeScript engine-extension
+surface is enough for this repository's literate QMD files: an engine receives Markdown, executes selected cells, and
+returns Markdown plus supporting files/includes for Pandoc and the target format. The `pi-bio` engine should therefore
+remain a thin execution adapter. Results, figures, and interactive specifications come from DuckDB/compute and are
+content-addressed; Quarto renders them. A figure is a derived view of a pinned relation and run, never a source of
+biomedical fact.
+
+`ggsql` is a promising optional host/display extension at this boundary: it keeps data selection and a Grammar of
+Graphics specification in SQL and targets Vega-Lite-style output. It belongs beside DuckDB as a provisioned renderer or
+extension, not in core and not as a new scientific resolver. An agent-authored visualization query must still be
+validated, tied to its input relation and run, and captured as a CAS-backed supporting artifact. The workbench can
+dogfood this path before promoting a generic figure-output contract.
+
+Our opinionated offers are deliberately small:
+
+- **Interactive workbench:** use AntV G2 directly. It is the browser-facing renderer for linked tables, graph windows,
+  review queues, and exploratory charts; the UI owns the chart instance and receives bounded relation data or a
+  content-addressed view spec.
+- **SQL-authored chart:** use `ggsql` when the actor should stay in DuckDB/SQL. Treat its grammar as an optional
+  provisioned extension and persist the normalized chart spec plus the query/run digests. Its current alpha status
+  means it is an integration target, not a core dependency.
+- **R/literate bridge:** use `gglite` when an R analyst or R-backed QMD wants the same G2 output. It is an adapter for
+  that host, not a second renderer the workbench must maintain.
+- **Publication:** use Quarto to place static or interactive artifacts into HTML/PDF/websites and to interleave
+  executable narrative. Do not make Quarto, G2, `ggsql`, or `gglite` responsible for scientific provenance.
+
+The useful lesson from litedown is scope discipline: fuse executable cells with narrative and keep the renderer
+small. We do not need another Markdown engine while Quarto already provides project rendering, figures, crossrefs,
+websites, and engine extensions. Quarto 2/q2 is an experimental implementation detail to watch, not a dependency to
+design against; keep QMD and the `pi-bio` engine contract portable.
+
 ### Compute
 
 Compute is asynchronous from the bottom: `submit`, `status`, `collect`, and `cancel`. A local process, NNG worker,

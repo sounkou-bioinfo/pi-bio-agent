@@ -1,0 +1,441 @@
+# Spark method selection through the skill-only CLI
+
+
+This is a live harness for the method-selection application. It gives
+`gpt-5.3-codex-spark` the packaged `pi-bio-agent` skill and the plain
+CLI, but no Pi extension tools. The model must inspect the declared
+relations, select a method under host constraints, author the operation
+manifest, and run it. The harness checks the durable artifacts
+independently after the model exits; the model’s prose is not the
+result.
+
+Run it explicitly from the repository root:
+
+``` sh
+npm run application:method-selection-agent
+```
+
+Set `PI_BIO_AGENT_MODEL` to compare another configured model and
+`PI_BIO_AGENT_TIMEOUT_MS` to change the call deadline. This is a live
+agent run, so its rendered transcript is evidence from the current host
+rather than a deterministic fixture.
+
+This proof uses a file-backed ledger serially so the CLI and the
+post-run verifier can be read directly. Concurrent agents or machines
+should inject the DuckNNG SQL server store; that server is the single
+writer and clients hold no shared DuckDB file lock. See
+[concurrency.md](../../../docs/concurrency.md) and the shared-memory
+patterns.
+
+``` ts
+import assert from "node:assert/strict";
+import { execFile as nodeExecFile, spawn } from "node:child_process";
+import { promises as fs } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { promisify } from "node:util";
+import { DuckDBInstance } from "@duckdb/node-api";
+import { duckdbNodeConn, materializeBioEdgesAsOf } from "pi-bio-agent/duckdb";
+
+const root = process.cwd();
+const cli = resolve(root, "dist/cli/bin.js");
+const skill = resolve(root, "skills/pi-bio-agent");
+const workdir = await fs.mkdtemp(join(tmpdir(), "pi-bio-spark-method-selection-"));
+const sessionDir = join(workdir, "sessions");
+const timeout = Number(process.env.PI_BIO_AGENT_TIMEOUT_MS ?? 180_000);
+const model = process.env.PI_BIO_AGENT_MODEL ?? "openai-codex/gpt-5.3-codex-spark";
+const exec = promisify(nodeExecFile);
+
+await fs.mkdir(join(workdir, ".pi", "bio-agent"), { recursive: true });
+await fs.writeFile(join(workdir, "variants.csv"), [
+  "variant_key,consequence,allele_frequency",
+  "v1,stop_gained,0.0003",
+  "v2,missense,0.3",
+  "v3,stop_gained,",
+  "v4,missense,0.01",
+  "v5,synonymous,0.2",
+  "",
+].join("\n"));
+await fs.writeFile(join(workdir, "actions.json"), JSON.stringify([
+  {
+    id: "variant.summary.sql",
+    title: "DuckDB consequence summary",
+    description: "Count variants by consequence in the declared variants relation.",
+    objective: "variant_summary",
+    dataset_kind: "variant_table",
+    execution_kind: "duckdb.sql",
+    requires_compute: false,
+    requires_network: false,
+    read_only: true,
+    output_kind: "relation",
+    sql_template: "SELECT consequence, count(*) AS n FROM variants GROUP BY consequence ORDER BY consequence",
+  },
+  {
+    id: "variant.summary.python",
+    title: "Python consequence summary",
+    description: "Count variants with a Python dataframe program.",
+    objective: "variant_summary",
+    dataset_kind: "variant_table",
+    execution_kind: "compute.run",
+    requires_compute: true,
+    requires_network: false,
+    read_only: true,
+    output_kind: "relation",
+    sql_template: "SELECT consequence, count(*) AS n FROM variants GROUP BY consequence ORDER BY consequence",
+  },
+  {
+    id: "variant.annotation.remote",
+    title: "Remote variant annotation",
+    description: "Annotate variants through a live external service.",
+    objective: "variant_summary",
+    dataset_kind: "variant_table",
+    execution_kind: "ducknng.http_fanout",
+    requires_compute: false,
+    requires_network: true,
+    read_only: true,
+    output_kind: "relation",
+    sql_template: "SELECT consequence, count(*) AS n FROM variants GROUP BY consequence ORDER BY consequence",
+  },
+], null, 2));
+await fs.writeFile(join(workdir, "study-manifest.json"), JSON.stringify({
+  schema: "pi-bio.manifest.v1",
+  id: "spark-method-selection-study",
+  version: "0.1.0",
+  title: "Spark method selection study",
+  description: "Declared action descriptions and a local variant relation.",
+  provides: {
+    resolvers: [{
+      id: "duckdb.file_scan",
+      version: "0.1.0",
+      title: "DuckDB file scan",
+      description: "Read a declared local file into a table.",
+      output: { mode: "table" },
+    }],
+    resources: [
+      { id: "actions", title: "Action descriptions", kind: "virtual", resolver: "duckdb.file_scan", params: { path: "actions.json", table: "actions" } },
+      { id: "variants", title: "Variant rows", kind: "virtual", resolver: "duckdb.file_scan", params: { path: "variants.csv", table: "variants" } },
+    ],
+  },
+}, null, 2));
+
+const prompt = [
+  "You are a method-selection agent working in the current directory.",
+  "Use the packaged pi-bio-agent skill as your only scientific onboarding and use the pi-bio-agent CLI as your only substrate interface. You have no bio_* extension tools.",
+  "Question: summarize the consequences in the declared variants relation.",
+  "Host constraints: compute=false, network=false, writable=false. Choose a read-only local SQL action when the declared catalog supports it.",
+  "First inspect study-manifest.json with pi-bio-agent describe. Then use pi-bio-agent query for DESCRIBE actions, SUMMARIZE variants, and a bounded SQL selection over actions. Do not skip schema discovery.",
+  "Author selected-manifest.json yourself from the selected catalog row. It must declare the existing file resources and a duckdb.sql operation with id variants.summary, requiredResources [variants], readOnly true, and the selected SQL template.",
+  "Run the authored operation with: pi-bio-agent run selected-manifest.json --db :memory: --operation variants.summary --run-id spark-method-selection --ledger auto --cas-root .pi/bio-agent/cas --author agent:spark-method-selection",
+  "Inspect the run result and finish with the manifest path, operation id, run id, and result rows. Do not invent facts outside the declared data.",
+].join("\n");
+
+const runPi = () => new Promise((resolveRun, reject) => {
+  const child = spawn("pi", [
+    "--model", model,
+    "--thinking", "medium",
+    "--no-extensions",
+    "--no-skills",
+    "--no-context-files",
+    "--skill", skill,
+    "--session-dir", sessionDir,
+    "--session-id", "spark-method-selection-agent",
+    "--name", "spark-method-selection-agent",
+    "--tools", "read,write,bash",
+    "-p", prompt,
+  ], { cwd: workdir, stdio: ["ignore", "pipe", "pipe"] });
+  let stdout = "";
+  let stderr = "";
+  const timer = setTimeout(() => child.kill("SIGTERM"), timeout);
+  child.stdout.on("data", (chunk) => { stdout += chunk; });
+  child.stderr.on("data", (chunk) => { stderr += chunk; });
+  child.on("error", (error) => { clearTimeout(timer); reject(error); });
+  child.on("close", (code, signal) => {
+    clearTimeout(timer);
+    if (code !== 0) {
+      reject(new Error(`pi exited ${String(code ?? signal)}: ${stderr.slice(-2000)}\n${stdout.slice(-2000)}`));
+      return;
+    }
+    resolveRun({ stdout: stdout.trim(), stderr: stderr.trim() });
+  });
+});
+
+const agent = await runPi();
+const selectedManifestPath = join(workdir, "selected-manifest.json");
+const selectedManifest = JSON.parse(await fs.readFile(selectedManifestPath, "utf8"));
+const operation = selectedManifest.provides?.operations?.find((candidate) => candidate.id === "variants.summary");
+assert.equal(operation?.transport, "duckdb.sql");
+assert.equal(operation?.sql?.readOnly, true);
+assert.deepEqual(operation?.sql?.requiredResources, ["variants"]);
+assert.match(operation?.sql?.sqlTemplate ?? "", /GROUP BY consequence/);
+
+const runDir = join(workdir, ".pi", "bio-agent", "runs", "spark-method-selection");
+const runResult = JSON.parse(await fs.readFile(join(runDir, "result.json"), "utf8"));
+assert.deepEqual(runResult.rows, [
+  { consequence: "missense", n: 2 },
+  { consequence: "stop_gained", n: 2 },
+  { consequence: "synonymous", n: 1 },
+]);
+const replay = JSON.parse(await fs.readFile(join(runDir, "replay.json"), "utf8"));
+const reproduce = JSON.parse((await exec(process.execPath, [cli, "reproduce", join(runDir, "replay.json")], {
+  cwd: workdir,
+  maxBuffer: 8 * 1024 * 1024,
+})).stdout);
+assert.equal(reproduce.reproduced, true);
+assert.equal(reproduce.matched, true);
+
+const sessionFiles = [];
+const findFiles = async (directory) => {
+  for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) await findFiles(path);
+    else if (entry.name.endsWith(".jsonl")) sessionFiles.push(path);
+  }
+};
+await findFiles(sessionDir);
+assert.equal(sessionFiles.length, 1);
+const imported = JSON.parse((await exec(process.execPath, [
+  cli, "session", "import", sessionFiles[0], "--format", "pi",
+  "--db", join(workdir, ".pi", "bio-agent", "store.duckdb"),
+  "--cas-root", join(workdir, ".pi", "bio-agent", "cas"),
+  "--source", "agent:spark-method-selection",
+], { cwd: workdir, maxBuffer: 8 * 1024 * 1024 })).stdout);
+assert.equal(imported.sessionId, "spark-method-selection-agent");
+
+const instance = await DuckDBInstance.create(join(workdir, ".pi", "bio-agent", "store.duckdb"));
+const rawConnection = await instance.connect();
+const conn = duckdbNodeConn(rawConnection);
+const observations = await conn.all(
+  "SELECT subject_id, predicate, count(*) AS n FROM bio_observations WHERE subject_id IN (?, ?) GROUP BY subject_id, predicate ORDER BY subject_id, predicate",
+  ["run:spark-method-selection", "session:spark-method-selection-agent"],
+);
+await materializeBioEdgesAsOf(conn, "9999-12-31T23:59:59.999Z");
+await conn.close?.();
+rawConnection.closeSync();
+instance.closeSync();
+const graph = JSON.parse((await exec(process.execPath, [
+  cli, "graph-window", "--db", join(workdir, ".pi", "bio-agent", "store.duckdb"),
+  "--table", "bio_edges_as_of", "--start", "run:spark-method-selection", "--direction", "both", "--limit", "20",
+], { cwd: workdir, maxBuffer: 8 * 1024 * 1024 })).stdout);
+const sessionGraph = JSON.parse((await exec(process.execPath, [
+  cli, "graph-window", "--db", join(workdir, ".pi", "bio-agent", "store.duckdb"),
+  "--table", "bio_edges_as_of", "--start", "session:spark-method-selection-agent", "--direction", "out", "--limit", "12",
+], { cwd: workdir, maxBuffer: 8 * 1024 * 1024 })).stdout);
+assert.ok(observations.some((row) => row.subject_id === "run:spark-method-selection" && row.predicate === "run"));
+assert.ok(observations.some((row) => row.subject_id === "session:spark-method-selection-agent"));
+assert.ok(graph.rows.some((row) => row.from_id === "run:spark-method-selection" || row.to_id === "run:spark-method-selection"));
+assert.ok(sessionGraph.rows.length > 0);
+
+piBio.json({
+  model,
+  host: { skillOnly: true, extensionTools: false, tools: ["read", "write", "bash"] },
+  authored: { manifest: "selected-manifest.json", operationId: operation.id, transport: operation.transport },
+  result: { rows: runResult.rows, runId: replay.runId, resultFile: "runs/spark-method-selection/result.json" },
+  replay: { reproduced: reproduce.reproduced, matched: reproduce.matched },
+  session: { imported: imported.sessionId, toolCount: imported.toolCount },
+  ledger: { observations, graph: { run: { totalCount: graph.totalCount, rows: graph.rows }, session: { totalCount: sessionGraph.totalCount, rows: sessionGraph.rows } } },
+  agentFinal: agent.stdout.slice(-2000),
+});
+```
+
+<details class="pi-bio-output">
+
+<summary>
+
+Output: cell-1
+</summary>
+
+``` json
+{
+  "model": "openai-codex/gpt-5.3-codex-spark",
+  "host": {
+    "skillOnly": true,
+    "extensionTools": false,
+    "tools": [
+      "read",
+      "write",
+      "bash"
+    ]
+  },
+  "authored": {
+    "manifest": "selected-manifest.json",
+    "operationId": "variants.summary",
+    "transport": "duckdb.sql"
+  },
+  "result": {
+    "rows": [
+      {
+        "consequence": "missense",
+        "n": 2
+      },
+      {
+        "consequence": "stop_gained",
+        "n": 2
+      },
+      {
+        "consequence": "synonymous",
+        "n": 1
+      }
+    ],
+    "runId": "spark-method-selection",
+    "resultFile": "runs/spark-method-selection/result.json"
+  },
+  "replay": {
+    "reproduced": true,
+    "matched": true
+  },
+  "session": {
+    "imported": "spark-method-selection-agent"
+  },
+  "ledger": {
+    "observations": [
+      {
+        "subject_id": "run:spark-method-selection",
+        "predicate": "executes_operation",
+        "n": "1n"
+      },
+      {
+        "subject_id": "run:spark-method-selection",
+        "predicate": "run",
+        "n": "1n"
+      },
+      {
+        "subject_id": "run:spark-method-selection",
+        "predicate": "uses_manifest",
+        "n": "1n"
+      },
+      {
+        "subject_id": "session:spark-method-selection-agent",
+        "predicate": "has_entry",
+        "n": "50n"
+      },
+      {
+        "subject_id": "session:spark-method-selection-agent",
+        "predicate": "has_message",
+        "n": "46n"
+      },
+      {
+        "subject_id": "session:spark-method-selection-agent",
+        "predicate": "has_model_change",
+        "n": "1n"
+      },
+      {
+        "subject_id": "session:spark-method-selection-agent",
+        "predicate": "has_session_info",
+        "n": "1n"
+      },
+      {
+        "subject_id": "session:spark-method-selection-agent",
+        "predicate": "has_thinking_level_change",
+        "n": "1n"
+      },
+      {
+        "subject_id": "session:spark-method-selection-agent",
+        "predicate": "has_turn",
+        "n": "22n"
+      },
+      {
+        "subject_id": "session:spark-method-selection-agent",
+        "predicate": "raw_jsonl",
+        "n": "1n"
+      },
+      {
+        "subject_id": "session:spark-method-selection-agent",
+        "predicate": "session",
+        "n": "1n"
+      }
+    ],
+    "graph": {
+      "run": {
+        "totalCount": 2,
+        "rows": [
+          {
+            "from_id": "run:spark-method-selection",
+            "predicate": "executes_operation",
+            "to_id": "operation:spark-method-selection-selected@0.1.0:variants.summary@0.1.0"
+          },
+          {
+            "from_id": "run:spark-method-selection",
+            "predicate": "uses_manifest",
+            "to_id": "manifest:spark-method-selection-selected@0.1.0"
+          }
+        ]
+      },
+      "session": {
+        "totalCount": 121,
+        "rows": [
+          {
+            "from_id": "session:spark-method-selection-agent",
+            "predicate": "has_entry",
+            "to_id": "entry:spark-method-selection-agent:007922dc"
+          },
+          {
+            "from_id": "session:spark-method-selection-agent",
+            "predicate": "has_entry",
+            "to_id": "entry:spark-method-selection-agent:03219684"
+          },
+          {
+            "from_id": "session:spark-method-selection-agent",
+            "predicate": "has_entry",
+            "to_id": "entry:spark-method-selection-agent:03c867c6"
+          },
+          {
+            "from_id": "session:spark-method-selection-agent",
+            "predicate": "has_entry",
+            "to_id": "entry:spark-method-selection-agent:13510b2a"
+          },
+          {
+            "from_id": "session:spark-method-selection-agent",
+            "predicate": "has_entry",
+            "to_id": "entry:spark-method-selection-agent:197dc800"
+          },
+          {
+            "from_id": "session:spark-method-selection-agent",
+            "predicate": "has_entry",
+            "to_id": "entry:spark-method-selection-agent:1a0bc18d"
+          },
+          {
+            "from_id": "session:spark-method-selection-agent",
+            "predicate": "has_entry",
+            "to_id": "entry:spark-method-selection-agent:1a8b1889"
+          },
+          {
+            "from_id": "session:spark-method-selection-agent",
+            "predicate": "has_entry",
+            "to_id": "entry:spark-method-selection-agent:295ac9c1"
+          },
+          {
+            "from_id": "session:spark-method-selection-agent",
+            "predicate": "has_entry",
+            "to_id": "entry:spark-method-selection-agent:365549f5"
+          },
+          {
+            "from_id": "session:spark-method-selection-agent",
+            "predicate": "has_entry",
+            "to_id": "entry:spark-method-selection-agent:3c99192b"
+          },
+          {
+            "from_id": "session:spark-method-selection-agent",
+            "predicate": "has_entry",
+            "to_id": "entry:spark-method-selection-agent:3cbf17c8"
+          },
+          {
+            "from_id": "session:spark-method-selection-agent",
+            "predicate": "has_entry",
+            "to_id": "entry:spark-method-selection-agent:40fa8a39"
+          }
+        ]
+      }
+    }
+  },
+  "agentFinal": "`DESCRIBE`/`SUMMARIZE`/bounded selection checks were done against `study-manifest.json`, and the selected operation is `variant.summary.sql` (read-only DuckDB SQL, compute/network not required).\n\nI authored: `selected-manifest.json` and ran it.\n\n- **manifest path:** `selected-manifest.json`\n- **operation id:** `variants.summary`\n- **run id:** `spark-method-selection`\n- **result rows:**\n  - `{ consequence: \"missense\", n: 2 }`\n  - `{ consequence: \"stop_gained\", n: 2 }`\n  - `{ consequence: \"synonymous\", n: 1 }`"
+}
+```
+
+</details>
+
+The important result is not that Spark can repeat a canned answer. It
+crossed the same boundary as a human or a stronger host: inspect
+declared data, compose a candidate, author executable SQL, run it
+through the substrate, and leave evidence that another actor can replay
+and walk. The SQL result remains grounded in `variants.csv`; the model
+only supplied routing and composition.

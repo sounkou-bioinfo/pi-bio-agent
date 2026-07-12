@@ -76,6 +76,7 @@
     "check:patterns:qmd": "npm run patterns:qmd && git diff --quiet -- examples/patterns/*.md",
     "application:clinical": "npm run build && npm run build:workbench && npm run build:quarto && quarto render packages/workbench/examples/clinical-genomics/application.qmd --to gfm",
     "application:method-selection": "npm run build && npm run build:quarto && quarto render packages/workbench/examples/method-selection/application.qmd --to gfm",
+    "application:method-selection-agent": "npm run build && npm run build:quarto && quarto render packages/workbench/examples/method-selection/agent.qmd --to gfm",
     "check:application:qmd": "npm run application:clinical && npm run application:method-selection && git diff --quiet -- packages/workbench/examples/clinical-genomics/application.md packages/workbench/examples/method-selection/application.md",
     "check:executable-docs": "npm run check:patterns:qmd && npm run check:application:qmd",
     "readme:examples": "npm run build && node scripts/generate-example-readmes.mjs",

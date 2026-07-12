@@ -84,9 +84,14 @@ refreshable method descriptions, DuckDB schema discovery, host-constraint filter
 candidate validation/approval, skill revision, CAS, and a ledger graph. It demonstrates composability over a changing
 tool landscape rather than maintenance of an isolated skill catalog.
 
+The live [Spark method-selection proof](../packages/workbench/examples/method-selection/agent.md) gives a weaker
+model only the packaged skill and CLI. It checks the authored operation, result, replay, imported session, ledger,
+and graph independently; it is a live trajectory, not a deterministic model-quality benchmark.
+
 ```sh
 npm run application:clinical
 npm run application:method-selection
+npm run application:method-selection-agent
 ```
 
 Repeated application friction may justify a new core abstraction only after another application or generic pattern

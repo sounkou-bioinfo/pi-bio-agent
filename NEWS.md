@@ -35,6 +35,10 @@ is the plan of record; [`docs/refinments.md`](docs/refinments.md) tracks open it
   distinguish contract mechanics, live compatibility, applications, and biomedical validity.
 - The Quarto engine has one generated workspace artifact and its own README is executable QMD. Private workspace
   packages now consume the root checkout in lockstep instead of pinned historical Git revisions.
+- Added a live method-selection application proof: `gpt-5.3-codex-spark` runs with only the packaged skill and CLI,
+  authors an operation manifest, and is checked through result, replay, session import, ledger, and graph evidence.
+- Recorded the rendering boundary: Quarto is the publication shell, G2 is the interactive workbench renderer, `ggsql`
+  is the optional SQL visualization bridge, and `gglite` is an R adapter; none is a core scientific primitive.
 
 - README redesigned demo-first, with a live NNG-topology demo (a worker reporting job
   status over ducknng RPC into the ledger) and re-rendered with real output. The render
