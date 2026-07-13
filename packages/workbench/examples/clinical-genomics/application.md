@@ -350,9 +350,251 @@ delta remain evaluator-only, so task metadata cannot be matched against
 candidate target metadata by simple enumeration. This is meaningful only
 when the host actually enforces separate tool/filesystem boundaries; a
 prompt or receipt cannot make a process blind. It tests source-label
-change, not diagnostic truth or clinical validity. The deterministic
-proof is
-[clinvar-temporal.test.ts](../../test/clinvar-temporal.test.ts).
+change, not diagnostic truth or clinical validity.
+
+The agent response is also durable evidence, not loose chat JSON. Each
+ranked prediction or explicit abstention binds to the candidate run’s
+manifest, replay, result, and run-object digests. The evaluator copies
+that verified CAS object across the host boundary and computes per-row
+source-label agreement plus coverage, change recall, and reciprocal rank
+in declared SQL. Proposal bytes are protected run bindings, so replay
+records their digest rather than their content.
+
+``` ts
+import { createHash as createTemporalHash } from "node:crypto";
+import {
+  buildClinVarTemporalIsolationReceipt,
+  defaultClinVarDuckLakeConfig,
+  listClinVarReleases,
+  prepareClinVarTemporalTask,
+  registerClinVarRelease,
+  registerClinVarTemporalProposalSet,
+  runClinVarTemporalCandidates,
+  runClinVarTemporalProposalEvaluation,
+} from "../../dist/clinvar-temporal.js";
+
+const temporalRoot = await fs.mkdtemp(join(tmpdir(), "pi-bio-clinvar-temporal-application-"));
+const temporalEvaluatorWorkspace = join(temporalRoot, "evaluator");
+const temporalAgentWorkspace = join(temporalRoot, "agent");
+const temporalEvaluatorLake = defaultClinVarDuckLakeConfig(temporalEvaluatorWorkspace);
+const temporalAgentLake = defaultClinVarDuckLakeConfig(temporalAgentWorkspace);
+const temporalDigest = (value) => `sha256:${createTemporalHash("sha256").update(value).digest("hex")}`;
+const temporalParser = {
+  id: "application.clinvar-normalizer",
+  version: "1.0.0",
+  implementationDigest: temporalDigest("application.clinvar-normalizer@1.0.0"),
+};
+const temporalAssertion = {
+  assertionId: "VCV000111",
+  temporalKey: "vcv:000111",
+  recordScope: "variation_aggregate",
+  variationId: "111",
+  conditionId: "MONDO:0000111",
+  reviewStatus: "criteria provided, single submitter",
+};
+const temporalBaseline = await registerClinVarRelease(temporalEvaluatorWorkspace, {
+  lake: temporalEvaluatorLake,
+  releaseId: "baseline-visible",
+  releasedAt: "2026-01-01T00:00:00Z",
+  rawSource: {
+    uri: "https://example.invalid/clinvar/baseline.tsv.gz",
+    format: "tsv",
+    mediaType: "text/tab-separated-values",
+    bytes: Buffer.from("baseline fixture"),
+  },
+  parser: temporalParser,
+  assertions: [
+    { ...temporalAssertion, clinicalSignificance: "Uncertain significance" },
+    {
+      ...temporalAssertion,
+      assertionId: "VCV000112",
+      temporalKey: "vcv:000112",
+      variationId: "112",
+      conditionId: "MONDO:0000112",
+      clinicalSignificance: "Uncertain significance",
+    },
+  ],
+  recordedAt: "2026-02-02T00:00:00Z",
+});
+const temporalTarget = await registerClinVarRelease(temporalEvaluatorWorkspace, {
+  lake: temporalEvaluatorLake,
+  releaseId: "target-hidden",
+  releasedAt: "2026-02-01T00:00:00Z",
+  rawSource: {
+    uri: "https://example.invalid/clinvar/target.tsv.gz",
+    format: "tsv",
+    mediaType: "text/tab-separated-values",
+    bytes: Buffer.from("hidden target fixture"),
+  },
+  parser: temporalParser,
+  assertions: [
+    { ...temporalAssertion, clinicalSignificance: "Likely pathogenic" },
+    {
+      ...temporalAssertion,
+      assertionId: "VCV000112",
+      temporalKey: "vcv:000112",
+      variationId: "112",
+      conditionId: "MONDO:0000112",
+      clinicalSignificance: "Uncertain significance",
+    },
+  ],
+  recordedAt: "2026-02-02T00:00:00Z",
+});
+const temporalIsolation = buildClinVarTemporalIsolationReceipt({
+  mode: "host_enforced",
+  agentBoundaryId: "application-agent-boundary",
+  evaluatorBoundaryId: "application-evaluator-boundary",
+  targetAccess: "evaluator_only",
+});
+const temporalTask = await prepareClinVarTemporalTask({
+  evaluatorWorkspace: temporalEvaluatorWorkspace,
+  agentWorkspace: temporalAgentWorkspace,
+  evaluatorLake: temporalEvaluatorLake,
+  agentLake: temporalAgentLake,
+  baseline: temporalBaseline,
+  target: temporalTarget,
+  candidatePolicy: { baselineClinicalSignificances: ["Uncertain significance"] },
+  targetCommitmentSecret: Buffer.alloc(32, 23),
+  isolationReceipt: temporalIsolation,
+  taskId: "application-temporal-task",
+  recordedAt: "2026-02-02T00:01:00Z",
+});
+assert.deepEqual(
+  (await listClinVarReleases(temporalAgentWorkspace, temporalAgentLake)).map((release) => release.releaseId),
+  [temporalBaseline.releaseId],
+);
+assert.equal(JSON.stringify(temporalTask.task).includes(temporalTarget.releaseId), false);
+
+const temporalCandidates = await runClinVarTemporalCandidates(
+  temporalAgentWorkspace,
+  temporalAgentLake,
+  temporalTask.task.taskId,
+  { runId: "application-temporal-candidates", now: "2026-02-02T00:02:00Z" },
+);
+const temporalProposals = await registerClinVarTemporalProposalSet({
+  agentWorkspace: temporalAgentWorkspace,
+  agentLake: temporalAgentLake,
+  taskId: temporalTask.task.taskId,
+  proposalSetId: "application-temporal-proposals",
+  candidateRunId: temporalCandidates.runId,
+  actor: {
+    id: "recorded-application-agent",
+    version: "1.0.0",
+    provider: "fixture",
+    model: "recorded-proposals",
+    contractDigest: temporalDigest("recorded-application-agent-contract@1.0.0"),
+  },
+  proposals: [
+    {
+      temporalKey: "vcv:000111",
+      priorityRank: 1,
+      prediction: "classification",
+      predictedClinicalSignificance: "Likely pathogenic",
+      confidence: 0.75,
+      rationale: "Recorded baseline-only proposal for the executable application fixture.",
+    },
+    {
+      temporalKey: "vcv:000112",
+      priorityRank: 2,
+      prediction: "abstain",
+      rationale: "The fixture actor leaves this source-label prediction unresolved.",
+    },
+  ],
+  recordedAt: "2026-02-02T00:03:00Z",
+});
+const temporalScores = await runClinVarTemporalProposalEvaluation({
+  evaluatorWorkspace: temporalEvaluatorWorkspace,
+  evaluatorLake: temporalEvaluatorLake,
+  agentWorkspace: temporalAgentWorkspace,
+  agentLake: temporalAgentLake,
+  proposalSetId: temporalProposals.proposalSet.proposalSetId,
+  scoreRunId: "application-temporal-scores",
+  metricsRunId: "application-temporal-metrics",
+  now: "2026-02-02T00:04:00Z",
+});
+assert.deepEqual(temporalScores.scores.rows.map((row) => row.score_status), ["correct", "abstained"]);
+assert.equal(temporalScores.metrics.rows[0].coverage, 0.5);
+assert.equal(temporalScores.metrics.rows[0].prediction_accuracy, 1);
+assert.equal(temporalScores.metrics.rows[0].classification_accuracy, 1);
+assert.equal(temporalScores.metrics.rows[0].target_change_reciprocal_rank, 1);
+const temporalProposalDigestRecorded = temporalProposals.proposalSet.proposalDigest.startsWith("sha256:");
+await fs.rm(temporalRoot, { recursive: true, force: true });
+
+piBio.json({
+  task: {
+    id: temporalTask.task.taskId,
+    target: "opaque commitment in agent boundary",
+    candidateRun: temporalCandidates.runId,
+  },
+  proposal: {
+    id: temporalProposals.proposalSet.proposalSetId,
+    contentDigestRecorded: temporalProposalDigestRecorded,
+    actor: temporalProposals.proposalSet.actor,
+  },
+  evaluator: {
+    scoreRun: temporalScores.scores.runId,
+    metricsRun: temporalScores.metrics.runId,
+    metrics: temporalScores.metrics.rows[0],
+  },
+});
+```
+
+<details class="pi-bio-output">
+
+<summary>
+
+JSON output: cell-3
+</summary>
+
+``` json
+{
+  "task": {
+    "id": "application-temporal-task",
+    "target": "opaque commitment in agent boundary",
+    "candidateRun": "application-temporal-candidates"
+  },
+  "proposal": {
+    "id": "application-temporal-proposals",
+    "contentDigestRecorded": true,
+    "actor": {
+      "id": "recorded-application-agent",
+      "version": "1.0.0",
+      "provider": "fixture",
+      "model": "recorded-proposals",
+      "contractDigest": "sha256:5de267523d6aaca03ed4052ca67a6a6b262ba63dfac0358af8d52b9f960e0de9"
+    }
+  },
+  "evaluator": {
+    "scoreRun": "application-temporal-scores",
+    "metricsRun": "application-temporal-metrics",
+    "metrics": {
+      "total_candidates": 2,
+      "answered_candidates": 1,
+      "abstained_candidates": 1,
+      "correct_predictions": 1,
+      "incorrect_predictions": 0,
+      "classification_predictions": 1,
+      "correct_classification_predictions": 1,
+      "removal_predictions": 0,
+      "correct_removal_predictions": 0,
+      "evaluation_missing_candidates": 0,
+      "target_changes": 1,
+      "correctly_predicted_changes": 1,
+      "first_target_change_rank": 1,
+      "first_correct_change_rank": 1,
+      "coverage": 0.5,
+      "prediction_accuracy": 1,
+      "classification_accuracy": 1,
+      "removal_accuracy": null,
+      "target_change_recall": 1,
+      "target_change_reciprocal_rank": 1,
+      "correct_change_reciprocal_rank": 1
+    }
+  }
+}
+```
+
+</details>
 
 ## Next case-workup closure
 

@@ -64,9 +64,17 @@ only the baseline release into a non-overlapping agent workspace, records an HMA
 evaluator-only entropy, and keeps the target release, commitment secret, and delta operation in the evaluator
 workspace. The task metadata therefore cannot be matched against candidate target metadata by simple enumeration.
 `clinical.clinvar_temporal_candidates` performs source-label selection in baseline SQL;
-`runClinVarTemporalEvaluation` later runs the target-side delta. A structured host isolation receipt is pinned in task
-and run provenance, but only a host container, microVM, filesystem policy, or equivalent tool boundary can enforce
-it. A prompt alone is not a blind. The result measures source-label change, not clinical truth, diagnosis, or a
+`registerClinVarTemporalProposalSet` then accepts one ranked prediction or explicit abstention per candidate. It
+rejects a handoff unless the task, candidate manifest, baseline bindings, exact DuckLake snapshot, host receipt,
+result CAS digest, replay, and run-object root agree. The proposal artifact records actor/provider/model identity and
+a digest of the host's prompt/tool/model contract; it remains a proposal rather than becoming a biomedical fact.
+
+`runClinVarTemporalProposalEvaluation` copies that verified artifact across the host boundary and executes two
+declared evaluator-only SQL operations over the hidden target delta: per-candidate scores and aggregate coverage,
+accuracy, change recall, and reciprocal-rank metrics. Proposal bytes are protected bindings, so replay pins their
+digest without serializing them. A structured host isolation receipt is pinned in task and run provenance, but only a
+host container, microVM, filesystem policy, or equivalent tool boundary can enforce it. A prompt alone is not a
+blind. The result measures later ClinVar source-label agreement, not clinical truth, diagnosis, ACMG validity, or a
 replacement for expert review. The executable proof is
 [clinvar-temporal.test.ts](test/clinvar-temporal.test.ts).
 

@@ -1,6 +1,6 @@
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { promises as fs } from "node:fs";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { DuckDBInstance } from "@duckdb/node-api";
 import {
   canonicalDigest,
@@ -27,17 +27,21 @@ export const CLINVAR_RELEASE_SCHEMA = "pi-bio.workbench.clinvar_release.v1" as c
 export const CLINVAR_TEMPORAL_TASK_SCHEMA = "pi-bio.workbench.clinvar_temporal_task.v1" as const;
 export const CLINVAR_TEMPORAL_EVALUATION_SCHEMA = "pi-bio.workbench.clinvar_temporal_evaluation.v1" as const;
 export const CLINVAR_TEMPORAL_ISOLATION_RECEIPT_SCHEMA = "pi-bio.workbench.clinvar_temporal_isolation_receipt.v1" as const;
+export const CLINVAR_TEMPORAL_PROPOSAL_SET_SCHEMA = "pi-bio.workbench.clinvar_temporal_proposal_set.v1" as const;
+export const CLINVAR_TEMPORAL_PROPOSAL_EVALUATION_SCHEMA = "pi-bio.workbench.clinvar_temporal_proposal_evaluation.v1" as const;
 
 const SOURCE = "pi-bio-workbench:clinvar-temporal";
 const RAW_MEDIA_TYPE = "application/vnd.pi-bio.workbench.clinvar-source";
 const NORMALIZED_MEDIA_TYPE = "application/vnd.pi-bio.workbench.clinvar-normalized+json";
 const TEMPORAL_TASK_MEDIA_TYPE = "application/vnd.pi-bio.workbench.clinvar-temporal-task+json";
 const TEMPORAL_COMMITMENT_SECRET_MEDIA_TYPE = "application/vnd.pi-bio.workbench.clinvar-temporal-commitment-secret";
+const TEMPORAL_PROPOSAL_SET_MEDIA_TYPE = "application/vnd.pi-bio.workbench.clinvar-temporal-proposal-set+json";
 const AS_OF = "9999-12-31T23:59:59.999Z";
 const CATALOG_ALIAS = "clinvar_lake";
 const LAKE_ID_RE = /^[a-z][a-z0-9_-]{0,63}$/;
 const RELEASE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const TASK_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+const RUN_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const BOUNDARY_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,255}$/;
 const SHA256_RE = /^sha256:[0-9a-f]{64}$/;
 
@@ -212,6 +216,79 @@ export interface RecordedClinVarOperation {
   casRefs: RunCasRefs;
 }
 
+export type ClinVarTemporalPredictionKind = "classification" | "removed" | "abstain";
+
+/** One ranked judgment over a baseline candidate. A prediction is a proposal, never a biomedical fact. */
+export interface ClinVarTemporalProposal {
+  temporalKey: string;
+  priorityRank: number;
+  prediction: ClinVarTemporalPredictionKind;
+  predictedClinicalSignificance?: string;
+  confidence?: number;
+  rationale: string;
+}
+
+/** Host-recorded identity of the actor and the exact prompt/tool/model policy used to obtain its proposal. */
+export interface ClinVarTemporalProposerIdentity {
+  id: string;
+  version: string;
+  provider?: string;
+  model?: string;
+  contractDigest: `sha256:${string}`;
+}
+
+export interface ClinVarTemporalProposalSet {
+  schema: typeof CLINVAR_TEMPORAL_PROPOSAL_SET_SCHEMA;
+  proposalSetId: string;
+  taskId: string;
+  taskDigest: `sha256:${string}`;
+  candidateRun: {
+    runId: string;
+    manifestDigest: `sha256:${string}`;
+    resultDigest: `sha256:${string}`;
+    runObjectDigest: `sha256:${string}`;
+  };
+  actor: ClinVarTemporalProposerIdentity;
+  proposals: ClinVarTemporalProposal[];
+  recordedAt: string;
+  proposalDigest: `sha256:${string}`;
+}
+
+export interface RegisterClinVarTemporalProposalSetRequest {
+  agentWorkspace: string;
+  agentLake: ClinVarDuckLakeConfig;
+  taskId: string;
+  proposalSetId: string;
+  candidateRunId: string;
+  actor: ClinVarTemporalProposerIdentity;
+  proposals: readonly ClinVarTemporalProposal[];
+  recordedAt?: string;
+}
+
+export interface RecordedClinVarTemporalProposalSet {
+  proposalSet: ClinVarTemporalProposalSet;
+  artifactDigest: `sha256:${string}`;
+  artifactUri: `cas:sha256:${string}`;
+}
+
+export interface ClinVarTemporalProposalEvaluationResult {
+  proposalSet: RecordedClinVarTemporalProposalSet;
+  scores: RecordedClinVarOperation;
+  metrics: RecordedClinVarOperation;
+}
+
+export interface RunClinVarTemporalProposalEvaluationRequest {
+  evaluatorWorkspace: string;
+  evaluatorLake: ClinVarDuckLakeConfig;
+  agentWorkspace: string;
+  agentLake: ClinVarDuckLakeConfig;
+  proposalSetId: string;
+  scoreRunId?: string;
+  metricsRunId?: string;
+  now?: string;
+  dbPath?: string;
+}
+
 export class ClinVarTemporalInputError extends Error {
   constructor(message: string) {
     super(message);
@@ -300,6 +377,25 @@ type TemporalEvaluationLedgerValue = {
   isolation_policy_digest: `sha256:${string}`;
 };
 
+type TemporalProposalSetLedgerValue = {
+  schema: typeof CLINVAR_TEMPORAL_PROPOSAL_SET_SCHEMA;
+  proposal_set_id: string;
+  proposal_digest: `sha256:${string}`;
+  artifact_digest: `sha256:${string}`;
+  artifact_uri: `cas:sha256:${string}`;
+  task_id: string;
+  task_digest: `sha256:${string}`;
+  candidate_run_id: string;
+  candidate_manifest_digest: `sha256:${string}`;
+  candidate_result_digest: `sha256:${string}`;
+  candidate_run_object_digest: `sha256:${string}`;
+  actor_id: string;
+  actor_version: string;
+  actor_provider?: string;
+  actor_model?: string;
+  actor_contract_digest: `sha256:${string}`;
+};
+
 function assertText(label: string, value: unknown): string {
   const trimmed = typeof value === "string" ? value.trim() : "";
   if (!trimmed) throw new ClinVarTemporalInputError(`${label} must be non-empty`);
@@ -321,6 +417,20 @@ function assertReleaseId(value: unknown): string {
 function assertTaskId(value: unknown): string {
   if (typeof value !== "string" || !TASK_ID_RE.test(value)) {
     throw new ClinVarTemporalInputError(`taskId must match ${TASK_ID_RE}`);
+  }
+  return value;
+}
+
+function assertProposalSetId(value: unknown): string {
+  if (typeof value !== "string" || !TASK_ID_RE.test(value)) {
+    throw new ClinVarTemporalInputError(`proposalSetId must match ${TASK_ID_RE}`);
+  }
+  return value;
+}
+
+function assertRunId(label: string, value: unknown): string {
+  if (typeof value !== "string" || !RUN_ID_RE.test(value)) {
+    throw new ClinVarTemporalInputError(`${label} must match ${RUN_ID_RE}`);
   }
   return value;
 }
@@ -500,6 +610,22 @@ function temporalEvaluationNode(taskId: string): string {
   return `clinvar-temporal-evaluation:${taskId}`;
 }
 
+function temporalProposalSetStatementKey(proposalSetId: string): string {
+  return `clinvar-temporal-proposal-set:${proposalSetId}`;
+}
+
+function temporalProposalSetNode(proposalSetId: string): string {
+  return `clinvar-temporal-proposal-set:${proposalSetId}`;
+}
+
+function temporalProposalEvaluationStatementKey(proposalSetId: string): string {
+  return `clinvar-temporal-proposal-evaluation:${proposalSetId}`;
+}
+
+function temporalProposalEvaluationNode(proposalSetId: string): string {
+  return `clinvar-temporal-proposal-evaluation:${proposalSetId}`;
+}
+
 function releaseBaseline(release: ClinVarRelease): ClinVarTemporalTaskBaseline {
   return {
     lakeId: release.lakeId,
@@ -564,6 +690,78 @@ function normalizedCandidatePolicy(input: unknown): ClinVarTemporalTask["candida
   };
 }
 
+function normalizeProposerIdentity(input: unknown): ClinVarTemporalProposerIdentity {
+  const actor = asObject("proposal actor", input);
+  return {
+    id: assertBoundaryId("actor.id", actor.id),
+    version: assertBoundaryId("actor.version", actor.version),
+    ...(actor.provider === undefined ? {} : { provider: assertText("actor.provider", actor.provider) }),
+    ...(actor.model === undefined ? {} : { model: assertText("actor.model", actor.model) }),
+    contractDigest: assertDigest("actor.contractDigest", actor.contractDigest),
+  };
+}
+
+function normalizeTemporalProposals(
+  input: unknown,
+  candidateTemporalKeys: readonly string[],
+): ClinVarTemporalProposal[] {
+  if (!Array.isArray(input)) throw new ClinVarTemporalInputError("proposals must be an array");
+  const temporalKeys = new Set<string>();
+  const ranks = new Set<number>();
+  const proposals = input.map((raw, index) => {
+    const item = asObject(`proposals[${index}]`, raw);
+    const temporalKey = assertText(`proposals[${index}].temporalKey`, item.temporalKey);
+    if (temporalKeys.has(temporalKey)) throw new ClinVarTemporalInputError(`duplicate proposal temporalKey '${temporalKey}'`);
+    temporalKeys.add(temporalKey);
+    const priorityRank = item.priorityRank;
+    if (typeof priorityRank !== "number" || !Number.isSafeInteger(priorityRank) || priorityRank < 1) {
+      throw new ClinVarTemporalInputError(`proposals[${index}].priorityRank must be a positive integer`);
+    }
+    if (ranks.has(priorityRank)) throw new ClinVarTemporalInputError(`duplicate proposal priorityRank '${priorityRank}'`);
+    ranks.add(priorityRank);
+    if (item.prediction !== "classification" && item.prediction !== "removed" && item.prediction !== "abstain") {
+      throw new ClinVarTemporalInputError(`proposals[${index}].prediction must be classification, removed, or abstain`);
+    }
+    const predictedClinicalSignificance = item.predictedClinicalSignificance === undefined
+      ? undefined
+      : assertText(`proposals[${index}].predictedClinicalSignificance`, item.predictedClinicalSignificance);
+    if (item.prediction === "classification" && !predictedClinicalSignificance) {
+      throw new ClinVarTemporalInputError(`proposals[${index}] requires predictedClinicalSignificance for a classification prediction`);
+    }
+    if (item.prediction !== "classification" && predictedClinicalSignificance !== undefined) {
+      throw new ClinVarTemporalInputError(`proposals[${index}] may only set predictedClinicalSignificance for a classification prediction`);
+    }
+    const confidence = item.confidence;
+    if (confidence !== undefined && (typeof confidence !== "number" || !Number.isFinite(confidence) || confidence < 0 || confidence > 1)) {
+      throw new ClinVarTemporalInputError(`proposals[${index}].confidence must be between 0 and 1`);
+    }
+    return {
+      temporalKey,
+      priorityRank,
+      prediction: item.prediction,
+      ...(predictedClinicalSignificance === undefined ? {} : { predictedClinicalSignificance }),
+      ...(confidence === undefined ? {} : { confidence }),
+      rationale: assertText(`proposals[${index}].rationale`, item.rationale),
+    } satisfies ClinVarTemporalProposal;
+  }).sort((left, right) => left.priorityRank - right.priorityRank);
+
+  const expectedKeys = [...new Set(candidateTemporalKeys)].sort();
+  const actualKeys = [...temporalKeys].sort();
+  if (canonicalDigest(actualKeys) !== canonicalDigest(expectedKeys)) {
+    const missing = expectedKeys.filter((key) => !temporalKeys.has(key));
+    const extra = actualKeys.filter((key) => !expectedKeys.includes(key));
+    throw new ClinVarTemporalInputError(`proposals must cover every candidate exactly once (missing: ${missing.join(", ") || "none"}; extra: ${extra.join(", ") || "none"})`);
+  }
+  for (let rank = 1; rank <= proposals.length; rank += 1) {
+    if (!ranks.has(rank)) throw new ClinVarTemporalInputError(`proposal priorityRank values must be contiguous from 1 through ${proposals.length}`);
+  }
+  return proposals;
+}
+
+function temporalProposalSetDigest(input: Omit<ClinVarTemporalProposalSet, "proposalDigest">): `sha256:${string}` {
+  return canonicalDigest(input) as `sha256:${string}`;
+}
+
 function isolationReceiptBody(receipt: Omit<ClinVarTemporalIsolationReceipt, "policyDigest">): Record<string, string> {
   return {
     schema: receipt.schema,
@@ -618,19 +816,55 @@ function pathContains(parent: string, child: string): boolean {
   return difference === "" || (!difference.startsWith(`..${sep}`) && difference !== ".." && !isAbsolute(difference));
 }
 
-function assertSeparateTemporalBoundaries(
+async function canonicalBoundaryPath(label: string, value: string): Promise<string> {
+  let cursor = resolve(assertText(label, value));
+  const missingTail: string[] = [];
+  for (;;) {
+    try {
+      return resolve(await fs.realpath(cursor), ...missingTail);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "ENOENT") {
+        throw new ClinVarTemporalInputError(`${label} cannot be resolved at the host boundary: ${(error as Error).message}`);
+      }
+      try {
+        const entry = await fs.lstat(cursor);
+        if (entry.isSymbolicLink()) {
+          throw new ClinVarTemporalInputError(`${label} must not contain a dangling symbolic link`);
+        }
+      } catch (entryError) {
+        if (entryError instanceof ClinVarTemporalInputError) throw entryError;
+        if ((entryError as NodeJS.ErrnoException).code !== "ENOENT") {
+          throw new ClinVarTemporalInputError(`${label} cannot be inspected at the host boundary: ${(entryError as Error).message}`);
+        }
+      }
+      const parent = dirname(cursor);
+      if (parent === cursor) throw new ClinVarTemporalInputError(`${label} has no resolvable host ancestor`);
+      missingTail.unshift(basename(cursor));
+      cursor = parent;
+    }
+  }
+}
+
+async function assertSeparateTemporalBoundaries(
   evaluatorWorkspace: string,
   agentWorkspace: string,
   evaluatorLake: ClinVarDuckLakeConfig,
   agentLake: ClinVarDuckLakeConfig,
-): void {
-  const evaluatorRoot = resolve(assertText("evaluatorWorkspace", evaluatorWorkspace));
-  const agentRoot = resolve(assertText("agentWorkspace", agentWorkspace));
+): Promise<void> {
+  const [evaluatorRoot, agentRoot, ...lakePaths] = await Promise.all([
+    canonicalBoundaryPath("evaluatorWorkspace", evaluatorWorkspace),
+    canonicalBoundaryPath("agentWorkspace", agentWorkspace),
+    canonicalBoundaryPath("evaluatorLake.catalogPath", evaluatorLake.catalogPath),
+    canonicalBoundaryPath("evaluatorLake.dataPath", evaluatorLake.dataPath),
+    canonicalBoundaryPath("agentLake.catalogPath", agentLake.catalogPath),
+    canonicalBoundaryPath("agentLake.dataPath", agentLake.dataPath),
+  ]);
   if (pathContains(evaluatorRoot, agentRoot) || pathContains(agentRoot, evaluatorRoot)) {
     throw new ClinVarTemporalInputError("agentWorkspace and evaluatorWorkspace must be non-overlapping host boundaries");
   }
-  const evaluatorPaths = [evaluatorLake.catalogPath, evaluatorLake.dataPath];
-  const agentPaths = [agentLake.catalogPath, agentLake.dataPath];
+  const evaluatorPaths = lakePaths.slice(0, 2);
+  const agentPaths = lakePaths.slice(2);
   if (evaluatorPaths.some((evaluatorPath) => agentPaths.some((agentPath) => (
     pathContains(evaluatorPath, agentPath) || pathContains(agentPath, evaluatorPath)
   )))) {
@@ -1002,6 +1236,63 @@ function parseEvaluationLedgerValue(valueJson: string): TemporalEvaluationLedger
   };
 }
 
+function parseTemporalProposalSet(value: unknown): ClinVarTemporalProposalSet {
+  const item = asObject("ClinVar temporal proposal set", value);
+  if (item.schema !== CLINVAR_TEMPORAL_PROPOSAL_SET_SCHEMA) {
+    throw new ClinVarTemporalInputError("ClinVar temporal proposal set has an unsupported schema");
+  }
+  if (!Array.isArray(item.proposals)) throw new ClinVarTemporalInputError("ClinVar temporal proposal set proposals must be an array");
+  const proposalKeys = item.proposals.map((proposal, index) =>
+    assertText(`proposals[${index}].temporalKey`, asObject(`proposals[${index}]`, proposal).temporalKey));
+  const candidateRun = asObject("proposal candidateRun", item.candidateRun);
+  const proposalSet: ClinVarTemporalProposalSet = {
+    schema: CLINVAR_TEMPORAL_PROPOSAL_SET_SCHEMA,
+    proposalSetId: assertProposalSetId(item.proposalSetId),
+    taskId: assertTaskId(item.taskId),
+    taskDigest: assertDigest("proposal taskDigest", item.taskDigest),
+    candidateRun: {
+      runId: assertRunId("proposal candidateRun.runId", candidateRun.runId),
+      manifestDigest: assertDigest("proposal candidateRun.manifestDigest", candidateRun.manifestDigest),
+      resultDigest: assertDigest("proposal candidateRun.resultDigest", candidateRun.resultDigest),
+      runObjectDigest: assertDigest("proposal candidateRun.runObjectDigest", candidateRun.runObjectDigest),
+    },
+    actor: normalizeProposerIdentity(item.actor),
+    proposals: normalizeTemporalProposals(item.proposals, proposalKeys),
+    recordedAt: assertTimestamp("proposal recordedAt", item.recordedAt),
+    proposalDigest: assertDigest("proposal proposalDigest", item.proposalDigest),
+  };
+  const { proposalDigest, ...proposalBody } = proposalSet;
+  if (proposalDigest !== temporalProposalSetDigest(proposalBody)) {
+    throw new ClinVarTemporalInputError("ClinVar temporal proposal set digest does not match its content");
+  }
+  return proposalSet;
+}
+
+function parseTemporalProposalSetLedgerValue(valueJson: string): TemporalProposalSetLedgerValue {
+  const item = asObject("ClinVar temporal proposal set ledger value", JSON.parse(valueJson));
+  if (item.schema !== CLINVAR_TEMPORAL_PROPOSAL_SET_SCHEMA) {
+    throw new ClinVarTemporalInputError("ClinVar temporal proposal set ledger value has an invalid schema");
+  }
+  return {
+    schema: CLINVAR_TEMPORAL_PROPOSAL_SET_SCHEMA,
+    proposal_set_id: assertProposalSetId(item.proposal_set_id),
+    proposal_digest: assertDigest("proposal_digest", item.proposal_digest),
+    artifact_digest: assertDigest("artifact_digest", item.artifact_digest),
+    artifact_uri: assertCasUri("artifact_uri", item.artifact_uri),
+    task_id: assertTaskId(item.task_id),
+    task_digest: assertDigest("task_digest", item.task_digest),
+    candidate_run_id: assertRunId("candidate_run_id", item.candidate_run_id),
+    candidate_manifest_digest: assertDigest("candidate_manifest_digest", item.candidate_manifest_digest),
+    candidate_result_digest: assertDigest("candidate_result_digest", item.candidate_result_digest),
+    candidate_run_object_digest: assertDigest("candidate_run_object_digest", item.candidate_run_object_digest),
+    actor_id: assertBoundaryId("actor_id", item.actor_id),
+    actor_version: assertBoundaryId("actor_version", item.actor_version),
+    ...(item.actor_provider === undefined ? {} : { actor_provider: assertText("actor_provider", item.actor_provider) }),
+    ...(item.actor_model === undefined ? {} : { actor_model: assertText("actor_model", item.actor_model) }),
+    actor_contract_digest: assertDigest("actor_contract_digest", item.actor_contract_digest),
+  };
+}
+
 async function readVerifiedCasBytes(cas: CasStore, digest: `sha256:${string}`, label: string): Promise<Buffer> {
   const address = casAddress(digest);
   if (!(await cas.has(address))) throw new ClinVarTemporalInputError(`${label} is missing from CAS`);
@@ -1084,6 +1375,136 @@ async function readTemporalEvaluationFromLedger(
   const observation = await observationAsOfKey(conn, temporalEvaluationStatementKey(taskId), asOf);
   if (!observation?.value_json) return null;
   return { value: parseEvaluationLedgerValue(observation.value_json), recordedAt: observation.recorded_at };
+}
+
+async function readTemporalProposalSetFromLedger(
+  conn: SqlConn,
+  cas: CasStore,
+  proposalSetId: string,
+  asOf = AS_OF,
+): Promise<RecordedClinVarTemporalProposalSet | null> {
+  const observation = await observationAsOfKey(conn, temporalProposalSetStatementKey(proposalSetId), asOf);
+  if (!observation?.value_json) return null;
+  const value = parseTemporalProposalSetLedgerValue(observation.value_json);
+  const bytes = await readVerifiedCasBytes(cas, value.artifact_digest, `ClinVar temporal proposal set '${proposalSetId}'`);
+  let artifactValue: unknown;
+  try {
+    artifactValue = JSON.parse(bytes.toString("utf8"));
+  } catch {
+    throw new ClinVarTemporalInputError(`ClinVar temporal proposal set '${proposalSetId}' CAS object is not valid JSON`);
+  }
+  const proposalSet = parseTemporalProposalSet(artifactValue);
+  if (
+    proposalSet.proposalSetId !== proposalSetId
+    || proposalSet.proposalDigest !== value.proposal_digest
+    || proposalSet.taskId !== value.task_id
+    || proposalSet.taskDigest !== value.task_digest
+    || proposalSet.candidateRun.runId !== value.candidate_run_id
+    || proposalSet.candidateRun.manifestDigest !== value.candidate_manifest_digest
+    || proposalSet.candidateRun.resultDigest !== value.candidate_result_digest
+    || proposalSet.candidateRun.runObjectDigest !== value.candidate_run_object_digest
+    || proposalSet.actor.id !== value.actor_id
+    || proposalSet.actor.version !== value.actor_version
+    || proposalSet.actor.provider !== value.actor_provider
+    || proposalSet.actor.model !== value.actor_model
+    || proposalSet.actor.contractDigest !== value.actor_contract_digest
+    || value.artifact_uri !== `cas:${value.artifact_digest}`
+  ) {
+    throw new ClinVarTemporalInputError(`ClinVar temporal proposal set '${proposalSetId}' does not match its ledger metadata`);
+  }
+  return { proposalSet, artifactDigest: value.artifact_digest, artifactUri: value.artifact_uri };
+}
+
+type CandidateRunEvidence = {
+  runId: string;
+  manifestDigest: `sha256:${string}`;
+  resultDigest: `sha256:${string}`;
+  runObjectDigest: `sha256:${string}`;
+  candidateTemporalKeys: string[];
+};
+
+async function readCandidateRunEvidence(
+  agentWorkspace: string,
+  agentLake: ClinVarDuckLakeConfig,
+  task: PreparedClinVarTemporalTask,
+  candidateRunId: string,
+): Promise<CandidateRunEvidence> {
+  const lake = normalizeLake(agentLake);
+  if (
+    task.agentRelease.lakeId !== lake.lakeId
+    || task.agentRelease.duckLakeConfigDigest !== duckLakeConfigDigest(lake)
+    || !releaseFromBaseline(task.agentRelease, task.task.agentBaseline)
+  ) {
+    throw new ClinVarTemporalInputError(`ClinVar temporal task '${task.task.taskId}' does not match the supplied agent DuckLake`);
+  }
+  const runId = assertRunId("candidateRunId", candidateRunId);
+  const store = await openBioStore(agentWorkspace);
+  const cas = fsCasStore(join(agentWorkspace, ".pi", "bio-agent", "cas"));
+  try {
+    const observation = await observationAsOfKey(store.conn, `run:${runId}`, AS_OF);
+    if (!observation?.value_json) throw new ClinVarTemporalInputError(`candidate run '${runId}' is not recorded in the agent ledger`);
+    const run = asObject(`candidate run '${runId}'`, JSON.parse(observation.value_json));
+    if (run.identity !== "clinical.clinvar_temporal_candidates" || run.status !== "succeeded") {
+      throw new ClinVarTemporalInputError(`candidate run '${runId}' is not a succeeded clinical.clinvar_temporal_candidates operation`);
+    }
+    const manifestDigest = assertDigest("candidate run manifestDigest", run.manifestDigest);
+    const resultDigest = assertDigest("candidate run resultDigest", run.resultDigest);
+    const replayDigest = assertDigest("candidate run replayDigest", run.replayDigest);
+    const runObjectDigest = assertDigest("candidate run runObjectDigest", run.runObjectDigest);
+    const expectedManifest = buildClinVarTemporalCandidateManifest(task.agentRelease);
+    const expectedManifestDigest = canonicalDigest(expectedManifest) as `sha256:${string}`;
+    if (manifestDigest !== expectedManifestDigest) {
+      throw new ClinVarTemporalInputError(`candidate run '${runId}' does not use the task's candidate manifest`);
+    }
+
+    const replayBytes = await readVerifiedCasBytes(cas, replayDigest, `candidate run '${runId}' replay`);
+    const replay = asObject(`candidate run '${runId}' replay`, JSON.parse(replayBytes.toString("utf8")));
+    const replayManifest = asObject(`candidate run '${runId}' replay manifest`, replay.manifest);
+    const expectedBindings = {
+      clinvar_release_id: task.agentRelease.releaseId,
+      clinvar_candidate_significances_json: JSON.stringify(task.task.candidatePolicy.baselineClinicalSignificances),
+      clinvar_candidate_review_statuses_json: JSON.stringify(task.task.candidatePolicy.baselineReviewStatuses ?? []),
+    };
+    if (
+      replay.kind !== "operation"
+      || replay.operationId !== "clinical.clinvar_temporal_candidates"
+      || replayManifest.digest !== expectedManifestDigest
+      || canonicalDigest(replayManifest.snapshot) !== expectedManifestDigest
+      || replay.resultDigest !== resultDigest
+      || replay.duckdbInitSqlDigest !== canonicalDigest(clinVarDuckLakeInitSql(lake, task.agentRelease.duckLakeSnapshotId))
+      || canonicalDigest(replay.bindings) !== canonicalDigest(expectedBindings)
+      || !Array.isArray(replay.hostReceiptDigests)
+      || !replay.hostReceiptDigests.includes(task.task.isolation.policyDigest)
+    ) {
+      throw new ClinVarTemporalInputError(`candidate run '${runId}' replay does not bind the exact task, snapshot, and host policy`);
+    }
+
+    const runObjectBytes = await readVerifiedCasBytes(cas, runObjectDigest, `candidate run '${runId}' run object`);
+    const runObject = asObject(`candidate run '${runId}' run object`, JSON.parse(runObjectBytes.toString("utf8")));
+    const runObjectData = asObject(`candidate run '${runId}' run object data`, runObject.data);
+    const runObjectRefs = asObject(`candidate run '${runId}' run object refs`, runObject.refs);
+    if (
+      runObject.schema !== "pi-bio.run_object.v1"
+      || runObjectData.kind !== "operation"
+      || runObjectData.identity !== "clinical.clinvar_temporal_candidates"
+      || runObjectData.status !== "succeeded"
+      || runObjectRefs.result !== resultDigest
+    ) {
+      throw new ClinVarTemporalInputError(`candidate run '${runId}' run object does not reference its result`);
+    }
+
+    const resultBytes = await readVerifiedCasBytes(cas, resultDigest, `candidate run '${runId}' result`);
+    const rows = JSON.parse(resultBytes.toString("utf8")) as unknown;
+    if (!Array.isArray(rows)) throw new ClinVarTemporalInputError(`candidate run '${runId}' result must be a JSON row array`);
+    const candidateTemporalKeys = rows.map((row, index) =>
+      assertText(`candidate run '${runId}' row ${index} temporal_key`, asObject(`candidate run '${runId}' row ${index}`, row).temporal_key));
+    if (new Set(candidateTemporalKeys).size !== candidateTemporalKeys.length) {
+      throw new ClinVarTemporalInputError(`candidate run '${runId}' result contains duplicate temporal keys`);
+    }
+    return { runId, manifestDigest, resultDigest, runObjectDigest, candidateTemporalKeys };
+  } finally {
+    store.close();
+  }
 }
 
 async function exists(path: string): Promise<boolean> {
@@ -1868,6 +2289,218 @@ FULL OUTER JOIN target t USING (temporal_key)`,
   };
 }
 
+/** Evaluator-only SQL scoring over one typed proposal artifact and the hidden release delta. */
+export function buildClinVarTemporalProposalEvaluationManifest(
+  baseline: ClinVarRelease,
+  target: ClinVarRelease,
+  proposalArtifact: Pick<RecordedClinVarTemporalProposalSet, "artifactDigest" | "artifactUri">,
+): BioManifest {
+  const proposalArtifactDigest = assertDigest("proposalArtifact.artifactDigest", proposalArtifact.artifactDigest);
+  const proposalArtifactUri = assertCasUri("proposalArtifact.artifactUri", proposalArtifact.artifactUri);
+  if (proposalArtifactUri !== `cas:${proposalArtifactDigest}`) {
+    throw new ClinVarTemporalInputError("proposal artifact URI does not match its digest");
+  }
+  const deltaManifest = buildClinVarClassificationDeltaManifest(baseline, target);
+  const deltaResources = deltaManifest.provides?.resources ?? [];
+  const resolvers = deltaManifest.provides?.resolvers ?? [];
+  const inputSchema = {
+    type: "object" as const,
+    properties: {
+      clinvar_baseline_release_id: { type: "string" as const },
+      clinvar_target_release_id: { type: "string" as const },
+      clinvar_temporal_proposal_set_json: {
+        type: "string" as const,
+        description: "Host-protected canonical proposal-set JSON copied from the agent CAS after integrity verification.",
+      },
+    },
+    required: [
+      "clinvar_baseline_release_id",
+      "clinvar_target_release_id",
+      "clinvar_temporal_proposal_set_json",
+    ],
+  };
+  return {
+    schema: "pi-bio.manifest.v1",
+    id: `clinvar-temporal-proposal-evaluation-${baseline.lakeId}`,
+    version: "0.1.0",
+    title: "Blinded ClinVar temporal proposal evaluation",
+    description: "Score ranked agent proposals against an evaluator-only, release-pinned ClinVar source-label delta.",
+    provides: {
+      resolvers,
+      resources: [
+        ...deltaResources,
+        {
+          id: "clinvar_temporal_proposals",
+          title: "Typed ClinVar temporal proposals",
+          kind: "virtual",
+          resolver: "duckdb.sql_materialize",
+          params: {
+            table: "clinvar_temporal_proposals",
+            declaredSources: [proposalArtifactUri],
+            sql: `SELECT
+  json_extract_string(proposal.value, '$.temporalKey') AS temporal_key,
+  try_cast(json_extract(proposal.value, '$.priorityRank') AS INTEGER) AS priority_rank,
+  json_extract_string(proposal.value, '$.prediction') AS prediction,
+  json_extract_string(proposal.value, '$.predictedClinicalSignificance') AS predicted_clinical_significance,
+  try_cast(json_extract(proposal.value, '$.confidence') AS DOUBLE) AS confidence,
+  json_extract_string(proposal.value, '$.rationale') AS rationale
+FROM json_each(
+  json_extract(CAST(getvariable('clinvar_temporal_proposal_set_json') AS JSON), '$.proposals')
+) AS proposal`,
+          },
+        },
+        {
+          id: "clinvar_temporal_proposal_scores",
+          title: "Per-candidate temporal proposal scores",
+          kind: "virtual",
+          resolver: "duckdb.sql_materialize",
+          params: {
+            table: "clinvar_temporal_proposal_scores",
+            sql: `SELECT
+  p.temporal_key,
+  p.priority_rank,
+  p.prediction,
+  p.predicted_clinical_significance,
+  p.confidence,
+  p.rationale,
+  d.baseline_assertion_id,
+  d.target_assertion_id,
+  d.record_scope,
+  d.variation_id,
+  d.condition_id,
+  d.baseline_clinical_significance,
+  d.target_clinical_significance,
+  d.baseline_review_status,
+  d.target_review_status,
+  d.change_kind,
+  d.change_kind IN ('classification_changed', 'removed') AS target_changed,
+  CASE
+    WHEN d.baseline_assertion_id IS NULL THEN NULL
+    WHEN p.prediction = 'abstain' THEN NULL
+    WHEN p.prediction = 'removed' THEN d.change_kind = 'removed'
+    WHEN p.prediction = 'classification'
+      THEN d.target_clinical_significance IS NOT NULL
+       AND p.predicted_clinical_significance IS NOT DISTINCT FROM d.target_clinical_significance
+    ELSE false
+  END AS is_correct,
+  CASE
+    WHEN d.baseline_assertion_id IS NULL THEN 'evaluation_missing_candidate'
+    WHEN p.prediction = 'abstain' THEN 'abstained'
+    WHEN p.prediction = 'removed' AND d.change_kind = 'removed' THEN 'correct'
+    WHEN p.prediction = 'classification'
+      AND d.target_clinical_significance IS NOT NULL
+      AND p.predicted_clinical_significance IS NOT DISTINCT FROM d.target_clinical_significance THEN 'correct'
+    ELSE 'incorrect'
+  END AS score_status,
+  coalesce(
+    d.change_kind IN ('classification_changed', 'removed')
+    AND CASE
+      WHEN p.prediction = 'removed' THEN d.change_kind = 'removed'
+      WHEN p.prediction = 'classification'
+        THEN d.target_clinical_significance IS NOT NULL
+         AND p.predicted_clinical_significance IS NOT DISTINCT FROM d.target_clinical_significance
+      ELSE false
+    END,
+    false
+  ) AS correctly_predicted_change
+FROM clinvar_temporal_proposals p
+LEFT JOIN clinvar_classification_delta d USING (temporal_key)`,
+          },
+        },
+        {
+          id: "clinvar_temporal_proposal_metrics",
+          title: "Aggregate temporal proposal metrics",
+          kind: "virtual",
+          resolver: "duckdb.sql_materialize",
+          params: {
+            table: "clinvar_temporal_proposal_metrics",
+            sql: `WITH counts AS (
+  SELECT
+    count(*) AS total_candidates,
+    count_if(score_status IN ('correct', 'incorrect')) AS answered_candidates,
+    count_if(score_status = 'abstained') AS abstained_candidates,
+    count_if(score_status = 'correct') AS correct_predictions,
+    count_if(score_status = 'incorrect') AS incorrect_predictions,
+    count_if(prediction = 'classification') AS classification_predictions,
+    count_if(prediction = 'classification' AND score_status = 'correct') AS correct_classification_predictions,
+    count_if(prediction = 'removed') AS removal_predictions,
+    count_if(prediction = 'removed' AND score_status = 'correct') AS correct_removal_predictions,
+    count_if(score_status = 'evaluation_missing_candidate') AS evaluation_missing_candidates,
+    count_if(target_changed) AS target_changes,
+    count_if(correctly_predicted_change) AS correctly_predicted_changes,
+    min(priority_rank) FILTER (WHERE target_changed) AS first_target_change_rank,
+    min(priority_rank) FILTER (WHERE correctly_predicted_change) AS first_correct_change_rank
+  FROM clinvar_temporal_proposal_scores
+)
+SELECT
+  *,
+  CASE WHEN total_candidates = 0 THEN NULL
+    ELSE answered_candidates::DOUBLE / total_candidates END AS coverage,
+  CASE WHEN answered_candidates = 0 THEN NULL
+    ELSE correct_predictions::DOUBLE / answered_candidates END AS prediction_accuracy,
+  CASE WHEN classification_predictions = 0 THEN NULL
+    ELSE correct_classification_predictions::DOUBLE / classification_predictions END AS classification_accuracy,
+  CASE WHEN removal_predictions = 0 THEN NULL
+    ELSE correct_removal_predictions::DOUBLE / removal_predictions END AS removal_accuracy,
+  CASE WHEN target_changes = 0 THEN NULL
+    ELSE correctly_predicted_changes::DOUBLE / target_changes END AS target_change_recall,
+  CASE WHEN first_target_change_rank IS NULL THEN 0.0
+    ELSE 1.0 / first_target_change_rank END AS target_change_reciprocal_rank,
+  CASE WHEN first_correct_change_rank IS NULL THEN 0.0
+    ELSE 1.0 / first_correct_change_rank END AS correct_change_reciprocal_rank
+FROM counts`,
+          },
+        },
+      ],
+      operations: [
+        {
+          id: "clinical.clinvar_temporal_proposal_scores",
+          version: "0.1.0",
+          title: "Score ranked ClinVar temporal proposals",
+          description: "Return one evaluator-only source-label score row per baseline candidate, retaining abstentions.",
+          transport: "duckdb.sql",
+          inputSchema,
+          notes: [
+            "The proposal artifact is supplied as a host-protected binding, so replay pins its digest without serializing agent output.",
+            "Correctness means agreement with a later ClinVar source label, not clinical truth, diagnosis, or ACMG classification validity.",
+          ],
+          sql: {
+            readOnly: true,
+            requiredResources: [
+              "clinvar_classification_delta",
+              "clinvar_temporal_proposals",
+              "clinvar_temporal_proposal_scores",
+            ],
+            sqlTemplate: "SELECT * FROM clinvar_temporal_proposal_scores ORDER BY priority_rank, temporal_key",
+          },
+        },
+        {
+          id: "clinical.clinvar_temporal_proposal_metrics",
+          version: "0.1.0",
+          title: "Summarize ClinVar temporal proposal performance",
+          description: "Compute coverage, source-label accuracy, change recall, and rank metrics in evaluator SQL.",
+          transport: "duckdb.sql",
+          inputSchema,
+          notes: [
+            "Abstention lowers coverage but is excluded from classification accuracy.",
+            "Ranking metrics use the hidden later-release change relation and remain evaluator-only.",
+          ],
+          sql: {
+            readOnly: true,
+            requiredResources: [
+              "clinvar_classification_delta",
+              "clinvar_temporal_proposals",
+              "clinvar_temporal_proposal_scores",
+              "clinvar_temporal_proposal_metrics",
+            ],
+            sqlTemplate: "SELECT * FROM clinvar_temporal_proposal_metrics",
+          },
+        },
+      ],
+    },
+  };
+}
+
 async function assertRegisteredRelease(workspace: string, lake: ClinVarDuckLakeConfig, release: ClinVarRelease): Promise<void> {
   const stored = await getClinVarRelease(workspace, lake, release.releaseId);
   if (
@@ -1891,6 +2524,8 @@ async function runRecordedOperation(args: {
   now?: string;
   dbPath?: string;
   hostCapabilityReceipts?: readonly HostCapabilityReceipt[];
+  protectedSessionBindings?: Record<string, unknown>;
+  protectedSessionVariables?: readonly string[];
 }): Promise<RecordedClinVarOperation> {
   const store = await openBioStore(args.workspace);
   const cas = fsCasStore(join(args.workspace, ".pi", "bio-agent", "cas"));
@@ -1902,6 +2537,13 @@ async function runRecordedOperation(args: {
       manifestBaseDir: args.workspace,
       operationId: args.operationId,
       bindings: args.bindings,
+      ...(args.protectedSessionBindings || args.protectedSessionVariables ? {
+        protectedSessionBindings: args.protectedSessionBindings,
+        protectedSessionVariables: [...new Set([
+          ...Object.keys(args.protectedSessionBindings ?? {}),
+          ...(args.protectedSessionVariables ?? []),
+        ])],
+      } : {}),
       ...(args.runId ? { runId: args.runId } : {}),
       ...(args.now ? { now: args.now } : {}),
       duckdbInitSql: clinVarDuckLakeInitSql(args.lake, args.snapshotVersion),
@@ -1967,7 +2609,7 @@ export async function runClinVarTemporalCandidates(
   ) {
     throw new ClinVarTemporalInputError(`ClinVar temporal task '${taskId}' does not match the supplied agent DuckLake`);
   }
-  return runRecordedOperation({
+  const result = await runRecordedOperation({
     workspace: resolve(assertText("agentWorkspace", agentWorkspace)),
     lake,
     snapshotVersion: task.agentRelease.duckLakeSnapshotId,
@@ -1981,6 +2623,20 @@ export async function runClinVarTemporalCandidates(
     ...options,
     hostCapabilityReceipts: [task.task.isolation],
   });
+  const store = await openBioStore(agentWorkspace);
+  try {
+    await recordObservationLink(store.conn, {
+      subjectId: temporalTaskNode(task.task.taskId),
+      predicate: "produces_run",
+      objectId: `run:${result.runId}`,
+      recordedAt: assertTimestamp("now", options.now ?? new Date().toISOString()),
+      source: SOURCE,
+      digest: task.task.taskDigest,
+    });
+  } finally {
+    store.close();
+  }
+  return result;
 }
 
 /**
@@ -2240,7 +2896,7 @@ export async function prepareClinVarTemporalTask(request: PrepareClinVarTemporal
   const agentLake = normalizeLake(request.agentLake ?? defaultClinVarDuckLakeConfig(agentWorkspace));
   const targetCommitmentSecret = normalizeCommitmentSecret(request.targetCommitmentSecret);
   const isolation = validateClinVarTemporalIsolationReceipt(request.isolationReceipt);
-  assertSeparateTemporalBoundaries(evaluatorWorkspace, agentWorkspace, evaluatorLake, agentLake);
+  await assertSeparateTemporalBoundaries(evaluatorWorkspace, agentWorkspace, evaluatorLake, agentLake);
   if (request.baseline.lakeId !== evaluatorLake.lakeId || request.target.lakeId !== evaluatorLake.lakeId) {
     throw new ClinVarTemporalInputError("baseline and target releases must belong to the evaluator DuckLake configuration");
   }
@@ -2442,4 +3098,355 @@ export async function runClinVarTemporalEvaluation(
     store.close();
   }
   return result;
+}
+
+function temporalProposalSetArtifact(proposalSet: ClinVarTemporalProposalSet): {
+  bytes: Buffer;
+  digest: `sha256:${string}`;
+  uri: `cas:sha256:${string}`;
+} {
+  const bytes = canonicalJsonBytes(proposalSet as unknown as JsonValue);
+  const digest = sha256(bytes);
+  return { bytes, digest, uri: `cas:${digest}` };
+}
+
+async function recordTemporalProposalSet(
+  workspace: string,
+  proposalSet: ClinVarTemporalProposalSet,
+): Promise<RecordedClinVarTemporalProposalSet> {
+  const cas = fsCasStore(join(workspace, ".pi", "bio-agent", "cas"));
+  const artifact = temporalProposalSetArtifact(proposalSet);
+  await cas.put(
+    { ...casAddress(artifact.digest), sizeBytes: artifact.bytes.length, mediaType: TEMPORAL_PROPOSAL_SET_MEDIA_TYPE },
+    artifact.bytes,
+  );
+  const store = await openBioStore(workspace);
+  try {
+    return await inTransaction(store.conn, async () => {
+      const existing = await readTemporalProposalSetFromLedger(store.conn, cas, proposalSet.proposalSetId);
+      if (existing) {
+        if (existing.proposalSet.proposalDigest !== proposalSet.proposalDigest) {
+          throw new ClinVarTemporalInputError(`ClinVar temporal proposal set '${proposalSet.proposalSetId}' already exists with different immutable content`);
+        }
+        return existing;
+      }
+      const node = temporalProposalSetNode(proposalSet.proposalSetId);
+      const value: TemporalProposalSetLedgerValue = {
+        schema: CLINVAR_TEMPORAL_PROPOSAL_SET_SCHEMA,
+        proposal_set_id: proposalSet.proposalSetId,
+        proposal_digest: proposalSet.proposalDigest,
+        artifact_digest: artifact.digest,
+        artifact_uri: artifact.uri,
+        task_id: proposalSet.taskId,
+        task_digest: proposalSet.taskDigest,
+        candidate_run_id: proposalSet.candidateRun.runId,
+        candidate_manifest_digest: proposalSet.candidateRun.manifestDigest,
+        candidate_result_digest: proposalSet.candidateRun.resultDigest,
+        candidate_run_object_digest: proposalSet.candidateRun.runObjectDigest,
+        actor_id: proposalSet.actor.id,
+        actor_version: proposalSet.actor.version,
+        ...(proposalSet.actor.provider ? { actor_provider: proposalSet.actor.provider } : {}),
+        ...(proposalSet.actor.model ? { actor_model: proposalSet.actor.model } : {}),
+        actor_contract_digest: proposalSet.actor.contractDigest,
+      };
+      await recordObservation(store.conn, {
+        statementKey: temporalProposalSetStatementKey(proposalSet.proposalSetId),
+        subjectId: node,
+        predicate: "clinvar_temporal_proposal_set",
+        value,
+        recordedAt: proposalSet.recordedAt,
+        source: SOURCE,
+        digest: proposalSet.proposalDigest,
+      });
+      await recordArtifactReference(store.conn, {
+        artifact: {
+          digest: artifact.digest,
+          mediaType: TEMPORAL_PROPOSAL_SET_MEDIA_TYPE,
+          semanticRole: "clinvar_temporal_proposal_set",
+          sizeBytes: artifact.bytes.length,
+          attrs: {
+            proposal_set_id: proposalSet.proposalSetId,
+            task_id: proposalSet.taskId,
+            candidate_result_digest: proposalSet.candidateRun.resultDigest,
+          },
+        },
+        subjectId: node,
+        predicate: "produces",
+        recordedAt: proposalSet.recordedAt,
+        source: SOURCE,
+        digest: proposalSet.proposalDigest,
+        casMetadata: { conn: store.conn, refId: node, refType: "clinvar_temporal_proposal_set" },
+      });
+      await recordObservationLink(store.conn, {
+        subjectId: node,
+        predicate: "responds_to",
+        objectId: temporalTaskNode(proposalSet.taskId),
+        recordedAt: proposalSet.recordedAt,
+        source: SOURCE,
+        digest: proposalSet.proposalDigest,
+      });
+      await recordObservationLink(store.conn, {
+        subjectId: node,
+        predicate: "uses_run",
+        objectId: `run:${proposalSet.candidateRun.runId}`,
+        recordedAt: proposalSet.recordedAt,
+        source: SOURCE,
+        digest: proposalSet.proposalDigest,
+      });
+      await recordObservationLink(store.conn, {
+        subjectId: node,
+        predicate: "proposed_by",
+        objectId: `actor:${proposalSet.actor.id}@${proposalSet.actor.version}`,
+        recordedAt: proposalSet.recordedAt,
+        source: SOURCE,
+        digest: proposalSet.proposalDigest,
+        attrs: {
+          ...(proposalSet.actor.provider ? { provider: proposalSet.actor.provider } : {}),
+          ...(proposalSet.actor.model ? { model: proposalSet.actor.model } : {}),
+          contract_digest: proposalSet.actor.contractDigest,
+        },
+      });
+      return { proposalSet, artifactDigest: artifact.digest, artifactUri: artifact.uri };
+    });
+  } finally {
+    store.close();
+  }
+}
+
+/**
+ * Validate and persist an actor's complete ranked response to one exact candidate run. Explicit abstention is valid;
+ * omitted or invented candidates are not. This function never opens the evaluator workspace or target release.
+ */
+export async function registerClinVarTemporalProposalSet(
+  request: RegisterClinVarTemporalProposalSetRequest,
+): Promise<RecordedClinVarTemporalProposalSet> {
+  const agentWorkspace = resolve(assertText("agentWorkspace", request.agentWorkspace));
+  const taskId = assertTaskId(request.taskId);
+  const task = await getClinVarTemporalTask(agentWorkspace, taskId);
+  if (!task) throw new ClinVarTemporalInputError(`ClinVar temporal task '${taskId}' does not exist`);
+  const candidateRun = await readCandidateRunEvidence(
+    agentWorkspace,
+    request.agentLake,
+    task,
+    request.candidateRunId,
+  );
+  const actor = normalizeProposerIdentity(request.actor);
+  const proposals = normalizeTemporalProposals(request.proposals, candidateRun.candidateTemporalKeys);
+  const proposalBody: Omit<ClinVarTemporalProposalSet, "proposalDigest"> = {
+    schema: CLINVAR_TEMPORAL_PROPOSAL_SET_SCHEMA,
+    proposalSetId: assertProposalSetId(request.proposalSetId),
+    taskId,
+    taskDigest: task.task.taskDigest,
+    candidateRun: {
+      runId: candidateRun.runId,
+      manifestDigest: candidateRun.manifestDigest,
+      resultDigest: candidateRun.resultDigest,
+      runObjectDigest: candidateRun.runObjectDigest,
+    },
+    actor,
+    proposals,
+    recordedAt: assertTimestamp("recordedAt", request.recordedAt ?? new Date().toISOString()),
+  };
+  return recordTemporalProposalSet(agentWorkspace, {
+    ...proposalBody,
+    proposalDigest: temporalProposalSetDigest(proposalBody),
+  });
+}
+
+/** Read and verify one immutable proposal artifact from the agent ledger and CAS. */
+export async function getClinVarTemporalProposalSet(
+  agentWorkspace: string,
+  proposalSetId: string,
+  asOf = AS_OF,
+): Promise<RecordedClinVarTemporalProposalSet | null> {
+  const workspace = resolve(assertText("agentWorkspace", agentWorkspace));
+  const normalizedProposalSetId = assertProposalSetId(proposalSetId);
+  const store = await openBioStore(workspace);
+  const cas = fsCasStore(join(workspace, ".pi", "bio-agent", "cas"));
+  try {
+    return await readTemporalProposalSetFromLedger(store.conn, cas, normalizedProposalSetId, asOf);
+  } finally {
+    store.close();
+  }
+}
+
+async function recordTemporalProposalEvaluation(args: {
+  workspace: string;
+  evaluation: ClinVarTemporalEvaluation;
+  proposalSet: RecordedClinVarTemporalProposalSet;
+  copiedArtifact: { digest: `sha256:${string}`; uri: `cas:sha256:${string}`; sizeBytes: number };
+  scores: RecordedClinVarOperation;
+  metrics: RecordedClinVarOperation;
+  recordedAt: string;
+}): Promise<void> {
+  const store = await openBioStore(args.workspace);
+  try {
+    await inTransaction(store.conn, async () => {
+      const node = temporalProposalEvaluationNode(args.proposalSet.proposalSet.proposalSetId);
+      const value = {
+        schema: CLINVAR_TEMPORAL_PROPOSAL_EVALUATION_SCHEMA,
+        proposal_set_id: args.proposalSet.proposalSet.proposalSetId,
+        proposal_digest: args.proposalSet.proposalSet.proposalDigest,
+        task_id: args.evaluation.taskId,
+        task_digest: args.evaluation.taskDigest,
+        proposal_artifact_digest: args.copiedArtifact.digest,
+        score_run_id: args.scores.runId,
+        score_result_digest: args.scores.casRefs.result,
+        metrics_run_id: args.metrics.runId,
+        metrics_result_digest: args.metrics.casRefs.result,
+      };
+      const evaluationDigest = canonicalDigest(value);
+      await recordObservation(store.conn, {
+        statementKey: temporalProposalEvaluationStatementKey(args.proposalSet.proposalSet.proposalSetId),
+        subjectId: node,
+        predicate: "clinvar_temporal_proposal_evaluation",
+        value,
+        recordedAt: args.recordedAt,
+        source: SOURCE,
+        digest: evaluationDigest,
+      });
+      await recordArtifactReference(store.conn, {
+        artifact: {
+          digest: args.copiedArtifact.digest,
+          mediaType: TEMPORAL_PROPOSAL_SET_MEDIA_TYPE,
+          semanticRole: "clinvar_temporal_proposal_set",
+          sizeBytes: args.copiedArtifact.sizeBytes,
+          attrs: {
+            proposal_set_id: args.proposalSet.proposalSet.proposalSetId,
+            source_boundary: "agent",
+          },
+        },
+        subjectId: node,
+        predicate: "uses_proposal_artifact",
+        recordedAt: args.recordedAt,
+        source: SOURCE,
+        digest: evaluationDigest,
+        casMetadata: { conn: store.conn, refId: node, refType: "clinvar_temporal_proposal_evaluation" },
+      });
+      for (const link of [
+        { predicate: "evaluates_task", objectId: temporalTaskNode(args.evaluation.taskId) },
+        { predicate: "evaluates_proposal_set", objectId: temporalProposalSetNode(args.proposalSet.proposalSet.proposalSetId) },
+        { predicate: "produces_run", objectId: `run:${args.scores.runId}` },
+        { predicate: "produces_run", objectId: `run:${args.metrics.runId}` },
+      ]) {
+        await recordObservationLink(store.conn, {
+          subjectId: node,
+          predicate: link.predicate,
+          objectId: link.objectId,
+          recordedAt: args.recordedAt,
+          source: SOURCE,
+          digest: evaluationDigest,
+        });
+      }
+    });
+  } finally {
+    store.close();
+  }
+}
+
+/**
+ * Copy a verified proposal artifact across the host boundary, then run per-row and aggregate scoring only where the
+ * hidden target release is attached. Proposal bytes are protected run bindings; replay stores only their digest.
+ */
+export async function runClinVarTemporalProposalEvaluation(
+  request: RunClinVarTemporalProposalEvaluationRequest,
+): Promise<ClinVarTemporalProposalEvaluationResult> {
+  const evaluatorWorkspace = resolve(assertText("evaluatorWorkspace", request.evaluatorWorkspace));
+  const agentWorkspace = resolve(assertText("agentWorkspace", request.agentWorkspace));
+  const evaluatorLake = normalizeLake(request.evaluatorLake);
+  const agentLake = normalizeLake(request.agentLake);
+  await assertSeparateTemporalBoundaries(evaluatorWorkspace, agentWorkspace, evaluatorLake, agentLake);
+  const proposalSetId = assertProposalSetId(request.proposalSetId);
+  const proposalSet = await getClinVarTemporalProposalSet(agentWorkspace, proposalSetId);
+  if (!proposalSet) throw new ClinVarTemporalInputError(`ClinVar temporal proposal set '${proposalSetId}' does not exist`);
+  const task = await getClinVarTemporalTask(agentWorkspace, proposalSet.proposalSet.taskId);
+  if (!task || task.task.taskDigest !== proposalSet.proposalSet.taskDigest) {
+    throw new ClinVarTemporalInputError(`ClinVar temporal proposal set '${proposalSetId}' no longer matches its agent task`);
+  }
+  const candidateRun = await readCandidateRunEvidence(
+    agentWorkspace,
+    agentLake,
+    task,
+    proposalSet.proposalSet.candidateRun.runId,
+  );
+  if (
+    candidateRun.manifestDigest !== proposalSet.proposalSet.candidateRun.manifestDigest
+    || candidateRun.resultDigest !== proposalSet.proposalSet.candidateRun.resultDigest
+    || candidateRun.runObjectDigest !== proposalSet.proposalSet.candidateRun.runObjectDigest
+  ) {
+    throw new ClinVarTemporalInputError(`ClinVar temporal proposal set '${proposalSetId}' candidate run evidence has drifted`);
+  }
+  normalizeTemporalProposals(proposalSet.proposalSet.proposals, candidateRun.candidateTemporalKeys);
+
+  const evaluation = await getClinVarTemporalEvaluation(
+    evaluatorWorkspace,
+    evaluatorLake,
+    proposalSet.proposalSet.taskId,
+  );
+  if (
+    !evaluation
+    || evaluation.taskDigest !== proposalSet.proposalSet.taskDigest
+    || evaluation.targetCommitment !== task.task.targetCommitment
+    || evaluation.isolation.policyDigest !== task.task.isolation.policyDigest
+  ) {
+    throw new ClinVarTemporalInputError(`ClinVar temporal proposal set '${proposalSetId}' does not match an evaluator task`);
+  }
+  const baseline = await getClinVarRelease(evaluatorWorkspace, evaluatorLake, evaluation.evaluatorBaseline.releaseId);
+  const target = await getClinVarRelease(evaluatorWorkspace, evaluatorLake, evaluation.target.releaseId);
+  if (!baseline || !target || !releaseFromBaseline(baseline, evaluation.evaluatorBaseline) || !releaseFromBaseline(target, evaluation.target)) {
+    throw new ClinVarTemporalInputError(`ClinVar temporal proposal evaluation '${proposalSetId}' releases are no longer registered exactly`);
+  }
+
+  const agentCas = fsCasStore(join(agentWorkspace, ".pi", "bio-agent", "cas"));
+  const evaluatorCas = fsCasStore(join(evaluatorWorkspace, ".pi", "bio-agent", "cas"));
+  const proposalBytes = await readVerifiedCasBytes(
+    agentCas,
+    proposalSet.artifactDigest,
+    `ClinVar temporal proposal set '${proposalSetId}'`,
+  );
+  const copiedArtifact = await putCas(evaluatorCas, proposalBytes, TEMPORAL_PROPOSAL_SET_MEDIA_TYPE);
+  if (copiedArtifact.digest !== proposalSet.artifactDigest) {
+    throw new ClinVarTemporalInputError(`ClinVar temporal proposal set '${proposalSetId}' changed across the host boundary`);
+  }
+  const manifest = buildClinVarTemporalProposalEvaluationManifest(baseline, target, proposalSet);
+  const bindings = {
+    clinvar_baseline_release_id: baseline.releaseId,
+    clinvar_target_release_id: target.releaseId,
+  };
+  const protectedSessionBindings = {
+    clinvar_temporal_proposal_set_json: proposalBytes.toString("utf8"),
+  };
+  const common = {
+    workspace: evaluatorWorkspace,
+    lake: evaluatorLake,
+    snapshotVersion: target.duckLakeSnapshotId,
+    manifest,
+    bindings,
+    protectedSessionBindings,
+    protectedSessionVariables: ["clinvar_temporal_proposal_set_json"],
+    ...(request.now ? { now: request.now } : {}),
+    ...(request.dbPath ? { dbPath: request.dbPath } : {}),
+    hostCapabilityReceipts: [evaluation.isolation],
+  };
+  const scores = await runRecordedOperation({
+    ...common,
+    operationId: "clinical.clinvar_temporal_proposal_scores",
+    ...(request.scoreRunId ? { runId: request.scoreRunId } : {}),
+  });
+  const metrics = await runRecordedOperation({
+    ...common,
+    operationId: "clinical.clinvar_temporal_proposal_metrics",
+    ...(request.metricsRunId ? { runId: request.metricsRunId } : {}),
+  });
+  const recordedAt = assertTimestamp("now", request.now ?? new Date().toISOString());
+  await recordTemporalProposalEvaluation({
+    workspace: evaluatorWorkspace,
+    evaluation,
+    proposalSet,
+    copiedArtifact,
+    scores,
+    metrics,
+    recordedAt,
+  });
+  return { proposalSet, scores, metrics };
 }

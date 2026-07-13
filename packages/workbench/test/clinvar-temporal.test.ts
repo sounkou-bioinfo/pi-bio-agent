@@ -10,16 +10,19 @@ import {
   ClinVarTemporalInputError,
   buildClinVarTemporalIsolationReceipt,
   defaultClinVarDuckLakeConfig,
+  getClinVarTemporalProposalSet,
   getClinVarTemporalEvaluation,
   getClinVarRelease,
   getClinVarTemporalTask,
   listClinVarReleases,
   prepareClinVarTemporalTask,
+  registerClinVarTemporalProposalSet,
   registerClinVarRelease,
   runClinVarAssertionGraph,
   runClinVarClassificationDelta,
   runClinVarTemporalCandidates,
   runClinVarTemporalEvaluation,
+  runClinVarTemporalProposalEvaluation,
   type RegisterClinVarReleaseRequest,
 } from "../src/clinvar-temporal.js";
 
@@ -233,6 +236,22 @@ test("a temporal task materializes only its baseline into the agent boundary", a
       conditionId: "MONDO:0000111",
       clinicalSignificance: "Uncertain significance",
       reviewStatus: "criteria provided, single submitter",
+    }, {
+      assertionId: "VCV000112",
+      temporalKey: "vcv:000112",
+      recordScope: "variation_aggregate",
+      variationId: "112",
+      conditionId: "MONDO:0000112",
+      clinicalSignificance: "Uncertain significance",
+      reviewStatus: "criteria provided, single submitter",
+    }, {
+      assertionId: "VCV000113",
+      temporalKey: "vcv:000113",
+      recordScope: "variation_aggregate",
+      variationId: "113",
+      conditionId: "MONDO:0000113",
+      clinicalSignificance: "Uncertain significance",
+      reviewStatus: "criteria provided, single submitter",
     }],
   ));
   const target = await registerClinVarRelease(evaluatorWorkspace, releaseInput(
@@ -248,6 +267,14 @@ test("a temporal task materializes only its baseline into the agent boundary", a
       conditionId: "MONDO:0000111",
       clinicalSignificance: "Likely pathogenic",
       reviewStatus: "criteria provided, single submitter",
+    }, {
+      assertionId: "VCV000112",
+      temporalKey: "vcv:000112",
+      recordScope: "variation_aggregate",
+      variationId: "112",
+      conditionId: "MONDO:0000112",
+      clinicalSignificance: "Uncertain significance",
+      reviewStatus: "criteria provided, single submitter",
     }],
   ));
   const isolation = buildClinVarTemporalIsolationReceipt({
@@ -257,6 +284,23 @@ test("a temporal task materializes only its baseline into the agent boundary", a
     targetAccess: "evaluator_only",
   });
   const evaluatorSecret = commitmentSecret();
+  const aliasedAgentWorkspace = join(root, "agent-boundary-alias");
+  await fs.symlink(evaluatorWorkspace, aliasedAgentWorkspace, "dir");
+  await assert.rejects(
+    () => prepareClinVarTemporalTask({
+      evaluatorWorkspace,
+      agentWorkspace: aliasedAgentWorkspace,
+      evaluatorLake,
+      baseline,
+      target,
+      candidatePolicy: { baselineClinicalSignificances: ["Uncertain significance"] },
+      targetCommitmentSecret: evaluatorSecret,
+      isolationReceipt: isolation,
+      taskId: "symlinked-boundary-must-fail",
+      recordedAt: "2026-02-02T00:00:00Z",
+    }),
+    (error: unknown) => error instanceof ClinVarTemporalInputError && /non-overlapping host boundaries/.test(error.message),
+  );
   const prepared = await prepareClinVarTemporalTask({
     evaluatorWorkspace,
     agentWorkspace,
@@ -323,6 +367,8 @@ test("a temporal task materializes only its baseline into the agent boundary", a
   }
   const agentCas = fsCasStore(join(agentWorkspace, ".pi", "bio-agent", "cas"));
   assert.equal(await agentCas.has({ algorithm: "sha256", digest: evaluatorSecretUri.slice("cas:sha256:".length) }), false);
+  assert.equal(await agentCas.has({ algorithm: "sha256", digest: target.rawDigest.slice("sha256:".length) }), false);
+  assert.equal(await agentCas.has({ algorithm: "sha256", digest: target.normalizedDigest.slice("sha256:".length) }), false);
 
   const differentSecretTask = await prepareClinVarTemporalTask({
     evaluatorWorkspace,
@@ -350,6 +396,8 @@ test("a temporal task materializes only its baseline into the agent boundary", a
   });
   assert.deepEqual(agentCandidates.rows.map((row) => [row.temporal_key, row.clinical_significance]), [
     ["vcv:000111", "Uncertain significance"],
+    ["vcv:000112", "Uncertain significance"],
+    ["vcv:000113", "Uncertain significance"],
   ]);
 
   const evaluation = await getClinVarTemporalEvaluation(evaluatorWorkspace, evaluatorLake, "temporal-blind-001");
@@ -362,6 +410,213 @@ test("a temporal task materializes only its baseline into the agent boundary", a
   });
   assert.equal(delta.rows[0]?.change_kind, "classification_changed");
   assert.equal(delta.rows[0]?.target_clinical_significance, "Likely pathogenic");
+
+  const proposalRequest = {
+    agentWorkspace,
+    agentLake,
+    taskId: "temporal-blind-001",
+    proposalSetId: "spark-proposals-001",
+    candidateRunId: agentCandidates.runId,
+    actor: {
+      id: "pi-agent:clinvar-reclassification",
+      version: "1.0.0",
+      provider: "openai-codex",
+      model: "gpt-5.3-codex-spark",
+      contractDigest: digest("clinvar-reclassification-prompt-tools-policy@1.0.0"),
+    },
+    proposals: [
+      {
+        temporalKey: "vcv:000111",
+        priorityRank: 1,
+        prediction: "classification" as const,
+        predictedClinicalSignificance: "Likely pathogenic",
+        confidence: 0.73,
+        rationale: "Baseline evidence supports prioritizing this source assertion for later-label review.",
+      },
+      {
+        temporalKey: "vcv:000113",
+        priorityRank: 2,
+        prediction: "removed" as const,
+        confidence: 0.68,
+        rationale: "The baseline-only evidence supports prioritizing possible source-record removal.",
+      },
+      {
+        temporalKey: "vcv:000112",
+        priorityRank: 3,
+        prediction: "classification" as const,
+        predictedClinicalSignificance: "Uncertain significance",
+        confidence: 0.64,
+        rationale: "The baseline-only evidence does not support a source-label change prediction.",
+      },
+    ],
+    recordedAt: "2026-02-03T00:02:00Z",
+  };
+  const proposalSet = await registerClinVarTemporalProposalSet(proposalRequest);
+  const repeatedProposalSet = await registerClinVarTemporalProposalSet(proposalRequest);
+  assert.deepEqual(repeatedProposalSet, proposalSet, "the same proposal artifact is idempotent");
+  assert.match(proposalSet.artifactDigest, /^sha256:[0-9a-f]{64}$/);
+  assert.equal(proposalSet.proposalSet.candidateRun.resultDigest, agentCandidates.casRefs.result);
+  assert.equal(proposalSet.proposalSet.actor.model, "gpt-5.3-codex-spark");
+  assert.equal(
+    (await getClinVarTemporalProposalSet(agentWorkspace, "spark-proposals-001"))?.proposalSet.proposalDigest,
+    proposalSet.proposalSet.proposalDigest,
+  );
+  const proposalStore = await openBioStore(agentWorkspace);
+  try {
+    await materializeBioEdgesAsOf(proposalStore.conn, "2026-02-04T00:00:00Z");
+    const proposalEdges = await proposalStore.conn.all<{ predicate: string; to_id: string }>(
+      "SELECT predicate, to_id FROM bio_edges_as_of WHERE from_id = ? ORDER BY predicate, to_id",
+      ["clinvar-temporal-proposal-set:spark-proposals-001"],
+    );
+    assert.ok(proposalEdges.some((edge) => edge.predicate === "responds_to"
+      && edge.to_id === "clinvar-temporal-task:temporal-blind-001"));
+    assert.ok(proposalEdges.some((edge) => edge.predicate === "uses_run"
+      && edge.to_id === "run:temporal-agent-candidates"));
+    assert.ok(proposalEdges.some((edge) => edge.predicate === "proposed_by"
+      && edge.to_id === "actor:pi-agent:clinvar-reclassification@1.0.0"));
+    const proposalSources = await proposalStore.conn.all<{ source: string }>(
+      "SELECT DISTINCT source FROM bio_observations WHERE subject_id = ? ORDER BY source",
+      ["clinvar-temporal-proposal-set:spark-proposals-001"],
+    );
+    assert.deepEqual(
+      proposalSources.map((row) => row.source),
+      ["pi-bio-workbench:clinvar-temporal"],
+      "caller-supplied actor identity must not replace the component provenance source",
+    );
+    const taskRunEdges = await proposalStore.conn.all<{ predicate: string; to_id: string }>(
+      "SELECT predicate, to_id FROM bio_edges_as_of WHERE from_id = ? AND predicate = 'produces_run'",
+      ["clinvar-temporal-task:temporal-blind-001"],
+    );
+    assert.ok(taskRunEdges.some((edge) => edge.to_id === "run:temporal-agent-candidates"));
+  } finally {
+    proposalStore.close();
+  }
+
+  await assert.rejects(
+    () => registerClinVarTemporalProposalSet({
+      ...proposalRequest,
+      proposalSetId: "missing-candidate-proposal",
+      proposals: [],
+    }),
+    (error: unknown) => error instanceof ClinVarTemporalInputError && /cover every candidate exactly once/.test(error.message),
+  );
+  await assert.rejects(
+    () => registerClinVarTemporalProposalSet({
+      ...proposalRequest,
+      proposalSetId: "wrong-candidate-run",
+      candidateRunId: agentGraph.runId,
+    }),
+    (error: unknown) => error instanceof ClinVarTemporalInputError && /not a succeeded clinical\.clinvar_temporal_candidates/.test(error.message),
+  );
+
+  const scored = await runClinVarTemporalProposalEvaluation({
+    evaluatorWorkspace,
+    evaluatorLake,
+    agentWorkspace,
+    agentLake,
+    proposalSetId: proposalSet.proposalSet.proposalSetId,
+    scoreRunId: "temporal-proposal-scores",
+    metricsRunId: "temporal-proposal-metrics",
+    now: "2026-02-03T00:03:00Z",
+  });
+  assert.equal(scored.scores.rows.length, 3);
+  assert.equal(scored.scores.rows[0]?.score_status, "correct");
+  assert.equal(scored.scores.rows[0]?.target_changed, true);
+  assert.equal(scored.scores.rows[0]?.correctly_predicted_change, true);
+  assert.equal(scored.scores.rows[1]?.score_status, "correct");
+  assert.equal(scored.scores.rows[1]?.change_kind, "removed");
+  assert.equal(scored.scores.rows[1]?.target_changed, true);
+  assert.equal(scored.scores.rows[2]?.score_status, "correct");
+  assert.equal(scored.scores.rows[2]?.target_changed, false);
+  const scoredMetrics = scored.metrics.rows[0]!;
+  assert.equal(Number(scoredMetrics.total_candidates), 3);
+  assert.equal(Number(scoredMetrics.answered_candidates), 3);
+  assert.equal(Number(scoredMetrics.correct_predictions), 3);
+  assert.equal(Number(scoredMetrics.classification_predictions), 2);
+  assert.equal(Number(scoredMetrics.correct_classification_predictions), 2);
+  assert.equal(Number(scoredMetrics.removal_predictions), 1);
+  assert.equal(Number(scoredMetrics.correct_removal_predictions), 1);
+  assert.equal(scoredMetrics.coverage, 1);
+  assert.equal(scoredMetrics.prediction_accuracy, 1);
+  assert.equal(scoredMetrics.classification_accuracy, 1);
+  assert.equal(scoredMetrics.removal_accuracy, 1);
+  assert.equal(scoredMetrics.target_change_recall, 1);
+  assert.equal(scoredMetrics.target_change_reciprocal_rank, 1);
+  assert.equal(scoredMetrics.correct_change_reciprocal_rank, 1);
+  const scoreReplayDigest = scored.scores.casRefs.replay!;
+  const scoreReplay = await fs.readFile(
+    fsCasStore(join(evaluatorWorkspace, ".pi", "bio-agent", "cas")).pathFor({
+      algorithm: "sha256",
+      digest: scoreReplayDigest.slice("sha256:".length),
+    }),
+    "utf8",
+  );
+  assert.match(scoreReplay, /protectedSessionBindingsDigest/);
+  assert.equal(scoreReplay.includes("Baseline evidence supports prioritizing"), false, "proposal bytes are not serialized into replay");
+
+  const abstainedProposalSet = await registerClinVarTemporalProposalSet({
+    ...proposalRequest,
+    proposalSetId: "spark-abstentions-001",
+    proposals: [
+      {
+        temporalKey: "vcv:000112",
+        priorityRank: 1,
+        prediction: "abstain",
+        confidence: 0.25,
+        rationale: "The baseline-only evidence is insufficient for a later-label prediction.",
+      },
+      {
+        temporalKey: "vcv:000113",
+        priorityRank: 2,
+        prediction: "abstain",
+        confidence: 0.25,
+        rationale: "The baseline-only evidence is insufficient for a later-label prediction.",
+      },
+      {
+        temporalKey: "vcv:000111",
+        priorityRank: 3,
+        prediction: "abstain",
+        confidence: 0.25,
+        rationale: "The baseline-only evidence is insufficient for a later-label prediction.",
+      },
+    ],
+    recordedAt: "2026-02-03T00:04:00Z",
+  });
+  const abstained = await runClinVarTemporalProposalEvaluation({
+    evaluatorWorkspace,
+    evaluatorLake,
+    agentWorkspace,
+    agentLake,
+    proposalSetId: abstainedProposalSet.proposalSet.proposalSetId,
+    scoreRunId: "temporal-abstention-scores",
+    metricsRunId: "temporal-abstention-metrics",
+    now: "2026-02-03T00:05:00Z",
+  });
+  assert.equal(abstained.scores.rows[0]?.score_status, "abstained");
+  assert.equal(abstained.scores.rows[0]?.is_correct, null);
+  assert.equal(abstained.metrics.rows[0]?.coverage, 0);
+  assert.equal(abstained.metrics.rows[0]?.prediction_accuracy, null);
+  assert.equal(abstained.metrics.rows[0]?.classification_accuracy, null);
+  assert.equal(abstained.metrics.rows[0]?.target_change_recall, 0);
+  assert.equal(abstained.metrics.rows[0]?.target_change_reciprocal_rank, 0.5, "ranking is scored independently of abstention");
+  assert.equal(abstained.metrics.rows[0]?.correct_change_reciprocal_rank, 0);
+
+  const scoredStore = await openBioStore(evaluatorWorkspace);
+  try {
+    await materializeBioEdgesAsOf(scoredStore.conn, "2026-02-04T00:00:00Z");
+    const evaluationEdges = await scoredStore.conn.all<{ predicate: string; to_id: string }>(
+      "SELECT predicate, to_id FROM bio_edges_as_of WHERE from_id = ? ORDER BY predicate, to_id",
+      ["clinvar-temporal-proposal-evaluation:spark-proposals-001"],
+    );
+    assert.ok(evaluationEdges.some((edge) => edge.predicate === "evaluates_proposal_set"
+      && edge.to_id === "clinvar-temporal-proposal-set:spark-proposals-001"));
+    assert.ok(evaluationEdges.some((edge) => edge.predicate === "produces_run"
+      && edge.to_id === "run:temporal-proposal-scores"));
+    assert.ok(evaluationEdges.some((edge) => edge.predicate === "produces_run"
+      && edge.to_id === "run:temporal-proposal-metrics"));
+  } finally {
+    scoredStore.close();
+  }
 
   await assert.rejects(
     () => prepareClinVarTemporalTask({

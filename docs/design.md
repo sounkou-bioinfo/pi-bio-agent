@@ -103,7 +103,11 @@ runs. This is the right split for a large evolving catalog: SQL remains able to 
 without loading them into prompt context or copying them into `bio_observations`. A local DuckLake metadata catalog
 is a single-host default; shared writers and catalogs remain explicit host composition. Where an evaluator must retain
 a future source state, the agent task gets an HMAC commitment keyed by evaluator-only entropy rather than a directly
-enumerable hash of target metadata; host-enforced access separation still carries the security boundary.
+enumerable hash of target metadata; host-enforced access separation still carries the security boundary. Agent
+judgments bind to the exact baseline candidate run and become typed CAS artifacts with actor and contract identity.
+Only the evaluator copies those bytes across the boundary and joins them to the hidden delta in declared SQL, keeping
+abstention, source-label accuracy, change recall, and ranking metrics reproducible without treating a future source
+label as clinical truth.
 
 DuckDB is already the default stateful scientific REPL. Temporary tables, materialized relations, graph projections,
 and CAS handles let an actor keep a large working set outside the prompt and inspect bounded slices as needed. This

@@ -76,6 +76,13 @@ topology. The control-plane record binds a release to an opaque DuckLake configu
 so identical logical lake ids and snapshot numbers in different local catalogs cannot be conflated. Do not solve that
 by copying release rows into the ledger or by creating another graph service.
 
+Blind evaluation also needs a content boundary for model output. The ClinVar task therefore accepts no loose result
+array: a proposal set must cover the exact candidate-result temporal keys, cite the candidate run and run-object
+digests, identify the actor and host contract, and retain abstention explicitly. Evaluator SQL consumes the verified
+proposal artifact through a protected binding and computes row scores and aggregate rank metrics against the hidden
+snapshot. Replay stores the binding digest, not the proposal payload; the proposal itself remains rooted in CAS and
+the temporal ledger.
+
 Evidence: [clinvar-temporal.ts](../packages/workbench/src/clinvar-temporal.ts),
 [clinvar-temporal.test.ts](../packages/workbench/test/clinvar-temporal.test.ts).
 
