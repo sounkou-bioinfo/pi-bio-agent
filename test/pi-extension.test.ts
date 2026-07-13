@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { describe, test } from "node:test";
+import { fileURLToPath } from "node:url";
 import piBioAgentExtension, { createBioExtension } from "../extensions/pi-coding-agent/index.js";
 import { openBioStore } from "../src/hosts/bio-store.js";
 import { fsCasStore } from "../src/hosts/fs-cas.js";
@@ -51,11 +52,14 @@ function loadExtension(extension = piBioAgentExtension) {
 }
 
 describe("Pi coding-agent extension", () => {
-  test("registers resource discovery and the expected safe tools", () => {
+  test("registers package and project skill discovery with the expected safe tools", async () => {
     const { handlers, tools } = loadExtension();
     const discover = handlers.get("resources_discover")?.[0];
     assert.ok(discover, "resources_discover handler registered");
-    assert.deepEqual(discover!({ cwd: "/work", reason: "startup" }), { skillPaths: ["/work/.pi/bio-agent/skills"] });
+    const discovery = discover!({ cwd: "/work", reason: "startup" });
+    assert.deepEqual(discovery, {
+      skillPaths: [resolve(dirname(fileURLToPath(import.meta.url)), "..", "skills"), "/work/.pi/bio-agent/skills"],
+    });
 
     const names = tools.map((tool) => tool.name).sort();
     assert.deepEqual(names, [

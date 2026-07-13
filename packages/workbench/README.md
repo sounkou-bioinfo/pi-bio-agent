@@ -123,8 +123,9 @@ The reference workbench keeps Pi's built-in `bash` for host inspection, authorin
 intentionally not a replacement "bio bash": arbitrary shell commands do not have the declared inputs, outputs,
 environment, receipts, or replay contract of scientific compute. When a command produces evidence for a scientific
 claim, the agent must declare it as a `compute.run` resource and execute it through `bio_query` or a declared
-operation. Session ingestion records ordinary bash command/result digests, but filesystem side effects do not become
-workbench artifacts. Inline media returned in a tool result may separately be retained as a `session_image` audit
+operation. The embedded Pi host emits Pi's `session_shutdown` lifecycle before disposing a session, so session
+ingestion records ordinary bash command/result digests, but filesystem side effects do not become workbench artifacts.
+Inline media returned in a tool result may separately be retained as a `session_image` audit
 artifact; it is not a run-linked scientific output.
 
 For likely plot, figure, external-runtime, or workflow requests, the Pi extension injects a visible just-in-time

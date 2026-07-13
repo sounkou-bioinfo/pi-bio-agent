@@ -114,6 +114,7 @@ function computeGuidanceForPrompt(prompt: string, computeRunAvailable: boolean):
 }
 
 const extensionDir = dirname(fileURLToPath(import.meta.url));
+const bundledSkillRoot = resolve(extensionDir, "..", "..", "skills");
 
 async function defaultManifestCatalogRoot(cwd: string): Promise<string> {
   const candidates = [
@@ -587,7 +588,9 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
   }
 
   pi.on("resources_discover", (event) => ({
-    skillPaths: [runtimeSkillRoot(event.cwd)],
+    // Package guidance is available in every host; project-local skills remain the place for
+    // durable, user-authored workflows.
+    skillPaths: [bundledSkillRoot, runtimeSkillRoot(event.cwd)],
   }));
 
   pi.on("session_start", (event, ctx) => {

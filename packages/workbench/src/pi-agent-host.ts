@@ -29,6 +29,13 @@ interface PiSessionLike {
   abort(): Promise<void>;
   setSessionName(name: string): void;
   availableCommands?(): AgentCommandSummary[];
+  /**
+   * Pi's SDK runtime emits this lifecycle event before it invalidates extension context.
+   * The workbench embeds a raw AgentSession, so it must preserve that boundary itself.
+   */
+  readonly extensionRunner?: {
+    emit(event: { type: "session_shutdown"; reason: "quit" }): Promise<unknown>;
+  };
   dispose(): void;
 }
 
@@ -88,6 +95,25 @@ function normalizeCursor(value: number | undefined): number {
   if (value === undefined) return 0;
   if (!Number.isInteger(value) || value < 0) throw new Error("event cursor must be a non-negative integer");
   return value;
+}
+
+async function disposePiSession(session: PiSessionLike): Promise<void> {
+  try {
+    // Match Pi's AgentSessionRuntime.dispose(): extensions get a final chance to persist
+    // session-derived evidence while their context and session file are still valid.
+    await session.extensionRunner?.emit({ type: "session_shutdown", reason: "quit" });
+  } finally {
+    session.dispose();
+  }
+}
+
+async function disposeActivePiSession(entry: ActivePiSession): Promise<void> {
+  try {
+    entry.unsubscribe();
+  } finally {
+    entry.listeners.clear();
+    await disposePiSession(entry.session);
+  }
 }
 
 function jsonValue(value: unknown, seen = new WeakSet<object>()): JsonValue {
@@ -405,19 +431,27 @@ export function createPiAgentHost(options: PiAgentHostOptions): AgentHostPort {
 
     async close(sessionId) {
       const entry = requireActive(sessionId);
-      entry.unsubscribe();
-      entry.listeners.clear();
-      entry.session.dispose();
+      // Remove it before awaiting extension shutdown so a concurrent close cannot emit twice.
       active.delete(sessionId);
+      await disposeActivePiSession(entry);
     },
 
     async dispose() {
-      for (const entry of active.values()) {
-        entry.unsubscribe();
-        entry.listeners.clear();
-        entry.session.dispose();
-      }
+      const entries = [...active.values()];
       active.clear();
+      let failed = false;
+      let failure: unknown;
+      for (const entry of entries) {
+        try {
+          await disposeActivePiSession(entry);
+        } catch (error) {
+          if (!failed) {
+            failed = true;
+            failure = error;
+          }
+        }
+      }
+      if (failed) throw failure;
     },
   };
 }

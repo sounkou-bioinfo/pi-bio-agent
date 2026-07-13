@@ -21,6 +21,16 @@ class FakePiSession {
   isStreaming = false;
   pendingMessageCount = 0;
   disposed = false;
+  disposeCount = 0;
+  shutdownEvents: unknown[] = [];
+  shutdownError?: Error;
+  readonly extensionRunner = {
+    emit: async (event: unknown) => {
+      assert.equal(this.disposed, false, "Pi session shutdown must happen before disposal");
+      this.shutdownEvents.push(event);
+      if (this.shutdownError) throw this.shutdownError;
+    },
+  };
 
   constructor(readonly sessionId: string) {}
 
@@ -90,6 +100,7 @@ class FakePiSession {
 
   dispose() {
     this.disposed = true;
+    this.disposeCount += 1;
   }
 }
 
@@ -242,4 +253,56 @@ test("agent session HTTP routes validate input and expose bounded host state", a
   } finally {
     await host.dispose();
   }
+});
+
+test("closing an embedded Pi session emits its lifecycle shutdown before disposal", async () => {
+  const { host, sessions } = fixture();
+  try {
+    const opened = await host.open();
+    const session = sessions.get(opened.sessionId)!;
+
+    await host.close(opened.sessionId);
+
+    assert.deepEqual(session.shutdownEvents, [{ type: "session_shutdown", reason: "quit" }]);
+    assert.equal(session.disposed, true);
+    assert.equal(session.disposeCount, 1);
+  } finally {
+    await host.dispose();
+  }
+});
+
+test("concurrent close requests emit Pi shutdown only once", async () => {
+  const { host, sessions } = fixture();
+  try {
+    const opened = await host.open();
+    const session = sessions.get(opened.sessionId)!;
+
+    const outcomes = await Promise.allSettled([host.close(opened.sessionId), host.close(opened.sessionId)]);
+
+    assert.equal(outcomes.filter((outcome) => outcome.status === "fulfilled").length, 1);
+    assert.equal(outcomes.filter((outcome) => outcome.status === "rejected").length, 1);
+    assert.deepEqual(session.shutdownEvents, [{ type: "session_shutdown", reason: "quit" }]);
+    assert.equal(session.disposeCount, 1);
+  } finally {
+    await host.dispose();
+  }
+});
+
+test("host-wide Pi disposal closes every session when one shutdown hook fails", async () => {
+  const { host, sessions } = fixture();
+  const first = await host.open();
+  const second = await host.open();
+  const firstSession = sessions.get(first.sessionId)!;
+  const secondSession = sessions.get(second.sessionId)!;
+  firstSession.shutdownError = new Error("fixture shutdown failure");
+
+  await assert.rejects(host.dispose(), /fixture shutdown failure/);
+
+  for (const session of [firstSession, secondSession]) {
+    assert.deepEqual(session.shutdownEvents, [{ type: "session_shutdown", reason: "quit" }]);
+    assert.equal(session.disposed, true);
+    assert.equal(session.disposeCount, 1);
+  }
+  assert.equal(await host.get(first.sessionId), undefined);
+  assert.equal(await host.get(second.sessionId), undefined);
 });
