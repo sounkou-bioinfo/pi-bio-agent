@@ -28,6 +28,7 @@ interface PiSessionLike {
   followUp(text: string): Promise<void>;
   abort(): Promise<void>;
   setSessionName(name: string): void;
+  bindExtensions(bindings: Record<string, never>): Promise<void>;
   availableCommands?(): AgentCommandSummary[];
   /**
    * Pi's SDK runtime emits this lifecycle event before it invalidates extension context.
@@ -337,6 +338,9 @@ export function createPiAgentHost(options: PiAgentHostOptions): AgentHostPort {
       if (resumeSessionId && active.has(resumeSessionId)) return summary(active.get(resumeSessionId)!);
       const session = await openSession({ ...(resumeSessionId ? { resumeSessionId } : {}) });
       if (active.has(session.sessionId)) return summary(active.get(session.sessionId)!);
+      // The SDK returns a raw session. Binding activates extension-provided resources,
+      // commands, and prompt hooks before the browser can query the session.
+      await session.bindExtensions({});
       const openedAt = clock();
       const entry: ActivePiSession = {
         session,

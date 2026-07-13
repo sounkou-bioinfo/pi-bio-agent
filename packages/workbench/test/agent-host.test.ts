@@ -15,6 +15,7 @@ class FakePiSession {
     { name: "skill:pi-bio-agent", description: "Use the pi-bio-agent substrate", source: "skill" as const },
   ];
   readonly invokedCommands: string[] = [];
+  readonly extensionBindings: Record<string, never>[] = [];
   private listeners = new Set<(event: unknown) => void>();
   private finishPrompt?: () => void;
   sessionName?: string;
@@ -94,6 +95,11 @@ class FakePiSession {
     this.sessionName = name;
   }
 
+  async bindExtensions(bindings: Record<string, never>) {
+    assert.equal(this.disposed, false, "Pi extensions must bind before session disposal");
+    this.extensionBindings.push(bindings);
+  }
+
   availableCommands() {
     return this.commandList;
   }
@@ -139,6 +145,7 @@ test("Pi adapter opens, resumes, steers, and streams without making activity dur
     assert.equal(opened.sessionId, "new-1");
     assert.equal(opened.name, "Browser study");
     assert.equal(opened.state, "idle");
+    assert.deepEqual(sessions.get(opened.sessionId)!.extensionBindings, [{}]);
 
     const renamed = await host.rename(opened.sessionId, "Rare disease review");
     assert.equal(renamed.name, "Rare disease review");
@@ -173,6 +180,7 @@ test("Pi adapter opens, resumes, steers, and streams without making activity dur
     const resumed = await host.open({ resumeSessionId: "saved-1" });
     assert.equal(resumed.sessionId, "saved-1");
     assert.equal(resumed.resumable, true);
+    assert.deepEqual(sessions.get(resumed.sessionId)!.extensionBindings, [{}]);
   } finally {
     await host.dispose();
   }

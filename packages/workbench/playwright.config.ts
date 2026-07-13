@@ -1,6 +1,9 @@
 import { defineConfig, devices } from "@playwright/test";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const port = 8791;
+const piAgentDir = join(tmpdir(), `pi-bio-workbench-playwright-${process.pid}`);
 
 export default defineConfig({
   testDir: "./test-browser",
@@ -25,7 +28,7 @@ export default defineConfig({
       timeout: 30_000,
     },
     {
-      command: `PI_BIO_VEP_URL=http://127.0.0.1:8792/vep PI_BIO_VEP_SOURCE_ID=fixture:vep PI_BIO_VEP_SOURCE_VERSION=fixture-1 node dist/server.js examples/clinical-genomics ${port}`,
+      command: `PI_CODING_AGENT_DIR=${piAgentDir} PI_BIO_VEP_URL=http://127.0.0.1:8792/vep PI_BIO_VEP_SOURCE_ID=fixture:vep PI_BIO_VEP_SOURCE_VERSION=fixture-1 node dist/server.js examples/clinical-genomics ${port}`,
       url: `http://127.0.0.1:${port}/healthz`,
       reuseExistingServer: false,
       timeout: 30_000,
