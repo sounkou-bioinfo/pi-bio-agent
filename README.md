@@ -75,16 +75,10 @@ pi \
 
 Manifest path: `.pi/bio-agent/readme-clinvar-tp53.json`
 
-SQL:
-
 ``` sql
 WITH exploded AS (
   SELECT
-    CHROM,
-    POS,
-    ID,
-    REF,
-    ALT,
+    CHROM, POS, ID, REF, ALT,
     TRIM(sig) AS clinical_significance
   FROM clinvar
   CROSS JOIN UNNEST(COALESCE(INFO_CLNSIG, [])) AS sigs(sig)
@@ -92,14 +86,9 @@ WITH exploded AS (
     AND POS BETWEEN 43044295 AND 43125483
     AND sig IS NOT NULL
     AND TRIM(sig) <> ''
-), deduped AS (
-  SELECT DISTINCT
-    CHROM,
-    POS,
-    ID,
-    REF,
-    ALT,
-    clinical_significance
+),
+deduped AS (
+  SELECT DISTINCT CHROM, POS, ID, REF, ALT, clinical_significance
   FROM exploded
 )
 SELECT
@@ -399,21 +388,27 @@ The first-party workbench composes a browser, a Pi SDK agent-host
 adapter, and the same public evidence substrate:
 
 ``` sh
-npm run serve --workspace=packages/workbench -- examples/clinical-genomics 8787
+npm run benchmark:acmg --workspace=packages/workbench -- \
+  --archive /path/to/scitranslmed.adz4172_tables_s1_to_s13.zip \
+  --expected-archive-digest sha256:eedf0d516842e5a1f929606161f61ae8185253d679810abc603d64526bbdd2ee \
+  --expected-workbook-digest sha256:4e8c55487dafcf88f4c34c233e52f5fc12860f7a7e9dcef4490f6464535ddbfa \
+  --workspace .pi/published-acmg-benchmark
+npm run resolve:acmg-variant --workspace=packages/workbench -- \
+  --row-id 'ST12_150 ClinGen varinats:39' \
+  --workspace .pi/published-acmg-benchmark
+npm run serve --workspace=packages/workbench -- .pi/published-acmg-benchmark 8787
 ```
 
 Open <http://127.0.0.1:8787>. Pi sessions can be opened, resumed,
 renamed, prompted, steered, followed up, aborted, and closed. Slash
-completion exposes invokable Pi commands while host-approved Clinical
-Evidence, Clinical Reanalysis, and Artifacts addons render the
-checkpoint plan, recorded analysis history, ledger-backed review state,
-transparent latest-per-case reanalysis queues, and CAS-backed
-figures/reports tied to recorded runs. The reanalysis queue exposes
-explicit follow-up, current-versus-prior, conflict, gap, and open-review
-reasons; it is not a diagnostic ranking or classification. Tool payloads
-and raw lifecycle deltas are collapsible diagnostics. The live
-conversation/event stream is a presentation surface, not the scientific
-source of truth.
+completion exposes invokable Pi commands. The Variants addon keeps
+published workbook decisions separate from independently resolved NCBI
+Variation/ClinVar snapshots, receipts, CAS digests, and run ids;
+Artifacts renders declared CAS-backed figures/reports. Starting against
+an explicitly supplied clinical manifest additionally loads its Evidence
+and Reanalysis addons. Tool payloads and raw lifecycle deltas are
+collapsible diagnostics. The live conversation/event stream is a
+presentation surface, not the scientific source of truth.
 
 The first-party workbench explicitly grants local `compute.run` with its
 workspace CAS. Agent-produced figures and reports must be declared

@@ -54,6 +54,9 @@ Instructions for coding agents working in this repository.
   tab and may implement activate/deactivate/dispose. Addons use the public SDK and canonical store. They do not own a
   private database, install themselves, accept browser-supplied module paths, or turn transient SSE events into
   durable state. Add focus/resize or dock semantics only when a concrete editor/terminal surface needs them.
+- Shared workspace selection is discriminated browser context (`clinical_analysis` or `published_variant`), not a
+  new scientific record. An addon must ignore selection kinds it does not own; cross-pane consumers such as Artifacts
+  may project the referenced analysis, variant-resolution node, run ids, and CAS digests through the canonical store.
 
 ## Thin Binding Rule
 
@@ -141,7 +144,9 @@ Instructions for coding agents working in this repository.
   diagnostic cases.
 - `rule_development` means the 1,000 curator-reviewed HKGP variants were used to optimize prompts and retrieval
   knowledge bases and then reassess seven literature-dependent rules. They are real variants, but not an independent
-  validation set.
+  validation set. They did not create or revise the ACMG/AMP rules themselves. In the published workflow, article
+  files supplied variant evidence; S8-S10 supplied narrow policy/interpretation retrieval for PS2/PM6, PP1, and PP4,
+  while S11 supplied PS4 thresholds. Do not call all of that material one undifferentiated literature RAG corpus.
 - The workbook supplies variant text but no stable VCV/RCV/SCV or ClinGen allele accession. Keep identity unresolved
   until a release-pinned mapping operation records resolved, ambiguous, or unmatched candidates; never infer a
   temporal key from HGVS text alone.

@@ -2,6 +2,8 @@ export * from "./clinical-genomics.js";
 export * from "./clinical-case-registry.js";
 export * from "./clinvar-temporal.js";
 export * from "./published-acmg-benchmark.js";
+export * from "./published-variant-resolution.js";
+export * from "./published-variants-addon.js";
 export * from "./candidate-variant-search.js";
 export * from "./phenotype-grounding.js";
 export * from "./phenotype-benchmark.js";

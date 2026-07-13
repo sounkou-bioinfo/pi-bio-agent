@@ -40,7 +40,7 @@ registerWorkbenchAddon({
       head.append(header);
       const body = host.node("tbody");
       for (const entry of entries) {
-        const row = host.node("tr", selection?.analysisId === entry.analysisId ? "focused" : "");
+        const row = host.node("tr", selection?.kind === "clinical_analysis" && selection.analysisId === entry.analysisId ? "focused" : "");
         row.append(
           host.node("td", "reanalysis-case", entry.caseId),
           host.node("td", null, stateLabels[entry.state] ?? entry.state),

@@ -237,14 +237,32 @@ function normalizeWorkspaceSelection(selection) {
   if (!selection || typeof selection !== "object") return null;
   const caseId = typeof selection.caseId === "string" ? selection.caseId : null;
   const analysisId = typeof selection.analysisId === "string" ? selection.analysisId : null;
-  if (!caseId || !analysisId) return null;
-  return {
-    caseId,
-    analysisId,
-    packetUri: typeof selection.packetUri === "string" ? selection.packetUri : null,
-    groundingId: typeof selection.groundingId === "string" ? selection.groundingId : null,
-    runIds: Array.isArray(selection.runIds) ? selection.runIds.filter((value) => typeof value === "string") : [],
-  };
+  const runIds = Array.isArray(selection.runIds) ? selection.runIds.filter((value) => typeof value === "string") : [];
+  if (caseId && analysisId) {
+    return {
+      kind: "clinical_analysis",
+      caseId,
+      analysisId,
+      packetUri: typeof selection.packetUri === "string" ? selection.packetUri : null,
+      groundingId: typeof selection.groundingId === "string" ? selection.groundingId : null,
+      runIds,
+    };
+  }
+  const benchmarkRowId = typeof selection.benchmarkRowId === "string" ? selection.benchmarkRowId : null;
+  const datasetId = typeof selection.datasetId === "string" ? selection.datasetId : null;
+  const version = typeof selection.version === "string" ? selection.version : null;
+  if (benchmarkRowId && datasetId && version) {
+    return {
+      kind: "published_variant",
+      benchmarkRowId,
+      datasetId,
+      version,
+      resolutionUri: typeof selection.resolutionUri === "string" ? selection.resolutionUri : null,
+      sourceDigests: Array.isArray(selection.sourceDigests) ? selection.sourceDigests.filter((value) => typeof value === "string") : [],
+      runIds,
+    };
+  }
+  return null;
 }
 
 function setWorkspaceSelection(selection) {

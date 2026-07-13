@@ -168,7 +168,7 @@ registerWorkbenchAddon({
     };
 
     const syncWorkspaceSelection = (selection) => {
-      if (!selection || selection.analysisId === analysis?.analysisId) return;
+      if (!selection || selection.kind !== "clinical_analysis" || selection.analysisId === analysis?.analysisId) return;
       void loadAnalysis(selection.analysisId);
     };
     const unsubscribeSelection = host.onWorkspaceSelectionChange(syncWorkspaceSelection);

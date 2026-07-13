@@ -16,6 +16,15 @@ registerWorkbenchAddon({
 
     const relevantArtifact = (artifact) => {
       if (!selection) return true;
+      if (selection.kind === "published_variant") {
+        const sourceNodes = new Set([
+          `variant-resolution:${selection.datasetId}@${selection.version}:${selection.benchmarkRowId}`,
+          ...selection.runIds.flatMap((runId) => [runId, `run:${runId}`]),
+        ]);
+        return sourceNodes.has(artifact.sourceNode)
+          || artifact.casUri === selection.resolutionUri
+          || selection.sourceDigests.includes(artifact.digest);
+      }
       const sourceNodes = new Set([
         `analysis:${selection.analysisId}`,
         selection.groundingId,
@@ -78,9 +87,11 @@ registerWorkbenchAddon({
       const gallery = container.querySelector("#artifact-gallery");
       const visible = artifacts.filter(relevantArtifact);
       gallery.replaceChildren(...visible.map(renderArtifact));
-      if (!visible.length) gallery.append(host.node("p", "muted artifact-empty", selection ? "No CAS artifacts are linked to the selected analysis." : "No CAS-backed artifacts are recorded yet."));
+      if (!visible.length) gallery.append(host.node("p", "muted artifact-empty", selection ? "No CAS artifacts are linked to the selected record." : "No CAS-backed artifacts are recorded yet."));
       container.querySelector("#artifact-count").textContent = ` · ${visible.length}${selection ? ` of ${artifacts.length}` : ""}`;
-      container.querySelector("#artifact-context").textContent = selection ? ` · ${selection.analysisId}` : "";
+      container.querySelector("#artifact-context").textContent = selection
+        ? ` · ${selection.kind === "published_variant" ? selection.benchmarkRowId : selection.analysisId}`
+        : "";
       container.querySelector("#clear-artifact-selection").hidden = !selection;
     };
 

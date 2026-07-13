@@ -321,8 +321,13 @@ Two evaluation levels must remain separate:
     differential testing, but it is not the published benchmark.
 
     Here `rule_development` means that the 1,000 curator-reviewed HKGP
-    variants were used to optimize prompts and retrieval knowledge bases
-    and then reassess seven literature-dependent rules. They are real
+    variants were used to optimize the AI-CURA prompt/evidence-reading
+    procedure for seven literature-dependent criteria; they did not
+    develop the ACMG/AMP rules. Variant publications were retrieved
+    externally and reformatted as the evidence corpus. S8-S10 instead
+    provide narrow criterion guidance for PS2/PM6, PP1, and PP4, while
+    S11 provides PS4 thresholds. These inputs should not be collapsed
+    into one undifferentiated literature RAG corpus. The rows are real
     variants, but they are development-contaminated rather than an
     independent evaluation set.
 
@@ -343,8 +348,10 @@ unique match, ambiguity, or no match. A separate case benchmark adapter
 must accept case and truth bundles as host inputs, project them into
 declared DuckDB relations, run one case or a bounded cohort through the
 same checkpoint graph, and write per-case predictions plus aggregate
-metrics to ledger/CAS. The current clinical fixture tests substrate
-correctness, not model or clinical quality.
+metrics to ledger/CAS. The current synthetic clinical application tests
+substrate correctness, not model or clinical quality. It is not the
+default browser product surface; the registered S12/S13 variant
+workspace supplies the first real-source surface.
 
 ### Release-pinned reclassification harness
 

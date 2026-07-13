@@ -4,14 +4,14 @@
 policy, evidence packets, APIs, and browser surfaces are composed. The root package remains the policy-free
 execution and evidence substrate.
 
-The workbench includes [clinical genomics](examples/clinical-genomics/application.md) and the generic
+The workbench includes a source-pinned published-variant surface, [clinical genomics](examples/clinical-genomics/application.md), and the generic
 [method-selection application](examples/method-selection/application.md). Their executable QMD files are the
 application narratives and proofs; rendered Markdown is committed for ordinary readers.
 
-The browser shell loads host-approved `WorkbenchAddon` pairs. Clinical Evidence contributes the analysis API, history,
-and review pane; Clinical Reanalysis projects the latest recorded analysis per case with explicit queue reasons; and
-Artifacts contributes temporal-ledger projection, verified CAS byte serving, and figure/report previews. Addons use
-the same public SDK and store rather than creating application-local persistence.
+The browser shell loads host-approved `WorkbenchAddon` pairs. Variants projects registered benchmark rows and
+independently resolved source snapshots; Clinical Evidence and Clinical Reanalysis are loaded only for a workspace
+that explicitly supplies the clinical manifest; and Artifacts projects verified CAS figures/reports. Addons use the
+same public SDK and store rather than creating application-local persistence.
 
 ## Package boundary
 
@@ -88,24 +88,52 @@ variant validation, and S13 variant reanalysis. It preserves source cells, norma
 raw spellings, parses criterion strength/footnote markers, and independently recomputes the worksheet's model/human
 concordance flags.
 
-The `rule_development` role is specific: S1-S7 contain 1,000 curator-reviewed HKGP variants used to optimize prompts
-and retrieval knowledge bases and then reassess seven literature-dependent rules. They are real variant examples, but
-they are development-contaminated and therefore cannot contribute to independent validation metrics.
+The `rule_development` role is specific: S1-S7 contain 1,000 curator-reviewed HKGP variants used to optimize the
+AI-CURA prompt/evidence-reading procedure for seven literature-dependent criteria. They did not develop the ACMG/AMP
+rules. They are real variant examples, but they are development-contaminated and therefore cannot contribute to
+independent validation metrics.
+
+The paper uses two different retrieval inputs that should not be collapsed into “RAG”:
+
+- variant publications were found outside the model (the study used Mastermind), downloaded with supplements, and
+  converted when necessary from XLSX to CSV or Word to text before being supplied to the LLM. These files are the
+  evidence corpus for PVS1 (RNA), PS2/PM6, PS3, PS4, PM3, PP1, and PP4. The preparation was necessary because the
+  model was run as a bounded document reader rather than an autonomous literature-search agent, and because tables
+  and supplements had to be represented in supported formats;
+- S8-S10 are narrow authored policy/interpretation knowledge bases retrieved for gene-disease consistency in
+  PS2/PM6, modified segregation scoring in PP1, and gene-specific phenotype/testing specificity in PP4. S11 supplies
+  PS4 thresholds. This is criterion guidance, not a search index of the publications.
+
+The remaining literature-independent evidence was assembled from declared sources and deterministic predictors. The
+study then ran the literature-dependent readers at least twice and manually aggregated criterion decisions. That is
+a useful benchmark design, but it is not yet an end-to-end tool-using agent or a complete automated ACMG/AMP kernel.
 
 These rows are variant-centered, not rare-disease case packets. The workbook contains no stable ClinVar/ClinGen
-accessions, so every variant identity remains explicitly unresolved until a separate release-pinned mapping step can
-record a unique, ambiguous, or absent match. Run the exact supplied archive with both content digests:
+accessions, so import keeps identity unresolved. `resolvePublishedVariantWithNcbi` then runs declared `http.get`
+operations against NCBI Variation and ClinVar, retains every response and resolver receipt in CAS, validates the
+HGVS/SPDI/GRCh38 identity, and links the resolution to the workbook row and source runs. Run the exact supplied
+archive with both content digests:
 
 ```sh
 npm run benchmark:acmg --workspace=packages/workbench -- \
   --archive /path/to/scitranslmed.adz4172_tables_s1_to_s13.zip \
-  --expected-archive-digest sha256:<archive-digest> \
-  --expected-workbook-digest sha256:<xlsx-digest> \
-  --workspace /path/to/benchmark-workspace
+  --expected-archive-digest sha256:eedf0d516842e5a1f929606161f61ae8185253d679810abc603d64526bbdd2ee \
+  --expected-workbook-digest sha256:4e8c55487dafcf88f4c34c233e52f5fc12860f7a7e9dcef4490f6464535ddbfa \
+  --workspace .pi/published-acmg-benchmark
+
+npm run resolve:acmg-variant --workspace=packages/workbench -- \
+  --row-id 'ST12_150 ClinGen varinats:39' \
+  --workspace .pi/published-acmg-benchmark
+
+npm run serve --workspace=packages/workbench -- \
+  .pi/published-acmg-benchmark \
+  8787
 ```
 
-The command prints bounded role counts and quality findings, not the 1,480 source rows. The source and normalized
-bytes remain queryable through CAS and the recorded run.
+Open <http://127.0.0.1:8787> and choose **Variants**. The featured real row is
+`NM_001369369.1(FOXN1):c.880G>A (p.Val294Ile)`. The pane keeps the workbook source classification, human
+reassessment, current ClinVar classification, current identifiers, criteria, source response digests, and run ids
+separate. The importer prints bounded role counts and quality findings, not the 1,480 source rows.
 
 ## Run
 
@@ -119,8 +147,10 @@ npm run application:method-selection
 npm run application:method-selection-agent
 ```
 
-The application QMD runs a hermetic local VEP-compatible endpoint, verifies transient retry, executes all eight
-steps, resumes the same analysis from checkpoints, and renders a collapsed evidence summary.
+The clinical application QMD uses synthetic biology only as a deterministic substrate regression proof: it runs a
+hermetic VEP-compatible endpoint, verifies transient retry, executes all eight steps, resumes from checkpoints, and
+renders a collapsed evidence summary. It is not the default browser workspace and must not be presented as a real
+case or clinical benchmark.
 
 The method-selection QMD studies a refreshable action relation, discovers the method with SQL under host constraints,
 authors a manifest operation, runs it, validates and approves the candidate, writes the approved skill revision into the
@@ -163,18 +193,17 @@ targeted search and review, not a diagnosis.
 
 ```sh
 npm run serve --workspace=packages/workbench -- \
-  examples/clinical-genomics \
+  .pi/published-acmg-benchmark \
   8787
 ```
 
 Open <http://127.0.0.1:8787>. The browser opens, resumes, and renames persistent Pi sessions; discovers invokable
 extension/template/skill commands for slash completion; accepts prompt/steer/follow-up input; and aborts or closes an
-active session. Tool payloads and raw lifecycle deltas stay under collapsible diagnostics rather than dominating the
-conversation. Clinical Evidence shows the fixture inputs and eight checkpointed stages before execution, recorded
-analysis history, evidence, and a ledger-backed review queue. Clinical Reanalysis projects one latest recorded
-analysis per case from explicit follow-up, current-versus-prior, conflict, gap, and open-review states; it is not a
-diagnostic ranking or classification. The panes hand durable run ids and CAS references back to Pi for ledger/graph
-inspection.
+active session. Variants shows bounded S12/S13 rows, workbook decisions, model decisions, and independently pinned
+current-source identities. Tool payloads and raw lifecycle deltas stay under collapsible diagnostics rather than
+dominating the conversation. Starting the server against `examples/clinical-genomics` explicitly adds the synthetic
+Evidence and Reanalysis regression panes; they are not loaded into the real-variant workspace. Every pane hands
+durable run ids and CAS references back to Pi for ledger/graph inspection.
 
 This host explicitly grants local `compute.run` with the workspace CAS. A plot or report is a declared compute output
 with media/role metadata, then a run/CAS/graph artifact visible in the Artifacts addon. A file written directly by
