@@ -66,6 +66,19 @@ and treating UI/model truncation as presentation metadata.
 Evidence: [operations.ts](../src/core/operations.ts), [run-store.ts](../src/hosts/run-store.ts),
 [sdk-host-embedding.qmd](../examples/patterns/sdk-host-embedding.qmd).
 
+### Shared DuckLake catalog ownership
+
+The workbench's release-pinned ClinVar proof uses a local DuckLake catalog: large normalized assertions remain in
+DuckLake/CAS while observations retain only release metadata, exact snapshot anchors, tasks, and runs. That local
+catalog is not a cross-process or cross-machine writer authority. A deployment that shares release ingestion across
+projects or agents must host the metadata catalog and serialize/coordinate writers through its chosen SQL/ducknng
+topology. The control-plane record binds a release to an opaque DuckLake configuration digest as well as its snapshot,
+so identical logical lake ids and snapshot numbers in different local catalogs cannot be conflated. Do not solve that
+by copying release rows into the ledger or by creating another graph service.
+
+Evidence: [clinvar-temporal.ts](../packages/workbench/src/clinvar-temporal.ts),
+[clinvar-temporal.test.ts](../packages/workbench/test/clinvar-temporal.test.ts).
+
 ### Cross-host memory mutation parity
 
 The SDK owns validated memory writes, retractions, recall, and history. Pi exposes both mutation and inspection,

@@ -95,6 +95,16 @@ Files and domain formats should enter through DuckDB readers, community extensio
 resolver. `duckdb.file_scan`, `duckdb.sql_materialize`, and extension table functions are preferred to bespoke
 parsers. CAS stores immutable bytes; a resource records how bytes or live data become a relation.
 
+Release-scale temporal sources need not become a second ledger or graph service. The workbench's ClinVar application
+keeps raw releases and normalized rows in CAS plus DuckLake, pins each operation to one DuckLake snapshot, and derives
+edge-shaped views in SQL. The temporal ledger records the smaller control plane: release identity, an opaque
+DuckLake host-configuration digest, snapshot anchor, artifact references, task commitments, approvals, and recorded
+runs. This is the right split for a large evolving catalog: SQL remains able to traverse all asserted relationships
+without loading them into prompt context or copying them into `bio_observations`. A local DuckLake metadata catalog
+is a single-host default; shared writers and catalogs remain explicit host composition. Where an evaluator must retain
+a future source state, the agent task gets an HMAC commitment keyed by evaluator-only entropy rather than a directly
+enumerable hash of target metadata; host-enforced access separation still carries the security boundary.
+
 DuckDB is already the default stateful scientific REPL. Temporary tables, materialized relations, graph projections,
 and CAS handles let an actor keep a large working set outside the prompt and inspect bounded slices as needed. This
 is the generic answer to context rot and the RLM-shaped case: the actor partitions, queries, joins, and reduces data in

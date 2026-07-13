@@ -50,6 +50,26 @@ grounding, phenotype/gene retrieval, indexed range restriction, VEP, typed ACMG 
 reranking, literature evidence, and gated review. VEP annotations alone are not an ACMG classification: population,
 inheritance/segregation, de novo, functional, curated, and review evidence remain explicit inputs.
 
+### Release-pinned ClinVar reclassification harness
+
+The workbench now has a separate temporal source plane for ClinVar-style releases. Raw TSV/XML/VCF bytes and a
+declared normalizer identity are content-addressed in CAS; normalized release-scale assertions live in DuckLake; and
+the ordinary ledger records only release metadata, source and normalized artifact references, exact DuckLake snapshot
+anchors, graph links, and recorded operations. `clinical.clinvar_assertion_graph` derives assertion-to-variation,
+condition, and gene edges by SQL from one pinned snapshot. It is a queryable graph view, not a second graph database
+or a bulk copy of ClinVar into observations.
+
+`prepareClinVarTemporalTask` prepares a blind-evaluation record for retrospective source-label work: it materializes
+only the baseline release into a non-overlapping agent workspace, records an HMAC target commitment keyed by
+evaluator-only entropy, and keeps the target release, commitment secret, and delta operation in the evaluator
+workspace. The task metadata therefore cannot be matched against candidate target metadata by simple enumeration.
+`clinical.clinvar_temporal_candidates` performs source-label selection in baseline SQL;
+`runClinVarTemporalEvaluation` later runs the target-side delta. A structured host isolation receipt is pinned in task
+and run provenance, but only a host container, microVM, filesystem policy, or equivalent tool boundary can enforce
+it. A prompt alone is not a blind. The result measures source-label change, not clinical truth, diagnosis, or a
+replacement for expert review. The executable proof is
+[clinvar-temporal.test.ts](test/clinvar-temporal.test.ts).
+
 ## Run
 
 ```sh

@@ -332,6 +332,28 @@ write per-case predictions plus aggregate metrics to the ledger/CAS. It
 must not embed patient data, private paths, or a second scoring system
 in TypeScript.
 
+### Release-pinned reclassification harness
+
+The workbench also now has a temporal ClinVar source plane for
+retrospective reclassification work. Raw release bytes and a declared
+normalizer are pinned in CAS; normalized assertions remain in DuckLake
+at an exact release snapshot; and SQL derives the
+assertion-to-variation, condition, and gene graph when needed. The
+ledger holds the release identity, snapshot anchor, artifact references,
+and runs rather than a duplicate of the release-scale relation.
+
+A blinded task copies only the baseline release into an agent workspace,
+passes an HMAC target commitment keyed by evaluator-only entropy plus a
+declared baseline candidate policy, and runs that policy as a recorded
+SQL operation. The target release, commitment secret, and source-label
+delta remain evaluator-only, so task metadata cannot be matched against
+candidate target metadata by simple enumeration. This is meaningful only
+when the host actually enforces separate tool/filesystem boundaries; a
+prompt or receipt cannot make a process blind. It tests source-label
+change, not diagnostic truth or clinical validity. The deterministic
+proof is
+[clinvar-temporal.test.ts](../../test/clinvar-temporal.test.ts).
+
 ## Next case-workup closure
 
 The same inverted lane can drive a broader one-study case workup from
