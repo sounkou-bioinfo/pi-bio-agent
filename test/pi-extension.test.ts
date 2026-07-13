@@ -10,11 +10,30 @@ import { sessionArtifacts, sessionTimeline, sessionToolTrajectory } from "../src
 import { recallSkill } from "../src/hosts/skill-store.js";
 import { canonicalDigest } from "../src/core/reproducibility.js";
 import { materializeTrainingCorpus, TRAINING_CORPUS_TABLES } from "../src/hosts/training-corpus.js";
+import type { ComputeRunner } from "../src/core/ports.js";
 
 interface RegisteredTool {
   name: string;
   execute: (...args: any[]) => Promise<any>;
 }
+
+const unusedComputeRunner: ComputeRunner = {
+  async submit() {
+    return { runId: "unused-compute-runner" };
+  },
+  async status() {
+    return null;
+  },
+  async collect() {
+    return {
+      exitCode: 0,
+      signal: null,
+      stdout: "",
+      stderr: "",
+      timedOut: false,
+    };
+  },
+};
 
 function loadExtension(extension = piBioAgentExtension) {
   const handlers = new Map<string, Function[]>();
@@ -159,6 +178,48 @@ describe("Pi coding-agent extension", () => {
     } finally {
       store.close();
     }
+  });
+
+  test("before_agent_start gives artifact requests just-in-time compute.run guidance", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "pi-bio-ext-compute-guidance-"));
+    const withCompute = loadExtension(createBioExtension({
+      author: "agent:test",
+      compute: { runner: unusedComputeRunner },
+    })).handlers.get("before_agent_start")?.[0];
+    assert.ok(withCompute, "before_agent_start handler registered");
+
+    const granted = await withCompute!({
+      prompt: "Can you make a small plot of the evidence statuses?",
+      systemPrompt: "base prompt",
+      systemPromptOptions: { cwd },
+    }, { cwd });
+    assert.equal(granted.message.customType, "pi-bio.compute-guidance");
+    assert.equal(granted.message.display, true);
+    assert.match(granted.message.content, /declare it as a manifest `compute\.run` resource/);
+    assert.doesNotMatch(granted.message.content, /has not granted/);
+    assert.deepEqual(granted.message.details, {
+      boundary: "scientific_compute",
+      computeRun: "available",
+      trigger: "prompt_heuristic",
+    });
+
+    const withoutCompute = loadExtension(createBioExtension({ author: "agent:test" }))
+      .handlers.get("before_agent_start")?.[0];
+    assert.ok(withoutCompute, "before_agent_start handler registered");
+    const blocked = await withoutCompute!({
+      prompt: "Run the Python analysis and render a figure",
+      systemPrompt: "base prompt",
+      systemPromptOptions: { cwd },
+    }, { cwd });
+    assert.match(blocked.message.content, /host has not granted `compute\.run`/);
+    assert.equal(blocked.message.details.computeRun, "unavailable");
+
+    const ordinary = await withCompute!({
+      prompt: "Inspect the manifest and explain its resource schema",
+      systemPrompt: "base prompt",
+      systemPromptOptions: { cwd },
+    }, { cwd });
+    assert.equal(ordinary.message, undefined);
   });
 
   test("input hook records steer/follow-up delivery metadata without storing input text", async () => {

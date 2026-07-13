@@ -92,8 +92,7 @@ WITH exploded AS (
     AND POS BETWEEN 43044295 AND 43125483
     AND sig IS NOT NULL
     AND TRIM(sig) <> ''
-),
-deduped AS (
+), deduped AS (
   SELECT DISTINCT
     CHROM,
     POS,
@@ -416,14 +415,22 @@ The first-party workbench explicitly grants local `compute.run` with its
 workspace CAS. Agent-produced figures and reports must be declared
 compute outputs so they become run-linked CAS artifacts; an arbitrary
 Python/R/shell file write is not a workbench artifact. The reference
-host excludes Pi’s built-in `bash`: agents author manifests and scripts
-with file tools, then explicitly resolve `compute.run` through
-`bio_query` or a declared operation. Hosts that expose Pi bash still
-capture its command/result digests in the session ledger, but those
-audited host effects do not become run-linked scientific artifacts.
-Inline media returned by any tool may separately be retained as a
-`session_image` audit artifact; arbitrary filesystem side effects are
-never discovered or promoted automatically.
+host keeps Pi’s built-in `bash` for inspection, authoring, testing, and
+CLI work, and captures its command/result digests in the session ledger.
+When a command performs scientific computation, the agent must
+explicitly declare it under `compute.run` and execute it through
+`bio_query` or a declared operation. Inline media returned by any tool
+may separately be retained as a `session_image` audit artifact;
+arbitrary filesystem side effects are never discovered or promoted
+automatically.
+
+The Pi extension reinforces this boundary just in time. Prompts that
+imply a plot, figure, external scientific runtime, or workflow receive a
+visible `compute.run` reminder before the agent starts. If the host did
+not grant compute, the reminder fails closed instead of suggesting raw
+bash as a scientific fallback. This is guidance for the agent’s tool
+use; Pi’s `user_bash` event remains the separate hook for human-entered
+`!` and `!!` commands.
 
 The reference server binds loopback and is not a sandbox. Pi and its
 tools run with the permissions of the launching process. Remote or

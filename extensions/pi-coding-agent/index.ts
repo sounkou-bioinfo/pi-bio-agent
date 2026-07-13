@@ -78,9 +78,10 @@ const BIO_ORIENTATION = [
   "  arbitrary output into the workspace. Author or reuse a manifest with a `compute.run` resource, declare every",
   "  output with `mediaType` and `semanticRole`, validate it with `bio_describe_model`, then execute it through",
   "  `bio_query` or `bio_run_operation`. The process may render the file, but the declared run must capture it in",
-  "  CAS and project `run:<id> --produces--> cas:<digest>` so hosts can display and reproduce it. If the host",
-  "  exposes bash, it may help author the manifest/script; bash is an audited host effect, not the scientific",
-  "  execution record. Hosts may disable bash entirely and require every process execution through `compute.run`.",
+  "  CAS and project `run:<id> --produces--> cas:<digest>` so hosts can display and reproduce it. Bash may inspect,",
+  "  author, and test host files. When a command performs scientific computation, declare that command and its",
+  "  inputs/outputs under `compute.run`; the ordinary bash call remains an audited host effect, not the scientific",
+  "  execution record.",
   "- REMEMBER (machine studying): memory is an append-only, as-of, ATTRIBUTED store (the same temporal ledger as",
   "  facts) — `bio_remember` (`[[slug]]` and optional typed `links` support; re-writing supersedes, never clobbers) / `bio_list_memory`",
   "  / `bio_walk_memory` (walk the graph) / `bio_recall`. list/read take an `asOf` time (time-travel), and",
@@ -91,6 +92,26 @@ const BIO_ORIENTATION = [
   "- GRAPH: validate graph projection profiles with `bio_validate_graph_projection`; inspect bounded graph context",
   "  with `bio_graph_window` instead of dumping high-degree neighborhoods into the prompt.",
 ].join("\n");
+
+const SCIENTIFIC_COMPUTE_PROMPTS = [
+  /\b(?:plot|chart|figure|visuali[sz](?:e|ation)|heatmap|histogram|scatter(?:plot)?|volcano(?:\s+plot)?|python|rscript|nextflow|snakemake)\b/i,
+  /\b(?:run|execute)\s+(?:the\s+)?(?:analysis|benchmark|model|pipeline|script|simulation|workflow)\b/i,
+  /\b(?:analysis|evidence|scientific)\s+report\b/i,
+];
+
+function computeGuidanceForPrompt(prompt: string, computeRunAvailable: boolean): string | undefined {
+  if (!SCIENTIFIC_COMPUTE_PROMPTS.some((pattern) => pattern.test(prompt))) return undefined;
+  const boundary = [
+    "[pi-bio-agent compute boundary] This request may need an evidence-producing process or generated artifact.",
+    "Ordinary bash remains appropriate for inspection, authoring, tests, and CLI work. If Python, R, shell, or a",
+    "workflow produces scientific evidence, declare it as a manifest `compute.run` resource with explicit inputs",
+    "and every output's `mediaType` and `semanticRole`; validate it with `bio_describe_model`, then execute it through",
+    "`bio_query` or `bio_run_operation`. Treat a generated file as a scientific artifact only after the run captures",
+    "it in CAS; do not present an untracked workspace file as one.",
+  ].join("\n");
+  if (computeRunAvailable) return boundary;
+  return `${boundary}\nThis host has not granted \`compute.run\`. Do not silently substitute raw bash for the evidence-producing process; author/validate the manifest if useful, then report the blocked host capability.`;
+}
 
 const extensionDir = dirname(fileURLToPath(import.meta.url));
 
@@ -592,7 +613,25 @@ export function createBioExtension(options: BioExtensionOptions = {}): (pi: Exte
     const memoryIndex = await memoryIndexBlock(openStore, cwd);
     const systemPrompt = `${event.systemPrompt}\n\n${BIO_ORIENTATION}${memoryIndex}`;
     await recordBeforeAgentStartContext(ctx, event, memoryIndex, systemPrompt);
-    return { systemPrompt };
+    const computeGuidance = computeGuidanceForPrompt(
+      typeof event.prompt === "string" ? event.prompt : "",
+      computeGrant !== undefined,
+    );
+    return {
+      systemPrompt,
+      ...(computeGuidance ? {
+        message: {
+          customType: "pi-bio.compute-guidance",
+          content: computeGuidance,
+          display: true,
+          details: {
+            boundary: "scientific_compute",
+            computeRun: computeGrant === undefined ? "unavailable" : "available",
+            trigger: "prompt_heuristic",
+          },
+        },
+      } : {}),
+    };
   });
 
   pi.registerTool({

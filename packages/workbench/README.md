@@ -119,13 +119,18 @@ This host explicitly grants local `compute.run` with the workspace CAS. A plot o
 with media/role metadata, then a run/CAS/graph artifact visible in the Artifacts addon. A file written directly by
 Python, R, or shell is merely a workspace side effect and is not presented as scientific evidence.
 
-The reference workbench excludes Pi's built-in `bash` tool. The agent can author a manifest and renderer with the
-ordinary file tools, then must execute the process explicitly as a `compute.run` resource through `bio_query` or a
-declared operation. This is intentionally not a replacement "bio bash": arbitrary shell commands do not have the
-declared inputs, outputs, environment, receipts, or replay contract of scientific compute. Hosts that choose to
-expose Pi bash still get command/result digests through session ingestion, but those records remain host-effect audit
-evidence and their filesystem side effects do not become workbench artifacts. Inline media returned in a tool result
-may separately be retained as a `session_image` audit artifact; it is not a run-linked scientific output.
+The reference workbench keeps Pi's built-in `bash` for host inspection, authoring, testing, and CLI work. This is
+intentionally not a replacement "bio bash": arbitrary shell commands do not have the declared inputs, outputs,
+environment, receipts, or replay contract of scientific compute. When a command produces evidence for a scientific
+claim, the agent must declare it as a `compute.run` resource and execute it through `bio_query` or a declared
+operation. Session ingestion records ordinary bash command/result digests, but filesystem side effects do not become
+workbench artifacts. Inline media returned in a tool result may separately be retained as a `session_image` audit
+artifact; it is not a run-linked scientific output.
+
+For likely plot, figure, external-runtime, or workflow requests, the Pi extension injects a visible just-in-time
+reminder before the agent starts. It points granted hosts to declared `compute.run`; without a compute grant it fails
+closed instead of treating raw bash as a scientific fallback. Pi's `user_bash` hook is separate and covers only
+human-entered `!` and `!!` commands.
 
 Zod route schemas validate requests and generate OpenAPI 3.1. The server fixes its workspace and Pi extension at
 startup; callers submit neither host paths nor executable extension configuration, and store/session paths are not
@@ -137,8 +142,8 @@ session and dynamic-tool mechanics do not enter the browser protocol.
 The reference server binds `127.0.0.1` and applies a same-origin content-security policy. This protects the local HTTP
 surface from accidental network exposure; it is not process isolation. Pi, its enabled tools, extensions, and any
 declared compute or network access they invoke run with the permissions of the user who launched the server. The
-reference workbench disables Pi's built-in shell, but this is a tool policy rather than a sandbox; another extension
-or a declared compute runner still has the operator's ordinary system access.
+reference workbench keeps Pi's built-in shell, which has the operator's ordinary system access. Use a container,
+microVM, or other host policy when that authority is too broad; evidence recording is not process isolation.
 
 Do not expose this reference server directly to a network. A remote or multi-user deployment must add authentication,
 TLS, per-principal admission, credential policy, and an appropriate process/container/microVM boundary. DuckNNG can

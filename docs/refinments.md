@@ -107,10 +107,14 @@ Cross-cutting constraints from this table are currently enforced by tests in:
 - The workbench's explicit local-compute grant and evidence-status figure exercise the existing `compute.run` ->
   declared output -> CAS -> `run:<id> produces cas:<digest>` path. Direct process writes are not artifacts. This is
   application composition over the existing contract, not evidence for a plot-specific core tool. The reference
-  host therefore excludes Pi's raw bash tool rather than wrapping arbitrary commands as fake compute runs. Hosts
-  that retain bash get session-level command/result audit; scientific process execution still requires declared
+  host retains Pi bash for ordinary host work and audits its command/result through session ingestion rather than
+  wrapping arbitrary commands as fake compute runs. Scientific process execution still requires declared
   `compute.run` inputs and outputs. Inline tool-result media can remain a `session_image` audit artifact, but shell
   filesystem side effects are not discovered or promoted.
+- The static compute boundary is reinforced at the point of likely use: the Pi adapter injects a visible
+  `before_agent_start` message for plot, figure, external-runtime, and workflow prompts. It reports whether
+  `compute.run` is host-granted and fails closed when it is not. This is deliberately distinct from Pi's
+  `user_bash` hook, which intercepts human `!` / `!!` commands rather than assistant tool calls.
 - Clinical Evidence and Artifacts now exercise a host-approved `WorkbenchAddon` API/browser pair. Do not broaden it
   into an installation/catalog/configuration system until another deployment needs runtime discovery; do not add
   focus/resize/dock hooks until an editor, terminal, or comparable mounted surface requires them.

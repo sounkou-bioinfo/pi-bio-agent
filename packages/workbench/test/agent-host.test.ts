@@ -1,12 +1,7 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { test } from "node:test";
-import { createAgentSession, SessionManager } from "@earendil-works/pi-coding-agent";
 import { createWorkbenchApi } from "../src/api/app.js";
 import { createPiAgentHost } from "../src/pi-agent-host.js";
-import { WORKBENCH_EXCLUDED_PI_TOOLS } from "../src/server.js";
 
 class FakePiSession {
   readonly sessionFile = "/host-owned/session.jsonl";
@@ -246,22 +241,5 @@ test("agent session HTTP routes validate input and expose bounded host state", a
     assert.equal(missing.status, 404);
   } finally {
     await host.dispose();
-  }
-});
-
-test("Pi's tool denylist removes raw bash without removing authoring tools", async () => {
-  const cwd = await mkdtemp(join(tmpdir(), "pi-bio-workbench-tools-"));
-  const { session } = await createAgentSession({
-    cwd,
-    sessionManager: SessionManager.inMemory(),
-    excludeTools: [...WORKBENCH_EXCLUDED_PI_TOOLS],
-  });
-  try {
-    assert.equal(session.getAllTools().some((tool) => tool.name === "bash"), false);
-    assert.ok(session.getActiveToolNames().includes("read"));
-    assert.ok(session.getActiveToolNames().includes("write"));
-  } finally {
-    session.dispose();
-    await rm(cwd, { recursive: true, force: true });
   }
 });
