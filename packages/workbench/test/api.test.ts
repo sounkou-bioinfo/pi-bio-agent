@@ -5,7 +5,11 @@ import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createClinicalWorkbenchAddon, createWorkbenchApi } from "../src/api/app.js";
+import {
+  createClinicalReanalysisWorkbenchAddon,
+  createClinicalWorkbenchAddon,
+  createWorkbenchApi,
+} from "../src/api/app.js";
 import { loadRecordedGroundingRuntime } from "../src/recorded-grounding.js";
 import { localMonarchFixtureRuntime } from "../src/monarch-host.js";
 import { localCandidateVariantSearchRuntime } from "../src/candidate-variant-search.js";
@@ -23,15 +27,20 @@ async function appFixture() {
     filter: (source) => relative(fixtureRoot, source).split(sep)[0] !== ".pi",
   });
   const vep = await startVepFixture();
+  const clinicalOptions = {
+    clinicalWorkspace: workspace,
+    grounding: await loadRecordedGroundingRuntime(join(workspace, "data", "grounding_proposals.json")),
+    hypotheses: localMonarchFixtureRuntime(workspace),
+    variantSearch: localCandidateVariantSearchRuntime(workspace),
+    vep: vep.runtime,
+    clock: () => "2026-07-05T12:00:00Z",
+  };
   return {
-    app: createWorkbenchApi({ addons: [createClinicalWorkbenchAddon({
-      clinicalWorkspace: workspace,
-      grounding: await loadRecordedGroundingRuntime(join(workspace, "data", "grounding_proposals.json")),
-      hypotheses: localMonarchFixtureRuntime(workspace),
-      variantSearch: localCandidateVariantSearchRuntime(workspace),
-      vep: vep.runtime,
-      clock: () => "2026-07-05T12:00:00Z",
-    }), createArtifactWorkbenchAddon(workspace)] }),
+    app: createWorkbenchApi({ addons: [
+      createClinicalWorkbenchAddon(clinicalOptions),
+      createClinicalReanalysisWorkbenchAddon(clinicalOptions),
+      createArtifactWorkbenchAddon(workspace),
+    ] }),
     workspace,
     close: vep.close,
   };
@@ -49,6 +58,9 @@ test("OpenAPI and runtime validation share the clinical analysis schemas", async
     };
     assert.ok(document.paths["/v1/clinical-analyses"]);
     assert.ok(document.paths["/v1/clinical-analyses/{analysisId}"]);
+    assert.ok(document.paths["/v1/clinical-analyses/{analysisId}/reviews"]);
+    assert.ok(document.paths["/v1/clinical-analyses/{analysisId}/reviews/{reviewId}"]);
+    assert.ok(document.paths["/v1/clinical-reanalysis-queue"]);
     assert.ok(document.paths["/v1/artifacts"]);
     assert.ok(document.paths["/v1/artifacts/{digest}/content"]);
     assert.ok(document.components.schemas.EvidencePacket);
@@ -111,22 +123,36 @@ test("artifact addon projects ledger references and serves verified CAS bytes", 
   }
 });
 
-test("HTTP creates an analysis and reads its packet back from CAS", async () => {
+test("HTTP projects recorded analyses, durable review state, and a transparent reanalysis queue", async () => {
   const fixture = await appFixture();
   try {
     const app = fixture.app;
     const created = await app.request("/v1/clinical-analyses", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ caseId: "CASE-RD-001" }),
+    body: JSON.stringify({ caseId: "CASE-RD-001", analysisId: "api-review-state" }),
   });
     assert.equal(created.status, 201);
     const result = await created.json() as {
     analysisId: string;
     packetDigest: string;
-    packet: { caseId: string; summary: { directCandidates: number } };
+    packetUri: string;
+    packet: {
+      caseId: string;
+      generatedAt: string;
+      grounding: { groundingId: string };
+      provenance: { runIds: string[] };
+      summary: {
+        directCandidates: number;
+        directAbstentions: number;
+        conflicts: number;
+        reanalysisSignals: number;
+        reviewQueue: Array<{ kind: string; target: string; reason: string }>;
+      };
+    };
     };
     assert.equal(result.packet.caseId, "CASE-RD-001");
+    assert.equal(result.analysisId, "api-review-state");
     assert.equal(result.packet.summary.directCandidates, 1);
     assert.match(result.packetDigest, /^sha256:[0-9a-f]{64}$/);
 
@@ -135,6 +161,100 @@ test("HTTP creates an analysis and reads its packet back from CAS", async () => 
     const recorded = await fetched.json() as typeof result;
     assert.equal(recorded.packetDigest, result.packetDigest);
     assert.deepEqual(recorded.packet, result.packet);
+
+    const history = await app.request("/v1/clinical-analyses?caseId=CASE-RD-001&limit=10");
+    assert.equal(history.status, 200);
+    const listed = await history.json() as { analyses: Array<{
+      analysisId: string;
+      caseId: string;
+      packetDigest: string;
+      packetUri: string;
+      generatedAt: string;
+      recordedAt: string;
+      reviewItems: number;
+      directCandidates: number;
+      directAbstentions: number;
+      conflicts: number;
+      reanalysisSignals: number;
+    }> };
+    assert.equal(listed.analyses.length, 1);
+    assert.deepEqual({ ...listed.analyses[0], recordedAt: undefined }, {
+      analysisId: result.analysisId,
+      caseId: "CASE-RD-001",
+      packetDigest: result.packetDigest,
+      packetUri: result.packetUri,
+      generatedAt: result.packet.generatedAt,
+      reviewItems: result.packet.summary.reviewQueue.length,
+      directCandidates: 1,
+      directAbstentions: 1,
+      conflicts: 2,
+      reanalysisSignals: 1,
+      recordedAt: undefined,
+    });
+    assert.match(listed.analyses[0]!.recordedAt, /^2026-07-05T12:00:00(?:\.000)?Z$/);
+
+    const reviewsResponse = await app.request(`/v1/clinical-analyses/${result.analysisId}/reviews`);
+    assert.equal(reviewsResponse.status, 200);
+    const reviewQueue = await reviewsResponse.json() as {
+      reviews: Array<{ reviewId: string; kind: string; status: string; note: string | null }>;
+    };
+    const frequencyReview = reviewQueue.reviews.find((item) => item.kind === "resolve_frequency");
+    assert.ok(frequencyReview);
+    assert.equal(frequencyReview.status, "open");
+
+    const revisedResponse = await app.request(`/v1/clinical-analyses/${result.analysisId}/reviews/${frequencyReview.reviewId}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ status: "needs_follow_up", note: "Obtain a declared frequency source." }),
+    });
+    assert.equal(revisedResponse.status, 200);
+    const revised = await revisedResponse.json() as typeof reviewQueue;
+    const revisedFrequencyReview = revised.reviews.find((item) => item.reviewId === frequencyReview.reviewId);
+    assert.deepEqual(revisedFrequencyReview && {
+      reviewId: revisedFrequencyReview.reviewId,
+      kind: revisedFrequencyReview.kind,
+      status: revisedFrequencyReview.status,
+      note: revisedFrequencyReview.note,
+    }, {
+      reviewId: frequencyReview.reviewId,
+      kind: "resolve_frequency",
+      status: "needs_follow_up",
+      note: "Obtain a declared frequency source.",
+    });
+
+    const reanalysis = await app.request("/v1/clinical-reanalysis-queue?limit=10");
+    assert.equal(reanalysis.status, 200);
+    const reanalysisQueue = await reanalysis.json() as {
+      cases: Array<{
+        analysisId: string;
+        groundingId: string;
+        runIds: string[];
+        state: string;
+        needsFollowUpItems: number;
+        reasons: string[];
+      }>;
+    };
+    assert.deepEqual(reanalysisQueue.cases.map((item) => ({
+      analysisId: item.analysisId,
+      groundingId: item.groundingId,
+      runIds: item.runIds,
+      state: item.state,
+      needsFollowUpItems: item.needsFollowUpItems,
+    })), [{
+      analysisId: result.analysisId,
+      groundingId: result.packet.grounding.groundingId,
+      runIds: result.packet.provenance.runIds,
+      state: "needs_follow_up",
+      needsFollowUpItems: 1,
+    }]);
+    assert.match(reanalysisQueue.cases[0]!.reasons.join(" "), /marked for follow-up/);
+
+    const invalidReview = await app.request(`/v1/clinical-analyses/${result.analysisId}/reviews/${"a".repeat(64)}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ status: "open" }),
+    });
+    assert.equal(invalidReview.status, 400);
 
     const missing = await app.request("/v1/clinical-analyses/does-not-exist");
     assert.equal(missing.status, 404);

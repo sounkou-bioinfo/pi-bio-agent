@@ -5,9 +5,11 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import {
   canonicalDigest,
   fsCasStore,
+  inTransaction,
   openBioStore,
   readJobStepCheckpoint,
   recordArtifactReference,
+  recordMonotonicObservation,
   recordObservation,
   recordObservationLink,
   runBioOperationFromManifest,
@@ -44,6 +46,8 @@ const SOURCE = "pi-bio-workbench:clinical-genomics";
 const WORKFLOW_VERSION = "clinical-evidence-workflow.v5";
 const PACKET_MEDIA_TYPE = "application/vnd.pi-bio.workbench.evidence+json";
 const PACKET_STEP = "packet";
+const AS_OF = "9999-12-31T23:59:59.999Z";
+const CLINICAL_REVIEW_SCHEMA = "pi-bio.workbench.clinical_review.v1" as const;
 
 type JsonRecord = { [key: string]: JsonValue };
 
@@ -205,6 +209,78 @@ export type ClinicalAnalysisStatus =
   | { found: false; analysisId: string }
   | ({ found: true; analysisId: string; packet: EvidencePacket } & EvidencePacketRef);
 
+export interface ClinicalAnalysisSummary extends EvidencePacketRef {
+  analysisId: string;
+  caseId: string;
+  generatedAt: string;
+  recordedAt: string;
+  reviewItems: number;
+  directCandidates: number;
+  directAbstentions: number;
+  conflicts: number;
+  reanalysisSignals: number;
+}
+
+export type ClinicalReviewDisposition = "open" | "acknowledged" | "needs_follow_up";
+
+export interface ClinicalReviewQueueItem extends ReviewItem {
+  reviewId: string;
+  status: ClinicalReviewDisposition;
+  note: string | null;
+  updatedAt: string | null;
+}
+
+export type ClinicalReviewQueueStatus =
+  | { found: false; analysisId: string }
+  | {
+    found: true;
+    analysisId: string;
+    caseId: string;
+    packetDigest: string;
+    reviews: ClinicalReviewQueueItem[];
+  };
+
+export interface UpdateClinicalReviewDispositionRequest {
+  reviewId: string;
+  status: ClinicalReviewDisposition;
+  note?: string;
+  now?: string;
+}
+
+/** A caller selected a review slot that is not part of the immutable evidence packet. */
+export class ClinicalReviewInputError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ClinicalReviewInputError";
+  }
+}
+
+export type ClinicalReanalysisQueueState =
+  | "needs_follow_up"
+  | "reanalysis_signal"
+  | "evidence_conflict"
+  | "evidence_gap"
+  | "review_pending"
+  | "no_active_signal";
+
+export interface ClinicalReanalysisChange {
+  variantKey: string;
+  priorStatus: string | null;
+  currentStatus: string | null;
+  changeStatus: string;
+}
+
+export interface ClinicalReanalysisQueueEntry extends ClinicalAnalysisSummary {
+  groundingId: string;
+  runIds: string[];
+  state: ClinicalReanalysisQueueState;
+  reasons: string[];
+  changes: ClinicalReanalysisChange[];
+  openReviewItems: number;
+  needsFollowUpItems: number;
+  evidenceGaps: number;
+}
+
 function encodeJson(value: unknown): Buffer {
   return Buffer.from(JSON.stringify(value, (_key, item) => (typeof item === "bigint" ? item.toString() : item)), "utf8");
 }
@@ -289,6 +365,59 @@ function buildReviewQueue(evidenceRows: JsonRecord[], reanalysisRows: JsonRecord
   return queue;
 }
 
+function reviewId(item: ReviewItem): string {
+  return createHash("sha256").update(JSON.stringify([item.kind, item.target, item.reason])).digest("hex");
+}
+
+function reviewStatementKey(analysisId: string, id: string): string {
+  return `clinical-review:${analysisId}:${id}`;
+}
+
+function reviewNode(analysisId: string, id: string): string {
+  return `review:${analysisId}:${id}`;
+}
+
+function currentReviewItem(args: {
+  item: ReviewItem;
+  analysisId: string;
+  caseId: string;
+  valueJson: string | null;
+  recordedAt: string | null;
+}): ClinicalReviewQueueItem {
+  const id = reviewId(args.item);
+  if (args.valueJson == null) {
+    return { ...args.item, reviewId: id, status: "open", note: null, updatedAt: null };
+  }
+  const value = JSON.parse(args.valueJson) as unknown;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`clinical review '${id}' has a non-object ledger value`);
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    record.schema !== CLINICAL_REVIEW_SCHEMA
+    || record.analysis_id !== args.analysisId
+    || record.case_id !== args.caseId
+    || record.review_id !== id
+    || record.kind !== args.item.kind
+    || record.target !== args.item.target
+  ) {
+    throw new Error(`clinical review '${id}' does not match its recorded evidence item`);
+  }
+  const status = record.status;
+  if (status !== "open" && status !== "acknowledged" && status !== "needs_follow_up") {
+    throw new Error(`clinical review '${id}' has unsupported disposition '${String(status)}'`);
+  }
+  const note = record.note;
+  if (note != null && typeof note !== "string") throw new Error(`clinical review '${id}' has a non-string note`);
+  return {
+    ...args.item,
+    reviewId: id,
+    status,
+    note: note ?? null,
+    updatedAt: args.recordedAt == null ? null : new Date(args.recordedAt).toISOString(),
+  };
+}
+
 function lane(operation: OperationRows, laneId: "direct" | "inverted"): OperationRows {
   return { ...operation, rows: operation.rows.filter((row) => row.lane === laneId) };
 }
@@ -353,7 +482,11 @@ function buildPacket(args: {
       invertedSupportedHypotheses: distinctCount(inverted.rows, "genotype_supports_hypothesis"),
       invertedGaps: distinctCount(inverted.rows, "hypothesis_without_supporting_variant"),
       invertedUnsearched: distinctCount(inverted.rows, "hypothesis_not_searched"),
-      conflicts: direct.rows.filter((row) => row.conflict != null).length,
+      conflicts: new Set(
+        args.evidence.rows
+          .filter((row) => row.conflict != null)
+          .map((row) => asString(row.variant_key) || asString(row.review_target) || asString(row.evidence_key)),
+      ).size,
       reanalysisSignals: args.reanalysis.rows.filter((row) =>
         (row.change_status === "new" || row.change_status === "upgraded")
         && (row.current_status === "candidate_needs_review" || row.current_status === "curated_plp_candidate")
@@ -1142,6 +1275,351 @@ export async function getClinicalAnalysis(exampleDir: string, analysisId: string
   } finally {
     store.close();
   }
+}
+
+type ClinicalAnalysisListOptions = { caseId?: string; limit?: number };
+
+type ClinicalAnalysisRecord = {
+  summary: ClinicalAnalysisSummary;
+  packet: EvidencePacket;
+};
+
+function clinicalAnalysisLimit(limit: number | undefined): number {
+  const resolved = limit ?? 100;
+  if (!Number.isInteger(resolved) || resolved < 1 || resolved > 500) {
+    throw new Error("clinical analysis limit must be an integer from 1 to 500");
+  }
+  return resolved;
+}
+
+async function listClinicalAnalysisRecords(
+  exampleDir: string,
+  options: ClinicalAnalysisListOptions,
+  latestPerCase: boolean,
+  maxRows: number | null = clinicalAnalysisLimit(options.limit),
+): Promise<ClinicalAnalysisRecord[]> {
+  const store = await openBioStore(exampleDir);
+  try {
+    const rows = await store.conn.all<{ subject_id: string; value_json: string | null; recorded_at: string }>(
+      `WITH eligible AS (
+         SELECT * FROM bio_observations
+         WHERE predicate = 'analysis'
+           AND starts_with(subject_id, 'analysis:')
+           AND recorded_at::TIMESTAMPTZ <= ?::TIMESTAMPTZ
+           AND (valid_from IS NULL OR valid_from::TIMESTAMPTZ <= ?::TIMESTAMPTZ)
+           AND (valid_to IS NULL OR valid_to::TIMESTAMPTZ > ?::TIMESTAMPTZ)
+       ), current AS (
+         SELECT * EXCLUDE (rn) FROM (
+           SELECT *, row_number() OVER (
+             PARTITION BY statement_key
+             ORDER BY recorded_at::TIMESTAMPTZ DESC, observation_id DESC
+           ) AS rn
+           FROM eligible
+         ) WHERE rn = 1
+       ), succeeded AS (
+         SELECT
+           subject_id,
+           value_json,
+           recorded_at,
+           json_extract_string(value_json, '$.case_id') AS case_id
+         FROM current
+         WHERE value_json IS NOT NULL
+           AND json_extract_string(value_json, '$.schema') = ?
+           AND json_extract_string(value_json, '$.status') = 'succeeded'
+           AND (? IS NULL OR json_extract_string(value_json, '$.case_id') = ?)
+       ), latest_by_case AS (
+         SELECT * EXCLUDE (case_rn) FROM (
+           SELECT *, row_number() OVER (
+             PARTITION BY case_id
+             ORDER BY recorded_at::TIMESTAMPTZ DESC, subject_id DESC
+           ) AS case_rn
+           FROM succeeded
+         ) WHERE case_rn = 1
+       )
+       SELECT subject_id, value_json, recorded_at
+       FROM ${latestPerCase ? "latest_by_case" : "succeeded"}
+       ORDER BY recorded_at::TIMESTAMPTZ DESC, subject_id DESC
+       ${maxRows == null ? "" : "LIMIT ?"}`,
+      [
+        AS_OF,
+        AS_OF,
+        AS_OF,
+        CLINICAL_ANALYSIS_SCHEMA,
+        options.caseId ?? null,
+        options.caseId ?? null,
+        ...(maxRows == null ? [] : [maxRows]),
+      ],
+    );
+    return Promise.all(rows.map(async (row) => {
+      const analysisId = row.subject_id.slice("analysis:".length);
+      if (!analysisId) throw new Error("clinical analysis observation has an empty analysis id");
+      if (row.value_json == null) throw new Error(`clinical analysis '${analysisId}' has no ledger value`);
+      const value = JSON.parse(row.value_json) as Record<string, unknown>;
+      const caseId = typeof value.case_id === "string" ? value.case_id : "";
+      const packetDigest = typeof value.packet_digest === "string" ? value.packet_digest : "";
+      const packetUri = typeof value.packet_uri === "string" ? value.packet_uri : "";
+      if (!caseId || !packetDigest || !packetUri) {
+        throw new Error(`clinical analysis '${analysisId}' has an incomplete ledger projection`);
+      }
+      const packet = await readEvidencePacket(exampleDir, packetDigest);
+      if (packet.analysisId !== analysisId || packet.caseId !== caseId) {
+        throw new Error(`clinical analysis '${analysisId}' does not match its CAS packet`);
+      }
+      return {
+        packet,
+        summary: {
+          analysisId,
+          caseId,
+          packetDigest,
+          packetUri,
+          generatedAt: packet.generatedAt,
+          recordedAt: new Date(row.recorded_at).toISOString(),
+          reviewItems: packet.summary.reviewQueue.length,
+          directCandidates: packet.summary.directCandidates,
+          directAbstentions: packet.summary.directAbstentions,
+          conflicts: packet.summary.conflicts,
+          reanalysisSignals: packet.summary.reanalysisSignals,
+        },
+      };
+    }));
+  } finally {
+    store.close();
+  }
+}
+
+export async function listClinicalAnalyses(
+  exampleDir: string,
+  options: ClinicalAnalysisListOptions = {},
+): Promise<ClinicalAnalysisSummary[]> {
+  const records = await listClinicalAnalysisRecords(exampleDir, options, false);
+  return records.map((record) => record.summary);
+}
+
+type CurrentReviewObservation = { valueJson: string | null; recordedAt: string | null };
+
+async function currentReviewObservations(
+  conn: SqlConn,
+  statementKeys: readonly string[],
+): Promise<Map<string, CurrentReviewObservation>> {
+  const keys = [...new Set(statementKeys)];
+  if (!keys.length) return new Map();
+  const rows = await conn.all<{ statement_key: string; value_json: string | null; recorded_at: string }>(
+    `WITH requested AS (
+       SELECT json_extract_string(value, '$') AS statement_key
+       FROM json_each(CAST(? AS JSON))
+     ), eligible AS (
+       SELECT observation.*
+       FROM bio_observations observation
+       JOIN requested USING (statement_key)
+       WHERE observation.recorded_at::TIMESTAMPTZ <= ?::TIMESTAMPTZ
+         AND (observation.valid_from IS NULL OR observation.valid_from::TIMESTAMPTZ <= ?::TIMESTAMPTZ)
+         AND (observation.valid_to IS NULL OR observation.valid_to::TIMESTAMPTZ > ?::TIMESTAMPTZ)
+     ), current AS (
+       SELECT * EXCLUDE (rn) FROM (
+         SELECT *, row_number() OVER (
+           PARTITION BY statement_key
+           ORDER BY recorded_at::TIMESTAMPTZ DESC, observation_id DESC
+         ) AS rn
+         FROM eligible
+       ) WHERE rn = 1
+     )
+     SELECT statement_key, value_json, recorded_at
+     FROM current`,
+    [JSON.stringify(keys), AS_OF, AS_OF, AS_OF],
+  );
+  return new Map(rows.map((row) => [row.statement_key, { valueJson: row.value_json, recordedAt: row.recorded_at }]));
+}
+
+function materializeClinicalReviewQueue(
+  analysis: Extract<ClinicalAnalysisStatus, { found: true }>,
+  observations: ReadonlyMap<string, CurrentReviewObservation>,
+): ClinicalReviewQueueItem[] {
+  return analysis.packet.summary.reviewQueue.map((item) => {
+    const id = reviewId(item);
+    const observation = observations.get(reviewStatementKey(analysis.analysisId, id));
+    return currentReviewItem({
+      item,
+      analysisId: analysis.analysisId,
+      caseId: analysis.packet.caseId,
+      valueJson: observation?.valueJson ?? null,
+      recordedAt: observation?.recordedAt ?? null,
+    });
+  });
+}
+
+export async function getClinicalReviewQueue(exampleDir: string, analysisId: string): Promise<ClinicalReviewQueueStatus> {
+  const analysis = await getClinicalAnalysis(exampleDir, analysisId);
+  if (!analysis.found) return analysis;
+  const store = await openBioStore(exampleDir);
+  try {
+    const observations = await currentReviewObservations(
+      store.conn,
+      analysis.packet.summary.reviewQueue.map((item) => reviewStatementKey(analysisId, reviewId(item))),
+    );
+    const reviews = materializeClinicalReviewQueue(analysis, observations);
+    return {
+      found: true,
+      analysisId,
+      caseId: analysis.packet.caseId,
+      packetDigest: analysis.packetDigest,
+      reviews,
+    };
+  } finally {
+    store.close();
+  }
+}
+
+export async function updateClinicalReviewDisposition(
+  exampleDir: string,
+  analysisId: string,
+  request: UpdateClinicalReviewDispositionRequest,
+): Promise<ClinicalReviewQueueStatus> {
+  const analysis = await getClinicalAnalysis(exampleDir, analysisId);
+  if (!analysis.found) return analysis;
+  const item = analysis.packet.summary.reviewQueue.find((candidate) => reviewId(candidate) === request.reviewId);
+  if (!item) throw new ClinicalReviewInputError(`review '${request.reviewId}' does not belong to analysis '${analysisId}'`);
+  const now = request.now ?? new Date().toISOString();
+  const store = await openBioStore(exampleDir);
+  try {
+    const node = reviewNode(analysisId, request.reviewId);
+    await inTransaction(store.conn, async () => {
+      const observationId = await recordMonotonicObservation(store.conn, {
+        statementKey: reviewStatementKey(analysisId, request.reviewId),
+        subjectId: node,
+        predicate: "review_disposition",
+        value: {
+          schema: CLINICAL_REVIEW_SCHEMA,
+          analysis_id: analysisId,
+          case_id: analysis.packet.caseId,
+          review_id: request.reviewId,
+          kind: item.kind,
+          target: item.target,
+          status: request.status,
+          ...(request.note ? { note: request.note } : {}),
+        },
+        source: SOURCE,
+        digest: analysis.packetDigest,
+        attrs: {
+          analysis_id: analysisId,
+          case_id: analysis.packet.caseId,
+          review_id: request.reviewId,
+          review_kind: item.kind,
+          review_target: item.target,
+        },
+      }, now, AS_OF);
+      const rows = await store.conn.all<{ recorded_at: string }>(
+        "SELECT recorded_at FROM bio_observations WHERE observation_id = ? LIMIT 1",
+        [observationId],
+      );
+      const recordedAt = rows[0]?.recorded_at;
+      if (!recordedAt) throw new Error(`clinical review '${request.reviewId}' was not recorded`);
+      await recordObservationLink(store.conn, {
+        statementKey: `analysis:${analysisId}:has_review:${request.reviewId}`,
+        subjectId: `analysis:${analysisId}`,
+        predicate: "has_review",
+        objectId: node,
+        recordedAt,
+        source: SOURCE,
+        digest: analysis.packetDigest,
+      });
+    });
+  } finally {
+    store.close();
+  }
+  return getClinicalReviewQueue(exampleDir, analysisId);
+}
+
+function nullableString(value: JsonValue | undefined): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+function reanalysisQueueEntry(
+  summary: ClinicalAnalysisSummary,
+  packet: EvidencePacket,
+  reviews: ClinicalReviewQueueItem[],
+): ClinicalReanalysisQueueEntry {
+  const changes = packet.stages.reanalysis.rows.map((row) => ({
+    variantKey: asString(row.variant_key),
+    priorStatus: nullableString(row.prior_status),
+    currentStatus: nullableString(row.current_status),
+    changeStatus: asString(row.change_status),
+  }));
+  const needsFollowUpItems = reviews.filter((item) => item.status === "needs_follow_up").length;
+  const openReviewItems = reviews.filter((item) => item.status !== "acknowledged").length;
+  const evidenceGaps = packet.summary.directAbstentions + packet.summary.invertedGaps + packet.summary.invertedUnsearched;
+  const reasons: string[] = [];
+  if (needsFollowUpItems) reasons.push(`${needsFollowUpItems} review item${needsFollowUpItems === 1 ? " is" : "s are"} marked for follow-up.`);
+  if (packet.summary.reanalysisSignals) reasons.push(`${packet.summary.reanalysisSignals} new or upgraded current assessment signal${packet.summary.reanalysisSignals === 1 ? "" : "s"}.`);
+  if (packet.summary.conflicts) reasons.push(`${packet.summary.conflicts} evidence conflict${packet.summary.conflicts === 1 ? "" : "s"} remain explicit.`);
+  if (evidenceGaps) reasons.push(`${evidenceGaps} recorded evidence gap${evidenceGaps === 1 ? "" : "s"} remain unresolved.`);
+  if (!reasons.length && openReviewItems) reasons.push(`${openReviewItems} review item${openReviewItems === 1 ? " is" : "s are"} still open.`);
+  if (!reasons.length) reasons.push("No active reanalysis signal is recorded for the latest analysis.");
+  const state: ClinicalReanalysisQueueState = needsFollowUpItems > 0
+    ? "needs_follow_up"
+    : packet.summary.reanalysisSignals > 0
+      ? "reanalysis_signal"
+      : packet.summary.conflicts > 0
+        ? "evidence_conflict"
+        : evidenceGaps > 0
+          ? "evidence_gap"
+          : openReviewItems > 0
+            ? "review_pending"
+            : "no_active_signal";
+  return {
+    ...summary,
+    groundingId: packet.grounding.groundingId,
+    runIds: packet.provenance.runIds,
+    state,
+    reasons,
+    changes,
+    openReviewItems,
+    needsFollowUpItems,
+    evidenceGaps,
+  };
+}
+
+const reanalysisQueueOrder: Record<ClinicalReanalysisQueueState, number> = {
+  needs_follow_up: 0,
+  reanalysis_signal: 1,
+  evidence_conflict: 2,
+  evidence_gap: 3,
+  review_pending: 4,
+  no_active_signal: 5,
+};
+
+export async function listClinicalReanalysisQueue(
+  exampleDir: string,
+  options: { limit?: number } = {},
+): Promise<ClinicalReanalysisQueueEntry[]> {
+  // Queue priority is derived from packet and review state, so select the latest packet for every case before
+  // applying the caller's output limit. Capping raw history first would silently omit older cases with follow-up.
+  const records = await listClinicalAnalysisRecords(exampleDir, {}, true, null);
+  const store = await openBioStore(exampleDir);
+  let entries: ClinicalReanalysisQueueEntry[];
+  try {
+    const reviewObservations = await currentReviewObservations(
+      store.conn,
+      records.flatMap(({ summary, packet }) => packet.summary.reviewQueue.map((item) => reviewStatementKey(summary.analysisId, reviewId(item)))),
+    );
+    entries = records.map(({ summary, packet }) => {
+      const analysis: Extract<ClinicalAnalysisStatus, { found: true }> = {
+        found: true,
+        analysisId: summary.analysisId,
+        packet,
+        packetDigest: summary.packetDigest,
+        packetUri: summary.packetUri,
+      };
+      return reanalysisQueueEntry(summary, packet, materializeClinicalReviewQueue(analysis, reviewObservations));
+    });
+  } finally {
+    store.close();
+  }
+  entries.sort((left, right) =>
+    reanalysisQueueOrder[left.state] - reanalysisQueueOrder[right.state]
+    || right.recordedAt.localeCompare(left.recordedAt)
+    || left.caseId.localeCompare(right.caseId),
+  );
+  return entries.slice(0, clinicalAnalysisLimit(options.limit));
 }
 
 export async function readEvidencePacket(exampleDir: string, packetDigest: string): Promise<EvidencePacket> {

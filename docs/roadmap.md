@@ -79,9 +79,9 @@ Near-term work should be selected from demonstrated pressure in these lanes:
 
 - **Workbench surfaces:** extend the browser with graph exploration, linked scientific graphics, approvals, forks,
   and long-running job/checkpoint UX over the existing SDK. The minimal `WorkbenchAddon` contract is now exercised by
-  Clinical Evidence and Artifacts; grow its lifecycle only from concrete editor/terminal pressure. Keep durable
-  approvals in the evidence plane and live status in SSE. The current clinical POST still waits for completion even
-  though its steps are durable; asynchronous browser submission is application work still ahead.
+  Clinical Evidence, Clinical Reanalysis, and Artifacts; grow its lifecycle only from concrete editor/terminal
+  pressure. Keep durable approvals in the evidence plane and live status in SSE. The current clinical POST still waits
+  for completion even though its steps are durable; asynchronous browser submission is application work still ahead.
 - **Composable method selection:** use Biomni-like catalogs, method documentation, and current environment metadata as
   refreshable discovery inputs. Ground the relevant candidates, let the actor author a manifest/operation composition,
   filter it by data/software/license/capability constraints, execute it through compute or source-spec adapters, and

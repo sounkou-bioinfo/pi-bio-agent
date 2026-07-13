@@ -105,6 +105,10 @@ Instructions for coding agents working in this repository.
   on compatible candidate and assessment relations.
 - Preserve negative, uncertain, family-context, missing-frequency, missing-coverage, and unsupported-scope states.
   A missed or unsearched variant is not negative evidence. Assembly or coordinate mismatches fail closed.
+- A reanalysis queue is a temporal projection over the latest recorded packet for each case, explicit evidence states,
+  and reviewer dispositions. It is not a diagnostic score or classification. Review dispositions are separate
+  ledger revisions keyed to one packet review item: they never mutate the packet and do not silently transfer to a
+  later analysis.
 - The inverted lane composes declared ontology labels/synonyms, FTS or SQL, typed term sets and grounding validation,
   graph projection/closure, Monarch, DuckHTS, existing VEP fanout, and SQL ranking. Add another provider only after a
   measured retrieval or reranking gap.

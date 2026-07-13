@@ -220,6 +220,11 @@ There is deliberately no runtime catalog, browser-supplied module path, addon KV
 model. Agent control remains shell infrastructure. Add focus/resize, dock placement, or installation only when a real
 editor/terminal or deployment repeats those needs.
 
+Clinical Reanalysis is a third evidence-plane pane: it projects the latest recorded packet per case and writes
+review disposition revisions to the canonical ledger. Its selected case/analysis pointer is deliberately narrow
+application state shared with Evidence and Artifacts, not a generic addon message bus. The queue exposes recorded
+follow-up, reanalysis, conflict, gap, and open-review reasons rather than an opaque clinical priority score.
+
 ## Typed judgment
 
 Deterministic code should mint identifiers, parse formats, compute candidates, apply mappings, and produce diffs.

@@ -173,6 +173,15 @@ export const ReviewItemSchema = z.object({
   reason: z.string(),
 }).strict().openapi("ReviewItem");
 
+const ReviewDispositionSchema = z.enum(["open", "acknowledged", "needs_follow_up"]);
+
+export const ClinicalReviewQueueItemSchema = ReviewItemSchema.extend({
+  reviewId: z.string().regex(/^[a-f0-9]{64}$/, "reviewId must be a sha256 hex digest"),
+  status: ReviewDispositionSchema,
+  note: z.string().nullable(),
+  updatedAt: z.iso.datetime().nullable(),
+}).strict().openapi("ClinicalReviewQueueItem");
+
 export const EvidencePacketSchema = z.object({
   schema: z.literal("pi-bio.workbench.evidence_packet.v1"),
   analysisId: z.string(),
@@ -217,14 +226,19 @@ export const EvidencePacketSchema = z.object({
   provenance: z.object({ runIds: z.array(z.string()) }).strict(),
 }).strict().openapi("EvidencePacket");
 
+const AnalysisIdSchema = z.string()
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/, "analysisId must be a run-safe identifier")
+  .describe("Analysis ledger key. Its restricted shape is required because the same value addresses durable run checkpoints.");
+
 export const CreateClinicalAnalysisSchema = z.object({
   caseId: z.string().trim().min(1).openapi({ example: "CASE-RD-001" }),
+  analysisId: AnalysisIdSchema.optional().openapi({
+    description: "Optional existing analysis id. Reusing it resumes compatible durable checkpoints instead of starting a new analysis.",
+  }),
 }).strict().openapi("CreateClinicalAnalysis");
 
 export const AnalysisPathSchema = z.object({
-  analysisId: z.string()
-    .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/, "analysisId must be a run-safe identifier")
-    .describe("Analysis ledger key. Its restricted shape is required because the same value addresses durable run checkpoints.")
+  analysisId: AnalysisIdSchema
     .openapi({ param: { name: "analysisId", in: "path" } }),
 });
 
@@ -246,6 +260,81 @@ export const ClinicalAnalysisResponseSchema = z.object({
   packetDigest: z.string(),
   packetUri: z.string(),
 }).strict().openapi("ClinicalAnalysisResponse");
+
+export const ClinicalAnalysisSummarySchema = z.object({
+  analysisId: z.string(),
+  caseId: z.string(),
+  packetDigest: z.string(),
+  packetUri: z.string(),
+  generatedAt: z.iso.datetime(),
+  recordedAt: z.iso.datetime(),
+  reviewItems: z.number().int().nonnegative(),
+  directCandidates: z.number().int().nonnegative(),
+  directAbstentions: z.number().int().nonnegative(),
+  conflicts: z.number().int().nonnegative(),
+  reanalysisSignals: z.number().int().nonnegative(),
+}).strict().openapi("ClinicalAnalysisSummary");
+
+export const ClinicalAnalysisListQuerySchema = z.object({
+  caseId: z.string().trim().min(1).optional(),
+  limit: z.coerce.number().int().min(1).max(500).default(100),
+});
+
+export const ClinicalAnalysisListSchema = z.object({
+  analyses: z.array(ClinicalAnalysisSummarySchema),
+}).strict().openapi("ClinicalAnalysisList");
+
+export const ClinicalReviewQueueResponseSchema = z.object({
+  analysisId: z.string(),
+  caseId: z.string(),
+  packetDigest: z.string(),
+  reviews: z.array(ClinicalReviewQueueItemSchema),
+}).strict().openapi("ClinicalReviewQueueResponse");
+
+export const UpdateClinicalReviewSchema = z.object({
+  status: ReviewDispositionSchema,
+  note: z.string().trim().min(1).max(4_000).optional(),
+}).strict().openapi("UpdateClinicalReview");
+
+export const ReviewPathSchema = z.object({
+  analysisId: AnalysisPathSchema.shape.analysisId,
+  reviewId: z.string()
+    .regex(/^[a-f0-9]{64}$/, "reviewId must be a sha256 hex digest")
+    .openapi({ param: { name: "reviewId", in: "path" } }),
+});
+
+const ClinicalReanalysisChangeSchema = z.object({
+  variantKey: z.string(),
+  priorStatus: z.string().nullable(),
+  currentStatus: z.string().nullable(),
+  changeStatus: z.string(),
+}).strict().openapi("ClinicalReanalysisChange");
+
+export const ClinicalReanalysisQueueEntrySchema = ClinicalAnalysisSummarySchema.extend({
+  groundingId: z.string(),
+  runIds: z.array(z.string()),
+  state: z.enum([
+    "needs_follow_up",
+    "reanalysis_signal",
+    "evidence_conflict",
+    "evidence_gap",
+    "review_pending",
+    "no_active_signal",
+  ]),
+  reasons: z.array(z.string()),
+  changes: z.array(ClinicalReanalysisChangeSchema),
+  openReviewItems: z.number().int().nonnegative(),
+  needsFollowUpItems: z.number().int().nonnegative(),
+  evidenceGaps: z.number().int().nonnegative(),
+}).strict().openapi("ClinicalReanalysisQueueEntry");
+
+export const ClinicalReanalysisQueueQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(500).default(100),
+});
+
+export const ClinicalReanalysisQueueSchema = z.object({
+  cases: z.array(ClinicalReanalysisQueueEntrySchema),
+}).strict().openapi("ClinicalReanalysisQueue");
 
 export const HealthResponseSchema = z.object({
   ok: z.literal(true),

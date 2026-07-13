@@ -1,14 +1,26 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { fsCasStore, openBioStore } from "pi-bio-agent";
+import {
+  fsCasStore,
+  JOB_STEP_CHECKPOINT_SCHEMA,
+  jobStepCheckpointKey,
+  observationAsOfKey,
+  openBioStore,
+  recordObservationBatch,
+} from "pi-bio-agent";
 import {
   getClinicalAnalysis,
+  getClinicalReviewQueue,
+  listClinicalAnalyses,
+  listClinicalReanalysisQueue,
   readEvidencePacket,
   runClinicalGenomicsWorkbench,
+  updateClinicalReviewDisposition,
 } from "../src/clinical-genomics.js";
 import { loadRecordedGroundingRuntime } from "../src/recorded-grounding.js";
 import { localMonarchFixtureRuntime } from "../src/monarch-host.js";
@@ -48,6 +60,79 @@ async function runFixture(
   }
 }
 
+type SeededAnalysis = {
+  analysisId: string;
+  caseId: string;
+  recordedAt: string;
+};
+
+async function seedRecordedAnalysisHistory(
+  exampleDir: string,
+  template: Awaited<ReturnType<typeof runFixture>>["packet"],
+  entries: readonly SeededAnalysis[],
+): Promise<void> {
+  const cas = fsCasStore(join(exampleDir, ".pi", "bio-agent", "cas"));
+  const observations = [];
+  for (const entry of entries) {
+    const packet = JSON.parse(
+      JSON.stringify(template)
+        .replaceAll(template.analysisId, entry.analysisId)
+        .replaceAll(template.caseId, entry.caseId),
+    ) as typeof template;
+    packet.analysisId = entry.analysisId;
+    packet.caseId = entry.caseId;
+    packet.generatedAt = entry.recordedAt;
+    const bytes = Buffer.from(JSON.stringify(packet), "utf8");
+    const digest = createHash("sha256").update(bytes).digest("hex");
+    const packetDigest = `sha256:${digest}`;
+    const packetUri = `cas:${packetDigest}`;
+    await cas.put({ algorithm: "sha256", digest, sizeBytes: bytes.length, mediaType: "application/vnd.pi-bio.workbench.evidence+json" }, bytes);
+    observations.push(
+      {
+        statementKey: `analysis:${entry.analysisId}`,
+        subjectId: `analysis:${entry.analysisId}`,
+        predicate: "analysis",
+        value: {
+          schema: "pi-bio.workbench.clinical_analysis.v1",
+          status: "succeeded",
+          case_id: entry.caseId,
+          packet_digest: packetDigest,
+          packet_uri: packetUri,
+          review_items: packet.summary.reviewQueue.length,
+        },
+        recordedAt: entry.recordedAt,
+        source: "test:clinical-history",
+        digest: packetDigest,
+      },
+      {
+        statementKey: jobStepCheckpointKey(entry.analysisId, "packet"),
+        subjectId: `job:${entry.analysisId}`,
+        predicate: "job_step_checkpoint",
+        value: {
+          schema: JOB_STEP_CHECKPOINT_SCHEMA,
+          runId: entry.analysisId,
+          stepId: "packet",
+          value: {
+            schema: "pi-bio.workbench.packet_checkpoint.v1",
+            packetDigest,
+            packetUri,
+          },
+        },
+        recordedAt: entry.recordedAt,
+        source: "test:clinical-history",
+        digest: packetDigest,
+        attrs: { step_id: "packet" },
+      },
+    );
+  }
+  const store = await openBioStore(exampleDir);
+  try {
+    await recordObservationBatch(store.conn, observations);
+  } finally {
+    store.close();
+  }
+}
+
 test("clinical workbench reconciles direct and inverted traversal into one evidence relation", async () => {
   const exampleDir = await copyFixture();
   const out = await runFixture(exampleDir, {
@@ -71,7 +156,7 @@ test("clinical workbench reconciles direct and inverted traversal into one evide
   assert.equal(out.packet.summary.invertedSupportedHypotheses, 1);
   assert.equal(out.packet.summary.invertedGaps, 1);
   assert.equal(out.packet.summary.invertedUnsearched, 0);
-  assert.equal(out.packet.summary.conflicts, 1);
+  assert.equal(out.packet.summary.conflicts, 2);
   assert.equal(out.packet.summary.reanalysisSignals, 1);
   assert.equal(out.packet.grounding.mode, "pre+post");
   assert.equal(out.packet.grounding.groundingId, "grounding:analysis-evidence");
@@ -94,6 +179,129 @@ test("clinical workbench reconciles direct and inverted traversal into one evide
   assert.ok(inverted.some((row) => row.gene === "GENEH" && row.evidence_status === "hypothesis_without_supporting_variant"));
   assert.ok(out.packet.summary.reviewQueue.some((row) => row.kind === "review_missing_genotype_support" && row.target === "hypothesis:MONDO:GENEH:GENEH"));
   assert.ok(out.packet.summary.reviewQueue.some((row) => row.kind === "resolve_frequency" && row.target === "variant:2-47637258-C-CT"));
+});
+
+test("clinical analyses project durable human review state without changing recorded evidence", async () => {
+  const exampleDir = await copyFixture();
+  const out = await runFixture(exampleDir, {
+    caseId: "CASE-RD-001",
+    analysisId: "analysis-review-projection",
+    now: "2026-07-05T12:00:00Z",
+  });
+
+  const initial = await getClinicalReviewQueue(exampleDir, out.analysisId);
+  assert.equal(initial.found, true);
+  if (!initial.found) throw new Error("expected recorded review queue");
+  const frequencyReview = initial.reviews.find((item) => item.kind === "resolve_frequency");
+  assert.ok(frequencyReview);
+  assert.equal(frequencyReview.status, "open");
+
+  const updated = await updateClinicalReviewDisposition(exampleDir, out.analysisId, {
+    reviewId: frequencyReview.reviewId,
+    status: "needs_follow_up",
+    note: "Obtain a declared frequency source.",
+    now: "2026-07-05T12:05:00Z",
+  });
+  assert.equal(updated.found, true);
+  if (!updated.found) throw new Error("expected updated review queue");
+  const recordedReview = updated.reviews.find((item) => item.reviewId === frequencyReview.reviewId);
+  assert.deepEqual(recordedReview && {
+    status: recordedReview.status,
+    note: recordedReview.note,
+    kind: recordedReview.kind,
+    target: recordedReview.target,
+  }, {
+    status: "needs_follow_up",
+    note: "Obtain a declared frequency source.",
+    kind: "resolve_frequency",
+    target: "variant:2-47637258-C-CT",
+  });
+
+  const analyses = await listClinicalAnalyses(exampleDir, { caseId: "CASE-RD-001" });
+  assert.deepEqual(analyses.map((item) => item.analysisId), [out.analysisId]);
+  assert.equal(analyses[0]?.packetDigest, out.packetDigest);
+
+  const queue = await listClinicalReanalysisQueue(exampleDir);
+  assert.equal(queue.length, 1);
+  assert.deepEqual(queue[0] && {
+    analysisId: queue[0].analysisId,
+    state: queue[0].state,
+    needsFollowUpItems: queue[0].needsFollowUpItems,
+    evidenceGaps: queue[0].evidenceGaps,
+  }, {
+    analysisId: out.analysisId,
+    state: "needs_follow_up",
+    needsFollowUpItems: 1,
+    evidenceGaps: 2,
+  });
+
+  const reread = await getClinicalAnalysis(exampleDir, out.analysisId);
+  assert.equal(reread.found, true);
+  if (!reread.found) throw new Error("expected recorded analysis");
+  assert.deepEqual(reread.packet, out.packet, "review state is a separate ledger observation, not a packet mutation");
+
+  const stale = await updateClinicalReviewDisposition(exampleDir, out.analysisId, {
+    reviewId: frequencyReview.reviewId,
+    status: "acknowledged",
+    now: "2026-07-05T12:04:00Z",
+  });
+  assert.equal(stale.found, true);
+  if (!stale.found) throw new Error("expected stale review update to be recorded monotonically");
+  const staleReview = stale.reviews.find((item) => item.reviewId === frequencyReview.reviewId);
+  assert.equal(staleReview?.status, "acknowledged");
+  assert.ok(staleReview?.updatedAt);
+  assert.ok(Date.parse(staleReview.updatedAt) > Date.parse("2026-07-05T12:05:00Z"));
+
+  const store = await openBioStore(exampleDir);
+  try {
+    const reviewObservation = await observationAsOfKey(
+      store.conn,
+      `clinical-review:${out.analysisId}:${frequencyReview.reviewId}`,
+      "9999-12-31T23:59:59.999Z",
+    );
+    const reviewLink = await observationAsOfKey(
+      store.conn,
+      `analysis:${out.analysisId}:has_review:${frequencyReview.reviewId}`,
+      "9999-12-31T23:59:59.999Z",
+    );
+    assert.ok(reviewObservation);
+    assert.ok(reviewLink);
+    assert.equal(
+      Date.parse(reviewLink.recorded_at),
+      Date.parse(reviewObservation.recorded_at),
+      "the graph relation advances with the effective monotonic review timestamp",
+    );
+  } finally {
+    store.close();
+  }
+});
+
+test("reanalysis selects the latest packet per case before applying its cohort output limit", async () => {
+  const exampleDir = await copyFixture();
+  const out = await runFixture(exampleDir, {
+    caseId: "CASE-RD-001",
+    analysisId: "analysis-cohort-template",
+    now: "2026-01-01T00:00:00Z",
+  });
+  const newerSameCase = Array.from({ length: 500 }, (_value, index) => ({
+    analysisId: `analysis-case-one-${String(index).padStart(3, "0")}`,
+    caseId: "CASE-RD-001",
+    recordedAt: new Date(Date.UTC(2026, 6, 1, 0, 0, index)).toISOString(),
+  }));
+  await seedRecordedAnalysisHistory(exampleDir, out.packet, [
+    ...newerSameCase,
+    {
+      analysisId: "analysis-case-two-latest",
+      caseId: "CASE-RD-002",
+      recordedAt: "2026-06-30T23:59:59.000Z",
+    },
+  ]);
+
+  const queue = await listClinicalReanalysisQueue(exampleDir, { limit: 2 });
+  assert.deepEqual(queue.map((entry) => [entry.caseId, entry.analysisId]), [
+    ["CASE-RD-001", "analysis-case-one-499"],
+    ["CASE-RD-002", "analysis-case-two-latest"],
+  ]);
 });
 
 test("SDK entry resolves a relative workspace exactly once", async () => {

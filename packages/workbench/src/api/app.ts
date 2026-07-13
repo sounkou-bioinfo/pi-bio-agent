@@ -10,8 +10,13 @@ import {
   type AgentHostPort,
 } from "../agent-host.js";
 import {
+  ClinicalReviewInputError,
   getClinicalAnalysis,
+  getClinicalReviewQueue,
+  listClinicalAnalyses,
+  listClinicalReanalysisQueue,
   runClinicalGenomicsWorkbench,
+  updateClinicalReviewDisposition,
 } from "../clinical-genomics.js";
 import type { GroundingRuntime } from "../phenotype-grounding.js";
 import type { PhenotypeHypothesisRuntime } from "../monarch-host.js";
@@ -29,14 +34,21 @@ import {
   AgentTranscriptQuerySchema,
   AgentTranscriptSchema,
   ClinicalAnalysisResponseSchema,
+  ClinicalAnalysisListQuerySchema,
+  ClinicalAnalysisListSchema,
+  ClinicalReanalysisQueueQuerySchema,
+  ClinicalReanalysisQueueSchema,
+  ClinicalReviewQueueResponseSchema,
   CloseAgentSessionResponseSchema,
   CreateClinicalAnalysisSchema,
   ErrorResponseSchema,
   HealthResponseSchema,
   OpenAgentSessionSchema,
   RenameAgentSessionSchema,
+  ReviewPathSchema,
   RunClinicalAnalysisResponseSchema,
   SendAgentMessageSchema,
+  UpdateClinicalReviewSchema,
   WorkbenchInfoSchema,
 } from "./schemas.js";
 
@@ -241,6 +253,19 @@ const createAnalysisRoute = createRoute({
   },
 });
 
+const listAnalysesRoute = createRoute({
+  method: "get",
+  path: "/v1/clinical-analyses",
+  tags: ["clinical analyses"],
+  summary: "List recorded clinical analyses",
+  description: "Projects completed evidence packets from the temporal ledger. A case filter retains all recorded analysis history for that case.",
+  request: { query: ClinicalAnalysisListQuerySchema },
+  responses: {
+    200: { ...json(ClinicalAnalysisListSchema), description: "Recorded analysis summaries ordered by latest ledger record." },
+    500: { ...json(ErrorResponseSchema), description: "The clinical analysis history could not be read." },
+  },
+});
+
 const getAnalysisRoute = createRoute({
   method: "get",
   path: "/v1/clinical-analyses/{analysisId}",
@@ -251,6 +276,50 @@ const getAnalysisRoute = createRoute({
     200: { ...json(ClinicalAnalysisResponseSchema), description: "The recorded packet, read back from CAS." },
     404: { ...json(ErrorResponseSchema), description: "No completed analysis has this id." },
     500: { ...json(ErrorResponseSchema), description: "The recorded analysis could not be read." },
+  },
+});
+
+const getClinicalReviewQueueRoute = createRoute({
+  method: "get",
+  path: "/v1/clinical-analyses/{analysisId}/reviews",
+  tags: ["clinical analyses"],
+  summary: "Read the durable review state for a recorded analysis",
+  request: { params: AnalysisPathSchema },
+  responses: {
+    200: { ...json(ClinicalReviewQueueResponseSchema), description: "Review items with their current ledger-backed dispositions." },
+    404: { ...json(ErrorResponseSchema), description: "No completed analysis has this id." },
+    500: { ...json(ErrorResponseSchema), description: "The clinical review queue could not be read." },
+  },
+});
+
+const updateClinicalReviewRoute = createRoute({
+  method: "put",
+  path: "/v1/clinical-analyses/{analysisId}/reviews/{reviewId}",
+  tags: ["clinical analyses"],
+  summary: "Record a non-diagnostic review disposition",
+  description: "This records human workflow state against an evidence packet. It does not change variant classification or produce a clinical conclusion.",
+  request: {
+    params: ReviewPathSchema,
+    body: { required: true, content: { "application/json": { schema: UpdateClinicalReviewSchema } } },
+  },
+  responses: {
+    200: { ...json(ClinicalReviewQueueResponseSchema), description: "The current ledger-backed review queue after the disposition was recorded." },
+    400: { ...json(ErrorResponseSchema), description: "The review update did not match the recorded evidence item." },
+    404: { ...json(ErrorResponseSchema), description: "No completed analysis has this id." },
+    500: { ...json(ErrorResponseSchema), description: "The review disposition could not be recorded." },
+  },
+});
+
+const clinicalReanalysisQueueRoute = createRoute({
+  method: "get",
+  path: "/v1/clinical-reanalysis-queue",
+  tags: ["clinical reanalysis"],
+  summary: "List the latest recorded reanalysis state for each case",
+  description: "A transparent queue over recorded current-versus-prior evidence, unresolved evidence, and human review state. It is not a diagnostic ranking or classification endpoint.",
+  request: { query: ClinicalReanalysisQueueQuerySchema },
+  responses: {
+    200: { ...json(ClinicalReanalysisQueueSchema), description: "One latest recorded analysis per case, with explicit queue reasons." },
+    500: { ...json(ErrorResponseSchema), description: "The clinical reanalysis queue could not be read." },
   },
 });
 
@@ -489,12 +558,24 @@ export function createClinicalWorkbenchAddon(options: ClinicalWorkbenchAddonOpti
     order: 100,
     browserEntry: "/addons/clinical-evidence.js",
     registerApi(app) {
+      app.openapi(listAnalysesRoute, async (context) => {
+        try {
+          return context.json(ClinicalAnalysisListSchema.parse({
+            analyses: await listClinicalAnalyses(options.clinicalWorkspace, context.req.valid("query")),
+          }), 200);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          return context.json({ error: { code: "analysis_list_failed", message } }, 500);
+        }
+      });
+
       app.openapi(createAnalysisRoute, async (context) => {
         const request = context.req.valid("json");
         try {
           const result = await runClinicalGenomicsWorkbench({
             exampleDir: options.clinicalWorkspace,
             caseId: request.caseId,
+            ...(request.analysisId ? { analysisId: request.analysisId } : {}),
             grounding: options.grounding,
             hypotheses: options.hypotheses,
             variantSearch: options.variantSearch,
@@ -506,6 +587,45 @@ export function createClinicalWorkbenchAddon(options: ClinicalWorkbenchAddonOpti
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           return context.json({ error: { code: "analysis_failed", message } }, 500);
+        }
+      });
+
+      app.openapi(getClinicalReviewQueueRoute, async (context) => {
+        const { analysisId } = context.req.valid("param");
+        try {
+          const queue = await getClinicalReviewQueue(options.clinicalWorkspace, analysisId);
+          if (!queue.found) {
+            return context.json({ error: { code: "analysis_not_found", message: `No completed analysis '${analysisId}' was found.` } }, 404);
+          }
+          const { found: _found, ...publicQueue } = queue;
+          return context.json(ClinicalReviewQueueResponseSchema.parse(publicQueue), 200);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          return context.json({ error: { code: "review_queue_read_failed", message } }, 500);
+        }
+      });
+
+      app.openapi(updateClinicalReviewRoute, async (context) => {
+        const { analysisId, reviewId } = context.req.valid("param");
+        const request = context.req.valid("json");
+        try {
+          const queue = await updateClinicalReviewDisposition(options.clinicalWorkspace, analysisId, {
+            reviewId,
+            status: request.status,
+            ...(request.note ? { note: request.note } : {}),
+            now: options.clock?.(),
+          });
+          if (!queue.found) {
+            return context.json({ error: { code: "analysis_not_found", message: `No completed analysis '${analysisId}' was found.` } }, 404);
+          }
+          const { found: _found, ...publicQueue } = queue;
+          return context.json(ClinicalReviewQueueResponseSchema.parse(publicQueue), 200);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          if (error instanceof ClinicalReviewInputError) {
+            return context.json({ error: { code: "invalid_review_item", message } }, 400);
+          }
+          return context.json({ error: { code: "review_update_failed", message } }, 500);
         }
       });
 
@@ -521,6 +641,27 @@ export function createClinicalWorkbenchAddon(options: ClinicalWorkbenchAddonOpti
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           return context.json({ error: { code: "analysis_read_failed", message } }, 500);
+        }
+      });
+    },
+  };
+}
+
+export function createClinicalReanalysisWorkbenchAddon(options: ClinicalWorkbenchAddonOptions): WorkbenchAddon {
+  return {
+    id: "clinical-reanalysis",
+    label: "Reanalysis",
+    order: 150,
+    browserEntry: "/addons/clinical-reanalysis.js",
+    registerApi(app) {
+      app.openapi(clinicalReanalysisQueueRoute, async (context) => {
+        try {
+          return context.json(ClinicalReanalysisQueueSchema.parse({
+            cases: await listClinicalReanalysisQueue(options.clinicalWorkspace, context.req.valid("query")),
+          }), 200);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          return context.json({ error: { code: "reanalysis_queue_failed", message } }, 500);
         }
       });
     },

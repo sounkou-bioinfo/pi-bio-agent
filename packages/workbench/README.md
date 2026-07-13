@@ -8,9 +8,10 @@ The workbench includes [clinical genomics](examples/clinical-genomics/applicatio
 [method-selection application](examples/method-selection/application.md). Their executable QMD files are the
 application narratives and proofs; rendered Markdown is committed for ordinary readers.
 
-The browser shell loads host-approved `WorkbenchAddon` pairs. Clinical Evidence contributes the analysis API and
-review pane; Artifacts contributes temporal-ledger projection, verified CAS byte serving, and figure/report previews.
-Addons use the same public SDK and store rather than creating application-local persistence.
+The browser shell loads host-approved `WorkbenchAddon` pairs. Clinical Evidence contributes the analysis API, history,
+and review pane; Clinical Reanalysis projects the latest recorded analysis per case with explicit queue reasons; and
+Artifacts contributes temporal-ledger projection, verified CAS byte serving, and figure/report previews. Addons use
+the same public SDK and store rather than creating application-local persistence.
 
 ## Package boundary
 
@@ -112,8 +113,11 @@ npm run serve --workspace=packages/workbench -- \
 Open <http://127.0.0.1:8787>. The browser opens, resumes, and renames persistent Pi sessions; discovers invokable
 extension/template/skill commands for slash completion; accepts prompt/steer/follow-up input; and aborts or closes an
 active session. Tool payloads and raw lifecycle deltas stay under collapsible diagnostics rather than dominating the
-conversation. Clinical Evidence shows the fixture inputs and eight checkpointed stages before execution, renders the
-evidence and review queue, and hands run ids back to Pi for ledger/graph inspection.
+conversation. Clinical Evidence shows the fixture inputs and eight checkpointed stages before execution, recorded
+analysis history, evidence, and a ledger-backed review queue. Clinical Reanalysis projects one latest recorded
+analysis per case from explicit follow-up, current-versus-prior, conflict, gap, and open-review states; it is not a
+diagnostic ranking or classification. The panes hand durable run ids and CAS references back to Pi for ledger/graph
+inspection.
 
 This host explicitly grants local `compute.run` with the workspace CAS. A plot or report is a declared compute output
 with media/role metadata, then a run/CAS/graph artifact visible in the Artifacts addon. A file written directly by

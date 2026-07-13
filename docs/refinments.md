@@ -115,8 +115,10 @@ Cross-cutting constraints from this table are currently enforced by tests in:
   `before_agent_start` message for plot, figure, external-runtime, and workflow prompts. It reports whether
   `compute.run` is host-granted and fails closed when it is not. This is deliberately distinct from Pi's
   `user_bash` hook, which intercepts human `!` / `!!` commands rather than assistant tool calls.
-- Clinical Evidence and Artifacts now exercise a host-approved `WorkbenchAddon` API/browser pair. Do not broaden it
-  into an installation/catalog/configuration system until another deployment needs runtime discovery; do not add
+- Clinical Evidence, Clinical Reanalysis, and Artifacts exercise host-approved `WorkbenchAddon` API/browser pairs.
+  Reanalysis reads the latest packet per case and writes review dispositions as canonical observation revisions; its
+  browser selection is narrow application state, not a generic addon event system. Do not broaden the contract into
+  an installation/catalog/configuration system until another deployment needs runtime discovery; do not add
   focus/resize/dock hooks until an editor, terminal, or comparable mounted surface requires them.
 - External systems such as `rv`, ChEMBL, OpenTargets, BioBTree, Nextflow, or FHIR should first enter as resources,
   SQL materialization, graph projection, or `compute.run`.

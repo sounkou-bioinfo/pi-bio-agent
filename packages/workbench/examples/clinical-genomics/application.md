@@ -32,7 +32,13 @@ import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { runClinicalGenomicsWorkbench } from "../../dist/clinical-genomics.js";
+import {
+  getClinicalReviewQueue,
+  listClinicalAnalyses,
+  listClinicalReanalysisQueue,
+  runClinicalGenomicsWorkbench,
+  updateClinicalReviewDisposition,
+} from "../../dist/clinical-genomics.js";
 import { localCandidateVariantSearchRuntime } from "../../dist/candidate-variant-search.js";
 import { localMonarchFixtureRuntime } from "../../dist/monarch-host.js";
 import { loadRecordedGroundingRuntime } from "../../dist/recorded-grounding.js";
@@ -131,7 +137,7 @@ assert.equal(first.packet.summary.resolvedCandidateGenes, 2);
 assert.equal(first.packet.summary.selectedAlleles, 3);
 assert.equal(first.packet.summary.invertedSupportedHypotheses, 1);
 assert.equal(first.packet.summary.invertedGaps, 1);
-assert.equal(first.packet.summary.conflicts, 1);
+assert.equal(first.packet.summary.conflicts, 2);
 
 const direct = first.packet.lanes.direct.rows;
 assert.equal(direct.find((row) => row.variant_key === "2-47637258-C-CT")?.variant_bucket, "abstain_no_frequency");
@@ -140,6 +146,26 @@ assert.equal(
   inverted.find((row) => row.gene === "GENEB" && row.evidence_status === "genotype_supports_hypothesis")?.vep_consequence,
   "stop_gained",
 );
+
+const initialReviews = await getClinicalReviewQueue(workspace, first.analysisId);
+assert.equal(initialReviews.found, true);
+if (!initialReviews.found) throw new Error("expected a recorded review queue");
+const frequencyReview = initialReviews.reviews.find((item) => item.kind === "resolve_frequency");
+assert.ok(frequencyReview);
+await updateClinicalReviewDisposition(workspace, first.analysisId, {
+  reviewId: frequencyReview.reviewId,
+  status: "needs_follow_up",
+  note: "Obtain a declared frequency source.",
+  now: "2026-07-12T12:10:00Z",
+});
+
+const history = await listClinicalAnalyses(workspace, { caseId: first.packet.caseId });
+assert.deepEqual(history.map((item) => item.analysisId), [first.analysisId]);
+const latestCases = await listClinicalReanalysisQueue(workspace);
+assert.equal(latestCases.length, 1);
+assert.equal(latestCases[0]?.analysisId, first.analysisId);
+assert.equal(latestCases[0]?.state, "needs_follow_up");
+assert.equal(latestCases[0]?.needsFollowUpItems, 1);
 
 piBio.json({
   application: "clinical-genomics",
@@ -154,6 +180,11 @@ piBio.json({
   provenance: {
     runCount: first.packet.provenance.runIds.length,
     packetStoredInCas: first.packetUri.startsWith("cas:sha256:"),
+  },
+  reviewProjection: {
+    recordedAnalysesForCase: history.length,
+    latestCaseState: latestCases[0]?.state,
+    needsFollowUpItems: latestCases[0]?.needsFollowUpItems,
   },
 });
 ```
@@ -193,7 +224,7 @@ JSON output: cell-2
     "invertedSupportedHypotheses": 1,
     "invertedGaps": 1,
     "invertedUnsearched": 0,
-    "conflicts": 1,
+    "conflicts": 2,
     "reanalysisSignals": 1,
     "reviewQueue": [
       {
@@ -237,11 +268,27 @@ JSON output: cell-2
   "provenance": {
     "runCount": 9,
     "packetStoredInCas": true
+  },
+  "reviewProjection": {
+    "recordedAnalysesForCase": 1,
+    "latestCaseState": "needs_follow_up",
+    "needsFollowUpItems": 1
   }
 }
 ```
 
 </details>
+
+## Review state and case reanalysis projection
+
+The evidence packet is immutable after it is committed. A reviewer
+records a disposition as a separate temporal ledger observation keyed to
+one packet review item; that disposition does not revise a variant
+assessment or move to a later analysis automatically. The browser’s
+reanalysis pane projects the latest recorded analysis for each case and
+orders explicit states such as follow-up, reanalysis signal, conflict,
+evidence gap, and open review. It is a transparent work queue, not a
+diagnostic ranking or clinical classification.
 
 ## What the application establishes
 

@@ -19,6 +19,8 @@ const WORKBENCH_COMMANDS = [
 ];
 
 const sessionListeners = new Set();
+const workspaceSelectionListeners = new Set();
+let workspaceSelection = null;
 let viewController = null;
 
 const element = (id) => document.getElementById(id);
@@ -229,6 +231,25 @@ function setControls() {
 
 function notifySessionChange() {
   for (const listener of sessionListeners) listener(state.active);
+}
+
+function normalizeWorkspaceSelection(selection) {
+  if (!selection || typeof selection !== "object") return null;
+  const caseId = typeof selection.caseId === "string" ? selection.caseId : null;
+  const analysisId = typeof selection.analysisId === "string" ? selection.analysisId : null;
+  if (!caseId || !analysisId) return null;
+  return {
+    caseId,
+    analysisId,
+    packetUri: typeof selection.packetUri === "string" ? selection.packetUri : null,
+    groundingId: typeof selection.groundingId === "string" ? selection.groundingId : null,
+    runIds: Array.isArray(selection.runIds) ? selection.runIds.filter((value) => typeof value === "string") : [],
+  };
+}
+
+function setWorkspaceSelection(selection) {
+  workspaceSelection = normalizeWorkspaceSelection(selection);
+  for (const listener of workspaceSelectionListeners) listener(workspaceSelection);
 }
 
 async function refreshSessions() {
@@ -516,6 +537,17 @@ async function boot() {
       onSessionChange(listener) {
         sessionListeners.add(listener);
         return () => sessionListeners.delete(listener);
+      },
+      getWorkspaceSelection() {
+        return workspaceSelection;
+      },
+      onWorkspaceSelectionChange(listener) {
+        workspaceSelectionListeners.add(listener);
+        return () => workspaceSelectionListeners.delete(listener);
+      },
+      setWorkspaceSelection,
+      activateView(id) {
+        viewController?.activate(id);
       },
       setAgentDraft(text) {
         messageInput.value = text;

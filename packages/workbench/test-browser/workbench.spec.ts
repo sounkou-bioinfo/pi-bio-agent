@@ -14,22 +14,30 @@ const packet = {
       operationId: "case.direct",
       runId: "run-direct",
       rows: [{
+        case_id: "CASE-RD-001",
+        lane: "direct",
+        evidence_key: "variant:GRCh38:1:100:A:T",
         gene: "GENE1",
         disease_label: "Example condition",
         variant_key: "GRCh38:1:100:A:T",
         evidence_status: "candidate_needs_review",
         review_kind: "adjudicate_candidate",
+        review_target: "variant:GRCh38:1:100:A:T",
       }],
     },
     inverted: {
       operationId: "case.inverted",
       runId: "run-inverted",
       rows: [{
+        case_id: "CASE-RD-001",
+        lane: "inverted",
+        evidence_key: "hypothesis:GENE2:no-supporting-variant",
         gene: "GENE2",
         disease_label: "Second condition",
         variant_key: null,
         evidence_status: "hypothesis_without_supporting_variant",
         review_kind: "review_missing_genotype_support",
+        review_target: "hypothesis:GENE2",
       }],
     },
   },
@@ -59,19 +67,87 @@ const packet = {
 };
 
 async function useRecordedPacket(page: import("@playwright/test").Page) {
-  await page.route("**/v1/clinical-analyses", async (route) => {
+  const reviewId = "c".repeat(64);
+  let review = {
+    ...packet.summary.reviewQueue[0],
+    reviewId,
+    status: "open",
+    note: null as string | null,
+    updatedAt: null as string | null,
+  };
+  const recorded = {
+    analysisId: packet.analysisId,
+    packet,
+    packetDigest: `sha256:${"a".repeat(64)}`,
+    packetUri: `cas:sha256:${"a".repeat(64)}`,
+  };
+  const summary = {
+    analysisId: packet.analysisId,
+    caseId: packet.caseId,
+    packetDigest: recorded.packetDigest,
+    packetUri: recorded.packetUri,
+    generatedAt: packet.generatedAt,
+    recordedAt: packet.generatedAt,
+    reviewItems: packet.summary.reviewQueue.length,
+    directCandidates: packet.summary.directCandidates,
+    directAbstentions: packet.summary.directAbstentions,
+    conflicts: packet.summary.conflicts,
+    reanalysisSignals: packet.summary.reanalysisSignals,
+  };
+  await page.route(/\/v1\/clinical-analyses(?:\?.*)?$/, async (route) => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ analyses: [summary] }) });
+      return;
+    }
     if (route.request().method() !== "POST") return route.continue();
     await route.fulfill({
       status: 201,
       contentType: "application/json",
       body: JSON.stringify({
-        analysisId: packet.analysisId,
-        packet,
-        packetDigest: `sha256:${"a".repeat(64)}`,
-        packetUri: `cas:sha256:${"a".repeat(64)}`,
+        ...recorded,
         workflow: { replayDigest: `sha256:${"b".repeat(64)}`, executedSteps: 8, reusedSteps: 0 },
       }),
     });
+  });
+  await page.route(`**/v1/clinical-analyses/${packet.analysisId}`, async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(recorded) });
+  });
+  await page.route(`**/v1/clinical-analyses/${packet.analysisId}/reviews`, async (route) => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+        analysisId: packet.analysisId,
+        caseId: packet.caseId,
+        packetDigest: recorded.packetDigest,
+        reviews: [review],
+      }) });
+      return;
+    }
+    return route.continue();
+  });
+  await page.route(`**/v1/clinical-analyses/${packet.analysisId}/reviews/${reviewId}`, async (route) => {
+    const body = route.request().postDataJSON() as { status: string; note?: string };
+    review = { ...review, status: body.status, note: body.note ?? null, updatedAt: "2026-07-12T12:05:00.000Z" };
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+      analysisId: packet.analysisId,
+      caseId: packet.caseId,
+      packetDigest: recorded.packetDigest,
+      reviews: [review],
+    }) });
+  });
+  await page.route(/\/v1\/clinical-reanalysis-queue(?:\?.*)?$/, async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
+      cases: [{
+        ...summary,
+        groundingId: "grounding:analysis-browser-proof",
+        runIds: packet.provenance.runIds,
+        state: "evidence_gap",
+        reasons: ["1 recorded evidence gap remains unresolved."],
+        changes: [],
+        openReviewItems: review.status === "acknowledged" ? 0 : 1,
+        needsFollowUpItems: review.status === "needs_follow_up" ? 1 : 0,
+        evidenceGaps: 1,
+      }],
+    }) });
   });
 }
 
@@ -108,18 +184,25 @@ test("real Pi session control and evidence rendering compose in the browser", as
   await page.getByRole("button", { name: "Evidence", exact: true }).click();
   await expect(page.locator("#analysis-steps")).toContainText("Ground narrative to reviewed HPO assertions");
   await expect(page.locator("#analysis-steps")).toContainText("Commit packet, receipts, replay, and graph links");
-  await page.getByRole("button", { name: "Run fixture workup" }).click();
+  await page.getByRole("button", { name: "Run recorded workup" }).click();
   await expect(page.locator("#analysis-status")).toContainText("analysis-browser-proof");
   await expect(page.locator("#analysis-status")).toContainText("8 executed");
   await expect(page.locator("#analysis-content")).toContainText("Direct candidates");
   await expect(page.locator("#analysis-content")).toContainText("GRCh38:1:100:A:T");
   await expect(page.locator("#analysis-content")).toContainText("Recorded workflow");
   await expect(page.locator("#analysis-content details")).toContainText("Evidence packet JSON");
+  await expect(page.locator("#analysis-history")).toContainText("analysis-browser-proof");
+  await page.getByRole("button", { name: "Inspect", exact: true }).first().click();
+  await expect(page.locator("#analysis-content")).toContainText("Evidence focus");
+  await page.locator(".review-disposition").selectOption("needs_follow_up");
+  await page.locator(".review-note").fill("Obtain a declared frequency source.");
+  await page.getByRole("button", { name: "Record", exact: true }).click();
+  await expect(page.locator(".review-note")).toHaveValue("Obtain a declared frequency source.");
 
   await page.getByRole("button", { name: "Ask Pi" }).click();
   await expect(page.getByRole("button", { name: "Agent" })).toHaveClass(/active/);
   await expect(page.locator("#message")).toHaveValue(/run-direct, run-inverted/);
-  await expect(page.locator("#message")).toHaveValue(/do not treat this message as the fact source/);
+  await expect(page.locator("#message")).toHaveValue(/identifiers are pointers, not the fact source/);
 
   await page.getByRole("button", { name: "Close active session" }).click();
   await expect(page.locator("#message")).toBeDisabled();
@@ -137,7 +220,7 @@ test("a real clinical browser run is recoverable from CAS", async ({ page }, tes
   const responsePromise = page.waitForResponse((response) =>
     response.url().endsWith("/v1/clinical-analyses") && response.request().method() === "POST",
   );
-  await page.getByRole("button", { name: "Run fixture workup" }).click();
+  await page.getByRole("button", { name: "Run recorded workup" }).click();
   const response = await responsePromise;
   expect(response.status()).toBe(201);
   const created = await response.json() as {
@@ -159,6 +242,21 @@ test("a real clinical browser run is recoverable from CAS", async ({ page }, tes
   const recorded = await recordedResponse.json() as { packetDigest: string; packet: unknown };
   expect(recorded.packetDigest).toBe(created.packetDigest);
   expect(recorded.packet).toEqual(created.packet);
+});
+
+test("the reanalysis queue opens a selected recorded evidence packet", async ({ page }) => {
+  await useRecordedPacket(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Evidence", exact: true }).click();
+  await page.locator("#case-id").fill("CASE-OTHER");
+  await page.getByRole("button", { name: "Reanalysis", exact: true }).click();
+  await expect(page.locator("#reanalysis-content")).toContainText("CASE-RD-001");
+  await expect(page.locator("#reanalysis-content")).toContainText("Evidence gap");
+  await page.getByRole("button", { name: "Open evidence", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Evidence", exact: true })).toHaveClass(/active/);
+  await expect(page.locator("#case-id")).toHaveValue("CASE-RD-001");
+  await expect(page.locator("#analysis-content")).toContainText("Recorded workflow");
+  await expect(page.locator("#analysis-content")).toContainText("GRCh38:1:100:A:T");
 });
 
 test("the artifact addon renders a real CAS-backed figure", async ({ page }, testInfo) => {
