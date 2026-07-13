@@ -135,6 +135,16 @@ Instructions for coding agents working in this repository.
   yield as separate claims and test suites. A hermetic fixture is not a clinical benchmark.
 - Ma et al. 2025 is a 300-variant ACMG evidence/classification benchmark described in Supplementary Tables 12-13;
   do not replace its exact rows with a new ClinVar sample and call that a reproduction.
+- Preserve the supplied workbook's dataset roles. Tables S1-S7 are Hong Kong Genome Project (HKGP) rule-development
+  examples, S8-S11 are authored knowledge/threshold tables, S12 is held-out ClinGen-variant validation, and S13 is
+  ClinVar VUS/conflict reanalysis. Never pool S1-S7 into validation metrics or describe those variant rows as
+  diagnostic cases.
+- `rule_development` means the 1,000 curator-reviewed HKGP variants were used to optimize prompts and retrieval
+  knowledge bases and then reassess seven literature-dependent rules. They are real variants, but not an independent
+  validation set.
+- The workbook supplies variant text but no stable VCV/RCV/SCV or ClinGen allele accession. Keep identity unresolved
+  until a release-pinned mapping operation records resolved, ambiguous, or unmatched candidates; never infer a
+  temporal key from HGVS text alone.
 
 ## API And Checks
 

@@ -21,6 +21,7 @@
     "demo:clinical": "npm run build && node dist/cli.js run",
     "pattern:monarch": "npm run build && node scripts/run-monarch-pattern.mjs",
     "benchmark:grounding": "npm run build && node scripts/run-phenotype-grounding-benchmark.mjs",
+    "benchmark:acmg": "npm run build && node scripts/import-published-acmg-workbook.mjs",
     "provision:ducknng": "node --input-type=module -e \"import {DuckDBInstance} from '@duckdb/node-api'; const c=await(await DuckDBInstance.create(':memory:')).connect(); await c.run('INSTALL ducknng FROM community;'); await c.run('LOAD ducknng;'); console.log('ducknng installed + loaded');\"",
     "provision:duckhts": "node --input-type=module -e \"import {DuckDBInstance} from '@duckdb/node-api'; const c=await(await DuckDBInstance.create(':memory:')).connect(); await c.run('INSTALL duckhts FROM community;'); await c.run('LOAD duckhts;'); console.log('duckhts installed + loaded');\"",
     "serve": "npm run build && node dist/server.js",
@@ -29,8 +30,10 @@
   "dependencies": {
     "@hono/node-server": "^2.0.8",
     "@hono/zod-openapi": "^1.4.0",
+    "fflate": "0.8.3",
     "hono": "^4.12.28",
     "pi-bio-agent": "file:../..",
+    "read-excel-file": "9.3.1",
     "zod": "^4.4.3"
   },
   "devDependencies": {

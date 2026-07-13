@@ -308,13 +308,24 @@ review concerns.
 Two evaluation levels must remain separate:
 
 1.  **ACMG evidence and class concordance.** [Ma et
-    al.](https://doi.org/10.1101/2025.06.03.25328923) describe 150
+    al.](https://doi.org/10.1126/scitranslmed.adz4172) describe 150
     ClinGen expert-panel variants in Supplementary Table 12 and 150
-    ClinVar VUS/conflicting variants in Supplementary Table 13. An exact
-    reproduction requires those row-level tables, criterion strengths,
-    source publications, and the authors’ human labels. A fresh sample
-    of three-star ClinVar rows is useful differential testing, but it is
-    not the published benchmark.
+    ClinVar VUS/conflicting variants in Supplementary Table 13. The
+    supplied workbook also contains Hong Kong Genome Project (HKGP)
+    rule-development examples in S1-S7 and authored knowledge/threshold
+    tables in S8-S11; those are not held-out validation rows.
+    `benchmark:acmg` imports the exact archive, CAS-pins the
+    ZIP/XLSX/normalized bundle, preserves raw labels and criterion
+    annotations, recomputes concordance, and records a SQL validation
+    run. A fresh sample of three-star ClinVar rows is useful
+    differential testing, but it is not the published benchmark.
+
+    Here `rule_development` means that the 1,000 curator-reviewed HKGP
+    variants were used to optimize prompts and retrieval knowledge bases
+    and then reassess seven literature-dependent rules. They are real
+    variants, but they are development-contaminated rather than an
+    independent evaluation set.
+
 2.  **Retrospective reanalysis yield.** The OpenAI/Boston Children’s
     [rare-disease
     study](https://openai.com/index/diagnose-rare-childhood-diseases/)
@@ -324,13 +335,16 @@ Two evaluation levels must remain separate:
     evidence-linked hypotheses, duplicate runs, expert adjudication,
     confirmatory testing, false-positive workload, and diagnostic yield.
 
-The current executable fixture tests substrate correctness, not model or
-clinical quality. A case benchmark adapter should accept case and truth
-bundles as host paths, project them into declared DuckDB relations, run
-one case or a bounded cohort through the same checkpoint graph, and
-write per-case predictions plus aggregate metrics to the ledger/CAS. It
-must not embed patient data, private paths, or a second scoring system
-in TypeScript.
+The workbook is a variant-classification benchmark, not a cohort of
+diagnostic cases. It has HGVS-like variant text but no stable
+VCV/RCV/SCV or ClinGen allele accessions, so the importer records
+unresolved identities until a release-pinned mapping step can return a
+unique match, ambiguity, or no match. A separate case benchmark adapter
+must accept case and truth bundles as host inputs, project them into
+declared DuckDB relations, run one case or a bounded cohort through the
+same checkpoint graph, and write per-case predictions plus aggregate
+metrics to ledger/CAS. The current clinical fixture tests substrate
+correctness, not model or clinical quality.
 
 ### Release-pinned reclassification harness
 

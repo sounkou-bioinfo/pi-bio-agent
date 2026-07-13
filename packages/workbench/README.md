@@ -78,6 +78,35 @@ blind. The result measures later ClinVar source-label agreement, not clinical tr
 replacement for expert review. The executable proof is
 [clinvar-temporal.test.ts](test/clinvar-temporal.test.ts).
 
+### Published ACMG workbook
+
+The Ma et al. supplementary workbook now enters through `registerPublishedAcmgWorkbook`: the ZIP container, inner
+XLSX, and normalized bundle are content-addressed; a declared SQL operation validates role counts and data-quality
+signals; and the registration links those artifacts to the validation run in the ordinary ledger. The adapter keeps
+four roles separate: S1-S7 Hong Kong Genome Project (HKGP) rule development, S8-S11 authored knowledge, S12 held-out
+variant validation, and S13 variant reanalysis. It preserves source cells, normalizes five-class labels while retaining
+raw spellings, parses criterion strength/footnote markers, and independently recomputes the worksheet's model/human
+concordance flags.
+
+The `rule_development` role is specific: S1-S7 contain 1,000 curator-reviewed HKGP variants used to optimize prompts
+and retrieval knowledge bases and then reassess seven literature-dependent rules. They are real variant examples, but
+they are development-contaminated and therefore cannot contribute to independent validation metrics.
+
+These rows are variant-centered, not rare-disease case packets. The workbook contains no stable ClinVar/ClinGen
+accessions, so every variant identity remains explicitly unresolved until a separate release-pinned mapping step can
+record a unique, ambiguous, or absent match. Run the exact supplied archive with both content digests:
+
+```sh
+npm run benchmark:acmg --workspace=packages/workbench -- \
+  --archive /path/to/scitranslmed.adz4172_tables_s1_to_s13.zip \
+  --expected-archive-digest sha256:<archive-digest> \
+  --expected-workbook-digest sha256:<xlsx-digest> \
+  --workspace /path/to/benchmark-workspace
+```
+
+The command prints bounded role counts and quality findings, not the 1,480 source rows. The source and normalized
+bytes remain queryable through CAS and the recorded run.
+
 ## Run
 
 ```sh
