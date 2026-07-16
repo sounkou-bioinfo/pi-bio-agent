@@ -61,6 +61,9 @@ test("OpenAPI and runtime validation share the clinical analysis schemas", async
     assert.ok(document.paths["/v1/clinical-analyses/{analysisId}/reviews"]);
     assert.ok(document.paths["/v1/clinical-analyses/{analysisId}/reviews/{reviewId}"]);
     assert.ok(document.paths["/v1/clinical-reanalysis-queue"]);
+    assert.ok(document.paths["/v1/clinical-case-assets/{digest}"]);
+    assert.ok(document.paths["/v1/clinical-cases/{caseId}/revisions"]);
+    assert.ok(document.paths["/v1/clinical-cases/{caseId}/revisions/{revisionId}"]);
     assert.ok(document.paths["/v1/artifacts"]);
     assert.ok(document.paths["/v1/artifacts/{digest}/content"]);
     assert.ok(document.components.schemas.EvidencePacket);
@@ -77,6 +80,74 @@ test("OpenAPI and runtime validation share the clinical analysis schemas", async
 
     const invalidId = await app.request("/v1/clinical-analyses/bad$id");
     assert.equal(invalidId.status, 400);
+  } finally {
+    await fixture.close();
+  }
+});
+
+test("HTTP stages content-addressed assets and registers immutable family case revisions", async () => {
+  const fixture = await appFixture();
+  try {
+    const narrative = Buffer.from("The proband has developmental delay and hypotonia.");
+    const narrativeDigest = createHash("sha256").update(narrative).digest("hex");
+    const staged = await fixture.app.request(`/v1/clinical-case-assets/${narrativeDigest}`, {
+      method: "PUT",
+      headers: { "content-type": "application/octet-stream" },
+      body: narrative,
+    });
+    assert.equal(staged.status, 201);
+    assert.deepEqual(await staged.json(), {
+      digest: `sha256:${narrativeDigest}`,
+      uri: `cas:sha256:${narrativeDigest}`,
+      sizeBytes: narrative.length,
+    });
+
+    const mismatch = await fixture.app.request(`/v1/clinical-case-assets/${"0".repeat(64)}`, {
+      method: "PUT",
+      headers: { "content-type": "application/octet-stream" },
+      body: narrative,
+    });
+    assert.equal(mismatch.status, 400);
+
+    const registered = await fixture.app.request("/v1/clinical-cases/family-api/revisions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        revisionId: "r-1",
+        indexMemberIds: ["proband"],
+        members: [
+          { memberId: "proband", role: "proband", affectedStatus: "affected", sex: "female" },
+          { memberId: "mother", role: "mother", affectedStatus: "unaffected", sex: "female" },
+        ],
+        relationships: [{ fromMemberId: "mother", predicate: "parent_of", toMemberId: "proband" }],
+        assets: [{
+          assetId: "narrative",
+          kind: "clinical_narrative",
+          mediaType: "text/plain",
+          digest: `sha256:${narrativeDigest}`,
+          memberIds: ["proband"],
+        }],
+      }),
+    });
+    assert.equal(registered.status, 201);
+    const revision = await registered.json() as {
+      caseId: string;
+      revisionId: string;
+      members: Array<{ memberId: string }>;
+      assets: Array<{ digest: string; sizeBytes: number }>;
+    };
+    assert.equal(revision.caseId, "family-api");
+    assert.equal(revision.revisionId, "r-1");
+    assert.equal(revision.members.length, 2);
+    assert.deepEqual(revision.assets.map((asset) => [asset.digest, asset.sizeBytes]), [[`sha256:${narrativeDigest}`, narrative.length]]);
+
+    const fetched = await fixture.app.request("/v1/clinical-cases/family-api/revisions/r-1");
+    assert.equal(fetched.status, 200);
+    assert.deepEqual(await fetched.json(), revision);
+    const listed = await fixture.app.request("/v1/clinical-cases/family-api/revisions?limit=10");
+    assert.equal(listed.status, 200);
+    const history = await listed.json() as { revisions: Array<{ revisionId: string; parentRevisionId: string | null }> };
+    assert.deepEqual(history.revisions.map((item) => [item.revisionId, item.parentRevisionId]), [["r-1", null]]);
   } finally {
     await fixture.close();
   }

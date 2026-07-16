@@ -191,14 +191,14 @@ function forbiddenDucknngProfileMutationSurface(sql: string): string | undefined
 // (CREATE TABLE / INSERT / SELECT), so it is NOT read-only — but it must not reach OUTSIDE the throwaway sandbox db:
 // ATTACH/DETACH (another db), COPY / EXPORT / IMPORT (file I/O), INSTALL / LOAD (extensions, incl. network-capable),
 // PRAGMA / CALL / CHECKPOINT / VACUUM (engine side-effects), and the dynamic-SQL query() functions.
-const fixtureForbidden = /\b(attach|detach|copy|install|load|export|import|pragma|call|reset|checkpoint|vacuum)\b/i;
+const fixtureForbidden = /\b(attach|detach|copy|install|load|export|import|pragma|call|set|reset|checkpoint|vacuum)\b/i;
 
 /** Assert `sql` is safe to run as approval-harness FIXTURE setup in a sandbox db: DDL/DML on local tables is fine,
  *  but statements that escape the sandbox (external db, file I/O, extension load, engine side-effects) are refused. */
 export function assertSafeFixtureSql(sql: string | undefined | null): void {
   if (!sql || !sql.trim()) return;
   const scan = stripLiteralsAndComments(sql);
-  if (fixtureForbidden.test(scan)) throw new Error("fixtureSql may seed in-memory test data (CREATE/INSERT/SELECT) but must not ATTACH/COPY/INSTALL/LOAD/EXPORT/IMPORT/PRAGMA — those escape the sandbox (external db / file I/O / extensions / engine side-effects)");
+  if (fixtureForbidden.test(scan)) throw new Error("fixtureSql may seed in-memory test data (CREATE/INSERT/SELECT) but must not ATTACH/COPY/INSTALL/LOAD/EXPORT/IMPORT/PRAGMA/SET — those escape or reconfigure the sandbox (external db / file I/O / extensions / engine side-effects)");
   if (usesDynamicSqlFn(sql)) throw new Error("fixtureSql must not use the dynamic-SQL table functions query()/query_table()");
 }
 
@@ -233,7 +233,10 @@ function validateReadOnlySqlStatement(sql: string, opts: { start: RegExp; messag
   const trimmed = sql.trim().replace(/;\s*$/, "");
   const scan = stripLiteralsAndComments(trimmed); // check statement class on the literal-free copy
   if (scan.includes(";")) throw new Error("one statement only");
-  if (!opts.start.test(trimmed)) throw new Error(opts.message);
+  // Classify the comment-free statement, not the original prefix. Literate SQL
+  // commonly starts with an explanatory line/block comment, which is inert and
+  // should not make an otherwise read-only SELECT fail validation.
+  if (!opts.start.test(scan.trimStart())) throw new Error(opts.message);
   if (forbiddenSql.test(scan)) throw new Error("query contains forbidden write/DDL keywords");
   // Reject query()/query_table() in ANY form — bare, quoted (`"query"(…)`), or catalog-qualified — since each
   // resolves to the dynamic-SQL function that would run a write hidden in its (blanked) string argument.

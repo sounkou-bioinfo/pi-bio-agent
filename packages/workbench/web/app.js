@@ -248,20 +248,6 @@ function normalizeWorkspaceSelection(selection) {
       runIds,
     };
   }
-  const benchmarkRowId = typeof selection.benchmarkRowId === "string" ? selection.benchmarkRowId : null;
-  const datasetId = typeof selection.datasetId === "string" ? selection.datasetId : null;
-  const version = typeof selection.version === "string" ? selection.version : null;
-  if (benchmarkRowId && datasetId && version) {
-    return {
-      kind: "published_variant",
-      benchmarkRowId,
-      datasetId,
-      version,
-      resolutionUri: typeof selection.resolutionUri === "string" ? selection.resolutionUri : null,
-      sourceDigests: Array.isArray(selection.sourceDigests) ? selection.sourceDigests.filter((value) => typeof value === "string") : [],
-      runIds,
-    };
-  }
   return null;
 }
 

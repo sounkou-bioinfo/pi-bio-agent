@@ -119,7 +119,14 @@ describe("Phase 4.4: durable submit -> (park) -> decide approval", () => {
 
   test("SECURITY: a candidate whose fixtureSql escapes the sandbox (ATTACH/COPY/INSTALL) FAILS validation and never runs", async () => {
     const conn = await obsConn();
-    for (const bad of ["ATTACH 'evil.db' AS e", "COPY nums TO '/tmp/x.csv'", "INSTALL httpfs", "LOAD ducknng", "PRAGMA database_list"]) {
+    for (const bad of [
+      "ATTACH 'evil.db' AS e",
+      "COPY nums TO '/tmp/x.csv'",
+      "INSTALL httpfs",
+      "LOAD ducknng",
+      "PRAGMA database_list",
+      "SET enable_external_access = true",
+    ]) {
       const c: OperationCandidate = { ...good, fixtureSql: bad };
       const sub = await submitCandidateForApproval(conn, c, { sandbox: await sandbox(), recordedAt: T1, source: "ci" });
       assert.equal(sub.validation, "failed", `dangerous fixtureSql rejected: ${bad}`);

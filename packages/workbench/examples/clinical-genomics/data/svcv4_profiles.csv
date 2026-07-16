@@ -1,0 +1,2 @@
+profile_id,profile_version,profile_kind,profile_status,classification_readiness,gene_id,disease_id,moi,priority,source_id
+clingen.svcv4.public-draft,2026-07-10,baseline,provisional,method_evaluation_only,,,,0,svcv4-model-summary

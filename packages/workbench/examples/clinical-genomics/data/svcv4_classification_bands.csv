@@ -1,0 +1,8 @@
+profile_id,profile_version,band_id,lower_bound,lower_inclusive,upper_bound,upper_inclusive,classification,uncertainty_band,sort_order,source_id
+clingen.svcv4.public-draft,2026-07-10,benign,,false,-4,true,benign,,1,svcv4-model-points-bands
+clingen.svcv4.public-draft,2026-07-10,likely_benign,-4,false,0,false,likely_benign,,2,svcv4-model-points-bands
+clingen.svcv4.public-draft,2026-07-10,vus_low,0,true,2,false,uncertain_significance,low,3,svcv4-model-points-bands
+clingen.svcv4.public-draft,2026-07-10,vus_mid,2,true,4,false,uncertain_significance,mid,4,svcv4-model-points-bands
+clingen.svcv4.public-draft,2026-07-10,vus_high,4,true,6,false,uncertain_significance,high,5,svcv4-model-points-bands
+clingen.svcv4.public-draft,2026-07-10,likely_pathogenic,6,true,10,false,likely_pathogenic,,6,svcv4-model-points-bands
+clingen.svcv4.public-draft,2026-07-10,pathogenic,10,true,,false,pathogenic,,7,svcv4-model-points-bands

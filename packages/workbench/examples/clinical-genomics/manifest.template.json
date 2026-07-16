@@ -140,29 +140,200 @@
         }
       },
       {
-        "id": "vep_annotations",
-        "title": "Normalized VEP annotations from the checkpoint",
+        "id": "gnomad_http_results",
+        "title": "Registered gnomAD population-frequency responses",
+        "kind": "virtual",
+        "resolver": "ducknng.http_fanout",
+        "params": {
+          "table": "gnomad_http_results",
+          "batchesSqlFile": "relations/gnomad_batches.sql",
+          "urlVariable": "gnomad_url",
+          "headersVariable": "gnomad_headers_json",
+          "profileVariable": "gnomad_profile_id",
+          "tlsConfigVariable": "gnomad_tls_config_id",
+          "extensions": ["ducknng"],
+          "declaredSources": ["https://gnomad.broadinstitute.org/api"]
+        }
+      },
+      {
+        "id": "gnomad_response",
+        "title": "Source-pinned gnomAD GraphQL envelopes",
         "kind": "virtual",
         "resolver": "duckdb.sql_materialize",
-        "params": { "table": "vep_annotations", "sqlFile": "relations/vep_annotations.sql" }
+        "params": { "table": "gnomad_response", "sqlFile": "relations/gnomad_response.sql" }
+      },
+      {
+        "id": "registered_gnomad_population_queries",
+        "title": "Registered gnomAD population strata",
+        "kind": "virtual",
+        "resolver": "duckdb.sql_materialize",
+        "params": {
+          "table": "registered_gnomad_population_queries",
+          "sqlFile": "relations/registered_gnomad_population_queries.sql"
+        }
+      },
+      {
+        "id": "registered_annotation_variants",
+        "title": "Alleles registered for annotation",
+        "kind": "virtual",
+        "resolver": "duckdb.sql_materialize",
+        "params": {
+          "table": "registered_annotation_variants",
+          "sqlFile": "relations/registered_annotation_variants.sql"
+        }
+      },
+      {
+        "id": "variant_annotation_observations",
+        "title": "Provider-neutral variant annotation observations",
+        "kind": "virtual",
+        "resolver": "duckdb.sql_materialize",
+        "params": {
+          "table": "variant_annotation_observations",
+          "sqlFile": "relations/variant_annotation_observations.sql"
+        }
+      },
+      {
+        "id": "variant_annotation_audit",
+        "title": "Variant annotation identity and provenance audit",
+        "kind": "virtual",
+        "resolver": "duckdb.sql_materialize",
+        "params": {
+          "table": "variant_annotation_audit",
+          "sqlFile": "relations/variant_annotation_audit.sql"
+        }
+      },
+      {
+        "id": "variant_annotations",
+        "title": "Admitted transcript-consequence annotations",
+        "kind": "virtual",
+        "resolver": "duckdb.sql_materialize",
+        "params": { "table": "variant_annotations", "sqlFile": "relations/variant_annotations.sql" }
       }
     ],
     "operations": [
       {
+        "id": "clinical.registered_case_narrative",
+        "version": "0.1.0",
+        "title": "Read a registered clinical narrative",
+        "description": "Materialize the exact host-protected narrative bound from an immutable case-revision CAS asset.",
+        "transport": "duckdb.sql",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "case_id": { "type": "string" },
+            "case_narrative_text": { "type": "string" }
+          },
+          "required": ["case_id", "case_narrative_text"]
+        },
+        "notes": [
+          "The narrative value is a protected host binding and is not embedded in the manifest or replay object.",
+          "The result is still a normal recorded run and CAS artifact linked to the immutable case revision."
+        ],
+        "sql": {
+          "readOnly": true,
+          "requiredResources": [],
+          "sqlFile": "operations/registered_case_narrative.sql"
+        }
+      },
+      {
         "id": "clinical.vep_annotations",
         "version": "0.1.0",
         "title": "Normalize selected-variant VEP annotations",
-        "description": "Normalize the declared VEP response rows and return one annotation row per selected allele and transcript gene.",
+        "description": "Normalize the declared VEP response into source-pinned coverage and transcript-consequence observations for selected alleles.",
         "transport": "duckdb.sql",
-        "inputSchema": { "type": "object" },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "selected_variants_json": { "type": "string" },
+            "vep_source_id": { "type": "string" },
+            "vep_source_version": { "type": "string" },
+            "vep_source_uri": { "type": "string" },
+            "vep_observed_at": { "type": "string" }
+          },
+          "required": ["selected_variants_json", "vep_source_id", "vep_source_version", "vep_source_uri", "vep_observed_at"]
+        },
         "notes": [
           "The endpoint, credentials, batching, retry, and cancellation policy are host composition; selected alleles are the operation input.",
-          "The SQL keeps VEP as annotation evidence. It does not turn an external response into a diagnosis."
+          "One coverage row records every submitted allele, including a response-missing state; transcript rows retain transcript, gene, consequence, impact, response digest, source version, and observation time.",
+          "Colocated population frequencies and clinical assertions are deliberately excluded because VEP is not their authoritative versioned source.",
+          "The SQL keeps VEP as annotation evidence. It does not turn an external response into a criterion, classification, or diagnosis."
         ],
         "sql": {
           "readOnly": true,
           "requiredResources": ["vep_http_results", "vep_response"],
           "sqlFile": "operations/vep_annotations.sql"
+        }
+      },
+      {
+        "id": "clinical.variant_annotation_audit",
+        "version": "0.1.0",
+        "title": "Audit variant annotation observations",
+        "description": "Match provider-neutral coverage and transcript observations to registered alleles and admit only complete, source-pinned snapshots.",
+        "transport": "duckdb.sql",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "registered_annotation_variants_json": {
+              "type": "string",
+              "description": "Bounded JSON array containing only the exact registered allele identities submitted for annotation."
+            },
+            "variant_annotation_observations_json": {
+              "type": "string",
+              "description": "Bounded JSON array of normalized coverage and transcript-consequence observations from one provider snapshot."
+            }
+          },
+          "required": ["registered_annotation_variants_json", "variant_annotation_observations_json"]
+        },
+        "notes": [
+          "Every allele requires exactly one coverage observation for one source snapshot; zero emitted transcripts is valid only when the coverage row declares transcript_count = 0.",
+          "Unknown fields, JSON coercions, duplicate identifiers, allele mismatches, source drift, orphan responses, and transcript-count mismatches fail closed.",
+          "Population frequency and clinical assertions are not accepted by this contract and therefore appear as unknown fields rather than annotation evidence.",
+          "This operation accepts normalized observations from REST VEP, offline VEP, or another provider that implements the same explicit contract."
+        ],
+        "sql": {
+          "readOnly": true,
+          "requiredResources": [
+            "registered_annotation_variants",
+            "variant_annotation_observations",
+            "variant_annotation_audit"
+          ],
+          "sqlFile": "operations/variant_annotation_audit.sql"
+        }
+      },
+      {
+        "id": "clinical.gnomad_population_observations",
+        "version": "0.1.0",
+        "title": "Normalize registered gnomAD population strata",
+        "description": "Fetch each registered gnomAD variant once and emit provider-neutral, source-pinned population observations for the requested sequencing-type and ancestry strata.",
+        "transport": "duckdb.sql",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "gnomad_population_queries_json": { "type": "string", "description": "Host-protected exact scope, allele, dataset, sequencing-type, and population registrations." },
+            "gnomad_source_id": { "type": "string" },
+            "gnomad_source_version": { "type": "string" },
+            "gnomad_source_uri": { "type": "string" },
+            "gnomad_observed_at": { "type": "string" }
+          },
+          "required": [
+            "gnomad_population_queries_json", "gnomad_source_id", "gnomad_source_version",
+            "gnomad_source_uri", "gnomad_observed_at"
+          ]
+        },
+        "notes": [
+          "The GraphQL endpoint and transport are host composition through the existing DuckNNG fanout resolver; the operation is a source adapter, not another network client.",
+          "Rows are always proposed. A later host approval must admit the exact source digest and stratum before SVCv4 policy can consume it.",
+          "Exome, genome, joint, global, and ancestry rows remain distinct. The adapter does not choose a preferred population stratum.",
+          "A provider variant record supplies measured or counted-zero AC/AN. Variant-not-found remains a completed no-hit with null AF/AC/AN, unknown callability, and no fabricated denominator.",
+          "Provider filters are preserved separately from coverage and admission. A filtered row cannot pass the POP_FRQ evidence audit merely by changing admission_state.",
+          "Disease maximum credible frequency is intentionally absent; it is separate disease/MOI evidence in the SVCv4 kernel."
+        ],
+        "sql": {
+          "readOnly": true,
+          "requiredResources": [
+            "gnomad_http_results", "gnomad_response", "registered_gnomad_population_queries"
+          ],
+          "sqlFile": "operations/gnomad_population_observations.sql"
         }
       },
       {
@@ -183,12 +354,12 @@
               "type": "string",
               "description": "Host-protected JSON array from the checkpointed indexed variant-search operation."
             },
-            "vep_annotations_json": {
+            "variant_annotation_audit_json": {
               "type": "string",
-              "description": "Host-protected JSON array from the checkpointed VEP annotation operation."
+              "description": "Host-protected JSON array from the checkpointed provider-neutral annotation audit."
             }
           },
-          "required": ["case_id", "phenotype_hypotheses_json", "candidate_variant_search_json", "vep_annotations_json"]
+          "required": ["case_id", "phenotype_hypotheses_json", "candidate_variant_search_json", "variant_annotation_audit_json"]
         },
         "notes": [
           "Direct starts from observed variants; inverted consumes the recorded phenotype-to-disease-to-gene hypothesis relation produced from accepted grounding assertions.",
@@ -204,7 +375,7 @@
             "so_loss_of_function",
             "variant_inputs",
             "variant_search_coverage",
-            "vep_annotations",
+            "variant_annotations",
             "variant_assessment",
             "phenotype_hypothesis",
             "case_evidence"
@@ -220,8 +391,12 @@
         "transport": "duckdb.sql",
         "inputSchema": {
           "type": "object",
-          "properties": { "case_id": { "type": "string" } },
-          "required": ["case_id"]
+          "properties": {
+            "case_id": { "type": "string" },
+            "candidate_variant_search_json": { "type": "string" },
+            "variant_annotation_audit_json": { "type": "string" }
+          },
+          "required": ["case_id", "candidate_variant_search_json", "variant_annotation_audit_json"]
         },
         "notes": [
           "Reanalysis is a delta over durable prior results, not another prompt."
@@ -234,7 +409,7 @@
             "variant_inputs",
             "prior_assessment",
             "assessment_status_order",
-            "vep_annotations",
+            "variant_annotations",
             "variant_assessment",
             "reanalysis_evidence"
           ],

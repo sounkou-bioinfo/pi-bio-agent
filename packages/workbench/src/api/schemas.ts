@@ -1,5 +1,10 @@
 import { z } from "@hono/zod-openapi";
 
+const ClinicalRegistryIdSchema = z.string().trim()
+  .regex(/^[A-Za-z][A-Za-z0-9._-]{0,127}$/, "identifier must start with a letter and contain only letters, digits, '.', '_', or '-'");
+const Sha256HexSchema = z.string().regex(/^[a-f0-9]{64}$/, "digest must be 64 lowercase hexadecimal characters");
+const Sha256AddressSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/, "digest must be a sha256 content address");
+
 const CasRefsSchema = z.object({
   result: z.string().optional(),
   receipts: z.string().optional(),
@@ -57,10 +62,10 @@ export const CaseEvidenceRowSchema = z.object({
   clinical_significance: z.string().nullable(),
   zygosity: z.string().nullable(),
   inheritance: z.string().nullable(),
-  vep_impact: z.string().nullable(),
-  vep_consequence: z.string().nullable(),
-  vep_allele_frequency: z.number().nullable(),
-  vep_clinical_significance: z.string().nullable(),
+  annotation_impact: z.string().nullable(),
+  annotation_consequence: z.string().nullable(),
+  annotation_allele_frequency: z.number().nullable(),
+  annotation_clinical_significance: z.string().nullable(),
   variant_bucket: VariantBucketSchema.nullable(),
   variant_status: VariantStatusSchema.nullable(),
   matched_observed_terms: z.number().int().nullable(),
@@ -152,6 +157,58 @@ export const ReanalysisRowSchema = z.object({
   change_status: z.enum(["new", "dropped", "unchanged", "upgraded", "downgraded", "abstain_unknown_status"]),
 }).strict().openapi("ReanalysisRow");
 
+export const VariantAnnotationAuditRowSchema = z.object({
+  audit_key: z.string(),
+  registration_present: z.boolean(),
+  observation_present: z.boolean(),
+  registration_record_count: z.number().int().nullable(),
+  observation_count: z.number().int().nonnegative(),
+  coverage_count: z.number().int().nonnegative(),
+  declared_transcript_count: z.number().int().nonnegative().nullable(),
+  emitted_transcript_count: z.number().int().nonnegative(),
+  source_snapshot_count: z.number().int().nonnegative(),
+  record_kind: z.enum(["coverage", "transcript_consequence", "orphan_response"]).nullable(),
+  annotation_state: z.string().nullable(),
+  item_id: z.string().nullable(),
+  case_id: z.string().nullable(),
+  variant_id: z.string().nullable(),
+  variant_key: z.string().nullable(),
+  assembly: z.string().nullable(),
+  chrom: z.string().nullable(),
+  pos: z.number().int().nullable(),
+  ref: z.string().nullable(),
+  alt: z.string().nullable(),
+  source_variant_key: z.string().nullable(),
+  reported_assembly: z.string().nullable(),
+  reported_chrom: z.string().nullable(),
+  reported_start: z.number().int().nullable(),
+  reported_end: z.number().int().nullable(),
+  reported_allele_string: z.string().nullable(),
+  input: z.string().nullable(),
+  source_record_id: z.string().nullable(),
+  transcript_count: z.number().int().nonnegative().nullable(),
+  gene_id: z.string().nullable(),
+  gene: z.string().nullable(),
+  transcript_id: z.string().nullable(),
+  transcript_biotype: z.string().nullable(),
+  is_canonical: z.boolean().nullable(),
+  mane_select: z.string().nullable(),
+  consequence_terms: z.array(z.string()).nullable(),
+  most_severe_consequence: z.string().nullable(),
+  impact: z.string().nullable(),
+  hgvsc: z.string().nullable(),
+  hgvsp: z.string().nullable(),
+  source_id: z.string().nullable(),
+  source_version: z.string().nullable(),
+  source_uri: z.string().nullable(),
+  source_digest: z.string().nullable(),
+  observed_at: z.string().nullable(),
+  admission_state: z.string().nullable(),
+  audit_status: z.enum(["complete", "incomplete", "invalid"]),
+  audit_issues: z.array(z.string()),
+  evidence_eligible: z.boolean(),
+}).strict().openapi("VariantAnnotationAuditRow");
+
 function operationRowsSchema<T extends z.ZodType>(name: string, rows: T) {
   return z.object({
     operationId: z.string(),
@@ -165,6 +222,7 @@ const CaseEvidenceOperationSchema = operationRowsSchema("CaseEvidenceOperation",
 const PhenotypeHypothesisOperationSchema = operationRowsSchema("PhenotypeHypothesisOperation", PhenotypeHypothesisRowSchema);
 const CandidateGeneIntervalOperationSchema = operationRowsSchema("CandidateGeneIntervalOperation", CandidateGeneIntervalRowSchema);
 const CandidateVariantSearchOperationSchema = operationRowsSchema("CandidateVariantSearchOperation", CandidateVariantSearchRowSchema);
+const VariantAnnotationAuditOperationSchema = operationRowsSchema("VariantAnnotationAuditOperation", VariantAnnotationAuditRowSchema);
 const ReanalysisOperationSchema = operationRowsSchema("ReanalysisOperation", ReanalysisRowSchema);
 
 export const ReviewItemSchema = z.object({
@@ -187,10 +245,16 @@ export const EvidencePacketSchema = z.object({
   analysisId: z.string(),
   caseId: z.string(),
   generatedAt: z.iso.datetime(),
+  inputRevision: z.object({
+    revisionId: ClinicalRegistryIdSchema,
+    revisionDigest: Sha256AddressSchema,
+    revisionUri: z.string().regex(/^cas:sha256:[a-f0-9]{64}$/),
+  }).strict().optional(),
   stages: z.object({
     hypotheses: PhenotypeHypothesisOperationSchema,
     intervals: CandidateGeneIntervalOperationSchema,
     variantSearch: CandidateVariantSearchOperationSchema,
+    annotationAudit: VariantAnnotationAuditOperationSchema,
     reanalysis: ReanalysisOperationSchema,
   }).strict(),
   lanes: z.object({
@@ -226,12 +290,111 @@ export const EvidencePacketSchema = z.object({
   provenance: z.object({ runIds: z.array(z.string()) }).strict(),
 }).strict().openapi("EvidencePacket");
 
+const ClinicalCaseMemberSchema = z.object({
+  memberId: ClinicalRegistryIdSchema,
+  role: z.string().trim().min(1).max(128).optional(),
+  affectedStatus: z.enum(["affected", "unaffected", "unknown"]).default("unknown"),
+  sex: z.enum(["female", "male", "unknown"]).default("unknown"),
+  attributes: z.record(z.string(), z.any()).optional(),
+}).strict().openapi("ClinicalCaseMember");
+
+const ClinicalCaseRelationshipSchema = z.object({
+  fromMemberId: ClinicalRegistryIdSchema,
+  predicate: z.string().regex(/^[a-z][a-z0-9_]*$/),
+  toMemberId: ClinicalRegistryIdSchema,
+  sourceAssetId: ClinicalRegistryIdSchema.optional(),
+  attributes: z.record(z.string(), z.any()).optional(),
+}).strict().openapi("ClinicalCaseRelationship");
+
+const ClinicalSampleMappingSchema = z.object({
+  memberId: ClinicalRegistryIdSchema,
+  sampleId: z.string().trim().min(1).max(256),
+}).strict().openapi("ClinicalSampleMapping");
+
+const ClinicalCaseAssetReferenceSchema = z.object({
+  assetId: ClinicalRegistryIdSchema,
+  kind: z.string().trim().min(1).max(128),
+  mediaType: z.string().trim().regex(/^[^\s/]+\/[^\s/]+$/),
+  digest: Sha256AddressSchema,
+  format: z.string().trim().min(1).max(64).optional(),
+  assembly: z.string().trim().min(1).max(64).optional(),
+  memberIds: z.array(ClinicalRegistryIdSchema).default([]),
+  sampleMappings: z.array(ClinicalSampleMappingSchema).default([]),
+  attributes: z.record(z.string(), z.any()).optional(),
+}).strict().openapi("ClinicalCaseAssetReference");
+
+const ClinicalCaseAssetSchema = ClinicalCaseAssetReferenceSchema.extend({
+  uri: z.string().regex(/^cas:sha256:[a-f0-9]{64}$/),
+  sizeBytes: z.number().int().positive(),
+}).strict().openapi("ClinicalCaseAsset");
+
+export const RegisterClinicalCaseRevisionSchema = z.object({
+  revisionId: ClinicalRegistryIdSchema.optional(),
+  parentRevisionId: ClinicalRegistryIdSchema.optional(),
+  indexMemberIds: z.array(ClinicalRegistryIdSchema).default([]),
+  members: z.array(ClinicalCaseMemberSchema).min(1),
+  relationships: z.array(ClinicalCaseRelationshipSchema).default([]),
+  assets: z.array(ClinicalCaseAssetReferenceSchema).min(1),
+}).strict().openapi("RegisterClinicalCaseRevision");
+
+export const ClinicalCaseRevisionSchema = z.object({
+  schema: z.literal("pi-bio.workbench.clinical_case_revision.v1"),
+  caseId: ClinicalRegistryIdSchema,
+  revisionId: ClinicalRegistryIdSchema,
+  parentRevisionId: ClinicalRegistryIdSchema.optional(),
+  indexMemberIds: z.array(ClinicalRegistryIdSchema),
+  members: z.array(ClinicalCaseMemberSchema),
+  relationships: z.array(ClinicalCaseRelationshipSchema),
+  assets: z.array(ClinicalCaseAssetSchema),
+}).strict().openapi("ClinicalCaseRevision");
+
+export const ClinicalCaseRevisionSummarySchema = z.object({
+  caseId: ClinicalRegistryIdSchema,
+  revisionId: ClinicalRegistryIdSchema,
+  parentRevisionId: ClinicalRegistryIdSchema.nullable(),
+  revisionDigest: Sha256AddressSchema,
+  revisionUri: z.string().regex(/^cas:sha256:[a-f0-9]{64}$/),
+  memberCount: z.number().int().positive(),
+  assetCount: z.number().int().positive(),
+  recordedAt: z.iso.datetime(),
+}).strict().openapi("ClinicalCaseRevisionSummary");
+
+export const ClinicalCaseRevisionListSchema = z.object({
+  revisions: z.array(ClinicalCaseRevisionSummarySchema),
+}).strict().openapi("ClinicalCaseRevisionList");
+
+export const ClinicalCaseRevisionListQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(1_000).default(100),
+  asOf: z.iso.datetime().optional(),
+});
+
+export const ClinicalCasePathSchema = z.object({
+  caseId: ClinicalRegistryIdSchema.openapi({ param: { name: "caseId", in: "path" } }),
+});
+
+export const ClinicalCaseRevisionPathSchema = ClinicalCasePathSchema.extend({
+  revisionId: ClinicalRegistryIdSchema.openapi({ param: { name: "revisionId", in: "path" } }),
+});
+
+export const StageClinicalCaseAssetPathSchema = z.object({
+  digest: Sha256HexSchema.openapi({ param: { name: "digest", in: "path" } }),
+});
+
+export const StageClinicalCaseAssetResponseSchema = z.object({
+  digest: Sha256AddressSchema,
+  uri: z.string().regex(/^cas:sha256:[a-f0-9]{64}$/),
+  sizeBytes: z.number().int().positive(),
+}).strict().openapi("StageClinicalCaseAssetResponse");
+
 const AnalysisIdSchema = z.string()
   .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/, "analysisId must be a run-safe identifier")
   .describe("Analysis ledger key. Its restricted shape is required because the same value addresses durable run checkpoints.");
 
 export const CreateClinicalAnalysisSchema = z.object({
-  caseId: z.string().trim().min(1).openapi({ example: "CASE-RD-001" }),
+  caseId: ClinicalRegistryIdSchema.openapi({ example: "CASE-RD-001" }),
+  caseRevisionId: ClinicalRegistryIdSchema.optional().openapi({
+    description: "Immutable registered input revision. Required for registry-backed production analyses; omitted only by legacy manifest fixtures.",
+  }),
   analysisId: AnalysisIdSchema.optional().openapi({
     description: "Optional existing analysis id. Reusing it resumes compatible durable checkpoints instead of starting a new analysis.",
   }),

@@ -8,10 +8,10 @@ export type VepFixture = {
   close: () => Promise<void>;
 };
 
-const annotations: Record<string, { gene: string; consequence: string; impact: string; af: number; significance: string }> = {
-  "17-43093464-A-T": { gene: "GENEB", consequence: "stop_gained", impact: "HIGH", af: 0.0002, significance: "pathogenic" },
-  "17-43093470-C-G": { gene: "GENEB", consequence: "missense_variant", impact: "MODERATE", af: 0.0003, significance: "uncertain_significance" },
-  "17-43093470-C-T": { gene: "GENEB", consequence: "stop_gained", impact: "HIGH", af: 0.02, significance: "benign" },
+const annotations: Record<string, { geneId: string; gene: string; transcriptId: string; consequence: string; impact: string; af: number; significance: string }> = {
+  "17-43093464-A-T": { geneId: "HGNC:GENEB", gene: "GENEB", transcriptId: "ENST_FIXTURE_GENEB", consequence: "stop_gained", impact: "HIGH", af: 0.0002, significance: "pathogenic" },
+  "17-43093470-C-G": { geneId: "HGNC:GENEB", gene: "GENEB", transcriptId: "ENST_FIXTURE_GENEB", consequence: "missense_variant", impact: "MODERATE", af: 0.0003, significance: "uncertain_significance" },
+  "17-43093470-C-T": { geneId: "HGNC:GENEB", gene: "GENEB", transcriptId: "ENST_FIXTURE_GENEB", consequence: "stop_gained", impact: "HIGH", af: 0.02, significance: "benign" },
 };
 
 async function bodyOf(request: IncomingMessage): Promise<string> {
@@ -58,11 +58,19 @@ export async function startVepFixture(failuresBeforeSuccess = 2, port = 0): Prom
       const input = item as string;
       const [chrom, pos, _dot, ref, alt] = input.split(" ");
       const key = `${chrom}-${pos}-${ref}-${alt}`;
-      const annotation = annotations[key] ?? { gene: "UNKNOWN", consequence: "missense_variant", impact: "MODERATE", af: 0.2, significance: "uncertain_significance" };
+      const annotation = annotations[key] ?? { geneId: "HGNC:UNKNOWN", gene: "UNKNOWN", transcriptId: "ENST_FIXTURE_UNKNOWN", consequence: "missense_variant", impact: "MODERATE", af: 0.2, significance: "uncertain_significance" };
       return {
         input,
         most_severe_consequence: annotation.consequence,
-        transcript_consequences: [{ gene_symbol: annotation.gene, impact: annotation.impact, consequence_terms: [annotation.consequence] }],
+        transcript_consequences: [{
+          gene_id: annotation.geneId,
+          gene_symbol: annotation.gene,
+          transcript_id: annotation.transcriptId,
+          biotype: "protein_coding",
+          canonical: 1,
+          impact: annotation.impact,
+          consequence_terms: [annotation.consequence],
+        }],
         colocated_variants: [{ id: key, clin_sig: [annotation.significance], frequencies: { [alt]: { gnomadg: annotation.af } } }],
       };
     }));

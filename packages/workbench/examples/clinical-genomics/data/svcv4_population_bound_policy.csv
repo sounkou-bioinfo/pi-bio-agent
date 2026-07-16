@@ -1,0 +1,3 @@
+profile_id,profile_version,method_code,frequency_state,bound_method,confidence_level,denominator_semantics,zero_score_rule_id,policy_status,source_id
+clingen.svcv4.public-draft,2026-07-10,POP_FRQ,counted_zero,zero_count_binomial_one_sided_exact,0.95,variant_record_post_qc_alleles,pop_frq_below_one_percent,provisional,workbench-population-bound-policy
+clingen.svcv4.public-draft,2026-07-10,POP_FRQ,not_observed,zero_count_binomial_one_sided_exact,0.95,locus_post_qc_callable_alleles,pop_frq_below_one_percent,provisional,workbench-population-bound-policy

@@ -113,6 +113,26 @@ test("clinical case revisions keep family assets in CAS and project only pseudon
   assert.deepEqual(fetched, first);
 });
 
+test("clinical case revisions accept large assets staged through the workspace CAS", async () => {
+  const dir = await workspace();
+  const sourcePath = join(dir, "family.vcf.gz");
+  const sourceBytes = Buffer.from("registered variant bytes\n");
+  await fs.writeFile(sourcePath, sourceBytes);
+  const cas = fsCasStore(join(dir, ".pi", "bio-agent", "cas"));
+  const stored = await cas.putFile(sourcePath);
+  const input = revisionInput("r-streamed", "Streamed asset narrative.");
+  input.assets = input.assets.map((asset) => {
+    if (asset.assetId !== "variants" || !("bytes" in asset)) return asset;
+    const { bytes: _bytes, ...metadata } = asset;
+    return { ...metadata, digest: `sha256:${stored.address.digest}` as const };
+  });
+
+  const revision = await registerClinicalCaseRevision(dir, input);
+  const variants = revision.assets.find((asset) => asset.assetId === "variants");
+  assert.equal(variants?.digest, `sha256:${stored.address.digest}`);
+  assert.equal(variants?.sizeBytes, sourceBytes.length);
+});
+
 test("clinical case revisions are immutable, successor-linked, and validate family references", async () => {
   const dir = await workspace();
   const first = await registerClinicalCaseRevision(dir, {

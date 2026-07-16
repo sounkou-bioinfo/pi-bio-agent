@@ -11,6 +11,8 @@ describe("validateReadOnlySelect: the single read-only SQL guard", () => {
   test("accepts a single SELECT/WITH query and returns it trimmed", () => {
     assert.equal(validateReadOnlySelect(" select 1;\n"), "select 1");
     assert.equal(validateReadOnlySelect("WITH t AS (SELECT 1) SELECT * FROM t"), "WITH t AS (SELECT 1) SELECT * FROM t");
+    assert.equal(validateReadOnlySelect("-- explain the relation\nSELECT 1"), "-- explain the relation\nSELECT 1");
+    assert.equal(validateReadOnlySelect("/* explain the relation */\nWITH t AS (SELECT 1) SELECT * FROM t"), "/* explain the relation */\nWITH t AS (SELECT 1) SELECT * FROM t");
   });
 
   test("does NOT false-positive on forbidden keywords or ';' inside string literals / comments", () => {

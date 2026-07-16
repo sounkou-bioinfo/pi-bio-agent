@@ -1,0 +1,439 @@
+{
+  "schema": "pi-bio.manifest.v1",
+  "id": "clinical-genomics-svcv4-public-draft",
+  "version": "0.1.0",
+  "title": "SVCv4 public-draft classification kernel",
+  "description": "Configurable SQL evaluation over a commit-pinned provisional SVCv4 profile. Unsupported or incomplete workflows fail closed instead of borrowing ACMG/AMP 2015 semantics.",
+  "provides": {
+    "resolvers": [
+      {
+        "id": "duckdb.file_scan",
+        "version": "0.1.0",
+        "title": "DuckDB file scan",
+        "description": "Read a local configuration relation into DuckDB.",
+        "output": { "mode": "table" }
+      },
+      {
+        "id": "duckdb.sql_materialize",
+        "version": "0.1.0",
+        "title": "DuckDB SQL materialization",
+        "description": "Materialize a declared SQL relation.",
+        "output": { "mode": "table" }
+      }
+    ],
+    "resources": [
+      {
+        "id": "svcv4_sources",
+        "title": "Pinned SVCv4 draft sources",
+        "kind": "virtual",
+        "resolver": "duckdb.file_scan",
+        "params": { "path": "data/svcv4_sources.csv", "table": "svcv4_sources" }
+      },
+      {
+        "id": "svcv4_profiles",
+        "title": "SVCv4 baseline and specialized profiles",
+        "kind": "virtual",
+        "resolver": "duckdb.file_scan",
+        "params": { "path": "data/svcv4_profiles.csv", "table": "svcv4_profiles" }
+      },
+      {
+        "id": "svcv4_score_nodes",
+        "title": "SVCv4 score hierarchy and caps",
+        "kind": "virtual",
+        "resolver": "duckdb.file_scan",
+        "params": { "path": "data/svcv4_score_nodes.csv", "table": "svcv4_score_nodes" }
+      },
+      {
+        "id": "svcv4_numeric_thresholds",
+        "title": "SVCv4 numeric score thresholds",
+        "kind": "virtual",
+        "resolver": "duckdb.file_scan",
+        "params": { "path": "data/svcv4_numeric_thresholds.csv", "table": "svcv4_numeric_thresholds" }
+      },
+      {
+        "id": "svcv4_classification_bands",
+        "title": "SVCv4 score classification bands",
+        "kind": "virtual",
+        "resolver": "duckdb.file_scan",
+        "params": { "path": "data/svcv4_classification_bands.csv", "table": "svcv4_classification_bands" }
+      },
+      {
+        "id": "svcv4_population_bound_policy",
+        "title": "Population zero-count bound policy",
+        "kind": "virtual",
+        "resolver": "duckdb.file_scan",
+        "params": { "path": "data/svcv4_population_bound_policy.csv", "table": "svcv4_population_bound_policy" }
+      },
+      {
+        "id": "svcv4_evaluator_policy",
+        "title": "Approved evaluator identities",
+        "kind": "virtual",
+        "resolver": "duckdb.file_scan",
+        "params": { "path": "data/svcv4_evaluator_policy.csv", "table": "svcv4_evaluator_policy" }
+      },
+      {
+        "id": "svcv4_case_applicability",
+        "title": "SVCv4 CLN case applicability and value kinds",
+        "kind": "virtual",
+        "resolver": "duckdb.file_scan",
+        "params": { "path": "data/svcv4_case_applicability.csv", "table": "svcv4_case_applicability" }
+      },
+      {
+        "id": "svcv4_case_contract_policy",
+        "title": "Pinned SVCv4 case-contract projection",
+        "kind": "virtual",
+        "resolver": "duckdb.file_scan",
+        "params": { "path": "data/svcv4_case_contract_policy.csv", "table": "svcv4_case_contract_policy" }
+      },
+      {
+        "id": "svcv4_scopes",
+        "title": "Requested VBC-MDE evaluation scopes",
+        "kind": "virtual",
+        "resolver": "duckdb.sql_materialize",
+        "params": { "table": "svcv4_scopes", "sqlFile": "relations/svcv4_scopes.sql" }
+      },
+      {
+        "id": "svcv4_scope_candidates",
+        "title": "Checkpointed candidate alleles for SVCv4 scope formation",
+        "kind": "virtual",
+        "resolver": "duckdb.sql_materialize",
+        "params": { "table": "svcv4_scope_candidates", "sqlFile": "relations/svcv4_scope_candidates.sql" }
+      },
+      {
+        "id": "svcv4_disease_model_observations",
+        "title": "Admitted gene-disease-MOI observations",
+        "kind": "virtual",
+        "resolver": "duckdb.sql_materialize",
+        "params": { "table": "svcv4_disease_model_observations", "sqlFile": "relations/svcv4_disease_model_observations.sql" }
+      },
+      {
+        "id": "svcv4_scope_formation",
+        "title": "Evidence-backed SVCv4 scope formation audit",
+        "kind": "virtual",
+        "resolver": "duckdb.sql_materialize",
+        "params": { "table": "svcv4_scope_formation", "sqlFile": "relations/svcv4_scope_formation.sql" }
+      },
+      {
+        "id": "svcv4_profile_selection",
+        "title": "Exact specialized-profile or baseline selection",
+        "kind": "virtual",
+        "resolver": "duckdb.sql_materialize",
+        "params": { "table": "svcv4_profile_selection", "sqlFile": "relations/svcv4_profile_selection.sql" }
+      },
+      {
+        "id": "svcv4_case_observations",
+        "title": "Source-pinned SVCv4 CLN case observations",
+        "kind": "virtual",
+        "resolver": "duckdb.sql_materialize",
+        "params": { "table": "svcv4_case_observations", "sqlFile": "relations/svcv4_case_observations.sql" }
+      },
+      {
+        "id": "svcv4_case_input_audit",
+        "title": "SVCv4 CLN case-capture audit",
+        "kind": "virtual",
+        "resolver": "duckdb.sql_materialize",
+        "params": { "table": "svcv4_case_input_audit", "sqlFile": "relations/svcv4_case_input_audit.sql" }
+      },
+      {
+        "id": "svcv4_population_observations",
+        "title": "Provider-neutral population observations",
+        "kind": "virtual",
+        "resolver": "duckdb.sql_materialize",
+        "params": { "table": "svcv4_population_observations", "sqlFile": "relations/svcv4_population_observations.sql" }
+      },
+      {
+        "id": "svcv4_disease_frequency_observations",
+        "title": "Source-pinned disease maximum credible frequencies",
+        "kind": "virtual",
+        "resolver": "duckdb.sql_materialize",
+        "params": { "table": "svcv4_disease_frequency_observations", "sqlFile": "relations/svcv4_disease_frequency_observations.sql" }
+      },
+      {
+        "id": "svcv4_pop_frq_lines",
+        "title": "Deterministic POP_FRQ evidence lines",
+        "kind": "virtual",
+        "resolver": "duckdb.sql_materialize",
+        "params": { "table": "svcv4_pop_frq_lines", "sqlFile": "relations/svcv4_pop_frq_lines.sql" }
+      },
+      {
+        "id": "svcv4_evidence_lines",
+        "title": "Host-admitted SVCv4 method-result lines",
+        "kind": "virtual",
+        "resolver": "duckdb.sql_materialize",
+        "params": { "table": "svcv4_evidence_lines", "sqlFile": "relations/svcv4_evidence_lines.sql" }
+      },
+      {
+        "id": "svcv4_line_audit",
+        "title": "SVCv4 method-result audit",
+        "kind": "virtual",
+        "resolver": "duckdb.sql_materialize",
+        "params": { "table": "svcv4_line_audit", "sqlFile": "relations/svcv4_line_audit.sql" }
+      },
+      {
+        "id": "svcv4_score_rollup",
+        "title": "SVCv4 configured score rollup",
+        "kind": "virtual",
+        "resolver": "duckdb.sql_materialize",
+        "params": { "table": "svcv4_score_rollup", "sqlFile": "relations/svcv4_score_rollup.sql" }
+      },
+      {
+        "id": "svcv4_classification_results",
+        "title": "SVCv4 classification results",
+        "kind": "virtual",
+        "resolver": "duckdb.sql_materialize",
+        "params": { "table": "svcv4_classification_results", "sqlFile": "relations/svcv4_classification_results.sql" }
+      }
+    ],
+    "operations": [
+      {
+        "id": "clinical.svcv4_form_scopes",
+        "version": "0.1.0",
+        "title": "Form evidence-backed SVCv4 POP_FRQ scopes",
+        "description": "Join checkpointed candidate alleles to admitted gene-disease-MOI observations and emit either an exact reusable scope or a reviewable failure state.",
+        "transport": "duckdb.sql",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "case_id": { "type": "string" },
+            "candidate_variant_search_json": { "type": "string" },
+            "candidate_variant_search_run_id": { "type": "string" },
+            "candidate_variant_search_result_digest": { "type": "string" },
+            "svcv4_disease_model_observations_json": { "type": "string" },
+            "svcv4_allow_provisional": { "type": "boolean" }
+          },
+          "required": [
+            "case_id",
+            "candidate_variant_search_json",
+            "candidate_variant_search_run_id",
+            "candidate_variant_search_result_digest",
+            "svcv4_disease_model_observations_json",
+            "svcv4_allow_provisional"
+          ]
+        },
+        "notes": [
+          "A candidate allele does not imply an inheritance mode; MOI must come from separately admitted gene-disease knowledge.",
+          "Coordinate-derived identifiers are assembly-pinned local content identifiers, not claims of GA4GH VRS normalization.",
+          "This operation currently forms only case-independent POP_FRQ scopes because that is the only public-draft method implemented by this application."
+        ],
+        "sql": {
+          "readOnly": true,
+          "requiredResources": [
+            "svcv4_scope_candidates",
+            "svcv4_disease_model_observations",
+            "svcv4_scope_formation"
+          ],
+          "sqlFile": "operations/svcv4_form_scopes.sql"
+        }
+      },
+      {
+        "id": "clinical.svcv4_select_profile",
+        "version": "0.1.0",
+        "title": "Select an SVCv4 profile",
+        "description": "Choose the most specific applicable profile, fail on ambiguity, and require explicit opt-in to a provisional profile.",
+        "transport": "duckdb.sql",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "svcv4_scopes_json": { "type": "string", "description": "Host-protected JSON array of VBC-MDE evaluation scopes." }
+          },
+          "required": ["svcv4_scopes_json"]
+        },
+        "notes": [
+          "Profile selection is exact over gene, disease, and MOI scope; a tie at the highest specificity and priority is an abstention.",
+          "The checked-in baseline is a provisional public draft pinned to the cited SVCv4 model commit and source assets."
+        ],
+        "sql": {
+          "readOnly": true,
+          "requiredResources": ["svcv4_profiles", "svcv4_scopes", "svcv4_profile_selection"],
+          "sqlFile": "operations/svcv4_select_profile.sql"
+        }
+      },
+      {
+        "id": "clinical.svcv4_pop_frq",
+        "version": "0.1.0",
+        "title": "Evaluate provisional SVCv4 POP_FRQ",
+        "description": "Evaluate the maximum admitted measured-frequency ratio or a conservative zero-count upper bound through reviewable profile policy, producing one evidence line per VBC-MDE scope.",
+        "transport": "duckdb.sql",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "svcv4_scopes_json": { "type": "string", "description": "Host-protected JSON array of VBC-MDE evaluation scopes." },
+            "svcv4_population_observations_json": { "type": "string", "description": "Host-protected JSON array of source-pinned population observations bound to exact scope ids, with explicit frequency, query, coverage, and admission states." },
+            "svcv4_disease_frequency_observations_json": { "type": "string", "description": "Host-protected JSON array containing the separately admitted disease/MOI maximum credible frequency and its derivation identity for each exact scope." }
+          },
+          "required": ["svcv4_scopes_json", "svcv4_population_observations_json", "svcv4_disease_frequency_observations_json"]
+        },
+        "notes": [
+          "The disease maximum credible frequency is separate scoped method evidence; a population provider neither supplies nor derives it, and the evaluator does not infer it from prevalence without an approved method.",
+          "Exactly one admitted disease-frequency item must bind the variant, gene, disease, and MOI scope and identify its derivation method, version, digest, and source snapshot.",
+          "Every population observation binds one requested scope id and must repeat its exact variant, gene, disease, and MOI identity. Missing or duplicate item ids, unknown fields, type coercions, malformed source identities, and identity drift fail closed.",
+          "Missing, JSON null, measured positive frequency, counted zero, and covered no-hit observations are distinct input states; no state is inferred with coalesce(value, 0).",
+          "A reported AC=0 and AN>0 establish a counted-zero sample estimate, not a true population frequency. A completed no-hit has no variant-frequency row: AF, AC, and source AN remain explicitly null while a separate locus-callable denominator is supplied.",
+          "The provisional application policy derives a one-sided exact-binomial upper bound from the effective post-QC denominator. The denominator must already reflect locus and variant-class callability, ploidy, assay, and bioinformatics limitations; nominal cohort size is retained only for audit and is never substituted.",
+          "A finite-panel bound emits zero population points only when its whole plausible frequency interval is inside the configured zero-score interval; otherwise POP_FRQ remains not_evaluated while retaining the quantitative upper bound.",
+          "Missing, unapproved, invalid, unqueried, uncovered, or source-incomplete observations produce an explicit not_evaluated line.",
+          "Inheritance and de novo observations belong to clinical case methods and are rejected from POP_FRQ input.",
+          "When several admitted observations exist, SQL selects the greatest frequency-to-disease-maximum ratio before applying one configured threshold.",
+          "The evaluator policy digest pins the ordered POP_FRQ threshold, bound-policy, normalization-SQL, and evaluator-SQL definition bundle."
+        ],
+        "sql": {
+          "readOnly": true,
+          "requiredResources": [
+            "svcv4_sources",
+            "svcv4_profiles",
+            "svcv4_numeric_thresholds",
+            "svcv4_population_bound_policy",
+            "svcv4_evaluator_policy",
+            "svcv4_scopes",
+            "svcv4_profile_selection",
+            "svcv4_population_observations",
+            "svcv4_disease_frequency_observations",
+            "svcv4_pop_frq_lines"
+          ],
+          "sqlFile": "operations/svcv4_pop_frq.sql"
+        }
+      },
+      {
+        "id": "clinical.svcv4_case_audit",
+        "version": "0.1.0",
+        "title": "Audit an SVCv4 CLN case payload",
+        "description": "Validate source identity, scope identity, workflow applicability, nested value kinds, enums, conditional containers, and explicit missingness before any CSpec CLN evaluator sees a case.",
+        "transport": "duckdb.sql",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "svcv4_scopes_json": { "type": "string", "description": "Host-protected JSON array of VBC-MDE case-conditioned evaluation scopes." },
+            "svcv4_case_observations_json": { "type": "string", "description": "Host-protected JSON array of source-pinned, admission-gated SVCv4 Case envelopes." }
+          },
+          "required": ["svcv4_scopes_json", "svcv4_case_observations_json"]
+        },
+        "notes": [
+          "This operation audits the public case-capture and applicability contract. It emits no CLN points, evidence line, or classification because the corresponding CSpec scoring methods are not part of the public model.",
+          "A missing field, an explicit JSON null, and the tri-state token UNKNOWN are distinct: required missing or null values are incomplete, while an applicable required UNKNOWN token is captured and valid.",
+          "A not-applicable field must be absent; even an explicit null is rejected because the workflow-specific public schema excludes the property.",
+          "The pinned matrix currently marks additional_variants.gene.mde_associated_gene as required even though its note narrows that requirement to a gene different from the VBC gene. This provisional projection follows the matrix code literally and records its definition digest.",
+          "Unrequested scopes, duplicate or missing item identities, case-independent scopes, unadmitted observations, and incomplete source identities remain explicit invalid rows rather than being dropped."
+        ],
+        "sql": {
+          "readOnly": true,
+          "requiredResources": [
+            "svcv4_sources",
+            "svcv4_profiles",
+            "svcv4_case_applicability",
+            "svcv4_case_contract_policy",
+            "svcv4_scopes",
+            "svcv4_profile_selection",
+            "svcv4_case_observations",
+            "svcv4_case_input_audit"
+          ],
+          "sqlFile": "operations/svcv4_case_audit.sql"
+        }
+      },
+      {
+        "id": "clinical.svcv4_line_audit",
+        "version": "0.1.0",
+        "title": "Audit SVCv4 method-result lines",
+        "description": "Validate expected method coverage, scope identity, evaluator policy, producer provenance, score range, and branch identity before aggregation.",
+        "transport": "duckdb.sql",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "svcv4_scopes_json": { "type": "string", "description": "Host-protected JSON array of VBC-MDE evaluation scopes." },
+            "svcv4_evidence_lines_json": { "type": "string", "description": "Host-protected JSON array of checkpointed method-result lines." }
+          },
+          "required": ["svcv4_scopes_json", "svcv4_evidence_lines_json"]
+        },
+        "notes": [
+          "Exactly one admitted method-result line is required for every expected method code; extra or duplicate lines are invalid.",
+          "A method-result line is trusted only when its evaluator id, version, method-definition digest, producer run id, and producer result digest match host policy.",
+          "Missing and not_evaluated methods remain incomplete; they are never converted to zero."
+        ],
+        "sql": {
+          "readOnly": true,
+          "requiredResources": [
+            "svcv4_profiles",
+            "svcv4_score_nodes",
+            "svcv4_evaluator_policy",
+            "svcv4_scopes",
+            "svcv4_profile_selection",
+            "svcv4_evidence_lines",
+            "svcv4_line_audit"
+          ],
+          "sqlFile": "operations/svcv4_line_audit.sql"
+        }
+      },
+      {
+        "id": "clinical.svcv4_score_rollup",
+        "version": "0.1.0",
+        "title": "Roll up admitted SVCv4 scores",
+        "description": "Apply configured method and hierarchy caps after selecting the more pathogenic mutually exclusive impact branch.",
+        "transport": "duckdb.sql",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "svcv4_scopes_json": { "type": "string", "description": "Host-protected JSON array of VBC-MDE evaluation scopes." },
+            "svcv4_evidence_lines_json": { "type": "string", "description": "Host-protected JSON array of checkpointed method-result lines." }
+          },
+          "required": ["svcv4_scopes_json", "svcv4_evidence_lines_json"]
+        },
+        "notes": [
+          "Only complete audited lines participate in aggregation.",
+          "Mutually exclusive protein and splice branches are compared on uncapped raw totals; only the more pathogenic branch proceeds.",
+          "Every node exposes raw_score, capped_score, and cap_applied for review."
+        ],
+        "sql": {
+          "readOnly": true,
+          "requiredResources": [
+            "svcv4_profiles",
+            "svcv4_score_nodes",
+            "svcv4_evaluator_policy",
+            "svcv4_scopes",
+            "svcv4_profile_selection",
+            "svcv4_evidence_lines",
+            "svcv4_line_audit",
+            "svcv4_score_rollup"
+          ],
+          "sqlFile": "operations/svcv4_score_rollup.sql"
+        }
+      },
+      {
+        "id": "clinical.svcv4_classify",
+        "version": "0.1.0",
+        "title": "Classify a complete SVCv4 scope",
+        "description": "Return a configured SVCv4 score band only after profile selection, method coverage, evidence-line audit, and score rollup are complete.",
+        "transport": "duckdb.sql",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "svcv4_scopes_json": { "type": "string", "description": "Host-protected JSON array of VBC-MDE evaluation scopes." },
+            "svcv4_evidence_lines_json": { "type": "string", "description": "Host-protected JSON array of checkpointed method-result lines." }
+          },
+          "required": ["svcv4_scopes_json", "svcv4_evidence_lines_json"]
+        },
+        "notes": [
+          "Classification bands and interval endpoints are profile data, not TypeScript conditionals.",
+          "A profile marked method_evaluation_only can expose audited method lines and score rollups but cannot emit a clinical classification.",
+          "Incomplete, unsupported, ambiguous, or invalid evidence returns an explicit non-classified status and a null final score/class.",
+          "This public-draft profile remains provisional and must be explicitly admitted by the caller."
+        ],
+        "sql": {
+          "readOnly": true,
+          "requiredResources": [
+            "svcv4_sources",
+            "svcv4_profiles",
+            "svcv4_score_nodes",
+            "svcv4_classification_bands",
+            "svcv4_evaluator_policy",
+            "svcv4_scopes",
+            "svcv4_profile_selection",
+            "svcv4_evidence_lines",
+            "svcv4_line_audit",
+            "svcv4_score_rollup",
+            "svcv4_classification_results"
+          ],
+          "sqlFile": "operations/svcv4_classify.sql"
+        }
+      }
+    ]
+  }
+}

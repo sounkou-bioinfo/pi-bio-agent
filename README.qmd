@@ -294,23 +294,17 @@ in the manifest, SQL, or argv.
 The first-party workbench composes a browser, a Pi SDK agent-host adapter, and the same public evidence substrate:
 
 ```sh
-npm run benchmark:acmg --workspace=packages/workbench -- \
-  --archive /path/to/scitranslmed.adz4172_tables_s1_to_s13.zip \
-  --expected-archive-digest sha256:eedf0d516842e5a1f929606161f61ae8185253d679810abc603d64526bbdd2ee \
-  --expected-workbook-digest sha256:4e8c55487dafcf88f4c34c233e52f5fc12860f7a7e9dcef4490f6464535ddbfa \
-  --workspace .pi/published-acmg-benchmark
-npm run resolve:acmg-variant --workspace=packages/workbench -- \
-  --row-id 'ST12_150 ClinGen varinats:39' \
-  --workspace .pi/published-acmg-benchmark
-npm run serve --workspace=packages/workbench -- .pi/published-acmg-benchmark 8787
+npm run application:clinical
+npm run serve --workspace=packages/workbench -- examples/clinical-genomics 8787
 ```
 
 Open <http://127.0.0.1:8787>. Pi sessions can be opened, resumed, renamed, prompted, steered, followed up, aborted,
-and closed. Slash completion exposes invokable Pi commands. The Variants addon keeps published workbook decisions
-separate from independently resolved NCBI Variation/ClinVar snapshots, receipts, CAS digests, and run ids; Artifacts
-renders declared CAS-backed figures/reports. Starting against an explicitly supplied clinical manifest additionally
-loads its Evidence and Reanalysis addons. Tool payloads and raw lifecycle deltas are collapsible diagnostics. The live
-conversation/event stream is a presentation surface, not the scientific source of truth.
+and closed. Slash completion exposes invokable Pi commands. Artifacts renders declared CAS-backed figures and reports;
+starting against the clinical example explicitly adds its Evidence and Reanalysis regression panes. Immutable case
+revisions and their CAS-addressed narrative, family, indexed variant, and optional prior-assessment assets are
+registered through the workbench CLI or HTTP API before a real case run. Tool payloads and raw lifecycle deltas are
+collapsible diagnostics. The live conversation/event stream is a presentation surface, not the scientific source of
+truth.
 
 The first-party workbench explicitly grants local `compute.run` with its workspace CAS. Agent-produced figures and
 reports must be declared compute outputs so they become run-linked CAS artifacts; an arbitrary Python/R/shell file

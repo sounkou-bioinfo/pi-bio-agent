@@ -38,12 +38,18 @@ import {
   type CandidateIntervalRow,
   type CandidateVariantSearchRuntime,
 } from "./candidate-variant-search.js";
+import {
+  getClinicalCaseRevisionRecord,
+  type ClinicalCaseAsset,
+  type ClinicalCaseRevision,
+  type ClinicalCaseRevisionSummary,
+} from "./clinical-case-registry.js";
 
 export const EVIDENCE_PACKET_SCHEMA = "pi-bio.workbench.evidence_packet.v1" as const;
 export const CLINICAL_ANALYSIS_SCHEMA = "pi-bio.workbench.clinical_analysis.v1" as const;
 
 const SOURCE = "pi-bio-workbench:clinical-genomics";
-const WORKFLOW_VERSION = "clinical-evidence-workflow.v5";
+const WORKFLOW_VERSION = "clinical-evidence-workflow.v6";
 const PACKET_MEDIA_TYPE = "application/vnd.pi-bio.workbench.evidence+json";
 const PACKET_STEP = "packet";
 const AS_OF = "9999-12-31T23:59:59.999Z";
@@ -55,6 +61,8 @@ export interface RunClinicalGenomicsRequest {
   /** Host-owned directory containing manifest.json and data/. */
   exampleDir: string;
   caseId: string;
+  /** Immutable registered input revision. Omit only for legacy manifest-backed fixtures. */
+  caseRevisionId?: string;
   /** Reuse this id to resume the same task. A new id starts a fresh analysis. */
   analysisId?: string;
   now?: string;
@@ -116,10 +124,16 @@ export type EvidencePacket = {
   analysisId: string;
   caseId: string;
   generatedAt: string;
+  inputRevision?: {
+    revisionId: string;
+    revisionDigest: string;
+    revisionUri: string;
+  };
   stages: {
     hypotheses: OperationRows;
     intervals: OperationRows;
     variantSearch: OperationRows;
+    annotationAudit: OperationRows;
     reanalysis: OperationRows;
   };
   lanes: {
@@ -191,6 +205,14 @@ type GroundingArtifact = {
   contractDigest: string;
   narrativeQuery: { runId: string; resultDigest: string };
   result: PhenotypeGroundingResult;
+};
+
+type ResolvedClinicalCaseInput = {
+  revision: ClinicalCaseRevision;
+  summary: ClinicalCaseRevisionSummary;
+  narrative: { text: string; digest: string; assetId: string };
+  manifest: BioManifest;
+  variantSearch: CandidateVariantSearchRuntime;
 };
 
 export interface RunClinicalGenomicsResult extends EvidencePacketRef {
@@ -297,6 +319,168 @@ function contentAddress(digest: string): ContentAddress {
   return address;
 }
 
+const EMPTY_CASE_NARRATIVES_SQL = `SELECT NULL::VARCHAR AS case_id, NULL::VARCHAR AS narrative WHERE FALSE`;
+const EMPTY_CASE_VARIANTS_SQL = `SELECT
+  NULL::VARCHAR AS case_id,
+  NULL::VARCHAR AS variant_key,
+  NULL::VARCHAR AS gene,
+  NULL::VARCHAR AS consequence,
+  NULL::VARCHAR AS allele_frequency,
+  NULL::VARCHAR AS clinical_significance,
+  NULL::VARCHAR AS zygosity,
+  NULL::VARCHAR AS inheritance
+WHERE FALSE`;
+const EMPTY_PRIOR_ASSESSMENT_SQL = `SELECT
+  NULL::VARCHAR AS case_id,
+  NULL::VARCHAR AS variant_key,
+  NULL::VARCHAR AS prior_status
+WHERE FALSE`;
+
+function assetsOfKind(revision: ClinicalCaseRevision, kind: string): ClinicalCaseAsset[] {
+  return revision.assets.filter((asset) => asset.kind === kind);
+}
+
+function optionalSingleAsset(revision: ClinicalCaseRevision, kind: string): ClinicalCaseAsset | undefined {
+  const assets = assetsOfKind(revision, kind);
+  if (assets.length > 1) throw new Error(`case revision '${revision.revisionId}' has ${assets.length} '${kind}' assets; this composition requires at most one`);
+  return assets[0];
+}
+
+function requiredSingleAsset(revision: ClinicalCaseRevision, kind: string): ClinicalCaseAsset {
+  const asset = optionalSingleAsset(revision, kind);
+  if (!asset) throw new Error(`case revision '${revision.revisionId}' requires one '${kind}' asset`);
+  return asset;
+}
+
+function tabularReader(asset: ClinicalCaseAsset): "csv" | "tsv" | "parquet" | "json" {
+  const format = asset.format?.trim().toLowerCase();
+  if (format === "csv" || format === "tsv" || format === "parquet" || format === "json") return format;
+  if (format === "jsonl" || format === "ndjson") return "json";
+  throw new Error(`case asset '${asset.assetId}' requires format csv, tsv, parquet, json, jsonl, or ndjson`);
+}
+
+function replaceResourceWithSql(manifest: BioManifest, resourceId: string, table: string, sql: string): void {
+  const resource = manifest.provides?.resources?.find((candidate) => candidate.id === resourceId);
+  if (!resource) throw new Error(`clinical manifest has no '${resourceId}' resource`);
+  resource.resolver = "duckdb.sql_materialize";
+  resource.params = { table, sql };
+}
+
+function replaceResourceWithCasFile(
+  manifest: BioManifest,
+  cas: CasStore,
+  resourceId: string,
+  table: string,
+  asset: ClinicalCaseAsset,
+): void {
+  const resource = manifest.provides?.resources?.find((candidate) => candidate.id === resourceId);
+  if (!resource) throw new Error(`clinical manifest has no '${resourceId}' resource`);
+  resource.resolver = "duckdb.file_scan";
+  resource.params = {
+    path: cas.pathFor(contentAddress(asset.digest)),
+    table,
+    reader: tabularReader(asset),
+  };
+}
+
+async function linkVerifiedCasAsset(cas: CasStore, asset: ClinicalCaseAsset, destination: string): Promise<void> {
+  const address = contentAddress(asset.digest);
+  if (!await cas.has(address)) throw new Error(`case asset '${asset.assetId}' is missing from CAS`);
+  await fs.mkdir(dirname(destination), { recursive: true });
+  try {
+    await fs.link(cas.pathFor(address), destination);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+  }
+  const actualDigest = await digestFile(destination);
+  if (actualDigest !== asset.digest) {
+    throw new Error(`materialized case asset '${asset.assetId}' does not match its registered digest`);
+  }
+}
+
+async function resolveRegisteredClinicalCaseInput(
+  exampleDir: string,
+  caseId: string,
+  revisionId: string,
+  baseVariantSearch: CandidateVariantSearchRuntime,
+): Promise<ResolvedClinicalCaseInput> {
+  const record = await getClinicalCaseRevisionRecord(exampleDir, caseId, revisionId);
+  if (!record) throw new Error(`clinical case revision '${caseId}:${revisionId}' was not found`);
+  const { revision, summary } = record;
+  const cas = fsCasStore(join(exampleDir, ".pi", "bio-agent", "cas"));
+
+  // Grounding consumes one prepared, source-spannable narrative. Additional raw
+  // documents remain separate CAS assets until a declared extraction step creates
+  // a successor clinical_narrative revision.
+  const narrativeAsset = requiredSingleAsset(revision, "clinical_narrative");
+  if (!narrativeAsset.mediaType.startsWith("text/")) {
+    throw new Error(`clinical narrative asset '${narrativeAsset.assetId}' must use a text/* media type`);
+  }
+  const narrativeBytes = await fs.readFile(cas.pathFor(contentAddress(narrativeAsset.digest)));
+  const narrativeText = narrativeBytes.toString("utf8");
+  if (!narrativeText.trim()) throw new Error(`clinical narrative asset '${narrativeAsset.assetId}' is empty`);
+  if (narrativeDigest(narrativeText) !== narrativeAsset.digest) {
+    throw new Error(`clinical narrative asset '${narrativeAsset.assetId}' failed its content-digest check`);
+  }
+
+  const variantAsset = requiredSingleAsset(revision, "variant_set");
+  if (!variantAsset.assembly) throw new Error(`variant set '${variantAsset.assetId}' requires an assembly`);
+  const variantFormat = variantAsset.format?.trim().toLowerCase();
+  if (!variantFormat || !["vcf", "vcf.gz", "bcf"].includes(variantFormat)) {
+    throw new Error(`variant set '${variantAsset.assetId}' requires format vcf, vcf.gz, or bcf`);
+  }
+  const matchingIndexes = assetsOfKind(revision, "variant_index").filter((asset) =>
+    asset.attributes?.index_for === variantAsset.assetId
+  );
+  if (matchingIndexes.length !== 1) {
+    throw new Error(`variant set '${variantAsset.assetId}' requires exactly one variant_index with attributes.index_for='${variantAsset.assetId}'`);
+  }
+  const indexAsset = matchingIndexes[0]!;
+  const indexFormat = indexAsset.format?.trim().toLowerCase();
+  if (indexFormat !== "tbi" && indexFormat !== "csi") {
+    throw new Error(`variant index '${indexAsset.assetId}' requires format tbi or csi`);
+  }
+  if (variantFormat === "bcf" && indexFormat !== "csi") {
+    throw new Error(`BCF variant set '${variantAsset.assetId}' requires a CSI index`);
+  }
+  const inputRoot = join(
+    exampleDir,
+    ".pi",
+    "bio-agent",
+    "case-inputs",
+    summary.revisionDigest.slice("sha256:".length),
+  );
+  const variantPath = join(inputRoot, variantFormat === "bcf" ? "variants.bcf" : "variants.vcf.gz");
+  await linkVerifiedCasAsset(cas, variantAsset, variantPath);
+  await linkVerifiedCasAsset(cas, indexAsset, `${variantPath}.${indexFormat}`);
+
+  const manifest = JSON.parse(await fs.readFile(join(exampleDir, "manifest.json"), "utf8")) as BioManifest;
+  replaceResourceWithSql(manifest, "case_narratives", "case_narratives", EMPTY_CASE_NARRATIVES_SQL);
+  const directVariants = optionalSingleAsset(revision, "variant_table");
+  if (directVariants) replaceResourceWithCasFile(manifest, cas, "case_variants", "case_variants", directVariants);
+  else replaceResourceWithSql(manifest, "case_variants", "case_variants", EMPTY_CASE_VARIANTS_SQL);
+  const priorAssessment = optionalSingleAsset(revision, "prior_assessment");
+  if (priorAssessment) replaceResourceWithCasFile(manifest, cas, "prior_assessment", "prior_assessment", priorAssessment);
+  else replaceResourceWithSql(manifest, "prior_assessment", "prior_assessment", EMPTY_PRIOR_ASSESSMENT_SQL);
+
+  return {
+    revision,
+    summary,
+    narrative: { text: narrativeText, digest: narrativeAsset.digest, assetId: narrativeAsset.assetId },
+    manifest,
+    variantSearch: {
+      ...baseVariantSearch,
+      assembly: variantAsset.assembly,
+      vcfPath: variantPath,
+      sourceVersion: canonicalDigest({
+        revisionDigest: summary.revisionDigest,
+        variantAsset: variantAsset.digest,
+        indexAsset: indexAsset.digest,
+      }),
+    },
+  };
+}
+
 async function readCasJson(cas: CasStore, digest: string): Promise<JsonValue> {
   const address = contentAddress(digest);
   const bytes = await fs.readFile(cas.pathFor(address));
@@ -317,6 +501,49 @@ function asRows(value: unknown): JsonRecord[] {
 
 function asString(value: JsonValue | undefined): string {
   return typeof value === "string" ? value : value == null ? "" : String(value);
+}
+
+type RegisteredAnnotationVariant = {
+  case_id: string;
+  variant_id?: string;
+  variant_key: string;
+  assembly: string;
+  chrom: string;
+  pos: number;
+  ref: string;
+  alt: string;
+};
+
+function projectRegisteredAnnotationVariants(rows: JsonRecord[], caseId: string): RegisteredAnnotationVariant[] {
+  const registered = new Map<string, RegisteredAnnotationVariant>();
+  for (const row of rows) {
+    if (row.record_kind !== "variant") continue;
+    const variantKey = asString(row.variant_key);
+    const assembly = asString(row.assembly);
+    const chrom = asString(row.chrom).replace(/^chr/i, "");
+    const pos = row.pos;
+    const ref = asString(row.ref);
+    const alt = asString(row.alt);
+    if (!variantKey || !assembly || !chrom || typeof pos !== "number" || !Number.isInteger(pos) || pos < 1 || !ref || !alt) {
+      throw new Error(`candidate variant '${variantKey || "<missing>"}' has no complete annotation identity`);
+    }
+    const candidate: RegisteredAnnotationVariant = {
+      case_id: caseId,
+      ...(typeof row.variant_id === "string" && row.variant_id ? { variant_id: row.variant_id } : {}),
+      variant_key: variantKey,
+      assembly,
+      chrom,
+      pos,
+      ref,
+      alt,
+    };
+    const previous = registered.get(variantKey);
+    if (previous && canonicalDigest(previous) !== canonicalDigest(candidate)) {
+      throw new Error(`candidate variant '${variantKey}' has conflicting annotation identities`);
+    }
+    registered.set(variantKey, candidate);
+  }
+  return [...registered.values()].sort((left, right) => left.variant_key.localeCompare(right.variant_key));
 }
 
 function reviewReason(kind: string, row: JsonRecord): string {
@@ -438,11 +665,13 @@ function buildPacket(args: {
   analysisId: string;
   caseId: string;
   generatedAt: string;
+  caseInput?: ResolvedClinicalCaseInput;
   grounding: GroundingCheckpoint;
   hypotheses: OperationRows;
   intervals: OperationRows;
   variantSearch: OperationRows;
   vep: OperationRows;
+  annotationAudit: OperationRows;
   evidence: OperationRows;
   reanalysis: OperationRows;
 }): EvidencePacket {
@@ -454,10 +683,18 @@ function buildPacket(args: {
     analysisId: args.analysisId,
     caseId: args.caseId,
     generatedAt: args.generatedAt,
+    ...(args.caseInput ? {
+      inputRevision: {
+        revisionId: args.caseInput.revision.revisionId,
+        revisionDigest: args.caseInput.summary.revisionDigest,
+        revisionUri: args.caseInput.summary.revisionUri,
+      },
+    } : {}),
     stages: {
       hypotheses: args.hypotheses,
       intervals: args.intervals,
       variantSearch: args.variantSearch,
+      annotationAudit: args.annotationAudit,
       reanalysis: args.reanalysis,
     },
     lanes: { direct, inverted },
@@ -501,6 +738,7 @@ function buildPacket(args: {
         args.intervals.runId,
         args.variantSearch.runId,
         args.vep.runId,
+        args.annotationAudit.runId,
         args.evidence.runId,
         args.reanalysis.runId,
       ],
@@ -526,6 +764,7 @@ ORDER BY hpo_id, matched_text`;
 
 async function runGroundingQuery(args: {
   exampleDir: string;
+  manifestSnapshot?: BioManifest;
   analysisDbPath: string;
   ledger: SqlConn;
   cas: CasStore;
@@ -538,7 +777,9 @@ async function runGroundingQuery(args: {
   const response = await runBioQueryFromManifest({
     cwd: args.exampleDir,
     dbPath: args.analysisDbPath,
-    manifestPath: "manifest.json",
+    ...(args.manifestSnapshot
+      ? { manifestSnapshot: args.manifestSnapshot, manifestBaseDir: args.exampleDir }
+      : { manifestPath: "manifest.json" }),
     sql: args.sql,
     resources: args.resources,
     runId: args.runId,
@@ -583,6 +824,7 @@ function ontologyCandidates(rows: JsonRecord[]): OntologyCandidate[] {
 
 async function runGrounding(args: {
   exampleDir: string;
+  manifestSnapshot?: BioManifest;
   analysisDbPath: string;
   ledger: SqlConn;
   cas: CasStore;
@@ -590,17 +832,40 @@ async function runGrounding(args: {
   analysisId: string;
   now: string;
   composition: GroundingRuntime;
+  caseInput?: ResolvedClinicalCaseInput;
 }): Promise<GroundingCheckpoint> {
-  const narrativeQuery = await runGroundingQuery({
-    ...args,
-    runId: `${args.analysisId}.grounding.narrative`,
-    sql: "SELECT narrative FROM case_narratives WHERE case_id = getvariable('case_id')",
-    resources: ["case_narratives"],
-    bindings: { case_id: args.caseId },
-  });
+  const caseInput = args.caseInput;
+  const narrativeQuery = caseInput
+    ? await (async () => {
+      const checkpoint = await runOperation({
+        exampleDir: args.exampleDir,
+        manifestSnapshot: args.manifestSnapshot,
+        manifestBaseDir: args.exampleDir,
+        conn: args.ledger,
+        cas: args.cas,
+        caseId: args.caseId,
+        operationId: "clinical.registered_case_narrative",
+        runId: `${args.analysisId}.grounding.narrative`,
+        now: args.now,
+        dbPath: args.analysisDbPath,
+        protectedBindings: { case_narrative_text: caseInput.narrative.text },
+      });
+      const result = await readOperationRows(args.cas, checkpoint);
+      return { rows: result.rows, runId: result.runId, resultDigest: checkpoint.resultDigest };
+    })()
+    : await runGroundingQuery({
+      ...args,
+      runId: `${args.analysisId}.grounding.narrative`,
+      sql: "SELECT narrative FROM case_narratives WHERE case_id = getvariable('case_id')",
+      resources: ["case_narratives"],
+      bindings: { case_id: args.caseId },
+    });
   if (narrativeQuery.rows.length !== 1) throw new Error(`expected one immutable narrative for case '${args.caseId}'`);
   const narrative = asString(narrativeQuery.rows[0]?.narrative);
   if (!narrative) throw new Error(`case '${args.caseId}' has an empty narrative`);
+  if (caseInput && narrativeDigest(narrative) !== caseInput.narrative.digest) {
+    throw new Error(`case '${args.caseId}' narrative query drifted from registered asset '${caseInput.narrative.assetId}'`);
+  }
   const retrievalQueryRunIds: string[] = [];
   const result = await runPhenotypeGrounding({
     narrative: { caseId: args.caseId, text: narrative, sourceDigest: narrativeDigest(narrative) },
@@ -676,6 +941,16 @@ async function runGrounding(args: {
     source: SOURCE,
     digest: resultDigest,
   });
+  if (caseInput) {
+    await recordObservationLink(args.ledger, {
+      subjectId: groundingId,
+      predicate: "uses_case_revision",
+      objectId: `case-revision:${args.caseId}:${caseInput.revision.revisionId}`,
+      recordedAt: args.now,
+      source: SOURCE,
+      digest: caseInput.summary.revisionDigest,
+    });
+  }
   const queryRunIds = [narrativeQuery.runId, ...retrievalQueryRunIds];
   for (const queryRunId of queryRunIds) {
     await recordObservationLink(args.ledger, {
@@ -788,6 +1063,8 @@ async function recordPacket(args: {
       packet_digest: packetDigest,
       packet_uri: packetUri,
       review_items: args.packet.summary.reviewQueue.length,
+      case_revision_id: args.packet.inputRevision?.revisionId ?? null,
+      case_revision_digest: args.packet.inputRevision?.revisionDigest ?? null,
     },
     recordedAt: args.recordedAt,
     source: SOURCE,
@@ -817,6 +1094,25 @@ async function recordPacket(args: {
     source: SOURCE,
     digest: packetDigest,
   });
+  if (args.packet.inputRevision) {
+    const revisionNode = `case-revision:${args.packet.caseId}:${args.packet.inputRevision.revisionId}`;
+    await recordObservationLink(args.conn, {
+      subjectId: analysisNode,
+      predicate: "uses_case_revision",
+      objectId: revisionNode,
+      recordedAt: args.recordedAt,
+      source: SOURCE,
+      digest: args.packet.inputRevision.revisionDigest,
+    });
+    await recordObservationLink(args.conn, {
+      subjectId: packetUri,
+      predicate: "derived_from",
+      objectId: args.packet.inputRevision.revisionUri,
+      recordedAt: args.recordedAt,
+      source: SOURCE,
+      digest: args.packet.inputRevision.revisionDigest,
+    });
+  }
   await recordObservationLink(args.conn, {
     subjectId: analysisNode,
     predicate: "produces",
@@ -876,8 +1172,10 @@ async function workflowReplayDigest(
   hypotheses: PhenotypeHypothesisRuntime,
   variantSearch: CandidateVariantSearchRuntime,
   vep: VepAnnotationRuntime,
+  caseInput?: ResolvedClinicalCaseInput,
 ): Promise<string> {
-  const manifest = JSON.parse(await fs.readFile(join(exampleDir, "manifest.json"), "utf8")) as BioManifest;
+  const manifest = caseInput?.manifest
+    ?? JSON.parse(await fs.readFile(join(exampleDir, "manifest.json"), "utf8")) as BioManifest;
   const hypothesisManifestPath = isAbsolute(hypotheses.manifestPath)
     ? hypotheses.manifestPath
     : resolve(exampleDir, hypotheses.manifestPath);
@@ -914,6 +1212,11 @@ async function workflowReplayDigest(
   return canonicalDigest({
     schema: WORKFLOW_VERSION,
     caseId,
+    caseRevision: caseInput ? {
+      revisionId: caseInput.revision.revisionId,
+      revisionDigest: caseInput.summary.revisionDigest,
+      assetDigests: caseInput.revision.assets.map((asset) => ({ assetId: asset.assetId, digest: asset.digest })),
+    } : null,
     manifest,
     inputs,
     grounding: {
@@ -971,8 +1274,22 @@ export async function runClinicalGenomicsWorkbench(req: RunClinicalGenomicsReque
   if (!req.vep?.url || !req.vep.sourceId || !req.vep.sourceVersion || !req.vep.headersJson || !req.vep.duckdbInitSql.length) {
     throw new Error("VEP composition requires an endpoint, source identity, headers, and DuckDB initialization");
   }
+  const caseInput = req.caseRevisionId
+    ? await resolveRegisteredClinicalCaseInput(exampleDir, req.caseId, req.caseRevisionId, req.variantSearch)
+    : undefined;
+  const clinicalManifest = caseInput?.manifest
+    ?? JSON.parse(await fs.readFile(join(exampleDir, "manifest.json"), "utf8")) as BioManifest;
+  const variantSearchRuntime = caseInput?.variantSearch ?? req.variantSearch;
   const composition = req.grounding;
-  const replayDigest = await workflowReplayDigest(exampleDir, req.caseId, composition, req.hypotheses, req.variantSearch, req.vep);
+  const replayDigest = await workflowReplayDigest(
+    exampleDir,
+    req.caseId,
+    composition,
+    req.hypotheses,
+    variantSearchRuntime,
+    req.vep,
+    caseInput,
+  );
   const analysisDbDir = join(exampleDir, ".pi", "bio-agent", "analyses");
   const analysisDbPath = join(analysisDbDir, `${createHash("sha256").update(analysisId).digest("hex")}.duckdb`);
   await fs.mkdir(analysisDbDir, { recursive: true });
@@ -989,6 +1306,7 @@ export async function runClinicalGenomicsWorkbench(req: RunClinicalGenomicsReque
           stepId: "phenotype-grounding",
           run: async () => toJsonValue(await runGrounding({
             exampleDir,
+            manifestSnapshot: clinicalManifest,
             analysisDbPath,
             ledger: store.conn,
             cas,
@@ -996,6 +1314,7 @@ export async function runClinicalGenomicsWorkbench(req: RunClinicalGenomicsReque
             analysisId,
             now,
             composition,
+            ...(caseInput ? { caseInput } : {}),
           })),
         },
         {
@@ -1029,15 +1348,15 @@ export async function runClinicalGenomicsWorkbench(req: RunClinicalGenomicsReque
             const hypotheses = await readOperationRows(cas, hypothesisCheckpoint);
             const intervals = await runOperation({
               exampleDir,
-              manifestPath: req.variantSearch.intervalManifestPath,
+              manifestPath: variantSearchRuntime.intervalManifestPath,
               conn: store.conn,
               cas,
               caseId: req.caseId,
-              operationId: req.variantSearch.intervalOperationId,
+              operationId: variantSearchRuntime.intervalOperationId,
               runId: `${analysisId}.intervals`,
               now,
               dbPath: analysisDbPath,
-              bindings: { assembly: req.variantSearch.assembly },
+              bindings: { assembly: variantSearchRuntime.assembly },
               protectedBindings: { hypotheses_json: JSON.stringify(hypotheses.rows) },
             });
             await recordObservationLink(store.conn, {
@@ -1056,32 +1375,32 @@ export async function runClinicalGenomicsWorkbench(req: RunClinicalGenomicsReque
           run: async ({ valueOf }) => {
             const intervalCheckpoint = valueOf<JsonValue>("candidate-gene-intervals") as unknown as OperationCheckpoint;
             const intervals = await readOperationRows(cas, intervalCheckpoint);
-            const templatePath = isAbsolute(req.variantSearch.variantSearchManifestPath)
-              ? req.variantSearch.variantSearchManifestPath
-              : resolve(req.variantSearch.manifestBaseDir, req.variantSearch.variantSearchManifestPath);
+            const templatePath = isAbsolute(variantSearchRuntime.variantSearchManifestPath)
+              ? variantSearchRuntime.variantSearchManifestPath
+              : resolve(variantSearchRuntime.manifestBaseDir, variantSearchRuntime.variantSearchManifestPath);
             const template = JSON.parse(await fs.readFile(templatePath, "utf8")) as BioManifest;
             const dynamic = buildCandidateVariantSearchManifest(
               template,
               intervals.rows as unknown as CandidateIntervalRow[],
-              req.variantSearch,
+              variantSearchRuntime,
             );
             const search = await runOperation({
               exampleDir,
               manifestSnapshot: dynamic.manifest,
-              manifestBaseDir: req.variantSearch.manifestBaseDir,
+              manifestBaseDir: variantSearchRuntime.manifestBaseDir,
               conn: store.conn,
               cas,
               caseId: req.caseId,
-              operationId: req.variantSearch.variantSearchOperationId,
+              operationId: variantSearchRuntime.variantSearchOperationId,
               runId: `${analysisId}.variant-search`,
               now,
               dbPath: analysisDbPath,
-              ...(dynamic.regions.length ? { duckdbInitSql: req.variantSearch.duckdbInitSql } : {}),
+              ...(dynamic.regions.length ? { duckdbInitSql: variantSearchRuntime.duckdbInitSql } : {}),
               protectedBindings: {
                 intervals_json: JSON.stringify(intervals.rows),
-                case_vcf_path: req.variantSearch.vcfPath.includes("://") || isAbsolute(req.variantSearch.vcfPath)
-                  ? req.variantSearch.vcfPath
-                  : resolve(req.variantSearch.manifestBaseDir, req.variantSearch.vcfPath),
+                case_vcf_path: variantSearchRuntime.vcfPath.includes("://") || isAbsolute(variantSearchRuntime.vcfPath)
+                  ? variantSearchRuntime.vcfPath
+                  : resolve(variantSearchRuntime.manifestBaseDir, variantSearchRuntime.vcfPath),
               },
             });
             await recordObservationLink(store.conn, {
@@ -1100,8 +1419,8 @@ export async function runClinicalGenomicsWorkbench(req: RunClinicalGenomicsReque
           run: async ({ valueOf }) => {
             const variantSearchCheckpoint = valueOf<JsonValue>("candidate-variant-search") as unknown as OperationCheckpoint;
             const variantSearch = await readOperationRows(cas, variantSearchCheckpoint);
-            const selected = variantSearch.rows.filter((row) => row.record_kind === "variant");
-            const manifest = JSON.parse(await fs.readFile(join(exampleDir, "manifest.json"), "utf8")) as BioManifest;
+            const selected = projectRegisteredAnnotationVariants(variantSearch.rows, req.caseId);
+            const manifest = structuredClone(clinicalManifest);
             const httpResource = manifest.provides?.resources?.find((resource) => resource.id === "vep_http_results");
             if (!httpResource) throw new Error("clinical manifest has no vep_http_results resource");
             httpResource.params = {
@@ -1126,6 +1445,10 @@ export async function runClinicalGenomicsWorkbench(req: RunClinicalGenomicsReque
                 vep_url: req.vep.url,
                 vep_headers_json: req.vep.headersJson,
                 vep_profile_id: req.vep.profileId ?? "",
+                vep_source_id: req.vep.sourceId,
+                vep_source_version: req.vep.sourceVersion,
+                vep_source_uri: req.vep.url,
+                vep_observed_at: now,
               },
               ...(req.vep.hostCapabilityReceipts ? { hostCapabilityReceipts: req.vep.hostCapabilityReceipts } : {}),
             });
@@ -1141,12 +1464,51 @@ export async function runClinicalGenomicsWorkbench(req: RunClinicalGenomicsReque
           },
         },
         {
+          stepId: "variant-annotation-audit",
+          run: async ({ valueOf }) => {
+            const variantSearchCheckpoint = valueOf<JsonValue>("candidate-variant-search") as unknown as OperationCheckpoint;
+            const annotationCheckpoint = valueOf<JsonValue>("vep-annotation") as unknown as OperationCheckpoint;
+            const variantSearch = await readOperationRows(cas, variantSearchCheckpoint);
+            const annotations = await readOperationRows(cas, annotationCheckpoint);
+            const registered = projectRegisteredAnnotationVariants(variantSearch.rows, req.caseId);
+            const audit = await runOperation({
+              exampleDir,
+              manifestSnapshot: structuredClone(clinicalManifest),
+              manifestBaseDir: exampleDir,
+              conn: store.conn,
+              cas,
+              caseId: req.caseId,
+              operationId: "clinical.variant_annotation_audit",
+              runId: `${analysisId}.annotation-audit`,
+              now,
+              dbPath: analysisDbPath,
+              protectedBindings: {
+                registered_annotation_variants_json: JSON.stringify(registered),
+                variant_annotation_observations_json: JSON.stringify(annotations.rows),
+              },
+            });
+            for (const dependencyRunId of [variantSearchCheckpoint.runId, annotationCheckpoint.runId]) {
+              await recordObservationLink(store.conn, {
+                subjectId: `run:${audit.runId}`,
+                predicate: "uses_run",
+                objectId: `run:${dependencyRunId}`,
+                recordedAt: now,
+                source: SOURCE,
+                digest: audit.resultDigest,
+              });
+            }
+            return toJsonValue(audit);
+          },
+        },
+        {
           stepId: "reanalysis",
           run: async ({ valueOf }) => {
-            const annotationCheckpoint = valueOf<JsonValue>("vep-annotation") as unknown as OperationCheckpoint;
-            const annotations = await readOperationRows(cas, annotationCheckpoint);
-            return toJsonValue(await runOperation({
+            const auditCheckpoint = valueOf<JsonValue>("variant-annotation-audit") as unknown as OperationCheckpoint;
+            const auditRows = await readOperationRows(cas, auditCheckpoint);
+            const reanalysis = await runOperation({
               exampleDir,
+              manifestSnapshot: structuredClone(clinicalManifest),
+              manifestBaseDir: exampleDir,
               conn: store.conn,
               cas,
               caseId: req.caseId,
@@ -1156,9 +1518,18 @@ export async function runClinicalGenomicsWorkbench(req: RunClinicalGenomicsReque
               dbPath: analysisDbPath,
               protectedBindings: {
                 candidate_variant_search_json: "[]",
-                vep_annotations_json: JSON.stringify(annotations.rows),
+                variant_annotation_audit_json: JSON.stringify(auditRows.rows),
               },
-            }));
+            });
+            await recordObservationLink(store.conn, {
+              subjectId: `run:${reanalysis.runId}`,
+              predicate: "uses_run",
+              objectId: `run:${auditCheckpoint.runId}`,
+              recordedAt: now,
+              source: SOURCE,
+              digest: reanalysis.resultDigest,
+            });
+            return toJsonValue(reanalysis);
           },
         },
         {
@@ -1166,12 +1537,14 @@ export async function runClinicalGenomicsWorkbench(req: RunClinicalGenomicsReque
           run: async ({ valueOf }) => {
             const hypothesisCheckpoint = valueOf<JsonValue>("phenotype-hypotheses") as unknown as OperationCheckpoint;
             const variantSearchCheckpoint = valueOf<JsonValue>("candidate-variant-search") as unknown as OperationCheckpoint;
-            const annotationCheckpoint = valueOf<JsonValue>("vep-annotation") as unknown as OperationCheckpoint;
+            const auditCheckpoint = valueOf<JsonValue>("variant-annotation-audit") as unknown as OperationCheckpoint;
             const hypotheses = await readOperationRows(cas, hypothesisCheckpoint);
             const variantSearch = await readOperationRows(cas, variantSearchCheckpoint);
-            const annotations = await readOperationRows(cas, annotationCheckpoint);
+            const auditRows = await readOperationRows(cas, auditCheckpoint);
             const evidence = await runOperation({
               exampleDir,
+              manifestSnapshot: structuredClone(clinicalManifest),
+              manifestBaseDir: exampleDir,
               conn: store.conn,
               cas,
               caseId: req.caseId,
@@ -1182,7 +1555,7 @@ export async function runClinicalGenomicsWorkbench(req: RunClinicalGenomicsReque
               protectedBindings: {
                 phenotype_hypotheses_json: JSON.stringify(hypotheses.rows),
                 candidate_variant_search_json: JSON.stringify(variantSearch.rows),
-                vep_annotations_json: JSON.stringify(annotations.rows),
+                variant_annotation_audit_json: JSON.stringify(auditRows.rows),
               },
             });
             await recordObservationLink(store.conn, {
@@ -1201,6 +1574,14 @@ export async function runClinicalGenomicsWorkbench(req: RunClinicalGenomicsReque
               source: SOURCE,
               digest: evidence.resultDigest,
             });
+            await recordObservationLink(store.conn, {
+              subjectId: `run:${evidence.runId}`,
+              predicate: "uses_run",
+              objectId: `run:${auditCheckpoint.runId}`,
+              recordedAt: now,
+              source: SOURCE,
+              digest: evidence.resultDigest,
+            });
             return toJsonValue(evidence);
           },
         },
@@ -1212,23 +1593,27 @@ export async function runClinicalGenomicsWorkbench(req: RunClinicalGenomicsReque
             const intervalCheckpoint = valueOf<JsonValue>("candidate-gene-intervals") as unknown as OperationCheckpoint;
             const variantSearchCheckpoint = valueOf<JsonValue>("candidate-variant-search") as unknown as OperationCheckpoint;
             const annotationCheckpoint = valueOf<JsonValue>("vep-annotation") as unknown as OperationCheckpoint;
+            const annotationAuditCheckpoint = valueOf<JsonValue>("variant-annotation-audit") as unknown as OperationCheckpoint;
             const evidenceCheckpoint = valueOf<JsonValue>("case-evidence") as unknown as OperationCheckpoint;
             const reanalysisCheckpoint = valueOf<JsonValue>("reanalysis") as unknown as OperationCheckpoint;
             const hypotheses = await readOperationRows(cas, hypothesisCheckpoint);
             const intervals = await readOperationRows(cas, intervalCheckpoint);
             const variantSearch = await readOperationRows(cas, variantSearchCheckpoint);
             const vep = await readOperationRows(cas, annotationCheckpoint);
+            const annotationAudit = await readOperationRows(cas, annotationAuditCheckpoint);
             const evidence = await readOperationRows(cas, evidenceCheckpoint);
             const reanalysis = await readOperationRows(cas, reanalysisCheckpoint);
             const packet = buildPacket({
               analysisId,
               caseId: req.caseId,
               generatedAt: now,
+              ...(caseInput ? { caseInput } : {}),
               grounding: groundingCheckpoint,
               hypotheses,
               intervals,
               variantSearch,
               vep,
+              annotationAudit,
               evidence,
               reanalysis,
             });
