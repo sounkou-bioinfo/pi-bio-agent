@@ -1,0 +1,2 @@
+profile_id,profile_version,method_code,evaluator_id,evaluator_version,method_definition_digest,policy_status,source_id
+clingen.svcv4.public-draft,2026-07-10,POP_FRQ,clinical.svcv4_pop_frq,0.1.0,sha256:0132077f11a9f47c1065c9f9e79a28b6424ad98dcad088ec97ac0b8f1ab0edcf,active,svcv4-model-hod-workflows

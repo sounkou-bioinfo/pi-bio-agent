@@ -1,0 +1,5 @@
+profile_id,profile_version,method_code,measurement,rule_id,lower_bound,lower_inclusive,upper_bound,upper_inclusive,score,priority,source_id
+clingen.svcv4.public-draft,2026-07-10,POP_FRQ,frequency_ratio_to_disease_max,pop_frq_at_or_above_daf,1,true,,false,-6,1,svcv4-model-hod-workflows
+clingen.svcv4.public-draft,2026-07-10,POP_FRQ,frequency_ratio_to_disease_max,pop_frq_ten_percent_to_daf,0.1,true,1,false,-3,2,svcv4-model-hod-workflows
+clingen.svcv4.public-draft,2026-07-10,POP_FRQ,frequency_ratio_to_disease_max,pop_frq_one_to_ten_percent,0.01,true,0.1,false,-1,3,svcv4-model-hod-workflows
+clingen.svcv4.public-draft,2026-07-10,POP_FRQ,frequency_ratio_to_disease_max,pop_frq_below_one_percent,0,true,0.01,false,0,4,svcv4-model-hod-workflows

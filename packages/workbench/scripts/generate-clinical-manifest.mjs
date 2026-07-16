@@ -11,6 +11,7 @@ const manifests = [
   { templateName: "monarch.manifest.template.json", manifestName: "monarch.fixture.manifest.json", fixture: true },
   { templateName: "gene-intervals.manifest.template.json", manifestName: "gene-intervals.manifest.json" },
   { templateName: "variant-search.manifest.template.json", manifestName: "variant-search.manifest.json" },
+  { templateName: "svcv4.manifest.template.json", manifestName: "svcv4.manifest.json" },
 ];
 
 const fixtureSources = {

@@ -4,14 +4,13 @@
 policy, evidence packets, APIs, and browser surfaces are composed. The root package remains the policy-free
 execution and evidence substrate.
 
-The workbench includes a source-pinned published-variant surface, [clinical genomics](examples/clinical-genomics/application.md), and the generic
+The workbench includes [clinical genomics](examples/clinical-genomics/application.md) and the generic
 [method-selection application](examples/method-selection/application.md). Their executable QMD files are the
 application narratives and proofs; rendered Markdown is committed for ordinary readers.
 
-The browser shell loads host-approved `WorkbenchAddon` pairs. Variants projects registered benchmark rows and
-independently resolved source snapshots; Clinical Evidence and Clinical Reanalysis are loaded only for a workspace
-that explicitly supplies the clinical manifest; and Artifacts projects verified CAS figures/reports. Addons use the
-same public SDK and store rather than creating application-local persistence.
+The browser shell loads host-approved `WorkbenchAddon` pairs. Clinical Evidence and Clinical Reanalysis are loaded
+only for a workspace that explicitly supplies the clinical manifest; Artifacts projects verified CAS figures and
+reports. Addons use the same public SDK and store rather than creating application-local persistence.
 
 ## Package boundary
 
@@ -44,11 +43,18 @@ Both lanes close into `case_evidence`. Coverage states distinguish an unsearched
 with no supporting variant. Missing population frequency remains an abstention. The complete relations stay in the
 analysis DuckDB; the review-bearing packet and checkpoints use CAS references.
 
-This is evidence routing. It does not claim ACMG/AMP classification, diagnosis, or clinical validity. The next
-application closure can extend the same resumable study from uploaded VCF/TSV/CSV plus a case narrative through HPO
-grounding, phenotype/gene retrieval, indexed range restriction, VEP, typed ACMG evidence proposals, phenotype
-reranking, literature evidence, and gated review. VEP annotations alone are not an ACMG classification: population,
-inheritance/segregation, de novo, functional, curated, and review evidence remain explicit inputs.
+The existing case-workup lane is evidence routing. It does not claim diagnosis or clinical validity. The separate
+SVCv4 draft kernel below begins the deterministic classification backbone, while the same resumable study can accept
+registered VCF/TSV/CSV assets, one or more case-description revisions, family structure, and an optional prior
+assessment. VEP annotations alone are not a classification: population, inheritance/segregation, de novo,
+functional, curated, phenotype, and review evidence remain explicit inputs.
+
+Case inputs enter as immutable revisions rather than mutable workspace paths. A revision records pseudonymous family
+members and relationships plus CAS-addressed narrative, indexed variant-set, optional tabular variant, and optional
+prior-assessment assets. The CLI stages local files into CAS; the HTTP API supports streamed, digest-verified asset
+upload followed by revision registration. Every analysis records the exact revision digest and links it to the
+grounding, runs, packet, and graph projection. Omitted optional assets become typed empty relations rather than
+falling back to example data.
 
 ### Release-pinned ClinVar reclassification harness
 
@@ -78,62 +84,35 @@ blind. The result measures later ClinVar source-label agreement, not clinical tr
 replacement for expert review. The executable proof is
 [clinvar-temporal.test.ts](test/clinvar-temporal.test.ts).
 
-### Published ACMG workbook
+### SVCv4 public-draft SQL kernel
 
-The Ma et al. supplementary workbook now enters through `registerPublishedAcmgWorkbook`: the ZIP container, inner
-XLSX, and normalized bundle are content-addressed; a declared SQL operation validates role counts and data-quality
-signals; and the registration links those artifacts to the validation run in the ordinary ledger. The adapter keeps
-four roles separate: S1-S7 Hong Kong Genome Project (HKGP) rule development, S8-S11 authored knowledge, S12 held-out
-variant validation, and S13 variant reanalysis. It preserves source cells, normalizes five-class labels while retaining
-raw spellings, parses criterion strength/footnote markers, and independently recomputes the worksheet's model/human
-concordance flags.
+The clinical example contains a source-pinned, reviewable SQL projection of the public ClinGen SVCv4 Classification
+Model draft. It declares the score hierarchy, caps, branch exclusivity, profile selection, evidence-line admission,
+roll-up, classification bands, and fail-closed classification gate. The only active method evaluator is `POP_FRQ`.
+It preserves observed frequency, a counted zero, a covered no-hit, insufficient coverage, and a missing query as
+different states; a one-sided exact binomial upper bound can represent what a sufficiently powered no-hit excludes
+without fabricating an allele frequency of zero. A counted zero requires a source variant record with `AC=0` and
+`AN>0`. A no-hit keeps AF, AC, and source AN null and may use only a separately evidenced locus-level post-QC callable
+allele denominator; nominal panel or cohort size is not substituted for callability.
 
-The `rule_development` role is specific: S1-S7 contain 1,000 curator-reviewed HKGP variants used to optimize the
-AI-CURA prompt/evidence-reading procedure for seven literature-dependent criteria. They did not develop the ACMG/AMP
-rules. They are real variant examples, but they are development-contaminated and therefore cannot contribute to
-independent validation metrics.
+`clinical.svcv4_form_scopes` is the bridge from indexed candidate search to the classification model. It joins one
+checkpointed candidate result to separately admitted, source-pinned gene-disease-MOI observations and emits either
+one exact case-independent `POP_FRQ` scope or an explicit `not_formed` reason. It does not infer MOI from a gene,
+phenotype rank, or candidate allele, and its assembly-pinned fallback allele identifier is deliberately not labelled
+as GA4GH VRS.
 
-The paper uses two different retrieval inputs that should not be collapsed into “RAG”:
+`clinical.svcv4_case_audit` separately validates the public case-capture contracts for `CLN_AFF`, `CLN_DNV`,
+`CLN_ALTV`, `CLN_ALTG`, and `CLN_UAF`. It preserves absent fields, explicit nulls, and `UNKNOWN`, validates nested
+family/compound-heterozygous context, and records invalid or incomplete evidence without awarding points. The public
+draft does not yet publish the ClinGen CSpec scoring algorithms for these methods, `POP_HMZ`, or the PFD methods, and
+`CLN_CCS` remains underspecified. Those evaluators are deliberately marked `specified_not_implemented` or
+`underspecified` rather than reconstructed from older rules.
 
-- variant publications were found outside the model (the study used Mastermind), downloaded with supplements, and
-  converted when necessary from XLSX to CSV or Word to text before being supplied to the LLM. These files are the
-  evidence corpus for PVS1 (RNA), PS2/PM6, PS3, PS4, PM3, PP1, and PP4. The preparation was necessary because the
-  model was run as a bounded document reader rather than an autonomous literature-search agent, and because tables
-  and supplements had to be represented in supported formats;
-- S8-S10 are narrow authored policy/interpretation knowledge bases retrieved for gene-disease consistency in
-  PS2/PM6, modified segregation scoring in PP1, and gene-specific phenotype/testing specificity in PP4. S11 supplies
-  PS4 thresholds. This is criterion guidance, not a search index of the publications.
-
-The remaining literature-independent evidence was assembled from declared sources and deterministic predictors. The
-study then ran the literature-dependent readers at least twice and manually aggregated criterion decisions. That is
-a useful benchmark design, but it is not yet an end-to-end tool-using agent or a complete automated ACMG/AMP kernel.
-
-These rows are variant-centered, not rare-disease case packets. The workbook contains no stable ClinVar/ClinGen
-accessions, so import keeps identity unresolved. `resolvePublishedVariantWithNcbi` then runs declared `http.get`
-operations against NCBI Variation and ClinVar, retains every response and resolver receipt in CAS, validates the
-HGVS/SPDI/GRCh38 identity, and links the resolution to the workbook row and source runs. Run the exact supplied
-archive with both content digests:
-
-```sh
-npm run benchmark:acmg --workspace=packages/workbench -- \
-  --archive /path/to/scitranslmed.adz4172_tables_s1_to_s13.zip \
-  --expected-archive-digest sha256:eedf0d516842e5a1f929606161f61ae8185253d679810abc603d64526bbdd2ee \
-  --expected-workbook-digest sha256:4e8c55487dafcf88f4c34c233e52f5fc12860f7a7e9dcef4490f6464535ddbfa \
-  --workspace .pi/published-acmg-benchmark
-
-npm run resolve:acmg-variant --workspace=packages/workbench -- \
-  --row-id 'ST12_150 ClinGen varinats:39' \
-  --workspace .pi/published-acmg-benchmark
-
-npm run serve --workspace=packages/workbench -- \
-  .pi/published-acmg-benchmark \
-  8787
-```
-
-Open <http://127.0.0.1:8787> and choose **Variants**. The featured real row is
-`NM_001369369.1(FOXN1):c.880G>A (p.Val294Ile)`. The pane keeps the workbook source classification, human
-reassessment, current ClinVar classification, current identifiers, criteria, source response digests, and run ids
-separate. The importer prints bounded role counts and quality findings, not the 1,480 source rows.
+The only included profile is `method_evaluation_only`, so `clinical.svcv4_classify` cannot emit a clinical class.
+Source identities and method-definition digests are data, and a future clinical profile must admit a complete set of
+validated evaluators before the classification gate opens. The executable contract is
+[svcv4.test.ts](test/svcv4.test.ts); the generated binding is
+[svcv4.manifest.json](examples/clinical-genomics/svcv4.manifest.json).
 
 ## Run
 
@@ -147,10 +126,10 @@ npm run application:method-selection
 npm run application:method-selection-agent
 ```
 
-The clinical application QMD uses synthetic biology only as a deterministic substrate regression proof: it runs a
-hermetic VEP-compatible endpoint, verifies transient retry, executes all eight steps, resumes from checkpoints, and
-renders a collapsed evidence summary. It is not the default browser workspace and must not be presented as a real
-case or clinical benchmark.
+The clinical application QMD uses a deterministic regression case: it registers an immutable family/case revision,
+runs a hermetic VEP-compatible endpoint, verifies transient retry, executes all nine steps, resumes from checkpoints,
+and renders a collapsed evidence summary. It proves the application contracts, not model quality, clinical validity,
+or performance on a real cohort.
 
 The method-selection QMD studies a refreshable action relation, discovers the method with SQL under host constraints,
 authors a manifest operation, runs it, validates and approves the candidate, writes the approved skill revision into the
@@ -167,15 +146,24 @@ Run the package CLI directly when an application document is not needed:
 
 ```sh
 npm run build:all
+node packages/workbench/dist/cli.js case register \
+  /path/to/workspace \
+  /path/to/case-revision.json
+
 node packages/workbench/dist/cli.js run \
-  packages/workbench/examples/clinical-genomics \
+  /path/to/workspace \
   CASE-RD-001 \
+  <revision-id-from-register> \
   analysis-demo
 ```
 
-The default CLI composition uses recorded grounding and local graph/VCF fixtures but the configured VEP endpoint.
-Embedded hosts inject model or human grounding ports, graph attachment, VCF identity, VEP endpoint/profile, network
-admission, credentials, and extension provisioning.
+Asset paths in `case-revision.json` are resolved relative to the descriptor and staged into the workspace CAS before
+the revision is committed. `case list` and `case get` inspect the immutable registry. The bundled CLI run composition
+still uses recorded grounding and the local graph/interval providers while consuming the registered narrative and
+indexed variant set plus the configured VEP endpoint. It is therefore an executable integration surface, not yet a
+production rare-disease interpretation profile. Embedded hosts inject real model or human grounding ports, pinned
+graph and interval sources, VCF identity, annotation endpoint/profile, network admission, credentials, and extension
+provisioning.
 
 ## Live foreign graph
 
@@ -193,17 +181,16 @@ targeted search and review, not a diagnosis.
 
 ```sh
 npm run serve --workspace=packages/workbench -- \
-  .pi/published-acmg-benchmark \
+  examples/clinical-genomics \
   8787
 ```
 
 Open <http://127.0.0.1:8787>. The browser opens, resumes, and renames persistent Pi sessions; discovers invokable
 extension/template/skill commands for slash completion; accepts prompt/steer/follow-up input; and aborts or closes an
-active session. Variants shows bounded S12/S13 rows, workbook decisions, model decisions, and independently pinned
-current-source identities. Tool payloads and raw lifecycle deltas stay under collapsible diagnostics rather than
-dominating the conversation. Starting the server against `examples/clinical-genomics` explicitly adds the synthetic
-Evidence and Reanalysis regression panes; they are not loaded into the real-variant workspace. Every pane hands
-durable run ids and CAS references back to Pi for ledger/graph inspection.
+active session. Tool payloads and raw lifecycle deltas stay under collapsible diagnostics rather than dominating the
+conversation. Starting the server against `examples/clinical-genomics` explicitly adds the hermetic Evidence and
+Reanalysis regression panes. Every pane hands durable run ids and CAS references back to Pi for ledger/graph
+inspection.
 
 This host explicitly grants local `compute.run` with the workspace CAS. A plot or report is a declared compute output
 with media/role metadata, then a run/CAS/graph artifact visible in the Artifacts addon. A file written directly by

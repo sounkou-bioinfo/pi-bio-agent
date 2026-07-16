@@ -1,15 +1,15 @@
 WITH enriched AS (
   SELECT
     v.*,
-    va.impact AS vep_impact,
-    va.consequence AS vep_consequence,
-    va.allele_frequency AS vep_allele_frequency,
-    va.clinical_significance AS vep_clinical_significance,
+    va.impact AS annotation_impact,
+    va.consequence AS annotation_consequence,
+    va.allele_frequency AS annotation_allele_frequency,
+    va.clinical_significance AS annotation_clinical_significance,
     coalesce(va.consequence, v.consequence) AS assessed_consequence,
     coalesce(va.allele_frequency, TRY_CAST(v.allele_frequency AS DOUBLE)) AS assessed_allele_frequency,
     coalesce(va.clinical_significance, v.clinical_significance) AS assessed_clinical_significance
   FROM variant_inputs v
-  LEFT JOIN vep_annotations va
+  LEFT JOIN variant_annotations va
     ON va.variant_key = v.variant_key
    AND (va.gene IS NULL OR va.gene = v.gene)
 )
@@ -25,10 +25,10 @@ SELECT
   v.assessed_consequence AS consequence,
   v.assessed_allele_frequency AS allele_frequency,
   v.assessed_clinical_significance AS clinical_significance,
-  v.vep_impact,
-  v.vep_consequence,
-  v.vep_allele_frequency,
-  v.vep_clinical_significance,
+  v.annotation_impact,
+  v.annotation_consequence,
+  v.annotation_allele_frequency,
+  v.annotation_clinical_significance,
   v.zygosity,
   v.inheritance,
   lof.id IS NOT NULL AS is_predicted_loss_of_function,

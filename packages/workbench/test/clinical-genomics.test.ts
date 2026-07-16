@@ -25,6 +25,7 @@ import {
 import { loadRecordedGroundingRuntime } from "../src/recorded-grounding.js";
 import { localMonarchFixtureRuntime } from "../src/monarch-host.js";
 import { localCandidateVariantSearchRuntime } from "../src/candidate-variant-search.js";
+import { registerClinicalCaseRevision } from "../src/clinical-case-registry.js";
 import type { VepAnnotationRuntime } from "../src/clinical-genomics.js";
 import { startVepFixture } from "./vep-fixture.js";
 
@@ -141,7 +142,7 @@ test("clinical workbench reconciles direct and inverted traversal into one evide
     now: "2026-07-05T12:00:00Z",
   });
 
-  assert.equal(out.workflow.executedSteps, 8);
+  assert.equal(out.workflow.executedSteps, 9);
   assert.equal(out.workflow.reusedSteps, 0);
   assert.equal(out.packet.schema, "pi-bio.workbench.evidence_packet.v1");
   assert.equal(out.packet.summary.kernelScope, "evidence routing only; not a complete clinical classification kernel");
@@ -158,6 +159,11 @@ test("clinical workbench reconciles direct and inverted traversal into one evide
   assert.equal(out.packet.summary.invertedUnsearched, 0);
   assert.equal(out.packet.summary.conflicts, 2);
   assert.equal(out.packet.summary.reanalysisSignals, 1);
+  assert.equal(
+    new Set(out.packet.stages.annotationAudit.rows.filter((row) => row.audit_status === "complete").map((row) => row.variant_key)).size,
+    3,
+  );
+  assert.equal(out.packet.stages.annotationAudit.rows.filter((row) => row.evidence_eligible).length, 3);
   assert.equal(out.packet.grounding.mode, "pre+post");
   assert.equal(out.packet.grounding.groundingId, "grounding:analysis-evidence");
   assert.equal(out.packet.grounding.acceptedCount, 4);
@@ -173,12 +179,104 @@ test("clinical workbench reconciles direct and inverted traversal into one evide
   assert.equal(supported?.gene_id, "HGNC:GENEB");
   assert.equal(supported?.hypothesis_rank, 1);
   assert.deepEqual(supported?.gene_disease_predicates, ["biolink:causes"]);
-  assert.equal(supported?.vep_impact, "HIGH");
-  assert.equal(supported?.vep_consequence, "stop_gained");
-  assert.equal(supported?.vep_allele_frequency, 0.0002);
+  assert.equal(supported?.annotation_impact, "HIGH");
+  assert.equal(supported?.annotation_consequence, "stop_gained");
+  assert.equal(supported?.annotation_allele_frequency, null, "VEP colocated population values are not population evidence");
+  assert.equal(supported?.annotation_clinical_significance, null, "VEP colocated ClinVar labels are not clinical assertions");
   assert.ok(inverted.some((row) => row.gene === "GENEH" && row.evidence_status === "hypothesis_without_supporting_variant"));
   assert.ok(out.packet.summary.reviewQueue.some((row) => row.kind === "review_missing_genotype_support" && row.target === "hypothesis:MONDO:GENEH:GENEH"));
   assert.ok(out.packet.summary.reviewQueue.some((row) => row.kind === "resolve_frequency" && row.target === "variant:2-47637258-C-CT"));
+});
+
+test("clinical analyses consume an exact registered case revision without fixture input fallback", async () => {
+  const exampleDir = await copyFixture();
+  const narrative = "The proband was late to sit and walk and has hypotonia. Her mother has no seizures. Possible ataxia remains uncertain.";
+  await registerClinicalCaseRevision(exampleDir, {
+    caseId: "CASE-RD-001",
+    revisionId: "r-registered",
+    indexMemberIds: ["proband"],
+    members: [
+      { memberId: "proband", role: "proband", affectedStatus: "affected", sex: "female" },
+      { memberId: "mother", role: "mother", affectedStatus: "unaffected", sex: "female" },
+    ],
+    relationships: [
+      { fromMemberId: "mother", predicate: "parent_of", toMemberId: "proband" },
+    ],
+    assets: [
+      {
+        assetId: "narrative",
+        kind: "clinical_narrative",
+        mediaType: "text/plain",
+        bytes: Buffer.from(narrative),
+        memberIds: ["proband", "mother"],
+      },
+      {
+        assetId: "variants",
+        kind: "variant_set",
+        mediaType: "application/gzip",
+        format: "vcf.gz",
+        assembly: "GRCh38",
+        bytes: await fs.readFile(join(exampleDir, "data", "case_variants.vcf.gz")),
+        memberIds: ["proband"],
+      },
+      {
+        assetId: "variants-index",
+        kind: "variant_index",
+        mediaType: "application/octet-stream",
+        format: "tbi",
+        bytes: await fs.readFile(join(exampleDir, "data", "case_variants.vcf.gz.tbi")),
+        memberIds: ["proband"],
+        attributes: { index_for: "variants" },
+      },
+      {
+        assetId: "variant-table",
+        kind: "variant_table",
+        mediaType: "text/csv",
+        format: "csv",
+        bytes: await fs.readFile(join(exampleDir, "data", "case_variants.csv")),
+        memberIds: ["proband"],
+      },
+    ],
+    recordedAt: "2026-07-05T11:00:00Z",
+  });
+
+  await fs.writeFile(join(exampleDir, "data", "case_narratives.csv"), "case_id,narrative\nCASE-RD-001,fixture-poison\n");
+  await fs.writeFile(join(exampleDir, "data", "case_variants.csv"), "case_id,variant_key,gene,consequence,allele_frequency,clinical_significance,zygosity,inheritance\n");
+  await fs.writeFile(join(exampleDir, "data", "prior_assessment.csv"), "case_id,variant_key,prior_status\nCASE-RD-001,fixture-only,curated_plp_candidate\n");
+
+  const out = await runFixture(exampleDir, {
+    caseId: "CASE-RD-001",
+    caseRevisionId: "r-registered",
+    analysisId: "analysis-registered-revision",
+    now: "2026-07-05T12:00:00Z",
+  });
+
+  assert.equal(out.packet.inputRevision?.revisionId, "r-registered");
+  assert.equal(out.packet.grounding.sourceDigest, createHash("sha256").update(narrative).digest("hex").replace(/^/, "sha256:"));
+  assert.equal(out.packet.lanes.direct.rows.some((row) => row.variant_key === "17-43093464-A-T"), true);
+  assert.equal(out.packet.stages.reanalysis.rows.some((row) => row.variant_key === "fixture-only"), false);
+  assert.equal(
+    out.packet.stages.reanalysis.rows.find((row) => row.variant_key === "17-43093464-A-T")?.change_status,
+    "new",
+    "an omitted prior-assessment asset must not fall back to the example CSV",
+  );
+
+  const store = await openBioStore(exampleDir);
+  try {
+    const revisionNode = "case-revision:CASE-RD-001:r-registered";
+    const links = await store.conn.all<{ subject_id: string; predicate: string; object_id: string | null }>(
+      "SELECT subject_id, predicate, object_id FROM bio_observations WHERE predicate = 'uses_case_revision' ORDER BY subject_id",
+    );
+    assert.ok(links.some((row) => row.subject_id === `analysis:${out.analysisId}` && row.object_id === revisionNode));
+    assert.ok(links.some((row) => row.subject_id === out.packet.grounding.groundingId && row.object_id === revisionNode));
+    const packetLinks = await store.conn.all<{ object_id: string | null }>(
+      "SELECT object_id FROM bio_observations WHERE subject_id = ? AND predicate = 'derived_from'",
+      [out.packetUri],
+    );
+    assert.ok(packetLinks.some((row) => row.object_id === out.packet.inputRevision?.revisionUri));
+  } finally {
+    store.close();
+  }
 });
 
 test("clinical analyses project durable human review state without changing recorded evidence", async () => {
@@ -323,7 +421,7 @@ test("SDK entry resolves a relative workspace exactly once", async () => {
     await vep.close();
   }
   assert.ok(out.analysisDbPath.startsWith(resolve(exampleDir)));
-  assert.equal(out.workflow.executedSteps, 8);
+  assert.equal(out.workflow.executedSteps, 9);
   assert.equal(vep.requests(), 3, "the SQL-native VEP transport retries two transient 503 responses");
 });
 
@@ -480,9 +578,9 @@ test("same analysis id resumes from all durable checkpoints", async () => {
     await vep.close();
   }
 
-  assert.equal(first.workflow.executedSteps, 8);
+  assert.equal(first.workflow.executedSteps, 9);
   assert.equal(resumed.workflow.executedSteps, 0);
-  assert.equal(resumed.workflow.reusedSteps, 8);
+  assert.equal(resumed.workflow.reusedSteps, 9);
   assert.equal(resumed.packetDigest, first.packetDigest);
   assert.equal(resumed.packet.generatedAt, "2026-07-05T12:00:00Z");
   assert.equal(vep.requests(), 3, "resuming reuses the VEP checkpoint without another fanout");
@@ -492,7 +590,7 @@ test("same analysis id resumes from all durable checkpoints", async () => {
     const rows = await store.conn.all<{ n: bigint }>(
       "SELECT count(*) AS n FROM bio_observations WHERE predicate = 'run' AND starts_with(subject_id, 'run:analysis-resume.')",
     );
-    assert.equal(Number(rows[0]?.n), 9);
+    assert.equal(Number(rows[0]?.n), 10);
   } finally {
     store.close();
   }
@@ -578,7 +676,7 @@ test("packet and scientific runs are CAS-backed and connected in the ledger", as
       "SELECT value_json FROM bio_observations WHERE subject_id = ? AND predicate = 'job_step_checkpoint' ORDER BY statement_key",
       [`job:${out.analysisId}`],
     );
-    assert.equal(checkpoints.length, 8);
+    assert.equal(checkpoints.length, 9);
     assert.ok(checkpoints.every((row) => {
       const envelope = JSON.parse(row.value_json) as { value: Record<string, unknown> };
       return !("rows" in envelope.value) && !("packet" in envelope.value);
@@ -603,6 +701,7 @@ test("packet and scientific runs are CAS-backed and connected in the ledger", as
     );
     assert.ok(runLinks.some((row) => row.predicate === "uses_run" && row.object_id === `run:${out.packet.stages.hypotheses.runId}`));
     assert.ok(runLinks.some((row) => row.predicate === "uses_run" && row.object_id === `run:${out.packet.stages.variantSearch.runId}`));
+    assert.ok(runLinks.some((row) => row.predicate === "uses_run" && row.object_id === `run:${out.packet.stages.annotationAudit.runId}`));
     const intervalLinks = await store.conn.all<{ predicate: string; object_id: string | null }>(
       "SELECT predicate, object_id FROM bio_observations WHERE subject_id = ? ORDER BY predicate, object_id",
       [`run:${out.packet.stages.intervals.runId}`],
@@ -613,6 +712,19 @@ test("packet and scientific runs are CAS-backed and connected in the ledger", as
       [`run:${out.packet.stages.variantSearch.runId}`],
     );
     assert.ok(searchLinks.some((row) => row.predicate === "uses_run" && row.object_id === `run:${out.packet.stages.intervals.runId}`));
+    const auditLinks = await store.conn.all<{ predicate: string; object_id: string | null }>(
+      "SELECT predicate, object_id FROM bio_observations WHERE subject_id = ? ORDER BY predicate, object_id",
+      [`run:${out.packet.stages.annotationAudit.runId}`],
+    );
+    assert.ok(auditLinks.some((row) => row.predicate === "uses_run" && row.object_id === `run:${out.packet.stages.variantSearch.runId}`));
+    const rawAnnotationRunId = out.packet.provenance.runIds.find((runId) => runId.endsWith(".vep"));
+    assert.ok(rawAnnotationRunId);
+    assert.ok(auditLinks.some((row) => row.predicate === "uses_run" && row.object_id === `run:${rawAnnotationRunId}`));
+    const reanalysisLinks = await store.conn.all<{ predicate: string; object_id: string | null }>(
+      "SELECT predicate, object_id FROM bio_observations WHERE subject_id = ? ORDER BY predicate, object_id",
+      [`run:${out.packet.stages.reanalysis.runId}`],
+    );
+    assert.ok(reanalysisLinks.some((row) => row.predicate === "uses_run" && row.object_id === `run:${out.packet.stages.annotationAudit.runId}`));
     const groundingRoots = await store.conn.all<{ digest: string }>(
       "SELECT digest FROM cas_ref WHERE ref_id = ? AND ref_type = 'artifact'",
       [out.packet.grounding.groundingId],

@@ -54,9 +54,9 @@ Instructions for coding agents working in this repository.
   tab and may implement activate/deactivate/dispose. Addons use the public SDK and canonical store. They do not own a
   private database, install themselves, accept browser-supplied module paths, or turn transient SSE events into
   durable state. Add focus/resize or dock semantics only when a concrete editor/terminal surface needs them.
-- Shared workspace selection is discriminated browser context (`clinical_analysis` or `published_variant`), not a
-  new scientific record. An addon must ignore selection kinds it does not own; cross-pane consumers such as Artifacts
-  may project the referenced analysis, variant-resolution node, run ids, and CAS digests through the canonical store.
+- Shared workspace selection is browser context, not a new scientific record. An addon must ignore selection kinds it
+  does not own; cross-pane consumers such as Artifacts project the referenced analysis, run ids, and CAS digests
+  through the canonical store.
 
 ## Thin Binding Rule
 
@@ -126,6 +126,14 @@ Instructions for coding agents working in this repository.
 
 - Every scientific path is manifest/operation -> resolver or injected port -> DuckDB relation -> run -> CAS/receipt ->
   observation. A deliberate bypass is integration debt.
+- Case notes, uploaded documents, supplements, and legally obtained licensed literature enter as host-authorized CAS
+  assets; the workbench never bypasses access controls. Parse them through declared `compute.run` outputs, and make
+  every extracted claim identify the source digest plus an exact text span or table/figure region that can be checked
+  against the pinned parse. `false`, `unknown`, and not-observed are distinct states and are not exempt from evidence
+  or an explicit searched-scope reason. Agent extraction remains a proposal until typed or human approval promotes an
+  immutable revision; derived artifacts inherit the source access policy. Prefer structured full text when available;
+  native PDF parsing, OCR, and multimodal extraction are host-selected compute profiles whose provider, model/version,
+  confidence, input digest, and output regions are recorded. A derived OCR or vision string is not the primary source.
 - Subagents and UI surfaces exchange durable relations, CAS references, checkpoints, and observations. Prose may explain
   a handoff, but it is not the scientific state and must not be the only record of a candidate, source, score, or
   judgment.
@@ -134,22 +142,22 @@ Instructions for coding agents working in this repository.
 
 ## Clinical Benchmarks
 
-- Keep substrate correctness, variant-classification concordance, case prioritization, and retrospective diagnostic
-  yield as separate claims and test suites. A hermetic fixture is not a clinical benchmark.
-- Ma et al. 2025 is a 300-variant ACMG evidence/classification benchmark described in Supplementary Tables 12-13;
-  do not replace its exact rows with a new ClinVar sample and call that a reproduction.
-- Preserve the supplied workbook's dataset roles. Tables S1-S7 are Hong Kong Genome Project (HKGP) rule-development
-  examples, S8-S11 are authored knowledge/threshold tables, S12 is held-out ClinGen-variant validation, and S13 is
-  ClinVar VUS/conflict reanalysis. Never pool S1-S7 into validation metrics or describe those variant rows as
-  diagnostic cases.
-- `rule_development` means the 1,000 curator-reviewed HKGP variants were used to optimize prompts and retrieval
-  knowledge bases and then reassess seven literature-dependent rules. They are real variants, but not an independent
-  validation set. They did not create or revise the ACMG/AMP rules themselves. In the published workflow, article
-  files supplied variant evidence; S8-S10 supplied narrow policy/interpretation retrieval for PS2/PM6, PP1, and PP4,
-  while S11 supplied PS4 thresholds. Do not call all of that material one undifferentiated literature RAG corpus.
-- The workbook supplies variant text but no stable VCV/RCV/SCV or ClinGen allele accession. Keep identity unresolved
-  until a release-pinned mapping operation records resolved, ambiguous, or unmatched candidates; never infer a
-  temporal key from HGVS text alone.
+- The evaluation unit is an immutable case revision: clinical description, family/pedigree and sample mappings,
+  variant call assets, optional prior assessment, and the truth/review record used for that evaluation. A workbook row
+  is not a case.
+- Keep substrate correctness, criterion-level evidence fidelity, case-level candidate ranking, classification,
+  temporal reanalysis yield, abstention calibration, reviewer workload, and retrospective diagnostic yield as
+  separate claims and test suites. A hermetic fixture is not a clinical benchmark.
+- Primary ranking metrics are causal variant and gene recall/precision at declared `k` values, stratified by family
+  structure, variant class, ancestry/data availability, and solved/unsolved status. Record search coverage and the
+  candidate universe so a miss is distinguishable from an unsearched region or unavailable source.
+- Evaluate each guideline criterion against source-spanned evidence and its recorded version before aggregating a
+  five-tier class. External variant workbooks may be imported for component regression, but they do not define the
+  application architecture, default workspace, or end-to-end clinical claim.
+- The product path is description and family context plus variant calls -> reviewed HPO assertions -> candidate genes
+  -> variant annotation and deterministic guideline evidence -> phenotype/genotype reranking -> targeted literature
+  extraction and gated criterion proposals -> ranked candidates and expert review. Prior assessment is optional; when
+  present, reanalysis compares immutable revisions rather than mutating the old result.
 
 ## API And Checks
 

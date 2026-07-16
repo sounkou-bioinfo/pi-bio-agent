@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
 import { promises as fs } from "node:fs";
 import { join } from "node:path";
 import {
@@ -51,18 +52,30 @@ export interface ClinicalSampleMappingInput {
   sampleId: string;
 }
 
-/** Bytes are accepted by the SDK boundary only. HTTP adapters must decode an explicit upload payload before calling this API. */
-export interface ClinicalCaseAssetInput {
+interface ClinicalCaseAssetInputBase {
   assetId: string;
   kind: string;
   mediaType: string;
-  bytes: Buffer | Uint8Array;
   format?: string;
   assembly?: string;
   memberIds?: readonly string[];
   sampleMappings?: readonly ClinicalSampleMappingInput[];
   attributes?: Record<string, JsonValue>;
 }
+
+/** In-memory input for small SDK-owned assets such as a narrative or pedigree. */
+export interface ClinicalCaseAssetBytesInput extends ClinicalCaseAssetInputBase {
+  bytes: Buffer | Uint8Array;
+  digest?: never;
+}
+
+/** Reference to bytes already staged in this workspace's CAS, suitable for large VCF/BCF/table assets. */
+export interface ClinicalCaseAssetReferenceInput extends ClinicalCaseAssetInputBase {
+  digest: `sha256:${string}`;
+  bytes?: never;
+}
+
+export type ClinicalCaseAssetInput = ClinicalCaseAssetBytesInput | ClinicalCaseAssetReferenceInput;
 
 export interface ClinicalCaseAsset {
   assetId: string;
@@ -127,6 +140,11 @@ export interface ClinicalCaseRevisionSummary {
   memberCount: number;
   assetCount: number;
   recordedAt: string;
+}
+
+export interface ClinicalCaseRevisionRecord {
+  revision: ClinicalCaseRevision;
+  summary: ClinicalCaseRevisionSummary;
 }
 
 export class ClinicalCaseRegistryInputError extends Error {
@@ -265,10 +283,34 @@ function normalizeRelationships(
 
 async function writeAsset(cas: CasStore, input: ClinicalCaseAssetInput, memberIds: ReadonlySet<string>): Promise<ClinicalCaseAsset> {
   const assetId = assertId("assetId", input.assetId);
-  const bytes = Buffer.from(input.bytes);
-  if (bytes.length === 0) throw new ClinicalCaseRegistryInputError(`asset '${assetId}' has no bytes`);
-  const digest = createHash("sha256").update(bytes).digest("hex");
   const mediaType = assertMediaType(input.mediaType);
+  let digest: string;
+  let sizeBytes: number;
+  if ("bytes" in input && input.bytes !== undefined) {
+    const bytes = Buffer.from(input.bytes);
+    if (bytes.length === 0) throw new ClinicalCaseRegistryInputError(`asset '${assetId}' has no bytes`);
+    digest = createHash("sha256").update(bytes).digest("hex");
+    sizeBytes = bytes.length;
+    await cas.put({ algorithm: "sha256", digest, sizeBytes, mediaType }, bytes);
+  } else {
+    const address = contentAddress(input.digest);
+    const path = cas.pathFor(address);
+    if (!await cas.has(address)) {
+      throw new ClinicalCaseRegistryInputError(`asset '${assetId}' references CAS bytes that are not present`);
+    }
+    const hash = createHash("sha256");
+    sizeBytes = 0;
+    for await (const chunk of createReadStream(path)) {
+      const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      hash.update(bytes);
+      sizeBytes += bytes.length;
+    }
+    digest = hash.digest("hex");
+    if (digest !== address.digest.toLowerCase()) {
+      throw new ClinicalCaseRegistryInputError(`asset '${assetId}' CAS bytes do not match digest '${input.digest}'`);
+    }
+    if (sizeBytes === 0) throw new ClinicalCaseRegistryInputError(`asset '${assetId}' has no bytes`);
+  }
   const assetMemberIds = [...new Set((input.memberIds ?? []).map((memberId) => assertId(`asset '${assetId}' memberId`, memberId)))].sort();
   for (const memberId of assetMemberIds) {
     if (!memberIds.has(memberId)) throw new ClinicalCaseRegistryInputError(`asset '${assetId}' references unknown member '${memberId}'`);
@@ -284,15 +326,13 @@ async function writeAsset(cas: CasStore, input: ClinicalCaseAssetInput, memberId
     if (samples.has(mapping.sampleId)) throw new ClinicalCaseRegistryInputError(`asset '${assetId}' maps sample '${mapping.sampleId}' more than once`);
     samples.add(mapping.sampleId);
   }
-  const address = { algorithm: "sha256" as const, digest, sizeBytes: bytes.length, mediaType };
-  await cas.put(address, bytes);
   return {
     assetId,
     kind: input.kind.trim() || (() => { throw new ClinicalCaseRegistryInputError(`asset '${assetId}' kind is required`); })(),
     mediaType,
     digest: `sha256:${digest}`,
     uri: `cas:sha256:${digest}`,
-    sizeBytes: bytes.length,
+    sizeBytes,
     ...(input.format ? { format: input.format } : {}),
     ...(input.assembly ? { assembly: input.assembly } : {}),
     memberIds: assetMemberIds,
@@ -573,12 +613,21 @@ export async function getClinicalCaseRevision(
   revisionId: string,
   asOf = AS_OF,
 ): Promise<ClinicalCaseRevision | null> {
+  return (await getClinicalCaseRevisionRecord(workspace, caseId, revisionId, asOf))?.revision ?? null;
+}
+
+export async function getClinicalCaseRevisionRecord(
+  workspace: string,
+  caseId: string,
+  revisionId: string,
+  asOf = AS_OF,
+): Promise<ClinicalCaseRevisionRecord | null> {
   assertId("caseId", caseId);
   assertId("revisionId", revisionId);
   const store = await openBioStore(workspace);
   const cas = fsCasStore(join(workspace, ".pi", "bio-agent", "cas"));
   try {
-    return (await readRevisionFromLedger(store.conn, cas, caseId, revisionId, asOf))?.revision ?? null;
+    return await readRevisionFromLedger(store.conn, cas, caseId, revisionId, asOf);
   } finally {
     store.close();
   }

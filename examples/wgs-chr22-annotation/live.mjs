@@ -78,12 +78,13 @@ await conn.run(`CREATE TABLE joined AS
 
 console.log("funnel:", J(await conn.all(`SELECT
   count(*) annotated_gene_variants,
-  count(*) FILTER (WHERE coalesce(gnomadg,0.0) < 0.01) rare,
+  count(*) FILTER (WHERE gnomadg IS NOT NULL AND gnomadg < 0.01) known_rare,
+  count(*) FILTER (WHERE gnomadg IS NULL) frequency_not_available,
   count(*) FILTER (WHERE impact='HIGH') high_impact,
   count(*) FILTER (WHERE clinvar IS NOT NULL) in_clinvar,
   count(*) FILTER (WHERE clinvar ILIKE '%patho%') clinvar_pathogenic FROM joined`)));
 
-console.log("RARE + HIGH-IMPACT (LoF) hits:", J(await conn.all(`
-  SELECT DISTINCT gene, pos, ref, alt, csq AS consequence, round(coalesce(gnomadg,0.0),5) AS gnomad_af,
+console.log("KNOWN-RARE + HIGH-IMPACT (LoF) hits:", J(await conn.all(`
+  SELECT DISTINCT gene, pos, ref, alt, csq AS consequence, round(gnomadg,5) AS gnomad_af,
          coalesce(clinvar, '(not in ClinVar)') AS clinvar
-  FROM joined WHERE coalesce(gnomadg,0.0) < 0.01 AND impact = 'HIGH' ORDER BY gene, pos`)));
+  FROM joined WHERE gnomadg IS NOT NULL AND gnomadg < 0.01 AND impact = 'HIGH' ORDER BY gene, pos`)));

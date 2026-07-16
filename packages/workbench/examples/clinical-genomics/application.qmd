@@ -17,9 +17,10 @@ fanout, checkpoints, CAS, replay, and observations.
 
 ## Hermetic host composition
 
-The executable document uses recorded grounding, a local Monarch-shaped fixture, an indexed VCF fixture, and a
-local VEP-compatible HTTP server. The server deliberately returns two `503` responses before succeeding, exercising
-the generic DuckNNG fanout/retry path without relying on a live endpoint.
+The executable document uses recorded grounding, a local projection of the Monarch relation contract, an indexed
+VCF test case, and a local VEP-compatible HTTP server. These inputs make the woven proof deterministic; they are not
+the browser product's case or evidence source. The server deliberately returns two `503` responses before
+succeeding, exercising the generic DuckNNG fanout/retry path without relying on a live endpoint.
 
 ```{ts .pi-bio}
 import assert from "node:assert/strict";
@@ -35,6 +36,7 @@ import {
   runClinicalGenomicsWorkbench,
   updateClinicalReviewDisposition,
 } from "../../dist/clinical-genomics.js";
+import { registerClinicalCaseRevision } from "../../dist/clinical-case-registry.js";
 import { localCandidateVariantSearchRuntime } from "../../dist/candidate-variant-search.js";
 import { localMonarchFixtureRuntime } from "../../dist/monarch-host.js";
 import { loadRecordedGroundingRuntime } from "../../dist/recorded-grounding.js";
@@ -47,9 +49,9 @@ await fs.cp(sourceDir, workspace, {
 });
 
 const annotations = {
-  "17-43093464-A-T": { gene: "GENEB", consequence: "stop_gained", impact: "HIGH", af: 0.0002, significance: "pathogenic" },
-  "17-43093470-C-G": { gene: "GENEB", consequence: "missense_variant", impact: "MODERATE", af: 0.0003, significance: "uncertain_significance" },
-  "17-43093470-C-T": { gene: "GENEB", consequence: "stop_gained", impact: "HIGH", af: 0.02, significance: "benign" },
+  "17-43093464-A-T": { geneId: "HGNC:GENEB", gene: "GENEB", transcriptId: "ENST_FIXTURE_GENEB", consequence: "stop_gained", impact: "HIGH", af: 0.0002, significance: "pathogenic" },
+  "17-43093470-C-G": { geneId: "HGNC:GENEB", gene: "GENEB", transcriptId: "ENST_FIXTURE_GENEB", consequence: "missense_variant", impact: "MODERATE", af: 0.0003, significance: "uncertain_significance" },
+  "17-43093470-C-T": { geneId: "HGNC:GENEB", gene: "GENEB", transcriptId: "ENST_FIXTURE_GENEB", consequence: "stop_gained", impact: "HIGH", af: 0.02, significance: "benign" },
 };
 
 let requests = 0;
@@ -74,7 +76,15 @@ const server = createServer(async (request, response) => {
     return {
       input,
       most_severe_consequence: item.consequence,
-      transcript_consequences: [{ gene_symbol: item.gene, impact: item.impact, consequence_terms: [item.consequence] }],
+      transcript_consequences: [{
+        gene_id: item.geneId,
+        gene_symbol: item.gene,
+        transcript_id: item.transcriptId,
+        biotype: "protein_coding",
+        canonical: 1,
+        impact: item.impact,
+        consequence_terms: [item.consequence],
+      }],
       colocated_variants: [{ id: key, clin_sig: [item.significance], frequencies: { [alt]: { gnomadg: item.af } } }],
     };
   });
@@ -96,9 +106,60 @@ const runtime = {
   duckdbInitSql: ["LOAD ducknng"],
 };
 
+const narrative = "The proband was late to sit and walk and has hypotonia. Her mother has no seizures. Possible ataxia remains uncertain.";
+const caseRevision = await registerClinicalCaseRevision(workspace, {
+  caseId: "CASE-RD-001",
+  revisionId: "application-r1",
+  indexMemberIds: ["proband"],
+  members: [
+    { memberId: "proband", role: "proband", affectedStatus: "affected", sex: "female" },
+    { memberId: "mother", role: "mother", affectedStatus: "unaffected", sex: "female" },
+  ],
+  relationships: [
+    { fromMemberId: "mother", predicate: "parent_of", toMemberId: "proband" },
+  ],
+  assets: [
+    {
+      assetId: "narrative",
+      kind: "clinical_narrative",
+      mediaType: "text/plain",
+      bytes: Buffer.from(narrative),
+      memberIds: ["proband", "mother"],
+    },
+    {
+      assetId: "variants",
+      kind: "variant_set",
+      mediaType: "application/gzip",
+      format: "vcf.gz",
+      assembly: "GRCh38",
+      bytes: await fs.readFile(join(workspace, "data", "case_variants.vcf.gz")),
+      memberIds: ["proband"],
+    },
+    {
+      assetId: "variants-index",
+      kind: "variant_index",
+      mediaType: "application/octet-stream",
+      format: "tbi",
+      bytes: await fs.readFile(join(workspace, "data", "case_variants.vcf.gz.tbi")),
+      memberIds: ["proband"],
+      attributes: { index_for: "variants" },
+    },
+    {
+      assetId: "variant-table",
+      kind: "variant_table",
+      mediaType: "text/csv",
+      format: "csv",
+      bytes: await fs.readFile(join(workspace, "data", "case_variants.csv")),
+      memberIds: ["proband"],
+    },
+  ],
+  recordedAt: "2026-07-12T11:55:00Z",
+});
+
 const run = async (now) => runClinicalGenomicsWorkbench({
   exampleDir: workspace,
   caseId: "CASE-RD-001",
+  caseRevisionId: caseRevision.revisionId,
   analysisId: "application-proof",
   now,
   grounding: await loadRecordedGroundingRuntime(join(workspace, "data", "grounding_proposals.json")),
@@ -120,12 +181,13 @@ try {
   await new Promise((resolveClose, reject) => server.close((error) => error ? reject(error) : resolveClose()));
 }
 
-assert.equal(first.workflow.executedSteps, 8);
+assert.equal(first.workflow.executedSteps, 9);
 assert.equal(first.workflow.reusedSteps, 0);
 assert.equal(resumed.workflow.executedSteps, 0);
-assert.equal(resumed.workflow.reusedSteps, 8);
+assert.equal(resumed.workflow.reusedSteps, 9);
 assert.equal(resumed.packetDigest, first.packetDigest);
 assert.equal(requests, 3, "resume must reuse the VEP checkpoint");
+assert.equal(first.packet.inputRevision?.revisionId, caseRevision.revisionId);
 
 assert.equal(first.packet.summary.directCandidates, 1);
 assert.equal(first.packet.summary.directAbstentions, 1);
@@ -139,7 +201,7 @@ const direct = first.packet.lanes.direct.rows;
 assert.equal(direct.find((row) => row.variant_key === "2-47637258-C-CT")?.variant_bucket, "abstain_no_frequency");
 const inverted = first.packet.lanes.inverted.rows;
 assert.equal(
-  inverted.find((row) => row.gene === "GENEB" && row.evidence_status === "genotype_supports_hypothesis")?.vep_consequence,
+  inverted.find((row) => row.gene === "GENEB" && row.evidence_status === "genotype_supports_hypothesis")?.annotation_consequence,
   "stop_gained",
 );
 
@@ -195,45 +257,177 @@ transparent work queue, not a diagnostic ranking or clinical classification.
 
 ## What the application establishes
 
-The run establishes that the public substrate can support an application with grounded inputs, foreign-graph
-queries, indexed range reads, bounded network retry, SQL reconciliation, eight durable checkpoints, a CAS-backed
-packet, and exact resume. It also preserves an important abstention: missing population frequency is not evidence
-that a variant is rare.
+The run establishes that the public substrate can support an application with an immutable registered case revision,
+grounded inputs, foreign-graph queries, indexed range reads, bounded network retry, SQL reconciliation, nine durable
+checkpoints, a CAS-backed packet, and exact resume. It also preserves an important abstention: missing population
+frequency is not evidence that a variant is rare.
 
 It does not establish ACMG/AMP classification, diagnosis, clinical validity, or live-source stability. Those are
 application evaluation and review concerns.
 
-## Benchmark contract
+## Source-pinned operation authoring
 
-Two evaluation levels must remain separate:
+The browser's Variants pane starts from registered published rows and keeps the workbook observation separate from
+an independently resolved NCBI variant identity and current ClinVar observation. The Compositions pane turns one
+selected, resolved row into an operation-authoring slot. It accepts an operation identity, read-only SQL, a fixture,
+and expected rows; admits only deterministic reads over the server-provided `variant_context`; executes the fixture
+in an isolated DuckDB with external access disabled; checks the physical plan; then runs the operation through the
+normal manifest runner over the source-pinned row. The run, receipts, replay, result, and candidate document are
+stored in the ledger and CAS before the exact content digest can receive a terminal human decision. Approval records
+a temporal skill revision; rejection cannot be undone by resubmitting the same bytes.
 
-1. **ACMG evidence and class concordance.** [Ma et al.](https://doi.org/10.1126/scitranslmed.adz4172) describe
-   150 ClinGen expert-panel variants in Supplementary Table 12 and 150 ClinVar VUS/conflicting variants in
-   Supplementary Table 13. The supplied workbook also contains Hong Kong Genome Project (HKGP) rule-development
-   examples in S1-S7 and authored knowledge/threshold tables in S8-S11; those are not held-out validation rows.
-   `benchmark:acmg` imports the exact archive, CAS-pins the ZIP/XLSX/normalized bundle, preserves raw labels and
-   criterion annotations, recomputes concordance, and records a SQL validation run. A fresh sample of three-star
-   ClinVar rows is useful differential testing, but it is not the published benchmark.
+This is application composition over the public substrate, not a second execution system. The implementation is
+[`composition-addon.ts`](../../src/composition-addon.ts), the browser interaction is
+[`compositions.js`](../../web/addons/compositions.js), and
+[`composition-addon.test.ts`](../../test/composition-addon.test.ts) proves relation admission, deterministic-only
+execution, fixture failure, real source-bound execution, CAS and graph linkage, exact-digest approval, rejection,
+and immutable terminal decisions. The Playwright suite exercises the park-review-activate interaction at desktop
+width and its stacked mobile layout.
 
-   Here `rule_development` means that the 1,000 curator-reviewed HKGP variants were used to optimize the AI-CURA
-   prompt/evidence-reading procedure for seven literature-dependent criteria; they did not develop the ACMG/AMP
-   rules. Variant publications were retrieved externally and reformatted as the evidence corpus. S8-S10 instead
-   provide narrow criterion guidance for PS2/PM6, PP1, and PP4, while S11 provides PS4 thresholds. These inputs should
-   not be collapsed into one undifferentiated literature RAG corpus. The rows are real variants, but they are
-   development-contaminated rather than an independent evaluation set.
-2. **Retrospective reanalysis yield.** The OpenAI/Boston Children's
-   [rare-disease study](https://openai.com/index/diagnose-rare-childhood-diseases/) reports solved-case recovery
-   and 18 confirmed diagnoses from 376 previously unsolved cases. Those case packets are not a public fixture here.
-   It is a product and study-design target: evidence-linked hypotheses, duplicate runs, expert adjudication,
-   confirmatory testing, false-positive workload, and diagnostic yield.
+## Evidence source plane
 
-The workbook is a variant-classification benchmark, not a cohort of diagnostic cases. It has HGVS-like variant text
-but no stable VCV/RCV/SCV or ClinGen allele accessions, so the importer records unresolved identities until a
-release-pinned mapping step can return a unique match, ambiguity, or no match. A separate case benchmark adapter must
-accept case and truth bundles as host inputs, project them into declared DuckDB relations, run one case or a bounded
-cohort through the same checkpoint graph, and write per-case predictions plus aggregate metrics to ledger/CAS. The
-current synthetic clinical application tests substrate correctness, not model or clinical quality. It is not the
-default browser product surface; the registered S12/S13 variant workspace supplies the first real-source surface.
+Case workup uses a retrieval hierarchy rather than a general literature corpus:
+
+1. Query registered case, family, phenotype, variant, prior-assessment, and previously extracted evidence relations
+   with SQL.
+2. Retrieve a publication only when the required evidence has not been structured already.
+3. Extract source-spanned claims once and register the text span, normalized entities, source identity, observation
+   time, and extraction decision in DuckDB, the graph, and CAS.
+4. Reuse those claims across cases and later reanalysis while preserving their original source and observation time.
+5. Run deterministic ACMG/AMP or CNV/SV policy over typed evidence relations.
+6. Invoke an agent only for ambiguous extraction, evidence conflict, or an expert-facing proposal; the model does not
+   become the fact source or the final clinical decision.
+
+Case notes, uploaded PDFs, and PDF/DOCX/XLSX supplements use the same evidence plane, including literature available
+only through a user's or institution's lawful access. The host registers the original bytes and access policy in CAS;
+a declared `compute.run` parser emits text, document structure, tables, figures, and page coordinates as named outputs;
+SQL selects bounded source windows; and an agent may propose typed claims. A claim is admissible only when it carries
+the source digest and an exact text span or table/figure region that a deterministic validator can resolve against the
+pinned parse. Approval creates an immutable evidence revision, and derived parse/extraction artifacts inherit the
+source's access restrictions. The application does not bypass a paywall or send licensed full text across the host
+trust boundary unless the host policy explicitly permits it.
+
+Parsing is a host-selected profile rather than a fixed model dependency. Prefer structured JATS/XML or HTML from PMC,
+Europe PMC, or an authorized publisher source when available; PubMed normally supplies publication identity, metadata,
+abstracts, and links rather than the full article. For uploaded PDFs, use native text and layout extraction first, OCR
+for scanned pages, and a multimodal provider for figures or unresolved layouts when policy permits. Every parse records
+the provider and model/version, input digest, page/region coordinates, confidence, and run receipts. OCR and vision
+outputs are derived observations: a promoted claim still cites the original document digest and resolvable source
+region, while low-confidence or disagreeing parses become review or abstention states.
+
+The useful implemented pattern in
+[`cur-ai-ss`'s typed evidence blocks](https://github.com/clingen-data-model/cur-ai-ss/blob/ca25342a83806ce4674303ed39cd2f7c54050a52/lib/models/evidence_block.py)
+and [document parser](https://github.com/clingen-data-model/cur-ai-ss/blob/ca25342a83806ce4674303ed39cd2f7c54050a52/lib/misc/pdf/parse.py)
+is field-level evidence with quotes and table/figure locators over parsed papers and supplements. The local contract is
+stricter: source bytes and parses are content-addressed, locators are verified, extraction actor and contract digests
+are recorded, and `false`, `unknown`, `not captured`, and `not observed in a declared search scope` remain distinct.
+The external application's database, worker lifecycle, source-specific annotators, and model-mediated segregation
+counting are not imported.
+
+Provider choice follows the same separation. LitVar2 is a variant-to-publication index; Europe PMC and PMC are the
+preferred metadata, full-text, and annotation sources when license and access permit. OpenAlex contributes scholarly
+identity, citation, institution, and regional graph context, not variant evidence. Licensed discovery or reranking
+services may be host-injected, and broad web search remains a last-resort locator. Search results and generated
+summaries are never accepted as evidence without a registered primary source and source-spanned claim.
+
+The [MARRVEL 2 codebase](https://github.com/LiuzLab/MARRVEL2) makes useful operation families concrete: variant
+normalization and liftover; variant-to-gene mapping; population, clinical-assertion, patient-cohort, structural-overlap,
+and predictor lookups; and gene disease, constraint, orthology, model-organism phenotype, expression, ontology,
+interaction, and protein-domain projections. These are requirements for composable source operations, not a reason
+to mirror MARRVEL's database or preserve every endpoint as an isolated skill. Each adapter must retain the upstream
+authority, version, license boundary, missingness, and receipt; SQL then reduces those relations for the current
+case. Population and curated clinical assertions may enter deterministic classification only through criterion-specific
+contracts. Orthology, interaction, domain, expression, and model-organism signals remain research prioritization
+unless an approved guideline explicitly admits them.
+
+The [Monarch Initiative 2024](https://pubmed.ncbi.nlm.nih.gov/38000386/) platform already integrates open phenotype,
+gene, disease, ontology, and cross-species knowledge as a semantic graph with APIs and analytic services. This
+repository already closes over that graph: [`monarch.manifest.json`](monarch.manifest.json) attaches the release-pinned
+DuckDB graph and its declared operation joins canonical nodes and edges through ontology closure; the
+[`monarch-inverted.test.ts`](../../test/monarch-inverted.test.ts) proof executes that operation through the normal run,
+receipt, replay, and CAS path. `npm run pattern:monarch --workspace=packages/workbench` is the live application entry
+point. Monarch is therefore the implemented graph plane where it overlaps MARRVEL, not a future provider gap.
+MARRVEL remains valuable as an operation inventory, an optional aggregating provider, and a comparison surface for
+sources absent from Monarch. The durable product surface is the tested composition and its evidence lineage, not a
+hand-maintained catalog of wrappers.
+
+## Functional evidence calibration
+
+[MaveDB](https://www.mavedb.org/docs/mavedb/programmatic-access/api-quickstart.html) is the authoritative source for
+multiplexed assay score sets. A calibration experiment imports the score-set document, score CSV, mapped GA4GH VRS
+variants, calibration revisions and assignments, release-selected ClinVar controls, and gnomAD controls as separate
+relations. Every response is CAS-pinned with its URL, content digest, observation time, and available freshness token.
+The score-set URN does not identify one timeless interpretation: multiple investigator and community calibrations may
+coexist, and primary, research-use-only, evidence-strength, source-publication, and publication-state fields belong to
+the calibration revision.
+
+The JAG1 membrane-expression score set `urn:mavedb:00001198-a-1` is a concrete target. MaveDB exposes 2,832 real
+variant measurements, replicate scores and counts, multiple historical ClinVar control snapshots, gnomAD v4.1
+controls, and direct variant-to-calibration assignments. Its likelihood-ratio calibration cites
+[Hayeck et al.](https://doi.org/10.1016/j.ajhg.2026.06.016) and assigns PS3 at supporting, moderate, or strong strength
+for selected abnormal classes. Its normal classes deliberately carry no benign ACMG evidence because membrane
+expression does not test every relevant JAG1 function. Deterministic ACMG policy must consume that explicit evidence
+assignment; it must not infer BS3 merely from a normal assay score.
+
+The agent can run new calibration experiments, but the experiment is declared compute rather than an unrecorded
+Python session:
+
+1. SQL selects one pinned score-set revision, one predeclared ClinVar snapshot, gnomAD controls, synonymous controls,
+   and an explicit train/validation split. Variants used to create or reinterpret the assay calibration are excluded
+   from held-out evaluation, and overlapping labels are resolved by a recorded rule rather than random choice.
+2. `compute.run` invokes a commit- or image-pinned calibration implementation with an explicit random seed and
+   observed environment. It emits model parameters, per-score likelihood ratios or direct class assignments,
+   uncertainty intervals, diagnostics, and declared plot files.
+3. CAS captures the input relation, code and environment identities, split, fitted model, metrics, and figures. SQL
+   compares the candidate against threshold and likelihood baselines using held-out log loss, Brier score,
+   calibration, coverage, likelihood-ratio confidence intervals, and control violations.
+4. The candidate is parked through the same validation and exact-digest review lifecycle as Composition Studio. Only
+   an approved, non-RUO revision may emit a criterion-specific PS3/BS3 evidence relation; neither the model nor the
+   calibration experiment emits a final variant classification.
+
+This is already supported by the substrate's host-injected `compute.run`, environment attestation, output
+declarations, ledger, CAS, and temporal skill revision contracts. The missing application work is a validated
+calibration profile and evaluation protocol for each assay family, not another core runtime.
+
+FAVOR has two distinct roles. The [FAVOR v2 beta API](https://api-v2.genohub.org/docs) provides compact or detailed
+variant lookup, 10,000-variant batch lookup, graph operations, and a convenient MaveDB read model; it is useful for
+interactive annotation and source discovery. Its current variant-band response, however, does not expose calibration
+URN, primary status, or research-use-only status. It cannot be the sole clinical evidence contract until those source
+identities are retained and checked against authoritative MaveDB records. The
+[FAVORannotator](https://favor.genohub.org/favor-annotator) R/PostgreSQL path is the bulk WGS/WES offer: run it as a
+declared host compute profile, or attach release-pinned bulk tables and join in DuckDB, rather than issuing one HTTP
+request per cohort variant. FAVOR predictors and aggregate scores remain annotation features unless a guideline-owned
+criterion contract explicitly admits them; they are not interchangeable with empirical MAVE functional evidence.
+
+## Evaluation contract
+
+The product unit is an immutable case revision, not a paper-specific workbook row. Each revision binds a proband,
+family and pedigree structure when available, one or more source-description revisions, registered variant-call or
+annotation assets for the relevant family members, and zero or one prior assessment. A missing prior assessment is a
+valid first-analysis state. New, previous, and additional descriptions remain separate source revisions so every HPO
+assertion can retain its exact source span and later reanalysis can distinguish changed evidence from changed logic.
+
+Three evaluation levels must remain separate:
+
+1. **End-to-end case prioritization.** A host-supplied case/truth bundle measures causal gene and allele recall at
+   configurable `k`, precision at `k`, reciprocal rank, calibrated abstention, search coverage, evidence conflicts,
+   reviewer workload, and classification concordance. Family and multiplex cases are evaluated against their declared
+   member roles and segregation truth rather than flattened into a proband-only row. Confirmatory results and expert
+   adjudications remain evaluator-only evidence until the host explicitly registers them.
+2. **Criterion and component conformance.** Source-pinned real variants test each deterministic evaluator against an
+   independently curated evidence record. Small synthetic vectors remain appropriate for null, boundary, cap,
+   dependency, exclusivity, and malformed-input behavior, but they do not establish clinical performance. A
+   variant-only classification workbook may contribute component regression rows; it cannot substitute for the
+   case-level product evaluation or determine the application architecture.
+3. **Temporal reanalysis.** Immutable case, source, profile, annotation-release, and literature-claim revisions make
+   change attributable. Evaluation measures newly recovered causal alleles, rank movement, changed evidence lines,
+   abstentions resolved, false-positive workload, and diagnostic yield while preserving the previous result rather
+   than overwriting it.
+
+The public package does not embed a private clinical cohort or claim clinical validity from its hermetic case proof.
+A cohort adapter must register case and truth assets as host inputs, project bounded relations into DuckDB, run each
+case through the same checkpoint graph, and write per-case predictions and aggregate metrics to ledger/CAS. This
+keeps evaluation data replaceable without replacing the product flow.
 
 ### Release-pinned reclassification harness
 
@@ -435,14 +629,20 @@ piBio.json({
 
 ## Next case-workup closure
 
-The same inverted lane can drive a broader one-study case workup from host-approved VCF/TSV/CSV uploads and a case
-narrative: grounded HPO assertions, phenotype/disease/gene retrieval, assembly-pinned range restriction, bounded VEP
-annotation, typed ACMG evidence proposals, phenotype reranking, literature evidence, and a gated conclusion. “One
-study” means one resumable checkpoint graph, not one prompt or opaque function.
+The same inverted lane can drive one resumable case study from registered VCF/gVCF/BCF/TSV assets and immutable
+description revisions: source-spanned HPO assertions, phenotype/disease/gene retrieval, assembly-pinned range
+restriction, bounded annotation, deterministic SVCv4 evidence evaluation, phenotype reranking, literature evidence,
+and a gated ranked-candidate result. Family files retain sample and relationship identity; multiplex observations are
+relations over members rather than prose appended to the proband. “One study” means one checkpoint graph, not one
+prompt or opaque function.
 
-VEP is annotation evidence, not an ACMG classifier. Population frequency, inheritance and segregation, de novo
-status, functional assays, curated assertions, phenotype fit, and reviewer judgment must remain separately sourced;
-missing inputs produce abstentions rather than inferred criteria.
+The source-pinned SVCv4 draft now provides the score graph, caps, evidence admission, fail-closed classification gate,
+`POP_FRQ` evaluator, and capture audit for all five currently specified CLN workflows. It does not invent the
+unpublished CSpec scoring algorithms: those methods remain explicitly unimplemented until their authoritative
+contracts can be pinned and tested. VEP and offline annotation tables are evidence sources, not classifiers.
+Population observations, inheritance and segregation, de novo status, functional assays, curated assertions,
+phenotype fit, literature claims, and reviewer judgment remain separately sourced; missing inputs produce typed
+abstentions rather than inferred criteria.
 
 ## How applications change core
 

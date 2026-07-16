@@ -1,0 +1,2 @@
+profile_id,profile_version,contract_id,contract_version,contract_definition_digest,policy_status,source_id
+clingen.svcv4.public-draft,2026-07-10,clinical.svcv4_case_contract,0.1.0,sha256:09f6e46bded0dd3fc533a1b9b5a11f9d53297c02b27029b9b824fe6cde1b81bb,active,svcv4-model-case-applicability

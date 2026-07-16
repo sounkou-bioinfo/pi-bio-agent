@@ -2,7 +2,11 @@ import { createRoute, OpenAPIHono } from "@hono/zod-openapi";
 import type { Context } from "hono";
 import { secureHeaders } from "hono/secure-headers";
 import { streamSSE } from "hono/streaming";
+import { createHash, randomUUID } from "node:crypto";
+import { promises as fs } from "node:fs";
+import { join } from "node:path";
 import type { ZodType } from "zod";
+import { fsCasStore } from "pi-bio-agent";
 import {
   AgentSessionConflictError,
   AgentSessionNotFoundError,
@@ -22,6 +26,13 @@ import type { GroundingRuntime } from "../phenotype-grounding.js";
 import type { PhenotypeHypothesisRuntime } from "../monarch-host.js";
 import type { CandidateVariantSearchRuntime } from "../candidate-variant-search.js";
 import type { VepAnnotationRuntime } from "../clinical-genomics.js";
+import {
+  ClinicalCaseRegistryInputError,
+  getClinicalCaseRevision,
+  listClinicalCaseRevisions,
+  registerClinicalCaseRevision,
+  type RegisterClinicalCaseRevisionRequest,
+} from "../clinical-case-registry.js";
 import { addonDescriptor, type WorkbenchAddon } from "../workbench-addon.js";
 import {
   AnalysisPathSchema,
@@ -36,6 +47,11 @@ import {
   ClinicalAnalysisResponseSchema,
   ClinicalAnalysisListQuerySchema,
   ClinicalAnalysisListSchema,
+  ClinicalCasePathSchema,
+  ClinicalCaseRevisionListQuerySchema,
+  ClinicalCaseRevisionListSchema,
+  ClinicalCaseRevisionPathSchema,
+  ClinicalCaseRevisionSchema,
   ClinicalReanalysisQueueQuerySchema,
   ClinicalReanalysisQueueSchema,
   ClinicalReviewQueueResponseSchema,
@@ -45,9 +61,12 @@ import {
   HealthResponseSchema,
   OpenAgentSessionSchema,
   RenameAgentSessionSchema,
+  RegisterClinicalCaseRevisionSchema,
   ReviewPathSchema,
   RunClinicalAnalysisResponseSchema,
   SendAgentMessageSchema,
+  StageClinicalCaseAssetPathSchema,
+  StageClinicalCaseAssetResponseSchema,
   UpdateClinicalReviewSchema,
   WorkbenchInfoSchema,
 } from "./schemas.js";
@@ -69,6 +88,60 @@ export interface WorkbenchApiOptions {
 const json = <T extends ZodType>(schema: T) => ({
   content: { "application/json": { schema } },
 });
+
+async function stageClinicalAssetBytes(
+  workspace: string,
+  body: ReadableStream<Uint8Array> | null,
+  expectedDigest: string,
+): Promise<{ digest: `sha256:${string}`; uri: `cas:sha256:${string}`; sizeBytes: number }> {
+  if (!body) throw new ClinicalCaseRegistryInputError("asset request body is required");
+  const uploadDir = join(workspace, ".pi", "bio-agent", "uploads");
+  await fs.mkdir(uploadDir, { recursive: true });
+  const temporaryPath = join(uploadDir, `asset-${randomUUID()}.tmp`);
+  const hash = createHash("sha256");
+  let sizeBytes = 0;
+  try {
+    const handle = await fs.open(temporaryPath, "wx");
+    try {
+      const reader = body.getReader();
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const bytes = Buffer.from(value);
+          hash.update(bytes);
+          sizeBytes += bytes.length;
+          let offset = 0;
+          while (offset < bytes.length) {
+            const { bytesWritten } = await handle.write(bytes, offset, bytes.length - offset, null);
+            if (bytesWritten === 0) throw new Error("asset upload made no write progress");
+            offset += bytesWritten;
+          }
+        }
+      } finally {
+        reader.releaseLock();
+      }
+    } finally {
+      await handle.close();
+    }
+    if (sizeBytes === 0) throw new ClinicalCaseRegistryInputError("asset request body is empty");
+    const actualDigest = hash.digest("hex");
+    if (actualDigest !== expectedDigest) {
+      throw new ClinicalCaseRegistryInputError(`asset bytes hash to '${actualDigest}', not '${expectedDigest}'`);
+    }
+    const stored = await fsCasStore(join(workspace, ".pi", "bio-agent", "cas")).putFile(temporaryPath);
+    if (stored.address.digest !== expectedDigest || stored.size !== sizeBytes) {
+      throw new Error("CAS staging result does not match the verified upload");
+    }
+    return {
+      digest: `sha256:${expectedDigest}`,
+      uri: `cas:sha256:${expectedDigest}`,
+      sizeBytes,
+    };
+  } finally {
+    await fs.rm(temporaryPath, { force: true });
+  }
+}
 
 const healthRoute = createRoute({
   method: "get",
@@ -231,6 +304,62 @@ const agentTranscriptRoute = createRoute({
     404: { ...json(ErrorResponseSchema), description: "The active session was not found." },
     503: { ...json(ErrorResponseSchema), description: "No interactive agent host is configured." },
     500: { ...json(ErrorResponseSchema), description: "The agent host could not read the transcript." },
+  },
+});
+
+const stageClinicalCaseAssetRoute = createRoute({
+  method: "put",
+  path: "/v1/clinical-case-assets/{digest}",
+  tags: ["clinical cases"],
+  summary: "Stream verified bytes into the clinical workspace CAS",
+  description: "The path is the caller-computed SHA-256 hex digest and the request body is the raw asset bytes. No host filesystem path crosses the API boundary.",
+  request: { params: StageClinicalCaseAssetPathSchema },
+  responses: {
+    201: { ...json(StageClinicalCaseAssetResponseSchema), description: "The verified immutable CAS reference." },
+    400: { ...json(ErrorResponseSchema), description: "The body was empty or did not match the declared digest." },
+    500: { ...json(ErrorResponseSchema), description: "The asset could not be staged." },
+  },
+});
+
+const registerClinicalCaseRevisionRoute = createRoute({
+  method: "post",
+  path: "/v1/clinical-cases/{caseId}/revisions",
+  tags: ["clinical cases"],
+  summary: "Register an immutable clinical case revision",
+  description: "Binds pseudonymous family structure and staged CAS assets. The ledger stores identifiers and content addresses; raw clinical bytes remain in CAS.",
+  request: {
+    params: ClinicalCasePathSchema,
+    body: { required: true, content: { "application/json": { schema: RegisterClinicalCaseRevisionSchema } } },
+  },
+  responses: {
+    201: { ...json(ClinicalCaseRevisionSchema), description: "The immutable registered revision." },
+    400: { ...json(ErrorResponseSchema), description: "The revision or one of its asset/family references is invalid." },
+    500: { ...json(ErrorResponseSchema), description: "The revision could not be registered." },
+  },
+});
+
+const listClinicalCaseRevisionsRoute = createRoute({
+  method: "get",
+  path: "/v1/clinical-cases/{caseId}/revisions",
+  tags: ["clinical cases"],
+  summary: "List immutable revisions for one clinical case",
+  request: { params: ClinicalCasePathSchema, query: ClinicalCaseRevisionListQuerySchema },
+  responses: {
+    200: { ...json(ClinicalCaseRevisionListSchema), description: "Revision summaries from the temporal ledger." },
+    500: { ...json(ErrorResponseSchema), description: "The case revision history could not be read." },
+  },
+});
+
+const getClinicalCaseRevisionRoute = createRoute({
+  method: "get",
+  path: "/v1/clinical-cases/{caseId}/revisions/{revisionId}",
+  tags: ["clinical cases"],
+  summary: "Read one immutable clinical case revision",
+  request: { params: ClinicalCaseRevisionPathSchema },
+  responses: {
+    200: { ...json(ClinicalCaseRevisionSchema), description: "The verified revision read from CAS." },
+    404: { ...json(ErrorResponseSchema), description: "No registered revision has this case/revision identity." },
+    500: { ...json(ErrorResponseSchema), description: "The revision could not be read." },
   },
 });
 
@@ -558,6 +687,75 @@ export function createClinicalWorkbenchAddon(options: ClinicalWorkbenchAddonOpti
     order: 100,
     browserEntry: "/addons/clinical-evidence.js",
     registerApi(app) {
+      app.openapi(stageClinicalCaseAssetRoute, async (context) => {
+        const { digest } = context.req.valid("param");
+        try {
+          return context.json(StageClinicalCaseAssetResponseSchema.parse(
+            await stageClinicalAssetBytes(options.clinicalWorkspace, context.req.raw.body, digest),
+          ), 201);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          if (error instanceof ClinicalCaseRegistryInputError) {
+            return context.json({ error: { code: "invalid_clinical_asset", message } }, 400);
+          }
+          return context.json({ error: { code: "clinical_asset_stage_failed", message } }, 500);
+        }
+      });
+
+      app.openapi(registerClinicalCaseRevisionRoute, async (context) => {
+        const { caseId } = context.req.valid("param");
+        const request = context.req.valid("json");
+        try {
+          const revision = await registerClinicalCaseRevision(options.clinicalWorkspace, {
+            ...request,
+            caseId,
+            assets: request.assets.map((asset) => ({
+              ...asset,
+              digest: asset.digest as `sha256:${string}`,
+            })),
+            recordedAt: options.clock?.(),
+          } satisfies RegisterClinicalCaseRevisionRequest);
+          return context.json(ClinicalCaseRevisionSchema.parse(revision), 201);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          if (error instanceof ClinicalCaseRegistryInputError) {
+            return context.json({ error: { code: "invalid_clinical_case_revision", message } }, 400);
+          }
+          return context.json({ error: { code: "clinical_case_revision_failed", message } }, 500);
+        }
+      });
+
+      app.openapi(listClinicalCaseRevisionsRoute, async (context) => {
+        const { caseId } = context.req.valid("param");
+        const query = context.req.valid("query");
+        try {
+          return context.json(ClinicalCaseRevisionListSchema.parse({
+            revisions: await listClinicalCaseRevisions(options.clinicalWorkspace, {
+              caseId,
+              limit: query.limit,
+              ...(query.asOf ? { asOf: query.asOf } : {}),
+            }),
+          }), 200);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          return context.json({ error: { code: "clinical_case_revision_list_failed", message } }, 500);
+        }
+      });
+
+      app.openapi(getClinicalCaseRevisionRoute, async (context) => {
+        const { caseId, revisionId } = context.req.valid("param");
+        try {
+          const revision = await getClinicalCaseRevision(options.clinicalWorkspace, caseId, revisionId);
+          if (!revision) {
+            return context.json({ error: { code: "clinical_case_revision_not_found", message: `No revision '${revisionId}' was found for case '${caseId}'.` } }, 404);
+          }
+          return context.json(ClinicalCaseRevisionSchema.parse(revision), 200);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          return context.json({ error: { code: "clinical_case_revision_read_failed", message } }, 500);
+        }
+      });
+
       app.openapi(listAnalysesRoute, async (context) => {
         try {
           return context.json(ClinicalAnalysisListSchema.parse({
@@ -575,6 +773,7 @@ export function createClinicalWorkbenchAddon(options: ClinicalWorkbenchAddonOpti
           const result = await runClinicalGenomicsWorkbench({
             exampleDir: options.clinicalWorkspace,
             caseId: request.caseId,
+            ...(request.caseRevisionId ? { caseRevisionId: request.caseRevisionId } : {}),
             ...(request.analysisId ? { analysisId: request.analysisId } : {}),
             grounding: options.grounding,
             hypotheses: options.hypotheses,
