@@ -113,6 +113,59 @@ describe("Pi coding-agent extension", () => {
     assert.match(out.details.casRefs.result, /^sha256:/);
   });
 
+  test("concurrent reproduce tools keep the local ledger readable and record distinct verification runs", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "pi-bio-ext-concurrent-reproduce-"));
+    const manifestPath = join(cwd, "manifest.json");
+    await writeFile(manifestPath, JSON.stringify({
+      schema: "pi-bio.manifest.v1",
+      id: "concurrent-reproduce",
+      version: "0.1.0",
+      title: "Concurrent reproduce",
+      description: "Resource-free concurrent reproduction regression fixture.",
+      provides: {},
+    }), "utf8");
+
+    const cas = fsCasStore(join(cwd, ".pi", "bio-agent", "cas"));
+    const { tools } = loadExtension(createBioExtension({ author: "agent:test", cas }));
+    const byName = new Map(tools.map((tool) => [tool.name, tool]));
+    const replayPaths: string[] = [];
+    const seedRunPrefix = `concurrent-reproduce-${"x".repeat(96)}`;
+    for (let index = 0; index < 4; index += 1) {
+      const query = await byName.get("bio_query")!.execute(`seed-call-${index}`, {
+        dbPath: ":memory:",
+        manifestPath,
+        sql: `SELECT ${index} AS answer`,
+        runId: `${seedRunPrefix}-${index}`,
+      }, undefined, undefined, { cwd });
+      assert.equal(query.details.ok, true, query.details.ok ? "" : query.details.error);
+      replayPaths.push(join(query.details.runDir, "replay.json"));
+    }
+
+    const reproductions = await Promise.all(replayPaths.map((replayPath, index) =>
+      byName.get("bio_reproduce_run")!.execute(`reproduce-call-${index}`, {
+        replayPath,
+        dbPath: ":memory:",
+      }, undefined, undefined, { cwd }),
+    ));
+    assert.ok(reproductions.every((result) => result.details.matched === true));
+    const reproductionRunIds = reproductions.map((result) => result.details.reproductionRunId as string);
+    assert.equal(new Set(reproductionRunIds).size, 4, "concurrent reproductions have collision-free run ids");
+
+    const store = await openBioStore(cwd);
+    try {
+      const rows = await store.conn.all<{ n: bigint }>(
+        `SELECT count(DISTINCT subject_id) AS n
+         FROM bio_observations
+         WHERE predicate = 'run' AND subject_id IN (${reproductionRunIds.map(() => "?").join(",")})`,
+        reproductionRunIds.map((runId) => `run:${runId}`),
+      );
+      assert.equal(Number(rows[0]?.n), 4, "all verification runs reached the shared ledger");
+      await assert.doesNotReject(() => store.conn.all("SELECT count(*) FROM bio_observations"));
+    } finally {
+      store.close();
+    }
+  });
+
   test("before_agent_start records context digests without storing prompt text", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "pi-bio-ext-prompt-"));
     const { handlers } = loadExtension(createBioExtension({ author: "agent:test" }));

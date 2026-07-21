@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
-import { DuckDBInstance, type DuckDBConnection } from "@duckdb/node-api";
+import type { DuckDBConnection, DuckDBInstance } from "@duckdb/node-api";
 import { describeTable } from "../core/schema-discovery.js";
-import { duckdbNodeConn } from "../duckdb/node-api.js";
+import { duckdbNodeConn, openDuckDbInstance } from "../duckdb/node-api.js";
 import { parseGraphWindowContinuation, queryGraphWindow, type GraphQueryWindowOptions } from "../duckdb/graph-window.js";
 import { materializeBioEdgesAsOf } from "../duckdb/observations.js";
 import { MEMORY_NOW } from "../hosts/memory-store.js";
@@ -71,10 +71,10 @@ export async function mainGraphWindow(argv: string[], deps: GraphWindowCliDeps):
   }
 
   const dbPath = opts.dbPath === ":memory:" ? ":memory:" : resolve(deps.cwd, opts.dbPath);
-  let instance: Awaited<ReturnType<typeof DuckDBInstance.create>> | undefined;
+  let instance: DuckDBInstance | undefined;
   let connection: DuckDBConnection | undefined;
   try {
-    instance = await DuckDBInstance.create(dbPath);
+    instance = await openDuckDbInstance(dbPath);
     connection = await instance.connect();
     const { dbPath: _dbPath, ...windowOpts } = opts;
     const conn = duckdbNodeConn(connection);

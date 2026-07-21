@@ -90,9 +90,10 @@ The adapter is host-specific; the ledger is not.
 
 ## Cross-process access
 
-The default local DuckDB store is process-exclusive. Multiple actors can share the logical ledger by injecting a
-remote `SqlConn`, including the parameterized HTTP reference server or a DuckNNG RPC-backed connection. The
-observation and memory APIs do not change with topology.
+The default local DuckDB store supports concurrent tools and hooks in one process through one process-cached native
+instance and independent connections. It remains exclusive across processes. Multiple processes or hosts share the
+logical ledger by injecting a remote `SqlConn`, including the parameterized HTTP reference server or a DuckNNG
+RPC-backed connection. The observation and memory APIs do not change with topology.
 
 Transport security, SQL authorization, credentials, TLS, and service admission are host responsibilities. See
 [concurrency.md](concurrency.md).

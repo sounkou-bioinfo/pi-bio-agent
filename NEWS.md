@@ -35,6 +35,15 @@ is the plan of record; [`docs/refinments.md`](docs/refinments.md) tracks open it
 
 ## Concurrency, security, and correctness
 
+- Local ledger opens now share one process-cached DuckDB instance with serialized schema bootstrap, preventing
+  concurrent Pi tools/hooks from attaching `store.duckdb` through independent instances and silently losing or
+  corrupting writes. Cache keys collapse symlink, dangling-symlink, and existing hard-link aliases, while CLI
+  execution rejects a `--ledger` alias of its scientific `--db`. Scientific file runs retain per-run instance
+  isolation for extension lifecycle safety and serialize by canonical path instead of attaching concurrent instances;
+  an ownership-mode guard rejects mixing a cached ledger owner with an isolated scientific owner for the same file.
+  Concurrent reproductions also receive collision-resistant run ids. First-party packages align on
+  `@duckdb/node-api` 1.5.2, and a runtime guard rejects an addon/library core-version mismatch before any database is
+  opened; DuckNNG remains the writer authority for cross-process and cross-host sharing.
 - Typed memory links are now canonicalized and validated at the public SDK write boundary before DuckDB is touched;
   recalled revisions and temporal graph edges therefore cannot disagree about a target or predicate. A live Quarto
   pattern runs separate writer and reader Pi agents, then verifies their session trajectories, history, and graph.

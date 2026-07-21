@@ -14,7 +14,7 @@ import { wrapSqlConn, type BioResolverImpl, type ComputeRunner, type SqlConn, ty
 import { OperationRunError, runOperation, runQuery, type OperationResult } from "../core/operations.js";
 import type { BioRunRecord } from "../core/run-spec.js";
 import type { BioArtifact, Provenance } from "../core/types.js";
-import { duckdbNodeConn } from "../duckdb/node-api.js";
+import { assertDuckDbNativeCompatibility, duckdbNodeConn, openDuckDbInstance, withDuckDbFileExclusive } from "../duckdb/node-api.js";
 import { sqlReadsOnlyResolvedTables, resolvedBaseTables, sqlUsesNonDeterministicFn, hermeticIntrospectionUsable } from "../duckdb/plan-hermeticity.js";
 import { duckdbFileScanResolver } from "../duckdb/resolvers/duckdb-file-scan.js";
 import { duckdbSqlMaterializeResolver } from "../duckdb/resolvers/duckdb-sql-materialize.js";
@@ -482,7 +482,7 @@ async function prepareRegistry(req: { cwd: string; manifestPath?: string; manife
 }
 
 async function inferQueryResourcesFromManifest(manifest: BioManifest, sql: string): Promise<string[]> {
-  const instance = await DuckDBInstance.create(":memory:");
+  const instance = await openDuckDbInstance(":memory:");
   let connection: Awaited<ReturnType<typeof instance.connect>> | undefined;
   try {
     connection = await instance.connect();
@@ -747,7 +747,7 @@ async function recordRun(
   await recordRunObservation(runLog.store, obs, now, runLog.author);
 }
 
-async function runAndPersist(
+async function runAndPersistUnlocked(
   cwd: string, dbPath: string, runId: string, identity: string, kind: "query" | "operation",
   body: (conn: SqlConn, protectedSessionVariables: readonly string[]) => Promise<{ run: BioRunRecord; result: OperationResult; receipts: ResolutionReceipt[] }>,
   // The INJECTED clock (req.now) or undefined. Resolution/receipts use the caller's start-time `now` (captured in
@@ -777,6 +777,7 @@ async function runAndPersist(
   const protectedVariableNames = protectedSessionVariableNames(protectedSessionBindings, protectedSessionVariables);
   let instance: DuckDBInstance;
   try {
+    assertDuckDbNativeCompatibility();
     instance = await DuckDBInstance.create(resolveInCwd(cwd, dbPath), duckdbConfig);
   } catch (err) {
     throw markRunDbOpenError(err); // create() failed (bad db/config/lock) — BEFORE any resolution/compute side effect
@@ -785,7 +786,7 @@ async function runAndPersist(
   try {
     connection = await instance.connect();
   } catch (err) {
-    instance.closeSync(); // connect() failed (bad db/config/lock) — the finally below can't run yet, so close the instance here or it leaks (a process-exclusive writer lock would linger)
+    instance.closeSync(); // connect() failed (bad db/config/lock) — the finally below can't run yet, so release this isolated instance here
     throw markRunDbOpenError(err); // still BEFORE side effects — a host may retry unlogged (see extension withRunLog)
   }
   const rawConn = duckdbNodeConn(connection);
@@ -1061,6 +1062,12 @@ async function runAndPersist(
     connection.closeSync();
     instance.closeSync();
   }
+}
+
+async function runAndPersist(...args: Parameters<typeof runAndPersistUnlocked>): Promise<RunOperationResponse> {
+  const [cwd, dbPath] = args;
+  const resolvedPath = resolveInCwd(cwd, dbPath);
+  return withDuckDbFileExclusive(resolvedPath, () => runAndPersistUnlocked(...args));
 }
 
 /**

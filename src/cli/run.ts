@@ -3,11 +3,12 @@ import { resolve } from "node:path";
 import type { SqlConn } from "../core/ports.js";
 import type { HostCapabilityReceipt } from "../core/reproducibility.js";
 import { runBioOperationFromManifest, runBioQueryFromManifest } from "../hosts/run-store.js";
-import { openBioStore } from "../hosts/bio-store.js";
+import { bioStorePath, openBioStore } from "../hosts/bio-store.js";
 import { fsCasStore } from "../hosts/fs-cas.js";
 import { cappedFetchLike, DEFAULT_MAX_RESPONSE_BYTES } from "../hosts/network.js";
 import { nodeComputeRunner } from "../process/node-compute-runner.js";
 import type { DucknngHttpProfileSpec } from "../duckdb/http-profiles.js";
+import { duckDbPathsReferToSameFile } from "../duckdb/node-api.js";
 
 // The `query` / `run` CLI engine — the substrate's actual value at a provider-agnostic entry point (not Pi-only).
 // It wraps the SAME tested host functions the Pi extension uses (runBioQueryFromManifest / runBioOperationFromManifest),
@@ -244,8 +245,13 @@ export async function mainRun(sub: string, argv: string[], deps: RunCliDeps): Pr
   // that store, openBioStore throws and we surface it here — we do NOT silently skip recording the run.
   let ledger: { conn: SqlConn; close: () => void } | undefined;
   if (flags.ledger) {
+    const ledgerPath = flags.ledger === "auto" ? bioStorePath(deps.cwd) : resolve(deps.cwd, flags.ledger);
+    if (dbPath !== ":memory:" && await duckDbPathsReferToSameFile(resolve(deps.cwd, dbPath), ledgerPath)) {
+      deps.err("--ledger must not refer to the scientific --db file; evidence and execution require separate DuckDB catalogs");
+      return 2;
+    }
     try {
-      ledger = await openBioStore(deps.cwd, flags.ledger === "auto" ? {} : { path: flags.ledger });
+      ledger = await openBioStore(deps.cwd, { path: ledgerPath });
     } catch (e) {
       deps.err(`--ledger: could not open the observation store (${flags.ledger}): ${e instanceof Error ? e.message : String(e)}`);
       return 1;

@@ -29,3 +29,33 @@ test("CLI reproduce exposes the existing digest-verification contract", async ()
   assert.deepEqual(verdict.missing, []);
   assert.deepEqual(verdict.extra, []);
 });
+
+test("CLI reproduce rejects a ledger alias of its scientific database before opening it", async () => {
+  const cwd = await fs.mkdtemp(join(tmpdir(), "pi-bio-cli-reproduce-alias-"));
+  const original = await runBioQueryFromManifest({
+    cwd,
+    dbPath: ":memory:",
+    manifestPath: resolve("examples/variant-counts/manifest.json"),
+    sql: "SELECT count(*) AS n FROM variants",
+    runId: "cli-reproduce-alias-original",
+  });
+  assert.equal(original.ok, true);
+
+  const realDir = join(cwd, "real");
+  await fs.mkdir(realDir);
+  const target = join(realDir, "shared.duckdb");
+  const scientificDb = join(cwd, "scientific.duckdb");
+  const ledgerAlias = join(cwd, "ledger.duckdb");
+  await fs.symlink(target, scientificDb);
+  await fs.symlink(target, ledgerAlias);
+  const out: string[] = [];
+  const err: string[] = [];
+  const code = await mainReproduce([
+    join(original.runDir, "replay.json"),
+    "--db", scientificDb,
+    "--ledger", ledgerAlias,
+  ], { cwd, out: (line) => out.push(line), err: (line) => err.push(line) });
+  assert.equal(code, 1);
+  assert.match(err.join("\n"), /ledger must not refer to the reproduction --db file/);
+  await assert.rejects(() => fs.stat(target), /ENOENT/);
+});

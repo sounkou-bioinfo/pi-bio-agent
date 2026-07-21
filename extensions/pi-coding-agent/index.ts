@@ -16,6 +16,7 @@ import {
 import { deleteStudyNote, makeStudyNote, runtimeSkillRoot, runtimeStudyRoot, validateSkillInput, writeProjectSkill, writeStudyNote } from "../../src/hosts/pi-project.js";
 import { defaultDuckDbExtensionCatalog, findDuckDbExtensions } from "../../src/duckdb/extensions.js";
 import { queryGraphWindow } from "../../src/duckdb/graph-window.js";
+import { duckDbPathsReferToSameFile } from "../../src/duckdb/node-api.js";
 import { entailedEdgesAsOf, materializeBioEdgesAsOf, recordObservationLink } from "../../src/duckdb/observations.js";
 import { describeBioManifestFromPath, isRunDbOpenError, runBioOperationFromManifest, runBioQueryFromManifest } from "../../src/hosts/run-store.js";
 import { listManifestCatalog } from "../../src/hosts/manifest-catalog.js";
@@ -23,7 +24,7 @@ import type { CasStore } from "../../src/core/cas.js";
 import { bioStorePath, isBioStoreLocked, openBioStore, type BioStore } from "../../src/hosts/bio-store.js";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { access, readFile, stat } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import { forget, listMemory, recall, remember, memorySubjectId, normalizeAsOf, MEMORY_NOW, type MemoryContent } from "../../src/hosts/memory-store.js";
 import { recordSkill, skillSubjectId } from "../../src/hosts/skill-store.js";
 import { fsCasStore } from "../../src/hosts/fs-cas.js";
@@ -138,7 +139,8 @@ async function defaultManifestCatalogRoot(cwd: string): Promise<string> {
 // that makes a MEMORY.md-style index useful. Bounded to keep the token cost small; failures are swallowed (an
 // index is a convenience, never a hard dependency).
 async function memoryIndexBlock(open: OpenStore, cwd: string): Promise<string> {
-  // tryOpen → undefined when a concurrent agent holds the store (degrade to no index, never break the turn).
+  // tryOpen → undefined when another process holds the local store (degrade to no index, never break the turn).
+  // Same-process callers share openBioStore's cached native instance and receive independent connections.
   let store: BioStore | undefined;
   try {
     store = await tryOpen(open, cwd);
@@ -162,22 +164,10 @@ async function memoryIndexBlock(open: OpenStore, cwd: string): Promise<string> {
 
 // Open the ONE store to record a run's `run:<id>` fact — but ONLY when it is safe to. Returns undefined (run
 // proceeds without shared-ledger logging) in exactly two cases, never swallowing anything broader:
-//   1. the run's own db IS the store file — a second open would lock-conflict (DuckDB is a process-exclusive
-//      writer), so skip logging rather than break the run;
-//   2. the store cannot be opened (locked by another process / unavailable) — logging is a convenience, not a
-//      hard dependency of the query. A genuinely broken store still surfaces on the next memory op (withStore).
-// True iff both paths name the SAME underlying file (same device + inode) — unmasks a symlink/hardlink alias that a
-// pure path compare misses. Best-effort: a missing file (ENOENT) or stat error means "not provably the same" -> false
-// (the resolved-path check above still catches the same-intended-path case before either file exists).
-async function isSameFile(a: string, b: string): Promise<boolean> {
-  try {
-    const [sa, sb] = await Promise.all([stat(a), stat(b)]);
-    return sa.dev === sb.dev && sa.ino === sb.ino;
-  } catch {
-    return false;
-  }
-}
-
+//   1. the run's own db IS the store file — do not open the cached evidence owner beside the run's isolated
+//      scientific owner; the process ownership guard would reject that overlap before execution;
+//   2. another process owns the local file / the store is unavailable — logging is a convenience, not a hard
+//      dependency of the query. A genuinely broken store still surfaces on the next memory op (withStore).
 async function openRunLog(open: OpenStore, cwd: string, dbPath: string): Promise<BioStore | undefined> {
   const runDb = dbPath === ":memory:" ? "" : isAbsolute(dbPath) ? dbPath : resolve(cwd, dbPath);
   const storePath = resolve(bioStorePath(cwd));
@@ -187,9 +177,9 @@ async function openRunLog(open: OpenStore, cwd: string, dbPath: string): Promise
   // Catch the run-uses-the-store case two ways: (a) same RESOLVED path (works even before either file exists —
   // resolve() both sides since bioStorePath(cwd) is relative when cwd is), and (b) same underlying FILE by
   // device+inode, so a SYMLINK or HARDLINK alias of the store file (which resolve() alone won't unmask) is still
-  // caught — else the run opens the same inode and DuckDB's process-exclusive-writer lock makes the run fail.
-  if (runDb && (resolve(runDb) === storePath || (await isSameFile(runDb, storePath)))) return undefined; // (1)
-  // (2) tryOpen returns undefined on a lock conflict (a concurrent agent holds it — the EXPECTED degrade). A REAL
+  // caught — the run must not acquire a cached evidence owner for its own isolated scientific DB.
+  if (runDb && await duckDbPathsReferToSameFile(runDb, storePath)) return undefined; // (1)
+  // (2) tryOpen returns undefined on a cross-process lock conflict (the EXPECTED degrade). A REAL
   // store error (corruption/permissions) is NOT expected: best-effort logging must still not fail the run, so we
   // degrade — but SURFACE it (a warning to stderr) rather than swallow it silently, so an operator can fix a broken
   // store instead of silently losing every run-ledger entry.
@@ -352,11 +342,11 @@ export interface BioExtensionOptions {
   protectedSessionVariables?: string[];
   /** The authoring agent id stamped on runs/memory this instance records (shared-store attribution). */
   author?: string;
-  /** How to open the ONE store. Default: the project-local file (`openBioStore(cwd)`), a process-exclusive writer
-   *  — fine for a single project run serially, but it LOCKS out concurrent openers. For inter-project /
-   *  inter-agent / inter-process / inter-machine memory, the host injects a SERVER-backed store here — a
-   *  connection to a ducknng `run_rpc` or a duckdb quack server — so many agents share one live store without
-   *  lock contention. This is the provider-agnostic seam: the library records; the host decides where memory lives. */
+  /** How to open the ONE store. Default: the project-local file (`openBioStore(cwd)`). Same-process hooks and tools
+   *  share one process-cached DuckDB instance with independent connections; another process is still locked out.
+   *  For inter-project / inter-agent / inter-process / inter-machine memory, the host injects a SERVER-backed store
+   *  here — a connection to a ducknng `run_rpc` or equivalent writer authority. This is the provider-agnostic seam:
+   *  the library records; the host decides where memory lives. */
   openStore?: OpenStore;
 }
 

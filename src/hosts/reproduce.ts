@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { dirname, join, resolve, isAbsolute } from "node:path";
 import { RUN_REPLAY_SPEC_SCHEMA, receiptContentDigest, canonicalDigest, hostCapabilityReceiptDigests, type EnvAttestationSummary, type HostCapabilityReceipt, type RunReplayOutcome, type RunReplaySpec } from "../core/reproducibility.js";
@@ -184,10 +185,10 @@ export async function reproduceRun(req: ReproduceRequest): Promise<ReproduceResu
     if (JSON.stringify(supplied) !== JSON.stringify(replay.hostReceiptDigests)) throw new Error("reproduce: the supplied hostCapabilityReceipts do not match the pinned hostReceiptDigests (would not be a faithful reproduction)");
   }
   // The reproduction run id must stay within the run-dir id limit (128 chars, RUN_DIR_ID_RE) — otherwise an ORIGINAL
-  // runId near that max would, with the `reproduce-…-<epoch>` wrapping, overflow and be rejected before reproduction,
-  // making a valid persisted run unreproducible. Truncate the original portion to fit (it's an internal temp-run id;
-  // full fidelity isn't needed — the epoch suffix keeps it unique).
-  const suffix = `-${Date.now()}`;
+  // runId near that max would, with the `reproduce-…-<epoch>-<entropy>` wrapping, overflow and be rejected before
+  // reproduction. Truncate the original portion to fit. Date.now() alone is not unique under concurrent tool calls;
+  // retain a UUID suffix so independent verification runs never overwrite one run directory/ledger slot.
+  const suffix = `-${Date.now()}-${randomUUID().slice(0, 8)}`;
   const budget = 128 - "reproduce-".length - suffix.length;
   const shortId = replay.runId.slice(0, Math.max(1, budget));
   const manifestBaseDir = req.manifestBaseDir

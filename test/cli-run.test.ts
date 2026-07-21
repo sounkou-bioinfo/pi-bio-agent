@@ -184,6 +184,25 @@ describe("cli: query/run over a manifest (provider-agnostic entry point)", () =>
     } finally { store.close(); }
   });
 
+  test("--ledger rejects dangling file-symlink aliases before the shared target is created", async () => {
+    const cwd = await fsp.mkdtemp(join(tmpdir(), "cli-ledger-alias-"));
+    const realDir = join(cwd, "real");
+    await fsp.mkdir(realDir);
+    const target = join(realDir, "shared.duckdb");
+    const scientificAlias = join(cwd, "scientific.duckdb");
+    const ledgerAlias = join(cwd, "ledger.duckdb");
+    await fsp.symlink(target, scientificAlias);
+    await fsp.symlink(target, ledgerAlias);
+    const s = sink();
+    const code = await mainRun("query", [
+      resolve(MANIFEST), "--db", scientificAlias, "--sql", "SELECT count(*) AS n FROM variants",
+      "--ledger", ledgerAlias,
+    ], { ...s.deps, cwd });
+    assert.equal(code, 2);
+    assert.match(s.err.join("\n"), /ledger must not refer to the scientific --db file/);
+    await assert.rejects(() => fsp.stat(target), /ENOENT/, "validation happens before DuckDB creates the shared target");
+  });
+
   test("--ledger defaults the author to 'cli' when --author is omitted; without --ledger nothing is recorded", async () => {
     const s = sink();
     const ledgerPath = join(await fsp.mkdtemp(join(tmpdir(), "cli-ledger-")), "store.duckdb");

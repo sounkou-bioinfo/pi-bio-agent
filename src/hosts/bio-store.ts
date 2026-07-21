@@ -1,8 +1,7 @@
-import { DuckDBInstance } from "@duckdb/node-api";
 import { promises as fs } from "node:fs";
 import { dirname, join } from "node:path";
 import type { SqlConn } from "../core/ports.js";
-import { duckdbNodeConn } from "../duckdb/node-api.js";
+import { duckdbNodeConn, openDuckDbInstance, withDuckDbFileInitialization } from "../duckdb/node-api.js";
 import { createBioObservationSchema } from "../duckdb/observations.js";
 
 // THE one store. Memory is NOT a separate database: facts, compute-status, jobs, activation AND memory are all
@@ -19,38 +18,37 @@ export function bioStorePath(cwd: string): string {
  * this connection and passes it to memory/fact/job recorders alike — none of them owns a private database.
  *
  * SHARING is a choice of WHERE this store lives, made by the host (the library records; the host decides):
- * - **across runs of one project**: the default project-local file — every run opens it, so memory/facts persist
- *   and accumulate (DuckDB is a process-exclusive writer, so concurrent runs serialize; that is the correct
- *   default for a single project);
- * - **across projects / users**: point `path` at a shared location (a shared mount, a per-user global store);
- * - **concurrent / cross-host / cross-agent**: the process-exclusive-writer lock is lifted by a DuckDB SERVER —
- *   a ducknng-served DuckDB (`ducknng_run_rpc`, exec opt-in) or a duckdb quack server — one writer that many
- *   clients read/write through concurrently; or share immutable snapshots by digest via CAS. Because every memory
- *   row carries its author (`source`) and an as-of time, a shared live store stays trustworthy and consistent;
- *   access is gated by ducknng's in-memory/file-backed mTLS, peer allowlists, and exec opt-in. This `conn` is the
- *   seam: the host injects a local file today or a server-backed connection when it wants a shared live store.
+ * - **across runs of one project / one process**: the default project-local file — every open receives a new
+ *   connection to one process-cached DuckDB instance, so concurrent Pi hooks/tools cannot attach the same file
+ *   through independent instances and silently lose or corrupt writes;
+ * - **across projects / users in one process**: point `path` at a shared location; the same resolved file path uses
+ *   that process cache and retains attributed rows;
+ * - **cross-process / cross-host / cross-agent**: another process still cannot open the local file while this one
+ *   owns it. Use a DuckDB SERVER — a ducknng-served DuckDB (`ducknng_run_rpc`, exec opt-in) or equivalent — as the
+ *   one writer that many clients reach concurrently; or share immutable snapshots by digest via CAS. Because every
+ *   memory row carries its author (`source`) and an as-of time, a shared live store stays attributed. This `conn` is
+ *   the seam: the host injects a local file today or a server-backed connection for multi-process sharing.
  */
 export interface BioStore {
   conn: SqlConn;
-  /** Release the DuckDB handle. On the serverless local-file default DuckDB is a process-exclusive writer, so a
-   *  project's runs SHARE by open → write → close in sequence; a caller must close to let the next run open it.
-   *  (Concurrency is not a serialize-forever limit — a ducknng/quack server lifts it; see openBioStore.) */
+  /** Release this connection and its cached-instance handle. Other same-process opens may remain live; callers must
+   *  still close promptly so the native cache can release the file when the final handle closes. */
   close(): void;
 }
 
 export async function openBioStore(cwd: string, opts: { path?: string } = {}): Promise<BioStore> {
   const path = opts.path ?? bioStorePath(cwd);
   await fs.mkdir(dirname(path), { recursive: true }); // the store file's OWN parent — works for a custom opts.path too
-  const instance = await DuckDBInstance.create(path);
-  // Fail closed WITHOUT leaking the handle: DuckDB is a process-exclusive writer, so a connection/instance left
-  // open on a failure (a throwing `connect`, a schema-creation error on a corrupt/incompatible table or bad
-  // permissions) would LOCK the file store against every later process. `connect()` is INSIDE the try so a
-  // connect-throw closes the instance too — the connection may not exist yet, so guard it before closing.
+  // DuckDB's node-api contract is explicit: multiple instances in one process must not attach the same database.
+  // openDuckDbInstance uses one process-wide native instance cache for file paths while keeping :memory: isolated.
+  const instance = await openDuckDbInstance(path);
+  // Fail closed WITHOUT leaking the cached handle. Schema DDL is serialized per file because concurrent
+  // CREATE ... IF NOT EXISTS statements on separate connections can still catalog-conflict.
   let connection: Awaited<ReturnType<typeof instance.connect>> | undefined;
   try {
     connection = await instance.connect();
     const conn = duckdbNodeConn(connection);
-    await createBioObservationSchema(conn, { ifNotExists: true });
+    await withDuckDbFileInitialization(path, () => createBioObservationSchema(conn, { ifNotExists: true }));
     return buildStore(conn, connection, instance);
   } catch (err) {
     connection?.closeSync();
@@ -69,9 +67,9 @@ function buildStore(conn: SqlConn, connection: { closeSync(): void }, instance: 
   };
 }
 
-/** True iff `err` is DuckDB refusing to open the local-file store because ANOTHER PROCESS holds the write lock
- *  (DuckDB is a process-exclusive writer). This is the EXPECTED contention between concurrent agents on the
- *  file store — distinct from a real failure (corruption, permissions, disk). Server-backed stores never raise it. */
+/** True iff `err` is DuckDB refusing to open the local-file store because ANOTHER PROCESS holds the write lock.
+ * Same-process opens share a cached instance and do not use this path. This remains distinct from a real failure
+ * (corruption, permissions, disk); server-backed stores never raise it. */
 export function isBioStoreLocked(err: unknown): boolean {
   const m = err instanceof Error ? err.message : String(err);
   return /Could not set lock|Conflicting lock|lock on file/i.test(m);
@@ -83,10 +81,11 @@ export function isBioStoreLocked(err: unknown): boolean {
  * (corruption/permissions/disk) still throws — it must not be silently swallowed.
  *
  * The three access modes, documented in one place:
- * - `openBioStore` — the OWNER's open; throws on a lock conflict (a memory WRITE must not be silently dropped).
- * - `tryOpenBioStore` — a best-effort open; a lock conflict returns null (the caller degrades), real errors throw.
- * - a SERVER-backed store (host injects via the extension's `openStore` seam — ducknng `run_rpc` / quack) — the
- *   correct answer for genuine concurrency: one server is the single writer, many clients connect, no file lock.
+ * - `openBioStore` — a connection to the process-cached local instance; throws on a cross-process lock conflict.
+ * - `tryOpenBioStore` — the same process-cached path, but a cross-process lock conflict returns null; real errors
+ *   still throw.
+ * - a SERVER-backed store (host injects via the extension's `openStore` seam — ducknng `run_rpc` / equivalent) —
+ *   the correct answer for multi-process/multi-host concurrency: one server is the writer authority.
  */
 export async function tryOpenBioStore(cwd: string, opts: { path?: string } = {}): Promise<BioStore | null> {
   try {

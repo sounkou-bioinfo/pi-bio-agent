@@ -8,21 +8,52 @@ tags: [memory, store, concurrency, ducknng, sharing]
 # Concurrent memory: inter-project / inter-actor / inter-process / inter-machine
 
 The one temporal store (`bio_observations` in a DuckDB, `src/hosts/bio-store.ts`) is where memory, facts, and runs
-live. DuckDB's local-file store is a **process-exclusive writer**: while one process holds it open read-write, any
-*other process* that opens the same file gets `IO Error: Could not set lock … Conflicting lock` (verified: cross-process open throws in ~10 ms, it does **not** block). That is correct for a single project run serially,
-but it is the wrong substrate for concurrent actors. This page maps the proven mechanics and remaining host
-integration.
+live. Two different concurrency axes matter:
+
+1. **Within one Node/Pi process**, DuckDB requires concurrent connections to one file to come from one database
+   instance. OS file locks do not protect against two instances in the same process. `openBioStore` therefore uses one
+   process-wide `DuckDBInstanceCache` and gives each hook/tool its own connection; schema bootstrap DDL is serialized
+   per file. Cache and initialization keys canonicalize symlinks and existing hard-link aliases. Opening the same
+   file repeatedly with `DuckDBInstance.create(path)` is unsafe and can silently lose writes or corrupt the database.
+2. **Across processes**, the local file remains a process-exclusive writer. While one process holds it read-write,
+   another process gets `IO Error: Could not set lock … Conflicting lock` rather than blocking. A server-backed
+   store is still the required authority for concurrent processes or hosts.
 
 ## Three access modes
 
 | Mode | Opener | Semantics |
 |---|---|---|
-| **Single project, serial** | `openBioStore(cwd)` (default) | the project-local file. Owner's open: **throws** on a lock conflict (a memory write must not be silently dropped). Runs share it open→write→close in sequence. |
-| **Best-effort read under contention** | `tryOpenBioStore(cwd)` | returns **null** on a lock conflict (a concurrent agent holds it) so a reader/logger degrades instead of failing; a *real* error (corruption/permissions) still throws. Used by the always-on recall index and the run-log: they are conveniences, not hard dependencies. `isBioStoreLocked(err)` is the discriminator. |
-| **Cross-process sharing** | a **server-backed store** injected through the host's `openStore` seam | one database service is the writer authority. `createSqlConnHttpClient` / `createSqlConnHttpServer` provide a parameterized, authenticated reference transport with serialized execution; ducknng RPC provides the NNG transport lane. Same-slug writes require the serialized execution model described below. |
+| **Single process, concurrent tools/hooks** | `openBioStore(cwd)` (default) | Independent connections share one process-cached native instance for the resolved project-local file. Concurrent appends are preserved; callers close their own handles promptly. |
+| **Best-effort cross-process contention** | `tryOpenBioStore(cwd)` | Same-process opens use the cache. A lock held by another process returns **null** so a reader/logger degrades; corruption/permissions/disk errors still throw. Used by the recall index and run log. `isBioStoreLocked(err)` is the discriminator. |
+| **Cross-process/cross-host sharing** | a **server-backed store** injected through the host's `openStore` seam | One database service is the writer authority. `createSqlConnHttpClient` / `createSqlConnHttpServer` provide a parameterized, authenticated reference transport with serialized execution; ducknng RPC provides the NNG transport lane. Same-slug writes require the serialized execution model described below. |
 
-`tryOpenBioStore` only makes a *single-file* deployment degrade gracefully. It is **not** how you get real
-concurrency: for that you move the store to a server.
+`tryOpenBioStore` only makes a local-file deployment degrade gracefully when another process owns the file. It is
+**not** the multi-process concurrency mechanism: for that, move the store behind the server seam. The CLI also
+rejects a `--ledger` path that resolves to the scientific `--db` path: execution and required evidence must not share
+one catalog accidentally merely because the process cache makes a second connection possible.
+
+## Scientific database ownership
+
+The ledger and a scientific run have different lifetimes. Ledger callers overlap, use one cached instance, and own
+independent connections. A scientific run may load a different native-extension set from the next run; retaining its
+instance across DuckHTS and DuckNNG phases caused a downstream workflow to hang. `runAndPersist` therefore creates
+and closes an isolated instance per scientific run. File-backed scientific runs targeting the same canonical path are
+serialized for their whole lifetime by `withDuckDbFileExclusive`, so those isolated instances never overlap;
+`:memory:` runs remain isolated and concurrent. A process-wide ownership-mode guard also rejects any attempt to
+mix a cached ledger/graph owner with an isolated scientific owner for one file. Symlink, dangling-symlink, and
+existing hard-link aliases use the same serialization and ownership key. Regression coverage is in
+[`duckdb-node-api.test.ts`](../test/duckdb-node-api.test.ts),
+[`bio-store.test.ts`](../test/bio-store.test.ts), and the distinct-replay Pi case in
+[`pi-extension.test.ts`](../test/pi-extension.test.ts).
+
+## Native DuckDB package compatibility
+
+Pi loads extensions into one Node process. On Linux, native addons from different package-local `node_modules`
+trees all request the same `libduckdb.so` SONAME; the first loaded library can satisfy a later, different
+`duckdb.node` addon. That is an unsupported ABI mix. The DuckDB adapter compares the installed
+`@duckdb/node-api` core version with `version()` from the loaded native library before opening a database and fails
+with an alignment/restart instruction on mismatch. First-party packages pin the same node-api version. This guard
+contains failure; it does not make mixed native versions supported.
 
 ## Running over a ducknng server (or any host-supplied server `SqlConn`)
 

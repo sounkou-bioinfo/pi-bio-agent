@@ -2,11 +2,12 @@ import { promises as fs } from "node:fs";
 import { join, resolve } from "node:path";
 import type { HostCapabilityReceipt, RunReplaySpec } from "../core/reproducibility.js";
 import type { SqlConn } from "../core/ports.js";
-import { openBioStore } from "../hosts/bio-store.js";
+import { bioStorePath, openBioStore } from "../hosts/bio-store.js";
 import { fsCasStore } from "../hosts/fs-cas.js";
 import { cappedFetchLike, DEFAULT_MAX_RESPONSE_BYTES } from "../hosts/network.js";
 import { reproduceRun } from "../hosts/reproduce.js";
 import { nodeComputeRunner } from "../process/node-compute-runner.js";
+import { duckDbPathsReferToSameFile } from "../duckdb/node-api.js";
 import { parseFlags, splitSqlStatements } from "./run.js";
 
 export interface ReproduceCliDeps {
@@ -76,12 +77,19 @@ export async function mainReproduce(argv: string[], deps: ReproduceCliDeps): Pro
       ? await readJson<HostCapabilityReceipt[]>(deps.cwd, flags["host-receipts-file"], "host receipts") : undefined;
     const protectedSessionVariables = flags["protected-variables"]?.split(",").map((name) => name.trim()).filter(Boolean);
     const duckdbInitSql = flags["init-sql"] ? splitSqlStatements(flags["init-sql"]) : undefined;
-    if (flags.ledger) ledger = await openBioStore(deps.cwd, flags.ledger === "auto" ? {} : { path: flags.ledger });
+    const dbPath = flags.db ?? ":memory:";
+    if (flags.ledger) {
+      const ledgerPath = flags.ledger === "auto" ? bioStorePath(deps.cwd) : resolve(deps.cwd, flags.ledger);
+      if (dbPath !== ":memory:" && await duckDbPathsReferToSameFile(resolve(deps.cwd, dbPath), ledgerPath)) {
+        throw new Error("--ledger must not refer to the reproduction --db file; evidence and execution require separate DuckDB catalogs");
+      }
+      ledger = await openBioStore(deps.cwd, { path: ledgerPath });
+    }
 
     const result = await reproduceRun({
       cwd: deps.cwd,
       replay,
-      dbPath: flags.db ?? ":memory:",
+      dbPath,
       ...(casRoot ? { cas: fsCasStore(casRoot) } : {}),
       ...(flags.compute === "local" ? { compute: { runner: nodeComputeRunner() } } : {}),
       ...(flags.network === "fetch" ? { network: { fetch: cappedFetchLike(globalThis.fetch, Number(flags["max-response-bytes"] ?? DEFAULT_MAX_RESPONSE_BYTES)) } } : {}),

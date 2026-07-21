@@ -32,6 +32,12 @@ their cognitive status. It gives each actor apparatus with a known shape: querya
 bounded effects, durable evidence, and explicit judgment boundaries. Those constraints do not replace creativity;
 they make creative composition inspectable.
 
+The harness should generalize through composition. Tasks that differ in biomedical domain, input size, or wording but
+share an execution structure should compile to nearly the same bounded trajectory: discover declarations, inspect
+relations, compose SQL or a declared operation, execute through granted ports, and inspect recorded evidence. The
+variation belongs in manifests, relations, chunking, and SQL rather than in a new tool or prompt protocol. This is an
+operational equivalence supplied by the harness, not a claim that the model has become a source of domain facts.
+
 ## Conceptual checksum
 
 These invariants should remain true after every architectural change.

@@ -42,6 +42,35 @@ describe("bio-store: ONE store for memory + facts + graph (not a separate memory
     }
   });
 
+  test("same-process concurrent opens preserve every write through one cached DuckDB instance", async () => {
+    const cwd = await tmp();
+    const stores = await Promise.all(Array.from({ length: 4 }, () => openBioStore(cwd)));
+    try {
+      await Promise.all(stores.map(async (store, writer) => {
+        for (let row = 0; row < 32; row += 1) {
+          await recordObservation(store.conn, {
+            statementKey: `concurrent:${writer}:${row}`,
+            subjectId: `writer:${writer}`,
+            predicate: "wrote",
+            value: row,
+            recordedAt: new Date(Date.UTC(2026, 0, 1, 0, writer, 0, row)).toISOString(),
+            source: `writer:${writer}`,
+          });
+        }
+      }));
+    } finally {
+      stores.forEach((store) => store.close());
+    }
+
+    const check = await openBioStore(cwd);
+    try {
+      const rows = await check.conn.all<{ n: bigint }>("SELECT count(*) AS n FROM bio_observations WHERE predicate = 'wrote'");
+      assert.equal(Number(rows[0]?.n), 128);
+    } finally {
+      check.close();
+    }
+  });
+
   test("the store is project-local under .pi/bio-agent by default", async () => {
     assert.ok(bioStorePath(await tmp()).endsWith(join(".pi", "bio-agent", "store.duckdb")));
   });
