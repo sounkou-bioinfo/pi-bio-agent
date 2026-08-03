@@ -47,6 +47,7 @@ type DuckDbFileOwner = { mode: "shared"; handles: number } | { mode: "exclusive"
 interface ProcessDuckDbState {
   nodeApiPackageVersion: string;
   instanceCache: DuckDBInstanceCache;
+  identityTails: Map<string, Promise<void>>;
   initializationTails: Map<string, Promise<void>>;
   exclusiveTails: Map<string, Promise<void>>;
   fileIdentityPaths: Map<string, string>;
@@ -92,11 +93,15 @@ function processDuckDbState(): ProcessDuckDbState {
         `(${existing.nodeApiPackageVersion} and ${duckdbNodeApiPackageVersion}); align dependencies and restart Pi.`,
       );
     }
+    // The process state is shared across package copies and hot reloads. Add newly introduced coordination lanes
+    // defensively rather than replacing the cache under live handles.
+    existing.identityTails ??= new Map();
     return existing;
   }
   const created: ProcessDuckDbState = {
     nodeApiPackageVersion: duckdbNodeApiPackageVersion,
     instanceCache: new DuckDBInstanceCache(),
+    identityTails: new Map(),
     initializationTails: new Map(),
     exclusiveTails: new Map(),
     fileIdentityPaths: new Map(),
@@ -140,10 +145,15 @@ async function canonicalCachePath(state: ProcessDuckDbState, path: string): Prom
   const canonical = await canonicalFilePath(path);
   const identity = await fileIdentity(canonical);
   if (!identity) return canonical;
-  const known = state.fileIdentityPaths.get(identity);
-  if (known && await fileIdentity(known) === identity) return known;
-  state.fileIdentityPaths.set(identity, canonical);
-  return canonical;
+  // A prior canonical path may have been removed while the inode survives through hard links. Validating that stale
+  // path awaits filesystem I/O; without an inode-keyed lane, two concurrent aliases can both observe the stale entry,
+  // then each replace it with a different cache key and attach one file through two native instances.
+  return withDuckDbPathLock(state.identityTails, identity, async () => {
+    const known = state.fileIdentityPaths.get(identity);
+    if (known && await fileIdentity(known) === identity) return known;
+    state.fileIdentityPaths.set(identity, canonical);
+    return canonical;
+  });
 }
 
 /** True when two file-backed DuckDB paths resolve to the same path or existing filesystem object. */
