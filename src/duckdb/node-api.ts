@@ -42,7 +42,9 @@ import { readlink, realpath, stat } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import type { SqlConn, SqlValue } from "../core/ports.js";
 
-type DuckDbFileOwner = { mode: "shared"; handles: number } | { mode: "exclusive" };
+type DuckDbFileOwner =
+  | { mode: "shared"; handles: number; identity?: string }
+  | { mode: "exclusive"; identity?: string };
 
 interface ProcessDuckDbState {
   nodeApiPackageVersion: string;
@@ -141,6 +143,11 @@ async function fileIdentity(path: string): Promise<string | undefined> {
   }
 }
 
+async function ownerMatchesIdentity(ownerKey: string, owner: DuckDbFileOwner | undefined, identity: string): Promise<boolean> {
+  if (owner?.identity !== undefined) return owner.identity === identity;
+  return await fileIdentity(ownerKey) === identity;
+}
+
 async function canonicalCachePath(state: ProcessDuckDbState, path: string): Promise<string> {
   const canonical = await canonicalFilePath(path);
   const identity = await fileIdentity(canonical);
@@ -150,9 +157,17 @@ async function canonicalCachePath(state: ProcessDuckDbState, path: string): Prom
   // then each replace it with a different cache key and attach one file through two native instances.
   return withDuckDbPathLock(state.identityTails, identity, async () => {
     const known = state.fileIdentityPaths.get(identity);
-    // An active owner pins its cache key even if that directory entry was removed. The native instance still owns the
-    // inode through its open handle; remapping a surviving hard link would create a second instance for the same file.
-    if (known && (state.fileOwners.has(known) || await fileIdentity(known) === identity)) return known;
+    if (known && await ownerMatchesIdentity(known, state.fileOwners.get(known), identity)) return known;
+
+    // An exclusive owner may have created a previously absent database after taking its path lane, so no identity
+    // mapping existed at acquisition time. Discover active owners by inode before selecting a new alias key.
+    for (const [ownerKey, owner] of state.fileOwners) {
+      if (ownerKey !== known && await ownerMatchesIdentity(ownerKey, owner, identity)) {
+        state.fileIdentityPaths.set(identity, ownerKey);
+        return ownerKey;
+      }
+    }
+
     state.fileIdentityPaths.set(identity, canonical);
     return canonical;
   });
@@ -178,11 +193,20 @@ export async function openDuckDbInstance(path: string, options?: Record<string, 
   const state = processDuckDbState();
   if (path === ":memory:") return DuckDBInstance.create(path, options);
   const key = await canonicalCachePath(state, path);
+  const identity = await fileIdentity(path);
   const owner = state.fileOwners.get(key);
   if (owner?.mode === "exclusive") {
     throw new Error(`DuckDB file '${key}' already has an active isolated scientific owner; a cached shared instance cannot overlap it`);
   }
-  state.fileOwners.set(key, { mode: "shared", handles: (owner?.handles ?? 0) + 1 });
+  if (owner?.mode === "shared" && owner.identity !== undefined && identity !== undefined && owner.identity !== identity) {
+    throw new Error(`DuckDB cache key '${key}' changed file identity while ${owner.handles} shared handle(s) remained active`);
+  }
+  const ownerIdentity = owner?.mode === "shared" ? owner.identity ?? identity : identity;
+  state.fileOwners.set(key, {
+    mode: "shared",
+    handles: (owner?.mode === "shared" ? owner.handles : 0) + 1,
+    ...(ownerIdentity ? { identity: ownerIdentity } : {}),
+  });
   let instance: DuckDBInstance;
   try {
     instance = await state.instanceCache.getOrCreateInstance(key, options);
@@ -192,8 +216,14 @@ export async function openDuckDbInstance(path: string, options?: Record<string, 
   }
   // A first open may have created a previously absent file. Register its identity now so a later hard-link alias
   // resolves back to this native cache key rather than attaching the inode through another instance.
-  const identity = await fileIdentity(key);
-  if (identity) state.fileIdentityPaths.set(identity, key);
+  const resolvedIdentity = identity ?? (await fileIdentity(path)) ?? (await fileIdentity(key));
+  if (resolvedIdentity) {
+    state.fileIdentityPaths.set(resolvedIdentity, key);
+    const currentOwner = state.fileOwners.get(key);
+    if (currentOwner?.mode === "shared" && currentOwner.identity === undefined) {
+      state.fileOwners.set(key, { ...currentOwner, identity: resolvedIdentity });
+    }
+  }
   const nativeClose = instance.closeSync.bind(instance);
   let closed = false;
   instance.closeSync = () => {
@@ -212,7 +242,7 @@ function releaseSharedFileOwner(state: ProcessDuckDbState, key: string): void {
   const owner = state.fileOwners.get(key);
   if (owner?.mode !== "shared") return;
   if (owner.handles === 1) state.fileOwners.delete(key);
-  else state.fileOwners.set(key, { mode: "shared", handles: owner.handles - 1 });
+  else state.fileOwners.set(key, { ...owner, handles: owner.handles - 1 });
 }
 
 /** Serialize idempotent schema/bootstrap DDL for connections sharing one cached file instance.
@@ -257,6 +287,7 @@ export async function withDuckDbFileExclusive<T>(path: string, run: () => Promis
   if (path === ":memory:") return run();
   const state = processDuckDbState();
   const key = await canonicalCachePath(state, path);
+  const identity = await fileIdentity(path);
   return withDuckDbPathLock(state.exclusiveTails, key, async () => {
     const owner = state.fileOwners.get(key);
     if (owner) {
@@ -271,7 +302,7 @@ export async function withDuckDbFileExclusive<T>(path: string, run: () => Promis
       error.__runDbOpen = true;
       throw error;
     }
-    state.fileOwners.set(key, { mode: "exclusive" });
+    state.fileOwners.set(key, { mode: "exclusive", ...(identity ? { identity } : {}) });
     try {
       return await run();
     } finally {
