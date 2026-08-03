@@ -109,12 +109,14 @@
     "readme:tools": "node scripts/generate-readme-tools.mjs",
     "check:readme-tools": "node scripts/generate-readme-tools.mjs --check",
     "check:skills": "node scripts/validate-skills.mjs",
+    "check:mcp": "npm run check --workspace=packages/mcp-server",
+    "build:mcp": "npm run build --workspace=packages/mcp-server",
     "check:workbench": "npm run check --workspace=packages/workbench",
     "build:workbench": "npm run build --workspace=packages/workbench",
     "check:quarto": "npm run check --workspace=packages/quarto-engine",
     "build:quarto": "npm run build --workspace=packages/quarto-engine",
-    "check:all": "npm run check && npm run check:workbench && npm run check:quarto && npm run check:executable-docs",
-    "build:all": "npm run build && npm run build:workbench && npm run build:quarto"
+    "check:all": "npm run check && npm run check:mcp && npm run check:workbench && npm run check:quarto && npm run check:executable-docs",
+    "build:all": "npm run build && npm run build:mcp && npm run build:workbench && npm run build:quarto"
   },
   "pi": {
     "extensions": [
