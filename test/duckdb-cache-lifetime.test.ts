@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { link, mkdtemp, rm } from "node:fs/promises";
+import { link, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, test } from "node:test";
@@ -90,6 +90,47 @@ describe("cached DuckDB instance lifetime", () => {
       second?.closeSync();
       firstConn.closeSync();
       first.closeSync();
+    }
+  });
+
+  test("does not conflate a reused canonical pathname with the preserved old inode", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "duckdb-cache-path-reuse-"));
+    const original = join(dir, "original.duckdb");
+    const preserved = join(dir, "preserved-hardlink.duckdb");
+
+    const seed = await openDuckDbInstance(original);
+    const seedConn = await seed.connect();
+    await seedConn.run("CREATE TABLE preserved_data (value INTEGER)");
+    seedConn.closeSync();
+    seed.closeSync();
+
+    await link(original, preserved);
+    await rm(original);
+    await writeFile(original, "replacement inode", "utf8");
+
+    let releaseExclusive!: () => void;
+    let markExclusiveStarted!: () => void;
+    const exclusiveStarted = new Promise<void>((resolve) => { markExclusiveStarted = resolve; });
+    const exclusiveGate = new Promise<void>((resolve) => { releaseExclusive = resolve; });
+    const replacementOwner = withDuckDbFileExclusive(original, async () => {
+      markExclusiveStarted();
+      await exclusiveGate;
+    });
+    await exclusiveStarted;
+
+    let preservedInstance: Awaited<ReturnType<typeof openDuckDbInstance>> | undefined;
+    let preservedConn: Awaited<ReturnType<NonNullable<typeof preservedInstance>["connect"]>> | undefined;
+    try {
+      preservedInstance = await openDuckDbInstance(preserved);
+      preservedConn = await preservedInstance.connect();
+      await preservedConn.run("INSERT INTO preserved_data VALUES (1)");
+      const result = await preservedConn.runAndReadAll("SELECT count(*) AS n FROM preserved_data");
+      assert.deepEqual(result.getRowObjects(), [{ n: 1n }]);
+    } finally {
+      preservedConn?.closeSync();
+      preservedInstance?.closeSync();
+      releaseExclusive();
+      await replacementOwner;
     }
   });
 
