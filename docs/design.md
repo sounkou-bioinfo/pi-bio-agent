@@ -125,13 +125,16 @@ A request is admitted before it becomes a run. Missing resources, unbound capabi
 errors. Once execution starts, success, failure, and cancellation produce auditable run evidence with whatever
 receipts were created.
 
-When CAS and a ledger are supplied, the host commit sequence is:
+For a successful run with CAS and a ledger, the host commit sequence is:
 
 1. execute the query or operation and collect resolver receipts;
 2. write immutable result, receipt, replay, and run-object bytes to CAS;
 3. establish GC roots and atomic human-readable file views;
 4. record declaration, run, and artifact observations; a required projection failure is surfaced;
 5. write an action-cache entry only after live-source and hermeticity checks pass.
+
+Failed and cancelled runs omit result and run-object content but preserve their receipts and replay evidence before
+ledger projection.
 
 Files are legible views. CAS digests and ledger references are the durable identities when configured. CAS proves byte
 identity, not freshness or truth. Replay distinguishes reproduced, diverged, and not reproducible.
