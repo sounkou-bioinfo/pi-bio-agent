@@ -34,24 +34,6 @@ treat UI/model truncation as presentation metadata.
 Evidence: [operations.ts](../src/core/operations.ts), [run-store.ts](../src/hosts/run-store.ts), and
 [sdk-host-embedding.qmd](../examples/patterns/sdk-host-embedding.qmd).
 
-### Shared CAS read leases
-
-CAS metadata supports references, leases, tombstones, and garbage collection. Resolver reuse does not acquire a
-metadata lease around every cross-process read. Add this only for a deployment where readers and concurrent GC share
-the same metadata authority.
-
-Evidence: [cas-metadata.ts](../src/hosts/cas-metadata.ts) and
-[cas-metadata-gc.test.ts](../test/cas-metadata-gc.test.ts).
-
-### HTTP receipt completeness
-
-The injected HTTP resolver records cancellation, bounded reads, retry, validators, and scoped CAS reuse. Redirected
-final URL and an explicit revalidation time would improve audit detail when the host fetch interface exposes them.
-These are receipt fields, not a new network subsystem.
-
-Evidence: [http-table-scan.ts](../src/duckdb/resolvers/http-table-scan.ts) and
-[http-cas-reuse.test.ts](../test/http-cas-reuse.test.ts).
-
 ### Second-host parity
 
 The public SDK owns validated memory writes, retractions, recall, history, runs, and evidence. Pi exposes the mature
@@ -75,10 +57,13 @@ Primary evidence is in [concurrency.md](concurrency.md), [reproduce.ts](../src/h
 [reproduce.test.ts](../test/reproduce.test.ts), [run-store.ts](../src/hosts/run-store.ts), and
 [pattern-ssh-remote-worker.mjs](../scripts/pattern-ssh-remote-worker.mjs).
 
+Shared-CAS read leases, richer HTTP receipt fields, scheduler adapters, additional renderers, and other integration
+ideas remain deferred until a current deployment demonstrates the need. They do not stay expanded in living design
+docs while inactive.
+
 ## Admission rule
 
-Do not add dormant implementation plans here. A proposal belongs in this worklog only when all of the following are
-true:
+A proposal belongs in this worklog only when all of the following are true:
 
 1. a current application or deployment is blocked or carrying a concrete workaround;
 2. the gap cannot be expressed through existing manifests, SQL, injected capabilities, observations, CAS, or replay;
