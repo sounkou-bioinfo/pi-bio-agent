@@ -19,8 +19,8 @@ export function bioStorePath(cwd: string): string {
  *
  * SHARING is a choice of WHERE this store lives, made by the host (the library records; the host decides):
  * - **across runs of one project / one process**: the default project-local file — every open receives a new
- *   connection to one process-cached DuckDB instance, so concurrent Pi hooks/tools cannot attach the same file
- *   through independent instances and silently lose or corrupt writes;
+ *   connection to one process-cached DuckDB instance; attaching that file through independent native instances is
+ *   unsupported;
  * - **across projects / users in one process**: point `path` at a shared location; the same resolved file path uses
  *   that process cache and retains attributed rows;
  * - **cross-process / cross-host / cross-agent**: another process still cannot open the local file while this one
