@@ -150,7 +150,9 @@ async function canonicalCachePath(state: ProcessDuckDbState, path: string): Prom
   // then each replace it with a different cache key and attach one file through two native instances.
   return withDuckDbPathLock(state.identityTails, identity, async () => {
     const known = state.fileIdentityPaths.get(identity);
-    if (known && await fileIdentity(known) === identity) return known;
+    // An active owner pins its cache key even if that directory entry was removed. The native instance still owns the
+    // inode through its open handle; remapping a surviving hard link would create a second instance for the same file.
+    if (known && (state.fileOwners.has(known) || await fileIdentity(known) === identity)) return known;
     state.fileIdentityPaths.set(identity, canonical);
     return canonical;
   });
