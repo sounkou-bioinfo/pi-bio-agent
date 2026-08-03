@@ -248,11 +248,16 @@ export async function withDuckDbFileExclusive<T>(path: string, run: () => Promis
   return withDuckDbPathLock(state.exclusiveTails, key, async () => {
     const owner = state.fileOwners.get(key);
     if (owner) {
-      throw new Error(
+      // The ownership guard rejects before `run()` can execute any resolver or compute side effect. Preserve the
+      // same structural marker used by run-store's native create/connect failures so a best-effort Pi run logger can
+      // close an aliased store and retry the scientific run once without logging.
+      const error = new Error(
         owner.mode === "shared"
           ? `DuckDB file '${key}' already has ${owner.handles} active cached shared handle(s); an isolated scientific owner cannot overlap them`
           : `DuckDB file '${key}' already has an active isolated scientific owner`,
-      );
+      ) as Error & { __runDbOpen?: boolean };
+      error.__runDbOpen = true;
+      throw error;
     }
     state.fileOwners.set(key, { mode: "exclusive" });
     try {
