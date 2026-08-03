@@ -20,8 +20,12 @@ The public substrate currently provides:
 - host-granted network and async compute, including bounded retry/cancellation and declared environment evidence;
 - CAS, run-object identities, replay specifications, explicit reproduction verdicts, and guarded action caching;
 - one temporal observation store for memory, facts, runs, sessions, jobs, checkpoints, approvals, and graph links;
-- graph projection and closure, durable replay jobs, checkpoint resume, a public SDK, and first-party CLI, Pi, Quarto,
-  and workbench consumers.
+- graph projection and closure, durable replay jobs, checkpoint resume, and a public SDK shared by CLI, Pi, Quarto,
+  the workbench, and a stateless MCP `2026-07-28` adapter.
+
+The MCP package proves that manifest discovery, query, named operation, exact evidence retrieval, and replay can be
+served outside Pi without copying the runner or SQL/security implementation. It creates a fresh protocol server per
+HTTP request; durable scientific continuity remains in run IDs, CAS, and the optional observation store.
 
 This is enough to build applications. It does not imply that every deployment adapter, biomedical policy, source pin,
 or user interface is complete.
@@ -66,15 +70,17 @@ The central metric is how little implementation code a supported new question re
 
 ### Make large result delivery explicit
 
-The current runner materializes complete results through `SqlConn.all`. Add caller-selected delivery such as inline
-rows, a materialized relation, or a Parquet/CAS artifact only when a consumer requires it. Preserve the complete
-scientific result and keep UI/model truncation as presentation metadata.
+The MCP adapter now exposes the semantic distinction between complete inline results and durable result references,
+but the core query runner still materializes every row through `SqlConn.all`. Add relation, Parquet, or CAS delivery at
+the SDK boundary only when a real consumer needs to avoid in-memory materialization. Preserve the complete scientific
+result and keep UI/model truncation as presentation metadata.
 
-### Test a second interactive host
+### Derive stateful interactive parity only from another stateful host
 
-The SDK is provider-neutral, but the mature interactive adapter is Pi-first. A second host should exercise session
-control, memory mutation, transcript ingestion, capability binding, and evidence handoff before any more interactive
-control behavior is promoted into shared code.
+The stateless MCP adapter closes the provider-neutral scientific execution surface; it deliberately does not model
+conversation sessions, transcript ingestion, steering, or dynamic tools. Promote any host-neutral interactive control
+contract only after a second stateful host repeats Pi's motion. Do not infer a session framework from a protocol whose
+modern HTTP path is per request.
 
 Other work enters this roadmap only from a current consumer, failing test, or executable proof. Application policy,
 production deployment choices, and source-specific integration remain downstream until repeated use exposes a shared
@@ -85,8 +91,9 @@ docs; reintroduce them only with a named consumer, failing test, or executable p
 
 ## Repository gate
 
-`npm run check:all` is the workspace gate. It covers core, workbench, Quarto engine, generated documentation,
-examples, skills, type checking, and tests. Run focused owning checks first, then the full gate for shared changes.
+`npm run check:all` is the workspace gate. It covers core, the stateless MCP package, workbench, Quarto engine,
+generated documentation, examples, skills, type checking, and tests. Run focused owning checks first, then the full
+gate for shared changes.
 
 Executable claims are authored in QMD and rendered to committed Markdown. Design prose links to code, tests, or
 application runs. Keep the generated docs index current.
