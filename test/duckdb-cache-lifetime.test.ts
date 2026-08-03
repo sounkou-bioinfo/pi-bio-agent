@@ -53,6 +53,46 @@ describe("cached DuckDB instance lifetime", () => {
     assert.equal(exclusiveBodyRan, true, "the isolated owner is admitted after the last shared wrapper closes");
   });
 
+  test("keeps an active cache key after its original directory entry is removed", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "duckdb-cache-active-unlink-"));
+    const original = join(dir, "original.duckdb");
+    const alias = join(dir, "surviving-hardlink.duckdb");
+    const first = await openDuckDbInstance(original);
+    const firstConn = await first.connect();
+    let second: Awaited<ReturnType<typeof openDuckDbInstance>> | undefined;
+    let secondConn: Awaited<ReturnType<typeof first.connect>> | undefined;
+
+    try {
+      await firstConn.run("CREATE TABLE writes (value INTEGER)");
+      await link(original, alias);
+      await rm(original);
+
+      second = await openDuckDbInstance(alias);
+      secondConn = await second.connect();
+      await secondConn.run("INSERT INTO writes VALUES (1)");
+      const result = await firstConn.runAndReadAll("SELECT count(*) AS n FROM writes");
+      assert.deepEqual(result.getRowObjects(), [{ n: 1n }]);
+
+      let conflict: unknown;
+      try {
+        await withDuckDbFileExclusive(alias, async () => undefined);
+        assert.fail("expected the surviving alias to resolve to the active original cache key");
+      } catch (error) {
+        conflict = error;
+      }
+      assert.match(
+        conflict instanceof Error ? conflict.message : String(conflict),
+        /2 active cached shared handle/,
+        "unlinking the original path must not split one live inode across two owner keys",
+      );
+    } finally {
+      secondConn?.closeSync();
+      second?.closeSync();
+      firstConn.closeSync();
+      first.closeSync();
+    }
+  });
+
   test("serializes stale hard-link remapping before concurrent first opens", async () => {
     const dir = await mkdtemp(join(tmpdir(), "duckdb-cache-stale-hardlink-"));
     const original = join(dir, "original.duckdb");
