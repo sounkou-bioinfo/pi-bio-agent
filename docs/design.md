@@ -7,328 +7,192 @@ tags: [architecture, contracts, execution, evidence, memory]
 
 # Conceptual architecture
 
-This document is the conceptual checksum for `pi-bio-agent`. Read it before changing a core contract. Focused
-mechanics belong in the linked reference documents; historical influences belong in [lineage.md](lineage.md).
+This is the conceptual checksum for `pi-bio-agent`. It defines the small set of ideas that shared code must preserve.
+Focused mechanics belong in the linked reference documents; historical influences belong in
+[lineage.md](lineage.md).
 
 ## The bet
 
-`pi-bio-agent` exists to replace per-question skill sprawl with agent-authored programs over declared scientific
-data. A new question should usually require schema inspection and SQL, not a new TypeScript helper or skill.
-
-The compact form is:
+`pi-bio-agent` replaces per-question skill sprawl with programs over declared scientific data. A new question should
+usually require schema inspection and SQL, not a new TypeScript helper or skill.
 
 ```text
 declared resources
   -> schema discovery
-  -> agent-authored SQL or code
-  -> deterministic execution through host-granted ports
+  -> agent-authored SQL or declared operation
+  -> execution through host-granted capabilities
   -> result + receipts + replay + CAS
   -> temporal observations and graph projections
-  -> typed judgment or approval where evidence alone cannot decide
+  -> typed judgment or approval where evidence cannot decide
 ```
 
-The actor may be a human, language model, automation, or a group of agents. The substrate does not distinguish
-their cognitive status. It gives each actor apparatus with a known shape: queryable data, executable operations,
-bounded effects, durable evidence, and explicit judgment boundaries. Those constraints do not replace creativity;
-they make creative composition inspectable.
+The actor may be a human, model, service, or group of agents. The substrate does not assign facts according to the
+actor's cognitive status. It provides queryable data, bounded effects, durable evidence, and explicit judgment points.
+Tasks that share this execution shape should reuse it; variation belongs in manifests, relations, SQL, and compute
+parameters rather than new tool protocols.
 
-The harness should generalize through composition. Tasks that differ in biomedical domain, input size, or wording but
-share an execution structure should compile to nearly the same bounded trajectory: discover declarations, inspect
-relations, compose SQL or a declared operation, execute through granted ports, and inspect recorded evidence. The
-variation belongs in manifests, relations, chunking, and SQL rather than in a new tool or prompt protocol. This is an
-operational equivalence supplied by the harness, not a claim that the model has become a source of domain facts.
+## Invariants
 
-## Conceptual checksum
-
-These invariants should remain true after every architectural change.
-
-1. **The model is not the source of biomedical facts.** An actor may route, inspect, compose, explain, and make a
-   typed judgment. Facts come from declared data, deterministic computation, receipts, or recorded approval.
-2. **Manifests and SQL are the program.** TypeScript interprets contracts and binds host capabilities. It should not
+1. **The model is not a biomedical fact source.** Facts come from declared data, deterministic computation, receipts,
+   or recorded approval. An actor may inspect, compose, explain, propose, and abstain.
+2. **Manifests and SQL are the program.** TypeScript interprets declarations and binds host capabilities. It does not
    accumulate question-specific biomedical logic.
-3. **DuckDB is the common work surface.** Files, extension table functions, remote responses, graph edges, memory,
-   and reductions become relations that ordinary SQL can inspect and join.
-4. **Effects are injected and fail closed.** Network, compute, credentials, filesystem policy, extension loading,
+3. **DuckDB is the common work surface.** Files, extension table functions, remote responses, graph edges,
+   observations, and reductions become relations that SQL can inspect and join.
+4. **Effects are injected and fail closed.** Network, compute, credentials, extension loading, filesystem policy,
    clocks, and deployment isolation belong to the host.
-5. **Evidence is structural.** Runs carry declarations, receipts, replay material, CAS references, environment
-   evidence, and observation links when the host supplies those facilities.
-6. **Memory and knowledge share one temporal store.** `bio_observations` is the append-only source of truth;
-   `bio_edges_as_of` and note files are projections or views.
-7. **Graph work is action over data, not prompt serialization.** The actor queries or writes code over graph tables
-   instead of receiving large neighborhoods as prose.
-8. **Judgment is narrow and typed.** Irreducible choices are proposed by a model or human, validated against an
-   explicit contract, and recorded. Mechanical work stays in code, SQL, or specifications.
-9. **Reproducibility verdicts are honest.** Live sources and volatile functions remain visibly non-reproducible
-   unless their relevant bytes and environment are pinned.
-10. **Applications pull abstractions into core.** One application owns its policy. A reusable primitive is promoted
-    only after repeated concrete use reveals the same motion and the existing boundaries cannot express it cleanly.
+5. **Evidence is structural.** Runs retain declarations, receipts, replay material, CAS references, environment
+   evidence, and temporal links when those facilities are supplied.
+6. **Memory and knowledge share one temporal store.** `bio_observations` is append-only; graph tables and note files
+   are projections.
+7. **Graph work is action over data.** Query or write code over graph relations instead of serializing large
+   neighborhoods into prompts.
+8. **Judgment is narrow and typed.** Mechanical work stays in SQL or code. Ambiguous choices are validated against
+   explicit candidates and may abstain.
+9. **Reproducibility verdicts are honest.** Live sources and volatile functions remain visibly non-reproducible unless
+   the relevant bytes and environment are pinned.
+10. **Applications pull abstractions into core.** Domain policy stays downstream. Shared primitives enter core only
+    after repeated concrete use exposes the same mechanism.
 
 ## Ownership
 
 | Layer | Owns | Must not own |
 |---|---|---|
-| Core | contracts, validators, registries, runs, replay, CAS, observations, graph projection, async lifecycles | disease-specific policy, UI workflow, source-specific product behavior |
-| DuckDB adapters | resource materialization, SQL validation, extension binding, relation projection | question-specific analysis clients |
+| Core | validators, registries, runs, replay, CAS, observations, graph projection, async execution shapes | disease policy, UI workflow, source-specific product behavior |
+| DuckDB adapters | resource materialization, SQL checks, extension binding, relation projection | question-specific analysis clients |
 | Host adapters | credentials, network admission, process execution, stores, clocks, approvals, isolation | hidden scientific fallbacks |
-| Applications | manifests, SQL relations, fixtures, review policy, packets, API and UI composition | duplicate runners, ledgers, retry systems, or graph substrates |
-| Skills | thin procedural onboarding over stable substrate surfaces | a separate executable client or one skill per biomedical question |
-| Documents | executable or linked explanations of implemented contracts | a second implementation or a stronger claim than the evidence |
+| Applications | manifests, SQL relations, fixtures, rankings, review policy, packets, API and UI composition | duplicate runners, ledgers, queues, or graph substrates |
+| Skills | thin procedural onboarding over public SDK surfaces | a separate executable client or one skill per question |
+| Documents | concise explanations linked to implementation and proof | a second implementation, work diary, or unsupported claim |
 
-The public SDK is the shared implementation. Pi tools, the CLI, Quarto, and future hosts adapt that SDK rather than
-reimplementing execution semantics.
+The public SDK is the shared implementation. The CLI, Pi extension, Quarto engine, workbench, and future hosts adapt
+that SDK rather than reimplementing execution semantics.
 
-## Manifests and ad-hoc queries
+## Program model
 
-A manifest declares what is available: resolvers, resources, table names, stable operations, bindings, and relevant
-reproducibility metadata. It is not a workflow diagram and should remain thin.
+A manifest declares available resolvers, resources, term sets, table names, and stable operations. It is serializable
+and remains thin; it is not an imperative workflow diagram.
 
-An ad-hoc query answers the current question. The actor first describes the manifest, inspects tables with
-`DESCRIBE`, `SUMMARIZE`, and bounded samples, then composes read-only SQL. This is the default path for novel
-questions. SQL graduates into a named operation only when repetition, testing, or an external contract makes stable
-identity useful.
+An ad-hoc query answers the current question. The actor describes the manifest, inspects relation schemas and bounded
+samples, then writes read-only SQL. This is the default path for novel questions.
 
-A stable operation is useful for regression tests, replay, shared workflows, and public interfaces. It is not more
-scientifically valid merely because it was named or pinned. Validity comes from declarations, evidence, and the
-analysis itself.
+A query becomes a named operation when stable identity is useful for regression tests, replay, repeated workflows, or
+a public interface. Naming does not make an analysis scientifically valid; declarations, evidence, and the analysis
+do.
 
 See [resources-and-tool-specs.md](resources-and-tool-specs.md) and [guide.md](guide.md).
 
-## Four DuckDB-centered pillars
+## Execution model
 
 ### Data
 
-Files and domain formats should enter through DuckDB readers, community extensions, or a general materialization
-resolver. `duckdb.file_scan`, `duckdb.sql_materialize`, and extension table functions are preferred to bespoke
-parsers. CAS stores immutable bytes; a resource records how bytes or live data become a relation.
+Files and domain formats enter through DuckDB readers, extensions, or general SQL materialization. CAS stores immutable
+bytes; a resource records how bytes or live data become a relation. Large evolving catalogs remain in suitable
+relational storage, while the temporal ledger records their control-plane identity, snapshots, runs, and approvals.
 
-Release-scale temporal sources need not become a second ledger or graph service. The workbench's ClinVar application
-keeps raw releases and normalized rows in CAS plus DuckLake, pins each operation to one DuckLake snapshot, and derives
-edge-shaped views in SQL. The temporal ledger records the smaller control plane: release identity, an opaque
-DuckLake host-configuration digest, snapshot anchor, artifact references, task commitments, approvals, and recorded
-runs. This is the right split for a large evolving catalog: SQL remains able to traverse all asserted relationships
-without loading them into prompt context or copying them into `bio_observations`. A local DuckLake metadata catalog
-is a single-host default; shared writers and catalogs remain explicit host composition. Where an evaluator must retain
-a future source state, the agent task gets an HMAC commitment keyed by evaluator-only entropy rather than a directly
-enumerable hash of target metadata; host-enforced access separation still carries the security boundary. Agent
-judgments bind to the exact baseline candidate run and become typed CAS artifacts with actor and contract identity.
-Only the evaluator copies those bytes across the boundary and joins them to the hidden delta in declared SQL, keeping
-abstention, source-label accuracy, change recall, and ranking metrics reproducible without treating a future source
-label as clinical truth.
-
-DuckDB is already the default stateful scientific REPL. Temporary tables, materialized relations, graph projections,
-and CAS handles let an actor keep a large working set outside the prompt and inspect bounded slices as needed. This
-is the generic answer to context rot and the RLM-shaped case: the actor partitions, queries, joins, and reduces data in
-the database instead of repeatedly loading the whole table into context. A persistent Python, R, or other kernel over
-NNG can complement this surface for methods that need process-local state; it is not required to make the workbench
-stateful.
+DuckDB also holds the actor's working set. Temporary relations, graph projections, and CAS handles stay outside prompt
+context and are inspected through bounded queries.
 
 ### Network
 
-`ducknng` makes HTTP responses, RPC-backed shared state, and NNG communication available through DuckDB-facing
-primitives. The host supplies endpoints, admission, credentials, TLS handles, and extension provisioning.
-`http.get` remains a host-injected fallback when SQL-native network is unavailable.
-
-One-response materialization, bounded fanout, and retry are distinct mechanics. Reuse the implemented
-`ducknng_ncurl_table`, `ducknng.http_fanout`, `ncurlFanout`, and host-fetch policy paths rather than adding a
-source-specific HTTP client.
-
-### Rendering and graphics are views
-
-Quarto is the document and publishing boundary, not a second scientific substrate. Its TypeScript engine-extension
-surface is enough for this repository's literate QMD files: an engine receives Markdown, executes selected cells, and
-returns Markdown plus supporting files/includes for Pandoc and the target format. The `pi-bio` engine should therefore
-remain a thin execution adapter. Results, figures, and interactive specifications come from DuckDB/compute and are
-content-addressed; Quarto renders them. A figure is a derived view of a pinned relation and run, never a source of
-biomedical fact.
-
-`ggsql` is a promising optional host/display extension at this boundary: it keeps data selection and a Grammar of
-Graphics specification in SQL and targets Vega-Lite-style output. It belongs beside DuckDB as a provisioned renderer or
-extension, not in core and not as a new scientific resolver. An agent-authored visualization query must still be
-validated, tied to its input relation and run, and captured as a CAS-backed supporting artifact. The workbench can
-dogfood this path before promoting a generic figure-output contract.
-
-Our opinionated offers are deliberately small:
-
-- **Interactive workbench:** use AntV G2 directly. It is the browser-facing renderer for linked tables, graph windows,
-  review queues, and exploratory charts; the UI owns the chart instance and receives bounded relation data or a
-  content-addressed view spec.
-- **SQL-authored chart:** use `ggsql` when the actor should stay in DuckDB/SQL. Treat its grammar as an optional
-  provisioned extension and persist the normalized chart spec plus the query/run digests. Its current alpha status
-  means it is an integration target, not a core dependency.
-- **R/literate bridge:** use `gglite` when an R analyst or R-backed QMD wants the same G2 output. It is an adapter for
-  that host, not a second renderer the workbench must maintain.
-- **Publication:** use Quarto to place static or interactive artifacts into HTML/PDF/websites and to interleave
-  executable narrative. Do not make Quarto, G2, `ggsql`, or `gglite` responsible for scientific provenance.
-
-The useful lesson from litedown is scope discipline: fuse executable cells with narrative and keep the renderer
-small. We do not need another Markdown engine while Quarto already provides project rendering, figures, crossrefs,
-websites, and engine extensions. Quarto 2/q2 is an experimental implementation detail to watch, not a dependency to
-design against; keep QMD and the `pi-bio` engine contract portable.
+DuckNNG provides SQL-visible HTTP, RPC, and NNG communication when the host provisions it. Host-injected `http.get`
+remains a fallback. One-response materialization, bounded fanout, retry, credentials, and service admission are
+separate concerns; applications reuse the existing generic paths rather than adding API-specific clients.
 
 ### Compute
 
-Compute is asynchronous from the bottom: `submit`, `status`, `collect`, and `cancel`. A local process, NNG worker,
-scheduler, durable queue, remote machine, or stateful session is an implementation of that lifecycle.
-
-`compute.run` is the manifest resolver that submits and collects one result because relation materialization needs a
-value. Durable task composition uses task -> step -> checkpoint. Resume reads completed content-pinned checkpoints
-and continues from the first missing step; it does not require another workflow engine.
+Compute uses `submit`, `status`, `collect`, and `cancel`. A local process, remote worker, scheduler, durable queue, or
+stateful session is an implementation of that shape. `compute.run` materializes one declared result because a
+relation-producing resolver needs a value. Durable applications compose task, step, and checkpoint records; resume
+continues from the first missing content-pinned step rather than introducing another workflow engine.
 
 ### Knowledge and memory
 
-External ontologies, foreign knowledge graphs, run provenance, typed memory links, and application relations share
-an edge-shaped SQL vocabulary. SemanticSQL supplies the relation shape; it is not another store. SQL closure,
-`bio_edges_as_of`, and `entailed_edge` let an actor walk these graphs without copying them into context.
+Ontologies, foreign knowledge graphs, run provenance, memory links, and application relations use an edge-shaped SQL
+vocabulary. `bio_edges_as_of` and `entailed_edge` support temporal traversal and closure without copying the graph into
+prompt text.
 
-See [duckdb-substrate.md](duckdb-substrate.md), [ontology-and-knowledge-graphs.md](ontology-and-knowledge-graphs.md),
-and [memory-and-knowledge-unification.md](memory-and-knowledge-unification.md).
+See [duckdb-substrate.md](duckdb-substrate.md),
+[ontology-and-knowledge-graphs.md](ontology-and-knowledge-graphs.md), and
+[memory-and-knowledge-unification.md](memory-and-knowledge-unification.md).
 
-## Evidence and identity
+## Runs, evidence, and identity
 
-Human-readable ids aid discovery. Content digests establish identity. A schema or version tag belongs at a real
-serialization, persistence, or IPC boundary; internal values do not need ceremonial version proliferation.
+Human-readable identifiers aid discovery. Content digests establish byte identity. Schema or version tags belong at
+real serialization, persistence, or IPC boundaries, not on every internal value.
 
-A scientific run should be explainable through the strongest evidence its host can supply:
+A request is admitted before it becomes a run. Missing resources, unbound capabilities, or invalid SQL are preflight
+errors. Once execution starts, success, failure, and cancellation produce auditable run evidence with whatever
+receipts were created.
 
-- the manifest snapshot and digest;
-- exact SQL or operation identity;
-- resource and capability receipts;
-- input, output, artifact, and environment digests;
-- a replay specification and explicit reproducibility verdict;
-- temporal observations linking actor, tool call, run, result, and approval.
+When CAS and a ledger are supplied, the host commit sequence is:
 
-CAS proves byte identity, not freshness or truth. A live-source receipt proves that a request occurred, not that the
-same endpoint will return the same bytes later. Replay must distinguish reproduced, diverged, and not reproducible.
+1. execute the query or operation and collect resolver receipts;
+2. write immutable result, receipt, replay, and run-object bytes to CAS;
+3. establish GC roots and atomic human-readable file views;
+4. record declaration, run, and artifact observations; a required projection failure is surfaced;
+5. write an action-cache entry only after live-source and hermeticity checks pass.
 
-## Memory is recorded relation
+Files are legible views. CAS digests and ledger references are the durable identities when configured. CAS proves byte
+identity, not freshness or truth. Replay distinguishes reproduced, diverged, and not reproducible.
 
-Memory is not a hidden prompt cache or a second document database. `remember` appends a typed content observation
-and typed link observations to `bio_observations`. A later revision supersedes the current slot while history remains
-queryable; forgetting appends a tombstone. Recall reconstructs the current content, while graph tools project the
-same current links into `bio_edges_as_of`.
+Memoization is a scientific claim: a cache entry is allowed only when pinned inputs determine the result. The
+physical plan must read resolved tables rather than ambient sources, SQL must avoid non-deterministic functions, and
+introspection failure disables caching.
 
-Agent sessions, run events, job checkpoints, host events, and domain facts may enter that same ledger through typed
-ingestion adapters. Their schemas differ, but their temporal and provenance mechanics do not. Human-readable note
-files are optional derived views.
+## Temporal state and judgment
 
-## Interactive workbench boundary
+`bio_observations` records revisions rather than mutating history. Current state is the latest valid row for a
+`statement_key` at the requested time. Retraction and rollback append new observations. Graph edges, memory recall,
+run state, approvals, and job checkpoints project from the same temporal mechanics without becoming semantically
+identical.
 
-The browser has two planes that must not collapse into each other:
+Deterministic code mints identifiers, parses formats, computes candidates, applies mappings, and produces diffs. When
+ambiguity remains, a model or human chooses from a typed candidate set. The host validates and records the choice and
+may require approval before activation. Generated prose does not become measured data.
 
-```text
-browser conversation and activity -> AgentHostPort -> Pi SDK (first adapter)
-browser evidence and review        -> public SDK -> runs / jobs / CAS / observations / graph
-```
+## Host and application boundaries
 
-The agent-host port owns open/resume, prompt, steer, follow-up, abort, bounded transcript, and ephemeral activity
-subscription. Its event buffer exists for responsive presentation and reconnect; it is not the scientific ledger.
-The browser hands durable ids and CAS/graph references to an agent, and reloads scientific state from the evidence
-plane. This keeps the application usable when the actor is Pi, another model host, a human, or automation.
+The package records and gates effects; it is not a sandbox. A deployment that requires stronger isolation supplies a
+container, microVM, scheduler policy, credential broker, SQL authorizer, or network proxy and injects only approved
+capabilities.
 
-Pi's runtime tool registration and active-tool mutation are useful implementation details. They can progressively
-disclose coarse capabilities without restarting a session and, where the provider supports it, without invalidating
-the whole prompt cache. They do not justify a generic core tool-mutation API or a tool per source/question. A future
-host-neutral capability profile must be derived from at least one additional host; until then it stays in the Pi
-adapter.
+Browser conversation state is separate from scientific evidence. Interactive hosts own prompt, steering, abort, and
+ephemeral activity. Durable scientific state moves through run ids, CAS references, checkpoints, observations, and
+graph relations. Pi-specific control behavior remains in the Pi adapter until another host demonstrates a shared need.
 
-The browser distinguishes three application surfaces, following the useful separation proven by Piclaw: persistent
-panes for substantial viewers/editors, durable timeline or evidence records for approvals and receipts, and SSE only
-for transient live signals. The first `WorkbenchAddon` contract was derived only after two paired application cases
-existed: Clinical Evidence contributes analysis routes plus a pane, and Artifacts contributes ledger/CAS routes plus a
-figure/report pane. The host approves and serves each browser module and registers its API contribution at startup.
-There is deliberately no runtime catalog, browser-supplied module path, addon KV store, or new scientific storage
-model. Agent control remains shell infrastructure. Add focus/resize, dock placement, or installation only when a real
-editor/terminal or deployment repeats those needs.
+Rendering is a view. Quarto or browser renderers consume content-addressed results and figure specifications; they do
+not own scientific provenance or create facts.
 
-Clinical Reanalysis is a third evidence-plane pane: it projects the latest recorded packet per case and writes
-review disposition revisions to the canonical ledger. Its selected case/analysis pointer is deliberately narrow
-application state shared with Evidence and Artifacts, not a generic addon message bus. The queue exposes recorded
-follow-up, reanalysis, conflict, gap, and open-review reasons rather than an opaque clinical priority score.
+## How core grows
 
-## Typed judgment
+1. Express the need in an application using existing manifests, SQL, ports, and evidence primitives.
+2. Observe the same friction in another real use or executable pattern.
+3. Name the shared mechanism without importing either application's policy.
+4. Reconcile it with existing surfaces and delete the weaker boundary.
+5. Promote the smallest general primitive with tests and public examples.
+6. Return both consumers to the public SDK and remove private workarounds.
 
-Deterministic code should mint identifiers, parse formats, compute candidates, apply mappings, and produce diffs.
-When ambiguity remains, a model or human chooses from a typed candidate set. The host validates the response,
-records the decision and evidence, and can require approval before activation.
+Unimplemented work with no current consumer, failing test, or executable proof does not belong in this document. Track
+it as an issue or delete it until it becomes active.
 
-This boundary supports grounding, schema mapping, candidate disambiguation, review, and scientific interpretation
-without treating generated prose as measured data. Abstention is a valid typed result when declarations do not
-support a stronger conclusion.
-
-## Method selection and self-extension
-
-The substrate should support an actor that learns how to choose scientific methods under constraints. This is a
-first-party application of machine studying, not a reason to hard-code a method recommender into core:
-
-```text
-study corpus, tool docs, data and environment descriptions
-  -> action/method catalog relations
-  -> candidate method or manifest authored by the actor
-  -> deterministic validation and sandbox test
-  -> recorded comparison, approval, and activation
-  -> a revised manifest, operation, or host skill
-```
-
-This is self-extension through durable specifications, not unrestricted mutation of the substrate or silent changes
-to executable capabilities. The actor may create a new manifest, operation, compute program, or skill revision. The
-host validates the candidate, records its implementation/input/environment digests, runs its declared tests, and
-requires the applicable typed or human approval before activation. A rejected or superseded revision remains in the
-ledger as history.
-
-The current pieces are deliberately separate and composable: study scaffolds produce `skill_draft` and other typed
-notes; the action catalog is application data; manifest and SQL validators check candidates; the harness-adaptation
-path validates and tests operation candidates; skill revisions use the temporal observation ledger; runs and action
-cache provide execution evidence. A method-selection application should compose these pieces before asking core for a
-new abstraction. Repeated friction in candidate output contracts, environment selection, or stateful kernel sessions
-is the evidence that can promote the smallest missing contract.
-
-## Host capabilities and permissions
-
-The package records and gates effects; it is not a sandbox. By default, a host adapter runs with the permissions of
-its process. Stronger boundaries require host composition such as a microVM, container, scheduler policy, credential
-broker, SQL authorizer, or network proxy. Core accepts only the approved typed ports and records their receipts.
-
-Failing closed is part of the contract. An unavailable resolver, extension, credential profile, CAS, compute
-runner, or graph capability must produce an explicit unsupported result rather than silently switching execution
-paths.
-
-## Immanent abstraction from applications
-
-Applications are not merely consumers; they are the pressure surface from which core abstractions are derived.
-The movement is concrete:
-
-1. Express the application with existing manifests, SQL, ports, and evidence primitives.
-2. Observe repeated friction in two or more real uses.
-3. Name the shared motion without importing either application's policy.
-4. Reconcile it with existing primitives and delete the weaker boundary.
-5. Promote the smallest general contract to core, with examples and tests.
-6. Return both applications to the public surface and verify that no private workaround remains.
-
-The clinical workbench exposed generic bounded HTTP fanout; that belonged in core. Its phenotype ranking, coverage
-semantics, evidence reconciliation, and review policy remain application relations. This distinction is the main
-defense against both TypeScript sprawl and premature framework design.
-
-## Executable documentation
-
-Documentation should be a woven view of executable code, not copied output. QMD examples may interleave SDK calls,
-SQL, R, Python, shell, assertions, and rendered results. Scientific cells must still use the normal runner, CAS,
-receipts, and ledger; `piBio.json()` is presentation, not provenance.
+## Proof and documentation
 
 The proof hierarchy is:
 
-1. contract tests for invariants;
-2. executable manifest and QMD examples for public composition;
-3. application runs for cross-boundary pressure;
-4. live-source runs for compatibility, clearly separated from hermetic correctness;
-5. prose that links to those proofs.
+1. focused tests establish one invariant;
+2. executable manifests or QMD examples establish public composition;
+3. hermetic application runs establish cross-boundary execution, evidence, resume, and abstention behavior;
+4. pinned live-source runs establish current source compatibility;
+5. budgeted benchmarks establish measured quality or cost improvement against a baseline.
 
-Generated Markdown is committed for ordinary readers. QMD is the authored source when execution is part of the
-claim.
+A runnable example proves mechanics, not clinical validity or universal superiority. Generated Markdown is committed
+for ordinary readers; QMD is the source when execution is part of the claim.
 
 ## Further reading
 
-- [lineage.md](lineage.md): why these bets were selected and what adjacent systems do or do not prove.
-- [domain-model.md](domain-model.md): the small kernel and its type admission test.
-- [concurrency.md](concurrency.md): local and remote observation-store access.
-- [roadmap.md](roadmap.md): current closure, success criteria, and consumer-pulled work.
-- [refinments.md](refinments.md): concrete unresolved edges, not speculative features.
+- [domain-model.md](domain-model.md): kernel types and admission rules.
+- [concurrency.md](concurrency.md): local DuckDB ownership and remote shared-store access.
+- [roadmap.md](roadmap.md): success criteria, proof levels, and active priorities.
+- [refinments.md](refinments.md): demonstrated unresolved edges.
+- [lineage.md](lineage.md): historical influences and the limits of comparisons.
