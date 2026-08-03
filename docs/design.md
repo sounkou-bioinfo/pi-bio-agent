@@ -162,7 +162,13 @@ capabilities.
 
 Browser conversation state is separate from scientific evidence. Interactive hosts own prompt, steering, abort, and
 ephemeral activity. Durable scientific state moves through run ids, CAS references, checkpoints, observations, and
-graph relations. Pi-specific control behavior remains in the Pi adapter until another host demonstrates a shared need.
+graph relations.
+
+The MCP `2026-07-28` adapter proves the scientific host boundary without adding conversation state: each HTTP request
+gets a fresh protocol server, manifests are addressed by host-approved IDs, and query, operation, evidence, and replay
+calls use the public SDK. Protocol statelessness does not erase scientific state; continuity remains in runs, CAS, and
+the optional temporal store. Pi-specific interactive control stays in the Pi adapter until another stateful host
+repeats it.
 
 Rendering is a view. Quarto or browser renderers consume content-addressed results and figure specifications; they do
 not own scientific provenance or create facts.
