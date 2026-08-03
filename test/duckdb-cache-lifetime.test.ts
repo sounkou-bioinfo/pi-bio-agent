@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, test } from "node:test";
 import { openDuckDbInstance, withDuckDbFileExclusive } from "../src/duckdb/node-api.js";
+import { isBioStoreLocked } from "../src/hosts/bio-store.js";
+import { isRunDbOpenError } from "../src/hosts/run-store.js";
 
 describe("cached DuckDB instance lifetime", () => {
   test("closing one shared wrapper leaves the remaining wrapper usable and owned", async () => {
@@ -22,10 +24,16 @@ describe("cached DuckDB instance lifetime", () => {
       firstClosed = true;
 
       let exclusiveBodyRan = false;
-      await assert.rejects(
-        () => withDuckDbFileExclusive(path, async () => { exclusiveBodyRan = true; }),
-        /active cached shared handle/,
-      );
+      let conflict: unknown;
+      try {
+        await withDuckDbFileExclusive(path, async () => { exclusiveBodyRan = true; });
+        assert.fail("expected the remaining cached wrapper to block an isolated owner");
+      } catch (error) {
+        conflict = error;
+      }
+      assert.match(conflict instanceof Error ? conflict.message : String(conflict), /active cached shared handle/);
+      assert.equal(isBioStoreLocked(conflict), true, "same-process ownership contention is classified like a local store lock");
+      assert.equal(isRunDbOpenError(conflict), true, "the pre-run guard is safe for the Pi logger's one unlogged retry");
       assert.equal(exclusiveBodyRan, false, "the remaining cached wrapper retains shared ownership");
 
       await secondConn.run("INSERT INTO shared VALUES (1)");
