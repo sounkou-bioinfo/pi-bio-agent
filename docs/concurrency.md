@@ -23,9 +23,7 @@ through independent native instances is unsupported and must not bypass ownershi
 
 | Mode | Opener | Semantics |
 |---|---|---|
-| Same process | `openBioStore(cwd)` | callers share one cached native instance and use independent connections; initialization is serialized |
-| Best-effort under cross-process contention | `tryOpenBioStore(cwd)` | returns `null` only for a lock held by another process; corruption, permission, and other errors still throw |
-| Cross-process or cross-host | host-supplied `openStore` returning a server-backed `SqlConn` | one service owns mutable state and serializes writes according to the selected server policy |
+| Best-effort under ownership contention | `tryOpenBioStore(cwd)` | returns `null` for a lock held by another process *or* same-process shared/exclusive ownership contention; corruption, permission, and other errors still throw |
 
 `tryOpenBioStore` is graceful degradation, not shared concurrency. The CLI also rejects a ledger path that aliases the
 scientific database path.
