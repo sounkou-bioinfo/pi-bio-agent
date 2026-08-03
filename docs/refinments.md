@@ -27,21 +27,23 @@ Evidence: [reproducibility.ts](../src/core/reproducibility.ts),
 ### Large result delivery
 
 The SDK returns the same JSON-safe result it persists, but the query runner still materializes every row through
-`SqlConn.all`. Do not add a hidden truncation cap. When a consumer requires large results, add an explicit delivery
-choice such as inline rows, a materialized relation, or a Parquet/CAS handle. Preserve the full scientific result and
-treat UI/model truncation as presentation metadata.
+`SqlConn.all`. The MCP adapter makes inline versus reference delivery explicit without truncating the persisted result;
+it does not remove the runner's in-memory materialization. Add a relation, Parquet, or CAS result mode only when a
+current consumer needs it.
 
-Evidence: [operations.ts](../src/core/operations.ts), [run-store.ts](../src/hosts/run-store.ts), and
-[sdk-host-embedding.qmd](../examples/patterns/sdk-host-embedding.qmd).
+Evidence: [operations.ts](../src/core/operations.ts), [run-store.ts](../src/hosts/run-store.ts),
+[sdk-host-embedding.qmd](../examples/patterns/sdk-host-embedding.qmd), and
+[packages/mcp-server](../packages/mcp-server/README.md).
 
-### Second-host parity
+### Stateful cross-host control
 
-The public SDK owns validated memory writes, retractions, recall, history, runs, and evidence. Pi exposes the mature
-interactive adapter. A second host must exercise session control, memory mutation, transcript ingestion, capability
-binding, and evidence handoff before additional interactive behavior moves into shared code.
+The stateless MCP adapter now exercises provider-neutral manifest inspection, capability admission, query, operation,
+evidence retrieval, and replay through the public SDK. It intentionally has no conversation session, transcript,
+steering, or dynamic-tool lifecycle. A second stateful host is still required before Pi's interactive control behavior
+can become a shared contract.
 
-Evidence: [memory-store.ts](../src/hosts/memory-store.ts),
-[memory-store.test.ts](../test/memory-store.test.ts), and
+Evidence: [packages/mcp-server](../packages/mcp-server/README.md),
+[memory-store.ts](../src/hosts/memory-store.ts), and
 [typed-memory-agent.qmd](../examples/patterns/typed-memory-agent.qmd).
 
 ## Deployment boundaries
@@ -50,11 +52,13 @@ Evidence: [memory-store.ts](../src/hosts/memory-store.ts),
 |---|---|---|
 | Local and shared DuckDB ownership | same-process ledger opens share one cached instance; isolated scientific file runs serialize; remote stores use injected `SqlConn` | provide one writer authority across processes, authorize SQL, and configure TLS/service admission |
 | Distributed replay | workers claim leased jobs, heartbeat, reject stale writes, and reproduce from manifest snapshots | stage inputs, supply network/compute/secrets/CAS, and operate worker retry and shutdown policy |
+| Stateless MCP | each modern HTTP request receives a fresh protocol server; tools reuse the public scientific SDK; no MCP session ID is created | authenticate requests, validate Host/Origin, terminate TLS, bind credentials/capabilities, and provide OS/network isolation |
 | Live-source replay | live inputs remain marked non-reproducible without sufficient pins and are excluded from action caching | supply content pins or consume `notReproducible` as the result |
 | Cross-machine portability | replay carries a manifest snapshot, relative paths, digests, and environment evidence | stage matching bytes and resupply protected host configuration and capabilities |
 
 Primary evidence is in [concurrency.md](concurrency.md), [reproduce.ts](../src/hosts/reproduce.ts),
-[reproduce.test.ts](../test/reproduce.test.ts), [run-store.ts](../src/hosts/run-store.ts), and
+[reproduce.test.ts](../test/reproduce.test.ts), [run-store.ts](../src/hosts/run-store.ts),
+[packages/mcp-server](../packages/mcp-server/README.md), and
 [pattern-ssh-remote-worker.mjs](../scripts/pattern-ssh-remote-worker.mjs).
 
 Shared-CAS read leases, richer HTTP receipt fields, scheduler adapters, additional renderers, and other integration
