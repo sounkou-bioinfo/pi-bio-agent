@@ -59,6 +59,12 @@ jobs:
       - name: Build package
         run: npm run build
 
+      - name: Check stateless MCP package
+        run: npm run check:mcp
+
+      - name: Build stateless MCP package
+        run: npm run build:mcp
+
       - name: Provision workbench extensions
         run: |
           npm run provision:duckhts --workspace=packages/workbench
@@ -74,7 +80,9 @@ jobs:
         run: npm run check:quarto
 
       - name: Verify package contents
-        run: npm pack --dry-run
+        run: |
+          npm pack --dry-run
+          npm pack --dry-run --workspace=packages/mcp-server
 
   owned-ducknng:
     runs-on: ubuntu-latest
