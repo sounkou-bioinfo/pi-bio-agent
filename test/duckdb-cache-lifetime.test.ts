@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
+import { link, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, test } from "node:test";
@@ -51,5 +51,49 @@ describe("cached DuckDB instance lifetime", () => {
     let exclusiveBodyRan = false;
     await withDuckDbFileExclusive(path, async () => { exclusiveBodyRan = true; });
     assert.equal(exclusiveBodyRan, true, "the isolated owner is admitted after the last shared wrapper closes");
+  });
+
+  test("serializes stale hard-link remapping before concurrent first opens", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "duckdb-cache-stale-hardlink-"));
+    const original = join(dir, "original.duckdb");
+    const firstAlias = join(dir, "first-alias.duckdb");
+    const secondAlias = join(dir, "second-alias.duckdb");
+
+    const seed = await openDuckDbInstance(original);
+    const seedConn = await seed.connect();
+    await seedConn.run("CREATE TABLE writes (value INTEGER)");
+    seedConn.closeSync();
+    seed.closeSync();
+
+    await link(original, firstAlias);
+    await link(original, secondAlias);
+    await rm(original); // the process map now points at a stale path while the inode survives through both aliases
+
+    const instances = await Promise.all([
+      openDuckDbInstance(firstAlias),
+      openDuckDbInstance(secondAlias),
+    ]);
+    const connections = await Promise.all(instances.map((instance) => instance.connect()));
+    try {
+      await connections[0]!.run("INSERT INTO writes VALUES (1)");
+      const result = await connections[1]!.runAndReadAll("SELECT count(*) AS n FROM writes");
+      assert.deepEqual(result.getRowObjects(), [{ n: 1n }]);
+
+      let conflict: unknown;
+      try {
+        await withDuckDbFileExclusive(firstAlias, async () => undefined);
+        assert.fail("expected both alias wrappers to retain one shared ownership key");
+      } catch (error) {
+        conflict = error;
+      }
+      assert.match(
+        conflict instanceof Error ? conflict.message : String(conflict),
+        /2 active cached shared handle/,
+        "both concurrent aliases must count against one canonical cache owner",
+      );
+    } finally {
+      connections.forEach((connection) => connection.closeSync());
+      instances.forEach((instance) => instance.closeSync());
+    }
   });
 });
