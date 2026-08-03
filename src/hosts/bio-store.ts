@@ -67,23 +67,22 @@ function buildStore(conn: SqlConn, connection: { closeSync(): void }, instance: 
   };
 }
 
-/** True iff `err` is DuckDB refusing to open the local-file store because ANOTHER PROCESS holds the write lock.
- * Same-process opens share a cached instance and do not use this path. This remains distinct from a real failure
- * (corruption, permissions, disk); server-backed stores never raise it. */
+/** True iff `err` is local DuckDB ownership contention: either another process holds the file lock or this process
+ * already owns the same file through the incompatible shared/exclusive mode. Corruption, permissions, and disk
+ * failures remain distinct and must propagate. */
 export function isBioStoreLocked(err: unknown): boolean {
   const m = err instanceof Error ? err.message : String(err);
-  return /Could not set lock|Conflicting lock|lock on file/i.test(m);
+  return /Could not set lock|Conflicting lock|lock on file|active cached shared handle|active isolated scientific owner/i.test(m);
 }
 
 /**
- * Non-throwing open for BEST-EFFORT readers/loggers (the recall index, the run-log): returns null when another
- * process holds the file store's write lock, so a concurrent agent DEGRADES instead of failing. A REAL error
+ * Non-throwing open for BEST-EFFORT readers/loggers (the recall index, the run-log): returns null when the local file
+ * is unavailable because another process owns it or an isolated scientific run owns it in this process. A REAL error
  * (corruption/permissions/disk) still throws — it must not be silently swallowed.
  *
  * The three access modes, documented in one place:
- * - `openBioStore` — a connection to the process-cached local instance; throws on a cross-process lock conflict.
- * - `tryOpenBioStore` — the same process-cached path, but a cross-process lock conflict returns null; real errors
- *   still throw.
+ * - `openBioStore` — a connection to the process-cached local instance; throws on ownership contention.
+ * - `tryOpenBioStore` — the same process-cached path, but ownership contention returns null; real errors still throw.
  * - a SERVER-backed store (host injects via the extension's `openStore` seam — ducknng `run_rpc` / equivalent) —
  *   the correct answer for multi-process/multi-host concurrency: one server is the writer authority.
  */
