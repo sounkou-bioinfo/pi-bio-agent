@@ -7,164 +7,85 @@ tags: [refinements, open-issues, worklog]
 
 # Refinements
 
-This is a pressure ledger, not a feature queue. A refinement enters core only when a current consumer cannot express
-the required behavior through manifests, SQL, graph projection, injected ports, async runners, observations, CAS,
-or replay.
+This file contains only demonstrated gaps that remain relevant to a current consumer. It is not a feature queue.
+Remove an item when it is closed, superseded, or no longer active. Reintroduce deferred work only with a named
+consumer, failing test, or executable proof.
 
-## Current sharp edges
+## Active sharp edges
 
 ### Live-source evidence
 
-`duckdb.sql_materialize`, region reads, and process compute can depend on content that is not fully snapshotted.
-Their receipts mark `live_source`; reproduction reports `notReproducible` unless output content is pinned in CAS.
-Do not weaken this verdict. A future source adapter may add byte/range/object-version pins where the source exposes
-them.
+`duckdb.sql_materialize`, indexed region reads, and process compute can depend on content that is not fully
+snapshotted. Their receipts mark `live_source`; reproduction reports `notReproducible` unless output content is pinned
+in CAS. Do not weaken that verdict. Add byte, range, object-version, or snapshot pins only where a source can support
+them honestly.
 
-Evidence: [reproducibility.ts](../src/core/reproducibility.ts), [duckhts-region.test.ts](../test/duckhts-region.test.ts),
+Evidence: [reproducibility.ts](../src/core/reproducibility.ts),
+[duckhts-region.test.ts](../test/duckhts-region.test.ts), and
 [reproduce.test.ts](../test/reproduce.test.ts).
-
-### HTTP receipt detail
-
-The injected HTTP resolver has cancellation, bounded body reads, retry, ETag/Last-Modified revalidation, and
-scope-partitioned CAS reuse. Redirected final URL and an explicit `revalidatedAt` would improve audit detail when the
-host fetch port exposes them. They are receipt additions, not a new network abstraction.
-
-Evidence: [http-table-scan.ts](../src/duckdb/resolvers/http-table-scan.ts),
-[http-cas-reuse.test.ts](../test/http-cas-reuse.test.ts).
-
-### Shared CAS reuse leases
-
-Shared CAS metadata supports refs, leases, tombstones, and GC. Resolver reuse does not yet take a metadata lease
-around every cross-process read. Add that only for a deployment where concurrent shared GC and resolver reads use
-the same metadata authority.
-
-Evidence: [cas-metadata.ts](../src/hosts/cas-metadata.ts), [cas-metadata-gc.test.ts](../test/cas-metadata-gc.test.ts).
-
-### Clock and generated identity
-
-Wall-clock and generated run ids are host effects. Tests inject `now` where order matters. A host that requires
-deterministic external identities can already supply `runId`; a universal clock/id port would touch broad surface
-area and needs a real consumer.
-
-### Product evidence packets
-
-Core records runs, declarations, SQL digests, receipts, CAS reports/figures, graph links, approvals, and reproduce
-verdicts. It does not impose one report or review-packet schema. Build the first packet in the workbench, then promote
-only the repeated format-neutral projection.
-
-Evidence: [artifacts.ts](../src/hosts/artifacts.ts), [declaration-graph.ts](../src/hosts/declaration-graph.ts),
-[cli-reproduce.test.ts](../test/cli-reproduce.test.ts).
 
 ### Large result delivery
 
-The SDK now returns the same JSON-safe `OperationResult` it persists, so an embedding consumer does not reopen
-`result.json`. The current query runner still materializes the complete SQL result with `SqlConn.all`. Do not add a
-hidden truncation cap. When the workbench needs a large result, add an explicit caller-selected delivery mode such as
-inline rows versus a materialized relation/Parquet/CAS handle, while preserving the full persisted scientific result
-and treating UI/model truncation as presentation metadata.
+The SDK returns the same JSON-safe result it persists, but the query runner still materializes every row through
+`SqlConn.all`. Do not add a hidden truncation cap. When a consumer requires large results, add an explicit delivery
+choice such as inline rows, a materialized relation, or a Parquet/CAS handle. Preserve the full scientific result and
+treat UI/model truncation as presentation metadata.
 
-Evidence: [operations.ts](../src/core/operations.ts), [run-store.ts](../src/hosts/run-store.ts),
+Evidence: [operations.ts](../src/core/operations.ts), [run-store.ts](../src/hosts/run-store.ts), and
 [sdk-host-embedding.qmd](../examples/patterns/sdk-host-embedding.qmd).
 
-### Shared DuckLake catalog ownership
+### Shared CAS read leases
 
-The workbench's release-pinned ClinVar proof uses a local DuckLake catalog: large normalized assertions remain in
-DuckLake/CAS while observations retain only release metadata, exact snapshot anchors, tasks, and runs. That local
-catalog is not a cross-process or cross-machine writer authority. A deployment that shares release ingestion across
-projects or agents must host the metadata catalog and serialize/coordinate writers through its chosen SQL/ducknng
-topology. The control-plane record binds a release to an opaque DuckLake configuration digest as well as its snapshot,
-so identical logical lake ids and snapshot numbers in different local catalogs cannot be conflated. Do not solve that
-by copying release rows into the ledger or by creating another graph service.
+CAS metadata supports references, leases, tombstones, and garbage collection. Resolver reuse does not acquire a
+metadata lease around every cross-process read. Add this only for a deployment where readers and concurrent GC share
+the same metadata authority.
 
-Blind evaluation also needs a content boundary for model output. The ClinVar task therefore accepts no loose result
-array: a proposal set must cover the exact candidate-result temporal keys, cite the candidate run and run-object
-digests, identify the actor and host contract, and retain abstention explicitly. Evaluator SQL consumes the verified
-proposal artifact through a protected binding and computes row scores and aggregate rank metrics against the hidden
-snapshot. Replay stores the binding digest, not the proposal payload; the proposal itself remains rooted in CAS and
-the temporal ledger.
+Evidence: [cas-metadata.ts](../src/hosts/cas-metadata.ts) and
+[cas-metadata-gc.test.ts](../test/cas-metadata-gc.test.ts).
 
-Evidence: [clinvar-temporal.ts](../packages/workbench/src/clinvar-temporal.ts),
-[clinvar-temporal.test.ts](../packages/workbench/test/clinvar-temporal.test.ts).
+### HTTP receipt completeness
 
-### Cross-host memory mutation parity
+The injected HTTP resolver records cancellation, bounded reads, retry, validators, and scoped CAS reuse. Redirected
+final URL and an explicit revalidation time would improve audit detail when the host fetch interface exposes them.
+These are receipt fields, not a new network subsystem.
 
-The SDK owns validated memory writes, retractions, recall, and history. Pi exposes both mutation and inspection,
-while the CLI currently emphasizes inspection. Non-Pi hosts need a thin JSON/stdin CLI adapter for the same
-`MemoryContent` and retraction contracts, with ordinary ledger receipts. This is surface parity over the existing
-observation store, not a new memory service or file format.
+Evidence: [http-table-scan.ts](../src/duckdb/resolvers/http-table-scan.ts) and
+[http-cas-reuse.test.ts](../test/http-cas-reuse.test.ts).
+
+### Second-host parity
+
+The public SDK owns validated memory writes, retractions, recall, history, runs, and evidence. Pi exposes the mature
+interactive adapter. A second host must exercise session control, memory mutation, transcript ingestion, capability
+binding, and evidence handoff before additional interactive behavior moves into shared code.
 
 Evidence: [memory-store.ts](../src/hosts/memory-store.ts),
-[memory-store.test.ts](../test/memory-store.test.ts),
+[memory-store.test.ts](../test/memory-store.test.ts), and
 [typed-memory-agent.qmd](../examples/patterns/typed-memory-agent.qmd).
 
-## Maintainer risk/perimeter matrix (core guarantees vs host obligations)
+## Deployment boundaries
 
-Use this as the deployment checklist before claiming a deployment-level behavior is covered.
-
-| Concern | In-core guarantee | Host obligation |
+| Concern | Library guarantee | Host responsibility |
 |---|---|---|
-| **Shared state topology (`SqlConn` / `openStore`)** | All ledger, memory, job, and run writes use injected SQL ports. The package ships a parameterized HTTP client/server and a typed Arrow/ducknng client adapter. HTTP requires bearer or authorization policy; ducknng supplies generated/in-memory/file-backed TLS and mTLS handles plus service admission. The default local store shares one cached instance within a process and remains exclusive across processes. | Terminate TLS for the HTTP reference, or configure ducknng's native TLS handle, peer policy, and SQL authorizer. Preserve serialized writes, or equivalent transaction semantics, for same-slot observation updates. |
-| **Distributed run execution** | `createQueueJobWorker` claims leased replay jobs, heartbeats, rejects stale writes, records durable status/results, and recovers a terminal result without rerunning. The executing worker opens its own scientific DuckDB and calls `reproduceRun`; shared `SqlConn` is the coordination/evidence plane, not a bulk-result tunnel. | Stage declared inputs at the chosen manifest base, inject compute/network/secret policy and CAS, operate workers, and choose retry/shutdown policy. A deployment that wants the scientific database itself to be remote needs a host adapter beyond this worker composition. |
-| **Live-source replay evidence** | Resolvers that cannot content-pin outputs annotate provenance as `live_source` (`duckdb.sql_materialize`, non-deterministic/uncertain `compute.run` paths). Reproduction with no output `resultDigest` does not produce `matched: true`; it reports `notReproducible`. Live-source runs are also excluded from ActionCache. | Hosts wanting deterministic replay on these sources must pass CAS and run in a mode where outputs are pinned. If CAS is absent, consume `notReproducible` as the stable truth and avoid treating the run as equality across time. |
-| **Cross-machine replay portability** | Replay carries a canonical manifest snapshot and digest. Authored relative resource/compute paths remain relative in identity and resolve from an explicit `manifestBaseDir`; snapshot tampering and source/result/environment drift fail closed. Cross-checkout tests and the SSH worker pattern execute without the original manifest. | Stage the same input bytes under the selected base and re-supply protected config, capability receipts, compute environment, and CAS. Live sources remain subject to the evidence rule above. |
+| Local and shared DuckDB ownership | same-process ledger opens share one cached instance; isolated scientific file runs serialize; remote stores use injected `SqlConn` | provide one writer authority across processes, authorize SQL, and configure TLS/service admission |
+| Distributed replay | workers claim leased jobs, heartbeat, reject stale writes, and reproduce from manifest snapshots | stage inputs, supply network/compute/secrets/CAS, and operate worker retry and shutdown policy |
+| Live-source replay | live inputs remain marked non-reproducible without sufficient pins and are excluded from action caching | supply content pins or consume `notReproducible` as the result |
+| Cross-machine portability | replay carries a manifest snapshot, relative paths, digests, and environment evidence | stage matching bytes and resupply protected host configuration and capabilities |
 
-Cross-cutting constraints from this table are currently enforced by tests in:
+Primary evidence is in [concurrency.md](concurrency.md), [reproduce.ts](../src/hosts/reproduce.ts),
+[reproduce.test.ts](../test/reproduce.test.ts), [run-store.ts](../src/hosts/run-store.ts), and
+[pattern-ssh-remote-worker.mjs](../scripts/pattern-ssh-remote-worker.mjs).
 
-- [reproduce.ts](../src/hosts/reproduce.ts), [reproduce.test.ts](../test/reproduce.test.ts)
-- [run-store.ts](../src/hosts/run-store.ts), especially `serialize:false` CAS-rooting and live-source cache-skips
-- [extensions/pi-coding-agent/index.ts](../extensions/pi-coding-agent/index.ts), `openStore` and session-sync guardrails
-- [concurrency.md](./concurrency.md), [remote-sql-conn.ts](../src/hosts/remote-sql-conn.ts), and
-  [pattern-ssh-remote-worker.mjs](../scripts/pattern-ssh-remote-worker.mjs)
+## Admission rule
 
-## Consumer-pulled adapters
+Do not add dormant implementation plans here. A proposal belongs in this worklog only when all of the following are
+true:
 
-- Scheduler backends for SLURM, `targets`, `mirai`, Modal, or another queue should implement `AsyncRunner` and the
-  existing checkpoint contract.
-- The workbench now has a Pi-backed interactive host port for open/resume/rename, command discovery,
-  prompt/steer/follow-up, abort, bounded transcripts, and ephemeral activity. Pi's extension already reduces durable input/lifecycle facts to
-  `recordHostEvent` and imports the session transcript. Do not promote the browser event vocabulary into core. A
-  second host adapter is the next test of whether any control contract beyond the current application port is shared.
-- The workbench's explicit local-compute grant and evidence-status figure exercise the existing `compute.run` ->
-  declared output -> CAS -> `run:<id> produces cas:<digest>` path. Direct process writes are not artifacts. This is
-  application composition over the existing contract, not evidence for a plot-specific core tool. The reference
-  host retains Pi bash for ordinary host work and audits its command/result through session ingestion rather than
-  wrapping arbitrary commands as fake compute runs. Scientific process execution still requires declared
-  `compute.run` inputs and outputs. Inline tool-result media can remain a `session_image` audit artifact, but shell
-  filesystem side effects are not discovered or promoted.
-- The static compute boundary is reinforced at the point of likely use: the Pi adapter injects a visible
-  `before_agent_start` message for plot, figure, external-runtime, and workflow prompts. It reports whether
-  `compute.run` is host-granted and fails closed when it is not. This is deliberately distinct from Pi's
-  `user_bash` hook, which intercepts human `!` / `!!` commands rather than assistant tool calls.
-- Clinical Evidence, Clinical Reanalysis, and Artifacts exercise host-approved `WorkbenchAddon` API/browser pairs.
-  Reanalysis reads the latest packet per case and writes review dispositions as canonical observation revisions; its
-  browser selection is narrow application state, not a generic addon event system. Do not broaden the contract into
-  an installation/catalog/configuration system until another deployment needs runtime discovery; do not add
-  focus/resize/dock hooks until an editor, terminal, or comparable mounted surface requires them.
-- External systems such as `rv`, ChEMBL, OpenTargets, BioBTree, Nextflow, or FHIR should first enter as resources,
-  SQL materialization, graph projection, or `compute.run`.
-- Cross-source node normalization should be added after two real KGs repeat the same identifier/category/label
-  reconciliation.
-- Renderer-specific report metadata and training labels belong to their first consumers.
-- Fugu-shaped orchestration and RLM-shaped recursive model calls belong first in an application agent harness. The
-  current access-list and map/reduce examples prove data-plane mechanics, not learned orchestration or
-  machine-studying quality.
-- A DuckTinyCC-backed C-FFI or ducknng filesystem lane remains research until a manifest needs a table function that
-  existing DuckDB extensions, process compute, or host adapters cannot supply.
+1. a current application or deployment is blocked or carrying a concrete workaround;
+2. the gap cannot be expressed through existing manifests, SQL, injected capabilities, observations, CAS, or replay;
+3. code, a failing test, or an executable pattern identifies the boundary;
+4. the proposed change is the smallest policy-free mechanism that closes it.
 
-## Closed contracts
+Otherwise track the idea in an issue or delete it. Proven surfaces are reopened only by contradictory evidence, not by
+association with another framework or a speculative future integration.
 
-Do not reopen these without contradictory evidence:
-
-- provider-neutral catalog, manifest, query, operation, CLI, Pi, and SDK paths;
-- parser/AST-backed read-only SQL and plan-based hermeticity checks;
-- lazy resource forcing and `duckdb.sql_materialize` as the general SQL materializer;
-- async compute plus durable queue, cancellation, leases, and checkpoint resume;
-- parameterized remote `SqlConn`, a lease-owning queue worker, and path-portable snapshot replay;
-- CAS bytes, metadata refs/leases/GC, action cache, replay, and consumer-facing reproduce;
-- required run/declaration/artifact evidence when a host supplies a ledger;
-- open host events and digest-first training-corpus projection;
-- graph projection profiles and the pinned SemanticSQL concrete-view compatibility contract;
-- host-neutral skill installation and executable conformance checks;
-- packed SDK consumer pattern and owned-extension CI lanes.
-
-The current proof levels and application-driven next work are in [roadmap.md](roadmap.md).
+Current priorities and proof levels are in [roadmap.md](roadmap.md).
