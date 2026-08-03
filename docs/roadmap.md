@@ -58,34 +58,27 @@ Examples state their proof level. Copied output in prose is not additional evide
 
 ## Active priorities
 
-### 1. Measure the anti-sprawl claim
+### Measure the anti-sprawl claim
 
 Build a budgeted comparison between per-question skills and manifest-plus-schema-plus-SQL composition across genuinely
 new questions. Measure correctness, evidence quality, tokens, tool calls, wall time, human review, and new TypeScript.
 The central metric is how little implementation code a supported new question requires.
 
-### 2. Make large result delivery explicit
+### Make large result delivery explicit
 
 The current runner materializes complete results through `SqlConn.all`. Add caller-selected delivery such as inline
 rows, a materialized relation, or a Parquet/CAS artifact only when a consumer requires it. Preserve the complete
 scientific result and keep UI/model truncation as presentation metadata.
 
-### 3. Test a second interactive host
+### Test a second interactive host
 
 The SDK is provider-neutral, but the mature interactive adapter is Pi-first. A second host should exercise session
 control, memory mutation, transcript ingestion, capability binding, and evidence handoff before any more interactive
 control behavior is promoted into shared code.
 
-### 4. Harden shared deployment from real use
-
-Add shared-CAS read leases, production store transport, worker admission, artifact retrieval, or stronger source pins
-only for deployments that exercise the relevant concurrency and failure modes. Do not prebuild a generic distributed
-platform.
-
-### 5. Keep application policy downstream
-
-The workbench remains the main pressure surface. Phenotype policy, clinical ranking, review packets, browser workflow,
-and source-specific evaluation stay in the application unless another consumer repeats the same mechanism.
+Other work enters this roadmap only from a current consumer, failing test, or executable proof. Application policy,
+production deployment choices, and source-specific integration remain downstream until repeated use exposes a shared
+mechanism.
 
 Concrete active gaps and their evidence links live in [refinments.md](refinments.md). Remove stalled items from living
 docs; reintroduce them only with a named consumer, failing test, or executable proof.
