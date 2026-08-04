@@ -321,12 +321,16 @@ function commonReplayOptions(host: PreparedBioMcpHost, requestContext: McpReques
 }
 
 function transformedCatalog(catalog: Awaited<ReturnType<typeof hostCatalog>>) {
+  const { schema, root, query, entries, invalid } = catalog;
   return {
-    ...catalog,
-    entries: catalog.entries.map(({ manifestPath: _manifestPath, ...entry }) => ({
+    schema,
+    root,
+    ...(query ? { query } : {}),
+    entries: entries.map(({ manifestPath: _manifestPath, ...entry }) => ({
       ...entry,
       resourceUri: manifestUri(entry.id),
     })),
+    invalid: invalid.map(({ manifestPath: _manifestPath, ...entry }) => entry),
   };
 }
 
