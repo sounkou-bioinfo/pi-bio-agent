@@ -232,7 +232,7 @@ function runEvidenceUris(runId: string, succeeded: boolean): Record<string, stri
     receipts: runPartUri(runId, "receipts"),
     replay: runPartUri(runId, "replay"),
     ...(succeeded ? { result: runPartUri(runId, "result") } : {}),
-    casRefs: runPartUri(runId, "cas-refs"),
+    "cas-refs": runPartUri(runId, "cas-refs"),
   };
 }
 
