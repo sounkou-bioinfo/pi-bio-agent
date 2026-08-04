@@ -25,7 +25,7 @@ export default handler;
 
 `handler.fetch(request, { authInfo })` accepts authentication information that the embedding host has already
 verified. The adapter never derives trust from an `Authorization` header. When no explicit `author` is configured,
-`authInfo.clientId` becomes the run attribution; otherwise runs are attributed to `mcp:anonymous`.
+`authInfo.clientId` becomes the run attribution; if `authInfo.clientId` is absent, runs are attributed to `mcp:anonymous`.
 
 The default legacy posture is `reject`. A host may explicitly set `legacy: "stateless"` to enable the SDK's
 per-request 2025 compatibility fallback. That does not create sessions.
