@@ -135,10 +135,11 @@ async function main(): Promise<void> {
         response.end("Not found");
         return;
       }
+      const body = await requestBody(request);
       const webRequest = new Request(url, {
         method: request.method,
         headers: webHeaders(request),
-        body: await requestBody(request),
+        body: body === undefined ? undefined : new Uint8Array(body),
       });
       await sendResponse(await handler.fetch(webRequest), response);
     } catch (error) {
