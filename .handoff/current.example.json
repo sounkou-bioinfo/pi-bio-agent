@@ -1,0 +1,114 @@
+{
+  "schema": "pi-bio.handoff.v1",
+  "updated_at": "2026-08-31T18:00:00Z",
+  "author": "agent:example",
+  "handoff_reason": "verification",
+  "repository": {
+    "name": "sounkou-bioinfo/pi-bio-agent",
+    "base_branch": "main",
+    "branch": "agent/example-change",
+    "head_sha": "0123456789abcdef0123456789abcdef01234567",
+    "working_tree": "clean",
+    "uncommitted_paths": []
+  },
+  "work": {
+    "title": "Add a deterministic queue edge-case test",
+    "objective": "Prove stale workers cannot publish after losing a lease.",
+    "acceptance_criteria": [
+      "A focused deterministic-clock test reproduces the stale-write attempt.",
+      "The stale attempt receives JobClaimLostError.",
+      "The existing queue and worker tests still pass."
+    ],
+    "scope": ["Queue claim and worker tests"],
+    "non_goals": ["Changing database backends", "Adding a new queue lifecycle"],
+    "issue_refs": ["#123"],
+    "pr_refs": [],
+    "owning_docs": ["docs/concurrency.md"]
+  },
+  "state": {
+    "status": "ready_for_verification",
+    "summary": "The focused test and implementation change are committed; an independent test pass is next.",
+    "read_first": [
+      {
+        "path": "test/job-queue.test.ts",
+        "symbol": "stale worker tests",
+        "reason": "Contains the new reproduction and expected boundary."
+      },
+      {
+        "path": "src/hosts/job-queue.ts",
+        "symbol": "insertObservationForLiveClaim",
+        "reason": "Contains the guarded write changed by this branch."
+      }
+    ],
+    "changed_paths": [
+      {
+        "path": "test/job-queue.test.ts",
+        "summary": "Adds the deterministic stale-write regression."
+      },
+      {
+        "path": "src/hosts/job-queue.ts",
+        "summary": "Keeps attempt identity in the guarded observation predicate."
+      }
+    ],
+    "decisions": [
+      {
+        "note": "Keep stale-write rejection at the durable observation boundary rather than trusting cancellation.",
+        "reference": "docs/concurrency.md"
+      }
+    ],
+    "invariants": [
+      {
+        "note": "A worker may publish only while run id, worker id, attempt, and lease all match.",
+        "reference": "src/hosts/job-queue.ts"
+      }
+    ],
+    "blockers": [],
+    "risks": [
+      {
+        "note": "The focused test does not prove behavior on a non-serialized remote SQL server.",
+        "reference": "docs/concurrency.md"
+      }
+    ],
+    "uncertainties": [],
+    "known_failures": []
+  },
+  "verification": [
+    {
+      "command": "npm test -- --test-name-pattern='stale'",
+      "cwd": ".",
+      "outcome": "passed",
+      "observed_at": "2026-08-31T17:55:00Z",
+      "applies_to": "head",
+      "summary": "Focused stale-claim tests passed."
+    },
+    {
+      "command": "npm run check:all",
+      "cwd": ".",
+      "outcome": "not_run",
+      "observed_at": "2026-08-31T17:56:00Z",
+      "applies_to": "head",
+      "summary": "Reserved for the independent verification pass."
+    }
+  ],
+  "next_actions": [
+    {
+      "order": 1,
+      "action": "Run the full repository gate and review the new assertion against the owning concurrency contract.",
+      "start_at": "npm run check:all; then read docs/concurrency.md and test/job-queue.test.ts",
+      "done_when": "The full gate passes and no mismatch is found between the test and the documented lease invariant.",
+      "blocked_by": []
+    }
+  ],
+  "references": [
+    {
+      "kind": "documentation",
+      "value": "docs/concurrency.md",
+      "purpose": "Owning lease and stale-write contract."
+    },
+    {
+      "kind": "test",
+      "value": "test/job-queue.test.ts",
+      "purpose": "Focused regression and verification entry point."
+    }
+  ]
+}

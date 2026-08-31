@@ -16,6 +16,20 @@
       ]
     },
     {
+      "slug": "handoff",
+      "path": "docs/handoff.md",
+      "type": "Reference",
+      "title": "Agent handoff and project orientation",
+      "description": "The branch-scoped contract for transferring exact work state between coding agents and maintainers without relying on chat history.",
+      "tags": [
+        "agents",
+        "handoff",
+        "orientation",
+        "development",
+        "verification"
+      ]
+    },
+    {
       "slug": "design",
       "path": "docs/design.md",
       "type": "Reference",
@@ -131,11 +145,12 @@
       "path": "docs/roadmap.md",
       "type": "Reference",
       "title": "Roadmap and success contract",
-      "description": "Current substrate closure, falsifiable success criteria, proof levels, and consumer-pulled next work.",
+      "description": "Current substrate closure, falsifiable success criteria, proof levels, handoff quality, and consumer-pulled next work.",
       "tags": [
         "roadmap",
         "testing",
         "success",
+        "handoff",
         "applications"
       ]
     },
@@ -148,6 +163,7 @@
       "tags": [
         "refinements",
         "open-issues",
+        "handoff",
         "worklog"
       ]
     }

@@ -1,8 +1,8 @@
 ---
 type: Reference
 title: Roadmap and success contract
-description: "Current substrate closure, falsifiable success criteria, proof levels, and consumer-pulled next work."
-tags: [roadmap, testing, success, applications]
+description: "Current substrate closure, falsifiable success criteria, proof levels, handoff quality, and consumer-pulled next work."
+tags: [roadmap, testing, success, handoff, applications]
 ---
 
 # Roadmap and success contract
@@ -28,7 +28,7 @@ served outside Pi without copying the runner or SQL/security implementation. It 
 HTTP request; durable scientific continuity remains in run IDs, CAS, and the optional observation store.
 
 This is enough to build applications. It does not imply that every deployment adapter, biomedical policy, source pin,
-or user interface is complete.
+user interface, or development handoff is complete.
 
 ## Falsifiable success
 
@@ -45,8 +45,14 @@ Correctness is the gate:
 - large data and graph state remain queryable rather than copied into prompts;
 - clinical interpretation is not presented as model-generated fact.
 
+Development continuity is also testable. A fresh coding agent or maintainer taking over an active branch should be able
+to recover the objective, current state, verification boundary, risks, and correct next action from Git, the PR/issue,
+owning docs, and one bounded handoff packet without relying on chat history.
+
 After correctness, compare scientific accuracy, evidence completeness, wall-clock time, token and tool-call budgets,
-human review effort, and growth in non-test implementation code. A runnable pattern proves mechanics only.
+human review effort, and growth in non-test implementation code. For handoff, compare time to first valid change,
+clarification rounds, unnecessary files opened, repeated commands, stale assumptions, and duplicated verification.
+A runnable pattern proves mechanics only.
 
 ## Proof levels
 
@@ -57,10 +63,37 @@ human review effort, and growth in non-test implementation code. A runnable patt
 | Hermetic application run | cross-boundary execution, evidence, resume, and abstention behavior | live-source compatibility |
 | Pinned live-source run | current source schema and host capability compatibility | future endpoint stability |
 | Budgeted benchmark | measured quality or cost difference against a baseline | universal superiority |
+| Cold handoff exercise | a fresh contributor can resume from repository state and the handoff packet | long-term maintainability without repeated trials |
 
 Examples state their proof level. Copied output in prose is not additional evidence.
 
 ## Active priorities
+
+### Make development handoff explicit and bounded
+
+The repository has good architectural instructions and a generated docs map, but incomplete branch state still often
+lives in the preceding conversation. Establish one branch-scoped handoff contract for coding agents and maintainers.
+
+The design is in [handoff.md](handoff.md). The concrete repository surfaces are:
+
+- `.handoff/handoff.schema.json` for the machine-readable packet;
+- `.handoff/current.example.json` for the minimal shape;
+- `AGENTS.md` for takeover and closeout rules;
+- the pull request template for the completed human-readable projection.
+
+Acceptance criteria:
+
+- a packet records exact HEAD/worktree state, objective, observable acceptance, scope/non-goals, first files/symbols,
+  decisions, invariants, verification evidence, known failures, risks, uncertainties, and ordered next actions;
+- a recipient can detect a stale packet immediately;
+- no packet claims an unrun test passed or hides whether verification applies to current HEAD;
+- durable discoveries move to code, tests, owning docs, executable examples, or issues before the packet is deleted;
+- branch-specific progress does not leak into canonical design documents;
+- a cold handoff exercise reaches the first correct implementation or verification action without chat history;
+- the packet is deleted before merge unless the branch intentionally remains resumable.
+
+Add a zero-dependency validator or CI check only after the schema has been exercised on real transfers. Do not require
+an always-present handoff file for ordinary completed PRs.
 
 ### Measure the anti-sprawl claim
 
@@ -94,6 +127,9 @@ docs; reintroduce them only with a named consumer, failing test, or executable p
 `npm run check:all` is the workspace gate. It covers core, the stateless MCP package, workbench, Quarto engine,
 generated documentation, examples, skills, type checking, and tests. Run focused owning checks first, then the full
 gate for shared changes.
+
+When a branch is transferred, the recipient should additionally verify `.handoff/current.json` against its schema,
+branch, HEAD, worktree status, and recorded commands. This is a handoff check, not a substitute for the repository gate.
 
 Executable claims are authored in QMD and rendered to committed Markdown. Design prose links to code, tests, or
 application runs. Keep the generated docs index current.

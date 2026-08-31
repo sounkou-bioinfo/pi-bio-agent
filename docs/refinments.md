@@ -2,7 +2,7 @@
 type: Worklog
 title: Refinements
 description: "Concrete sharp edges and consumer-pulled work that remain after core substrate closure."
-tags: [refinements, open-issues, worklog]
+tags: [refinements, open-issues, handoff, worklog]
 ---
 
 # Refinements
@@ -12,6 +12,27 @@ Remove an item when it is closed, superseded, or no longer active. Reintroduce d
 consumer, failing test, or executable proof.
 
 ## Active sharp edges
+
+### Cross-session development handoff
+
+`AGENTS.md`, the generated docs index, Git history, tests, issues, and PRs already provide strong durable context. The
+remaining gap appears when implementation stops mid-branch: objective, exact verification state, unresolved decisions,
+and the first correct next action can remain trapped in the preceding chat or in unstated local knowledge.
+
+The current consumers are coding agents and human maintainers transferring incomplete work. The smallest mechanism is
+a branch-scoped `.handoff/current.json` packet that points to existing sources of truth. It is not a runtime feature,
+project memory database, transcript store, or canonical design document.
+
+Evidence and ownership:
+
+- [handoff.md](handoff.md) defines the transfer contract and source-of-truth order;
+- `.handoff/handoff.schema.json` and `.handoff/current.example.json` define the bounded packet;
+- `AGENTS.md` defines takeover, verification, knowledge-promotion, and deletion rules;
+- the PR template carries the completed human-readable projection.
+
+The active proof gap is a cold handoff exercise on real incomplete work. A fresh contributor should identify the
+objective, verify the current boundary, and take one correct next action without reading the previous conversation or
+opening unrelated files. Add automated validation only after real packets reveal which constraints are stable.
 
 ### Live-source evidence
 
@@ -55,8 +76,9 @@ Evidence: [packages/mcp-server](../packages/mcp-server/README.md),
 | Stateless MCP | each modern HTTP request receives a fresh protocol server; tools reuse the public scientific SDK; no MCP session ID is created | authenticate requests, validate Host/Origin, terminate TLS, bind credentials/capabilities, and provide OS/network isolation |
 | Live-source replay | live inputs remain marked non-reproducible without sufficient pins and are excluded from action caching | supply content pins or consume `notReproducible` as the result |
 | Cross-machine portability | replay carries a manifest snapshot, relative paths, digests, and environment evidence | stage matching bytes and resupply protected host configuration and capabilities |
+| Development handoff | the repository defines a bounded branch packet, source-of-truth order, and verification vocabulary | keep the packet current at transfer boundaries, avoid secrets, and promote durable knowledge before merge |
 
-Primary evidence is in [concurrency.md](concurrency.md), [reproduce.ts](../src/hosts/reproduce.ts),
+Primary execution evidence is in [concurrency.md](concurrency.md), [reproduce.ts](../src/hosts/reproduce.ts),
 [reproduce.test.ts](../test/reproduce.test.ts), [run-store.ts](../src/hosts/run-store.ts),
 [packages/mcp-server](../packages/mcp-server/README.md), and
 [pattern-ssh-remote-worker.mjs](../scripts/pattern-ssh-remote-worker.mjs).
@@ -69,9 +91,10 @@ docs while inactive.
 
 A proposal belongs in this worklog only when all of the following are true:
 
-1. a current application or deployment is blocked or carrying a concrete workaround;
-2. the gap cannot be expressed through existing manifests, SQL, injected capabilities, observations, CAS, or replay;
-3. code, a failing test, or an executable pattern identifies the boundary;
+1. a current application, deployment, or development workflow is blocked or carrying a concrete workaround;
+2. the gap cannot be expressed through existing manifests, SQL, injected capabilities, observations, CAS, replay,
+   Git/PR state, or the branch handoff contract;
+3. code, a failing test, an executable pattern, or a cold handoff exercise identifies the boundary;
 4. the proposed change is the smallest policy-free mechanism that closes it.
 
 Otherwise track the idea in an issue or delete it. Proven surfaces are reopened only by contradictory evidence, not by
