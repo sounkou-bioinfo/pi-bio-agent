@@ -20,10 +20,11 @@
       "path": "docs/design.md",
       "type": "Reference",
       "title": "Conceptual architecture",
-      "description": "The canonical conceptual model for core boundaries, execution, evidence, memory, and host composition.",
+      "description": "The canonical system model for agent-authored programs, durable control, execution, evidence, memory, and host composition.",
       "tags": [
         "architecture",
-        "contracts",
+        "agents",
+        "control-plane",
         "execution",
         "evidence",
         "memory"
@@ -33,14 +34,17 @@
       "slug": "concurrency",
       "path": "docs/concurrency.md",
       "type": "Reference",
-      "title": "Concurrent memory — running the store over a ducknng server",
-      "description": "Read before running pi-bio-agent memory across projects, processes, agents, or machines. Explains the three store access modes and how to inject a server-backed store.",
+      "title": "Concurrent state and durable control plane",
+      "description": "Read before sharing memory, jobs, attempts, or resource pools across processes, agents, or machines.",
       "tags": [
         "memory",
-        "store",
+        "jobs",
+        "control-plane",
         "concurrency",
         "ducknng",
-        "sharing"
+        "sqlite",
+        "postgres",
+        "quack"
       ]
     },
     {
@@ -62,13 +66,14 @@
       "slug": "duckdb-substrate",
       "path": "docs/duckdb-substrate.md",
       "type": "Reference",
-      "title": "DuckDB substrate",
-      "description": "Read before using DuckDB tables, extensions, or SQL surfaces over bio data.",
+      "title": "DuckDB scientific substrate",
+      "description": "Read before using DuckDB tables, extensions, attached control stores, or SQL surfaces over scientific data.",
       "tags": [
         "duckdb",
         "sql",
         "extensions",
-        "substrate"
+        "substrate",
+        "control-plane"
       ]
     },
     {
@@ -117,13 +122,15 @@
       "slug": "resources-and-tool-specs",
       "path": "docs/resources-and-tool-specs.md",
       "type": "Reference",
-      "title": "Resources and resolvers",
-      "description": "Read before defining resources, resolvers, or operation contracts.",
+      "title": "Resources, capacity, and tool contracts",
+      "description": "Read before defining scientific resources, resolvers, execution capacity, or agent-facing operation contracts.",
       "tags": [
         "resources",
+        "capacity",
         "cas",
         "resolvers",
-        "operation-spec"
+        "operation-spec",
+        "agents"
       ]
     },
     {
@@ -131,11 +138,12 @@
       "path": "docs/roadmap.md",
       "type": "Reference",
       "title": "Roadmap and success contract",
-      "description": "Current substrate closure, falsifiable success criteria, proof levels, and consumer-pulled next work.",
+      "description": "Current substrate closure, agent-native success criteria, proof levels, and consumer-pulled next work.",
       "tags": [
         "roadmap",
         "testing",
-        "success",
+        "agents",
+        "control-plane",
         "applications"
       ]
     },
@@ -148,7 +156,8 @@
       "tags": [
         "refinements",
         "open-issues",
-        "worklog"
+        "worklog",
+        "control-plane"
       ]
     }
   ]
