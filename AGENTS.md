@@ -8,9 +8,36 @@ Instructions for coding agents working in this repository.
 - Read `docs/design.md` before changing a shared boundary. Use the focused document that owns the mechanism:
   `docs/domain-model.md`, `docs/duckdb-substrate.md`, `docs/concurrency.md`,
   `docs/memory-and-knowledge-unification.md`, or `docs/ontology-and-knowledge-graphs.md`.
+- Read `docs/handoff.md` when taking over incomplete work or preparing a transfer.
+- If `.handoff/current.json` exists, verify its branch, HEAD, and worktree state before trusting it. It is the latest
+  branch transfer snapshot, not a replacement for Git, tests, the PR, or owning design docs.
 - `README.qmd` is the README source. `README.md` is generated.
 - The root package is the public SDK. `packages/workbench` is the first-party application and
   `packages/quarto-engine` is a rendering adapter. Downstream packages consume public exports, not `src/` internals.
+
+## Handoff and orientation
+
+- A handoff is about transferring development work between coding agents and maintainers. Do not turn it into a
+  runtime agent abstraction, workflow feature, memory system, or scientific domain type.
+- At a transfer boundary, create or refresh `.handoff/current.json` according to `.handoff/handoff.schema.json`.
+  Use it for interrupted, blocked, verification-ready, or transferred work, not as a per-edit diary.
+- The packet must identify the objective, acceptance criteria, scope/non-goals, exact HEAD, dirty paths if any, current
+  state, first files/symbols to read, decisions, invariants, verification evidence, known failures, blockers, risks,
+  uncertainties, and ordered next actions with concrete completion conditions.
+- Keep handoffs bounded. Link to commits, issues, PRs, tests, logs, artifacts, and owning docs instead of copying full
+  diffs or command output.
+- Never put secrets, private chain-of-thought, credentials, private URLs, or machine-specific protected values in a
+  handoff packet.
+- A test is `passed` only when the exact recorded command ran against the stated revision. Distinguish current-HEAD
+  verification, earlier verification, known pre-existing failures, new failures, interrupted commands, and checks not
+  run because a dependency was unavailable.
+- On takeover, stop trusting a stale packet. Reconstruct state from Git, tests, the PR/issue, and owning docs; then
+  replace or remove it.
+- Before final merge, delete `.handoff/current.json` after moving durable knowledge to its canonical location:
+  architecture to the owning design doc, code contracts to tests/doc comments, user behavior to public docs, deferred
+  work to an issue/roadmap item, and reproducible procedures to scripts/tests/QMD.
+- PR descriptions are the durable human projection of completed work. Branch handoff packets are for incomplete or
+  transferred work.
 
 ## Architectural rules
 
@@ -45,7 +72,7 @@ Instructions for coding agents working in this repository.
 - Applications own domain policy, rankings, review packets, UI workflow, and source-specific product behavior.
   Core owns reusable execution, evidence, replay, temporal, and graph primitives.
 - Pi-specific session control and dynamic-tool behavior stay in the Pi adapter. Promote host-neutral control behavior
-  only after another host repeats it.
+  only after another stateful host repeats it.
 - `WorkbenchAddon` is an application-level API/browser pairing, not a general plugin marketplace or storage system.
 - Self-extension means producing a validated manifest, operation, compute program, or skill revision with evidence and
   approval. It does not mean silently mutating core code or host permissions.
@@ -57,6 +84,7 @@ Instructions for coding agents working in this repository.
 - Update the existing owning document. Delete duplicate or stale prose instead of adding another note.
 - Living design docs describe implemented behavior, active boundaries, and demonstrated gaps. They are not feature
   inventories, work diaries, or holding areas for stalled ideas.
+- Branch-specific progress belongs in `.handoff/current.json`, not in canonical design docs.
 - Claims about behavior must point to code, a test, an executable QMD, or a recorded application run. State explicitly
   when an example proves mechanics rather than scientific or deployment validity.
 - Edit generated sources rather than outputs: `README.qmd` for `README.md`, and `examples/patterns/*.qmd` for generated
@@ -87,4 +115,6 @@ Instructions for coding agents working in this repository.
 - README or generated-pattern changes: run the corresponding generator/check command.
 - Shared code or manifest changes: `npm run typecheck` plus focused tests; use `npm test` when shared behavior changes.
 - Cross-package or architectural changes: `npm run check:all`.
+- When `.handoff/current.json` exists, confirm it conforms to `.handoff/handoff.schema.json`, matches the current branch
+  and HEAD, and accurately records verification before transferring responsibility.
 - `NEWS.md` is maintained manually and should record shipped behavior, not design speculation.

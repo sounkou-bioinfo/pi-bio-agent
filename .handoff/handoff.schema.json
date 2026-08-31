@@ -1,0 +1,231 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/sounkou-bioinfo/pi-bio-agent/blob/main/.handoff/handoff.schema.json",
+  "title": "pi-bio-agent branch handoff packet",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "updated_at",
+    "handoff_reason",
+    "repository",
+    "work",
+    "state",
+    "verification",
+    "next_actions",
+    "references"
+  ],
+  "properties": {
+    "schema": {
+      "const": "pi-bio.handoff.v1"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "author": {
+      "type": "string",
+      "minLength": 1
+    },
+    "handoff_reason": {
+      "enum": ["transfer", "interruption", "blocked", "verification", "review"]
+    },
+    "repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "base_branch", "branch", "head_sha", "working_tree"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "base_branch": {"type": "string", "minLength": 1},
+        "branch": {"type": "string", "minLength": 1},
+        "head_sha": {"type": "string", "pattern": "^[0-9a-f]{7,40}$"},
+        "working_tree": {"enum": ["clean", "dirty"]},
+        "uncommitted_paths": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true,
+          "default": []
+        }
+      }
+    },
+    "work": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title", "objective", "acceptance_criteria", "scope", "non_goals"],
+      "properties": {
+        "title": {"type": "string", "minLength": 1},
+        "objective": {"type": "string", "minLength": 1},
+        "acceptance_criteria": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "scope": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1}
+        },
+        "non_goals": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1}
+        },
+        "issue_refs": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true
+        },
+        "pr_refs": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true
+        },
+        "owning_docs": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true
+        }
+      }
+    },
+    "state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "summary",
+        "read_first",
+        "changed_paths",
+        "decisions",
+        "invariants",
+        "blockers",
+        "risks",
+        "uncertainties",
+        "known_failures"
+      ],
+      "properties": {
+        "status": {
+          "enum": ["planned", "in_progress", "blocked", "ready_for_verification", "ready_for_review", "completed"]
+        },
+        "summary": {"type": "string", "minLength": 1},
+        "read_first": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "reason"],
+            "properties": {
+              "path": {"type": "string", "minLength": 1},
+              "symbol": {"type": "string", "minLength": 1},
+              "reason": {"type": "string", "minLength": 1}
+            }
+          }
+        },
+        "changed_paths": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "summary"],
+            "properties": {
+              "path": {"type": "string", "minLength": 1},
+              "summary": {"type": "string", "minLength": 1}
+            }
+          }
+        },
+        "decisions": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/notedReference"}
+        },
+        "invariants": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/notedReference"}
+        },
+        "blockers": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/notedReference"}
+        },
+        "risks": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/notedReference"}
+        },
+        "uncertainties": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["question", "cheapest_check"],
+            "properties": {
+              "question": {"type": "string", "minLength": 1},
+              "cheapest_check": {"type": "string", "minLength": 1},
+              "reference": {"type": "string", "minLength": 1}
+            }
+          }
+        },
+        "known_failures": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/notedReference"}
+        }
+      }
+    },
+    "verification": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["command", "cwd", "outcome", "observed_at", "applies_to"],
+        "properties": {
+          "command": {"type": "string", "minLength": 1},
+          "cwd": {"type": "string", "minLength": 1},
+          "outcome": {"enum": ["passed", "failed", "not_run", "interrupted"]},
+          "observed_at": {"type": "string", "format": "date-time"},
+          "applies_to": {"enum": ["head", "head_plus_listed_uncommitted_changes", "earlier_revision"]},
+          "summary": {"type": "string"},
+          "evidence_ref": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "next_actions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["order", "action", "start_at", "done_when", "blocked_by"],
+        "properties": {
+          "order": {"type": "integer", "minimum": 1},
+          "action": {"type": "string", "minLength": 1},
+          "start_at": {"type": "string", "minLength": 1},
+          "done_when": {"type": "string", "minLength": 1},
+          "blocked_by": {
+            "type": "array",
+            "items": {"type": "string", "minLength": 1}
+          }
+        }
+      }
+    },
+    "references": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "value", "purpose"],
+        "properties": {
+          "kind": {
+            "enum": ["commit", "issue", "pull_request", "file", "symbol", "test", "command", "log", "artifact", "documentation", "other"]
+          },
+          "value": {"type": "string", "minLength": 1},
+          "purpose": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "notedReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["note"],
+      "properties": {
+        "note": {"type": "string", "minLength": 1},
+        "reference": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}

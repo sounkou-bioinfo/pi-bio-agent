@@ -7,6 +7,7 @@
 
 ## Reference
 
+- [Agent handoff and project orientation](handoff.md) — The branch-scoped contract for transferring exact work state between coding agents and maintainers without relying on chat history. _(agents, handoff, orientation, development, verification)_
 - [Conceptual architecture](design.md) — The canonical conceptual model for core boundaries, execution, evidence, memory, and host composition. _(architecture, contracts, execution, evidence, memory)_
 - [Concurrent memory — running the store over a ducknng server](concurrency.md) — Read before running pi-bio-agent memory across projects, processes, agents, or machines. Explains the three store access modes and how to inject a server-backed store. _(memory, store, concurrency, ducknng, sharing)_
 - [Domain model](domain-model.md) — Read before adding any core type or manifest — kernel slots, resources/CAS/resolvers, temporality, manifests, and execution backends. _(domain-model, resources, resolvers, temporality, manifests, execution-backends)_
@@ -15,8 +16,8 @@
 - [Memory and knowledge in one temporal ledger](memory-and-knowledge-unification.md) — Implemented mechanics for memory revisions, typed links, observations, graph projection, and session ingestion. _(memory, observations, temporal, graph, sessions)_
 - [Ontologies and knowledge graphs](ontology-and-knowledge-graphs.md) — Read before modeling ontologies, KG nodes/edges, or the graph-as-substrate bet. _(ontology, knowledge-graph, graph-bet, provenance)_
 - [Resources and resolvers](resources-and-tool-specs.md) — Read before defining resources, resolvers, or operation contracts. _(resources, cas, resolvers, operation-spec)_
-- [Roadmap and success contract](roadmap.md) — Current substrate closure, falsifiable success criteria, proof levels, and consumer-pulled next work. _(roadmap, testing, success, applications)_
+- [Roadmap and success contract](roadmap.md) — Current substrate closure, falsifiable success criteria, proof levels, handoff quality, and consumer-pulled next work. _(roadmap, testing, success, handoff, applications)_
 
 ## Worklog
 
-- [Refinements](refinments.md) — Concrete sharp edges and consumer-pulled work that remain after core substrate closure. _(refinements, open-issues, worklog)_
+- [Refinements](refinments.md) — Concrete sharp edges and consumer-pulled work that remain after core substrate closure. _(refinements, open-issues, handoff, worklog)_
