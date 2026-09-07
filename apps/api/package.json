@@ -6,11 +6,13 @@
   "exports": {
     "./server": "./dist/server.js"
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "node scripts/build.mjs",
     "predev": "npm run build -w @pi-bio/protocol",
-    "dev": "npm run build && node --enable-source-maps --watch dist/server.js",
+    "dev": "node scripts/dev.mjs",
     "prestart": "npm run build -w @pi-bio/protocol",
     "provision:ducknng": "node scripts/provision-ducknng.mjs",
     "start": "node --enable-source-maps dist/server.js",
@@ -25,6 +27,12 @@
     "@pi-bio/protocol": "0.3.0",
     "@sinclair/typebox": "^0.34.48",
     "hono": "^4.12.34",
-    "pi-ducknng": "https://github.com/sounkou-bioinfo/pi-ducknng/archive/b289220b2a1fcab3bc710efe9146b50d74f0f6ff.tar.gz"
+    "pi-ducknng": "https://github.com/sounkou-bioinfo/pi-ducknng/archive/b289220b2a1fcab3bc710efe9146b50d74f0f6ff.tar.gz",
+    "proper-lockfile": "4.1.2",
+    "write-file-atomic": "7.0.1"
+  },
+  "devDependencies": {
+    "@types/proper-lockfile": "4.1.4",
+    "@types/write-file-atomic": "4.0.3"
   }
 }

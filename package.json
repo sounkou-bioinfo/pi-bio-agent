@@ -14,15 +14,16 @@
   "scripts": {
     "build": "npm run build -w @pi-bio/protocol && npm run build -w @pi-bio/api && npm run build -w @pi-bio/web",
     "check": "npm run check:readme && npm run typecheck && npm run build && npm test",
-    "check:readme": "cmp --silent README.qmd README.md",
+    "check:readme": "node scripts/readme.mjs check",
     "dev": "concurrently -k -n api,web -c cyan,magenta \"npm run dev -w @pi-bio/api\" \"npm run dev -w @pi-bio/web\"",
     "desktop": "npm run build && npm start -w @pi-bio/desktop",
     "package:desktop": "npm run build && npm run provision:ducknng -w @pi-bio/api && npm run package -w @pi-bio/desktop",
-    "readme": "cp README.qmd README.md",
+    "readme": "node scripts/readme.mjs render",
     "start": "npm run start -w @pi-bio/api",
     "test": "vitest run",
-    "test:integration": "npm run build -w @pi-bio/protocol && npm run build -w @pi-bio/api && PI_BIO_INTEGRATION=1 vitest run apps/api/test/science.integration.test.ts",
-    "typecheck": "npm run typecheck -w @pi-bio/protocol && npm run typecheck -w @pi-bio/api && npm run typecheck -w @pi-bio/web && npm run typecheck -w @pi-bio/desktop"
+    "test:desktop": "node scripts/test-desktop.mjs",
+    "test:integration": "npm run build -w @pi-bio/protocol && npm run build -w @pi-bio/api && node scripts/test-integration.mjs",
+    "typecheck": "npm run build -w @pi-bio/protocol && npm run typecheck -w @pi-bio/api && npm run typecheck -w @pi-bio/web && npm run typecheck -w @pi-bio/desktop"
   },
   "devDependencies": {
     "@types/node": "^24.10.0",
@@ -30,6 +31,7 @@
     "electron": "44.2.0",
     "electron-builder": "^26.8.1",
     "esbuild": "^0.28.2",
+    "jsdom": "28.1.0",
     "typescript": "^5.9.3",
     "vite": "^7.3.1",
     "vitest": "^4.0.18"

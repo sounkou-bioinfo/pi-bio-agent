@@ -1,4 +1,4 @@
-import { contextBridge } from "electron";
+const { contextBridge } = require("electron");
 
 const apiBase = argument("--pi-bio-api=");
 const token = argument("--pi-bio-token=");

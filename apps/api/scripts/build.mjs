@@ -15,16 +15,7 @@ await mkdir(join(dist, "vendor/pi-ducknng/extensions/pi-ducknng"), {
   recursive: true,
 });
 
-await build({
-  entryPoints: await sourceFiles(join(root, "src")),
-  outbase: join(root, "src"),
-  outdir: dist,
-  platform: "node",
-  format: "esm",
-  target: "node24",
-  bundle: false,
-  sourcemap: true,
-});
+await buildSources();
 
 await build({
   entryPoints: [join(piDucknngRoot, "extensions/pi-ducknng/index.ts")],
@@ -51,6 +42,15 @@ await cp(
   join(dist, "vendor/pi-ducknng/vendor"),
   { recursive: true },
 );
+
+export async function buildSources() {
+  const protocol = join(root, "../../packages/protocol");
+  const common = { platform: "node", format: "esm", target: "node24", bundle: false, sourcemap: true };
+  await Promise.all([
+    build({ ...common, entryPoints: await sourceFiles(join(root, "src")), outbase: join(root, "src"), outdir: dist }),
+    build({ ...common, entryPoints: [join(protocol, "src/index.ts")], outfile: join(protocol, "dist/index.js") }),
+  ]);
+}
 
 async function sourceFiles(directory) {
   const entries = await readdir(directory, { withFileTypes: true });

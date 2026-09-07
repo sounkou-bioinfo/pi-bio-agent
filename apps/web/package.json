@@ -6,16 +6,26 @@
   "exports": {
     "./index.html": "./dist/index.html"
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "vite build",
     "dev": "vite --host 127.0.0.1",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "svelte-check --tsconfig ./tsconfig.json --fail-on-warnings"
   },
   "dependencies": {
-    "@pi-bio/protocol": "0.3.0"
+    "@earendil-works/pi-agent-core": "0.85.1",
+    "@pi-bio/protocol": "0.3.0",
+    "highlight.js": "11.12.0",
+    "markdown-it": "14.3.1",
+    "svelte": "5.57.0"
   },
   "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "6.2.1",
+    "@testing-library/svelte": "5.4.2",
+    "@types/markdown-it": "14.2.0",
+    "svelte-check": "4.7.6",
     "vite": "^7.3.1"
   }
 }

@@ -4,9 +4,7 @@ title: Pi Bio
 
 # Pi Bio
 
-Pi Bio is a Pi-native scientific agent application built on AgentHarness v2. One backend serves the browser and Electron apps; a supervised worker owns persistent DuckDB and session-isolated R over nanonext/NNG.
-
-It is not a general agent SDK. There is no compatibility host, workbench layer, Jupyter control plane, or second agent lifecycle.
+Pi Bio is a scientific research workspace with a Svelte interface shared by the browser and Electron desktop. Conversations, drafts, and scientific tables persist between visits; a supervised worker runs DuckDB and session-isolated R.
 
 ```text
 web / Electron
@@ -28,8 +26,9 @@ Install with Node.js 24 or later:
 
 ```sh
 npm install
-export OPENAI_API_KEY=...
 ```
+
+Pi Bio uses Pi’s provider catalog and credential API, reusing `~/.pi/agent/auth.json`. Choose a model and connect its provider in the sidebar. The default is an OpenAI Codex subscription model, but authentication and model controls are provider-neutral. No API-key environment setup is required.
 
 ### Browser development
 
@@ -46,7 +45,7 @@ npm run build
 npm start
 ```
 
-Open <http://127.0.0.1:4317>. Sessions and `science.duckdb` live under `~/.pi/bio` by default.
+Open <http://127.0.0.1:4317>. By default, `~/.pi/bio` holds Pi session logs, `workspace.sqlite` for drafts/archival, and `science.duckdb` for scientific tables.
 
 ### Desktop application
 
@@ -62,9 +61,17 @@ npm run package:desktop
 
 Outputs are under `apps/desktop/dist/`; on Linux, run `apps/desktop/dist/linux-unpacked/pi-bio`.
 
-Set `PI_BIO_MODEL=provider/model-id` to override `openai/gpt-5.4`. Set `PI_BIO_DATA_DIR`, `PI_BIO_HOST`, `PI_BIO_PORT`, or `PI_BIO_API_TOKEN` as needed. A non-loopback API refuses to start without a token.
+New sessions default to `openai-codex/gpt-5.6-sol`; model changes are persisted by Pi per session. `PI_BIO_DATA_DIR`, `PI_BIO_HOST`, `PI_BIO_PORT`, and `PI_BIO_API_TOKEN` control application deployment; they are not model credentials. A non-loopback API refuses to start without a token.
 
 R execution additionally requires R packages `jsonlite`, `mirai`, `nanoarrow`, and `nanonext`. The pinned `pi-ducknng` source provisions the matching DuckDB extension. `npm run test:integration` exercises that path.
+
+The Windows CI job runs workspace checks, desktop directory packaging, and the desktop smoke test. R/NNG provisioning is skipped on Windows unless `DUCKNNG_EXTENSION_PATH` is supplied. Windows R/NNG execution remains unverified.
+
+## Working with sessions
+
+The chat renders model-provided reasoning, Markdown, highlighted code and patches, and copyable code blocks. **Session** opens recorded token/cost estimates, rename, clone, fork-from-message, tree, archive, and restore controls. Archiving is reversible and never deletes scientific data. Forks copy conversation history, not shared DuckDB tables or R memory.
+
+Type `/` for supported commands: `/new`, `/name`, `/session`, `/model`, `/thinking`, `/tree`, `/fork`, and `/clone`. Arrow keys select, Tab completes, Enter accepts, and Escape dismisses. Shift+Tab cycles the selected model’s supported thinking levels. Resource/extension reload and full Pi extension loading are not implemented; **Reload view** only reloads saved application state. Cost estimates are not subscription bills or remaining account quotas.
 
 ## Tools
 
@@ -80,5 +87,7 @@ npm run check
 npm run test:integration
 npm audit
 ```
+
+`npm run test:desktop` checks the desktop API connection, preload bridge, and clipboard permissions. On headless Linux, run `xvfb-run -a npm run test:desktop` after building.
 
 See [docs/design.md](docs/design.md) for durability and security boundaries. The worker isolates failures; untrusted or multi-user execution still requires a container or VM.

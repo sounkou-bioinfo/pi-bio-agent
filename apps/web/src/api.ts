@@ -1,8 +1,15 @@
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type {
   AgentEvent,
+  AuthStatus,
+  AuthReply,
+  LoginRequest,
+  ModelSelection,
+  ProviderSummary,
   PromptAccepted,
-  RuntimeStatus,
   SessionSummary,
+  SessionTree,
+  WorkspaceSnapshot,
 } from "@pi-bio/protocol";
 
 declare global {
@@ -11,39 +18,47 @@ declare global {
   }
 }
 
-export interface LaneSnapshot {
-  transcript: TranscriptEntry[];
-  operation: null | {
-    id: string;
-    status: string;
-    startedAt: number;
-    runningTools: Array<{ toolName: string; status: string }>;
-  };
-  faulted: boolean;
-}
-
-export interface TranscriptEntry {
-  id: string;
-  type: string;
-  timestamp: number;
-  message?: {
-    role: string;
-    content: unknown;
-    toolCallId?: string;
-    toolName?: string;
-  };
-}
+export type LaneSnapshot = WorkspaceSnapshot;
+export type ChatMessage = AgentMessage;
 
 const embedded = window.piBio;
 const base = embedded?.apiBase ?? import.meta.env.VITE_API_BASE ?? "";
 const token = embedded?.token ?? localStorage.getItem("pi-bio-token") ?? "";
 
-export async function runtimeStatus(): Promise<RuntimeStatus> {
-  return request("/api/runtime");
+export async function providers(): Promise<ProviderSummary[]> {
+  return request("/api/providers");
 }
 
-export async function listSessions(): Promise<SessionSummary[]> {
-  const result = await request<{ sessions: SessionSummary[] }>("/api/sessions");
+export async function authStatus(provider: string): Promise<AuthStatus> {
+  return request(`/api/providers/${encodeURIComponent(provider)}/auth`);
+}
+
+export async function login(provider: string, value: LoginRequest): Promise<AuthStatus> {
+  return request(`/api/providers/${encodeURIComponent(provider)}/auth/login`, { method: "POST", body: JSON.stringify(value) });
+}
+
+export async function answerLogin(provider: string, value: AuthReply): Promise<AuthStatus> {
+  return request(`/api/providers/${encodeURIComponent(provider)}/auth/reply`, { method: "POST", body: JSON.stringify(value) });
+}
+
+export async function cancelLogin(provider: string): Promise<AuthStatus> {
+  return request(`/api/providers/${encodeURIComponent(provider)}/auth/login`, { method: "DELETE" });
+}
+
+export async function logout(provider: string): Promise<AuthStatus> {
+  return request(`/api/providers/${encodeURIComponent(provider)}/auth`, { method: "DELETE" });
+}
+
+export async function selectThinking(id: string, level: string): Promise<void> {
+  await request(`/api/sessions/${encodeURIComponent(id)}/thinking`, { method: "PUT", body: JSON.stringify({ level }) });
+}
+
+export async function selectModel(id: string, selection: ModelSelection): Promise<void> {
+  await request(`/api/sessions/${encodeURIComponent(id)}/model`, { method: "PUT", body: JSON.stringify(selection) });
+}
+
+export async function listSessions(archived = false): Promise<SessionSummary[]> {
+  const result = await request<{ sessions: SessionSummary[] }>(`/api/sessions${archived ? "?archived=true" : ""}`);
   return result.sessions;
 }
 
@@ -54,8 +69,34 @@ export async function createSession(name?: string): Promise<SessionSummary> {
   });
 }
 
-export async function getSnapshot(id: string): Promise<LaneSnapshot> {
-  return request(`/api/sessions/${encodeURIComponent(id)}`);
+export async function archiveSession(id: string): Promise<void> {
+  await request(`/api/sessions/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export async function restoreSession(id: string): Promise<void> {
+  await request(`/api/sessions/${encodeURIComponent(id)}/restore`, { method: "POST" });
+}
+
+export async function renameSession(id: string, name: string): Promise<void> {
+  await request(`/api/sessions/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ name }) });
+}
+
+export async function forkSession(id: string, entryId?: string): Promise<SessionSummary> {
+  return request(`/api/sessions/${encodeURIComponent(id)}/fork`, { method: "POST", body: JSON.stringify({ entryId }) });
+}
+
+export async function sessionTree(id: string, cursor?: number): Promise<SessionTree> {
+  return request(`/api/sessions/${encodeURIComponent(id)}/tree${cursor === undefined ? "" : `?cursor=${cursor}`}`);
+}
+
+export async function getSnapshot(id: string, signal?: AbortSignal): Promise<LaneSnapshot> {
+  return request(`/api/sessions/${encodeURIComponent(id)}`, signal ? { signal } : {});
+}
+
+export async function saveDraft(id: string, text: string): Promise<void> {
+  await request(`/api/sessions/${encodeURIComponent(id)}/draft`, {
+    method: "PUT", body: JSON.stringify({ text }),
+  });
 }
 
 export async function sendPrompt(id: string, text: string): Promise<PromptAccepted> {
@@ -71,12 +112,11 @@ export async function abortPrompt(id: string): Promise<void> {
 
 export async function streamEvents(
   id: string,
-  after: number,
   onEvent: (event: AgentEvent) => void,
   signal: AbortSignal,
 ): Promise<void> {
   const response = await fetch(
-    `${base}/api/sessions/${encodeURIComponent(id)}/events?after=${after}`,
+    `${base}/api/sessions/${encodeURIComponent(id)}/events`,
     { headers: headers(), signal },
   );
   if (!response.ok || response.body === null) throw await responseError(response);
@@ -104,6 +144,9 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     headers: { ...headers(), ...(init.headers ?? {}) },
   });
   if (!response.ok) throw await responseError(response);
+  if (!response.headers.get("content-type")?.includes("application/json")) {
+    throw new Error("The API returned a web page instead of data. Restart the API and frontend together.");
+  }
   return (await response.json()) as T;
 }
 

@@ -10,7 +10,7 @@
   "scripts": {
     "start": "electron .",
     "package": "electron-builder --dir",
-    "typecheck": "node --check src/main.mjs && node --check src/preload.mjs"
+    "typecheck": "node --check src/main.mjs && node --check src/preload.cjs"
   },
   "dependencies": {
     "@pi-bio/api": "0.3.0",

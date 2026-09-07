@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import {
   AgentHarness,
+  reduceLaneSnapshot,
   BACKGROUND_CONTEXT,
   JsonlSessionRepo,
   type AgentHarness as AgentHarnessInstance,
@@ -14,12 +16,22 @@ import {
 } from "@earendil-works/pi-agent-core";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/harness/env/nodejs";
 import {
+  clampThinkingLevel,
+  getSupportedThinkingLevels,
   type Api,
   type Model,
   type Models,
 } from "@earendil-works/pi-ai";
 import { builtinModels } from "@earendil-works/pi-ai/providers/all";
-import type { AgentEvent, SessionSummary } from "@pi-bio/protocol";
+import type {
+  AgentEvent,
+  ModelSelection,
+  SessionTree,
+  SessionSummary,
+  WorkspaceSnapshot,
+} from "@pi-bio/protocol";
+import { CredentialService } from "./credential-service.js";
+import { PiFileCredentialStore } from "./credential-store.js";
 import type { ScienceToolRuntime } from "./science/client.js";
 import { createHarnessTools, type AppToolContext } from "./tools.js";
 
@@ -49,12 +61,16 @@ interface Runtime {
   watch: WatchHandle<LaneSnapshot>;
   events: SessionEvents;
   drives: Set<Promise<void>>;
+  rebase?: Promise<void>;
   drivingIds: Set<string>;
 }
 
 export class AgentService {
   readonly modelIdentity: string;
+  readonly credentials: CredentialService;
   readonly #repo: JsonlSessionRepo;
+  readonly #workspaceDb: DatabaseSync;
+  readonly #admissions = new Map<string, Promise<void>>();
   readonly #science: ScienceToolRuntime;
   readonly #modelRuntime: ModelRuntime;
   readonly #runtimes = new Map<string, Promise<Runtime>>();
@@ -64,12 +80,27 @@ export class AgentService {
     this.#science = options.science;
     this.#modelRuntime = modelRuntime;
     this.modelIdentity = modelRuntime.identity;
+    this.credentials = new CredentialService(modelRuntime.models);
+    this.#workspaceDb = new DatabaseSync(join(options.dataDir, "workspace.sqlite"));
+    this.#workspaceDb.exec(`
+      PRAGMA journal_mode = WAL;
+      PRAGMA synchronous = FULL;
+      PRAGMA busy_timeout = 5000;
+      CREATE TABLE IF NOT EXISTS app_drafts (
+        session_id TEXT PRIMARY KEY,
+        text TEXT NOT NULL CHECK (length(text) <= 100000)
+      ) STRICT;
+      CREATE TABLE IF NOT EXISTS app_archived_sessions (
+        session_id TEXT PRIMARY KEY,
+        archived_at INTEGER NOT NULL
+      ) STRICT;
+    `);
   }
 
   static async create(options: AgentServiceOptions): Promise<AgentService> {
     const sessionsRoot = join(options.dataDir, "sessions");
     await mkdir(sessionsRoot, { recursive: true });
-    const modelRuntime = options.modelRuntime ?? modelRuntimeFromEnvironment();
+    const modelRuntime = options.modelRuntime ?? defaultModelRuntime();
     const repo = new JsonlSessionRepo({
       fileSystem: new NodeExecutionEnv({ cwd: process.cwd() }),
       sessionsRoot,
@@ -77,13 +108,14 @@ export class AgentService {
     return new AgentService(options, repo, modelRuntime);
   }
 
-  async listSessions(): Promise<SessionSummary[]> {
+  async listSessions(archived = false): Promise<SessionSummary[]> {
     const metadata = await this.#repo.list(undefined, BACKGROUND_CONTEXT);
+    const hidden = new Map(this.#workspaceDb.prepare("SELECT session_id, archived_at FROM app_archived_sessions").all().map((row) => [String(row.session_id), Number(row.archived_at)]));
     return Promise.all(
-      metadata.map(async (item) => {
+      metadata.filter((item) => hidden.has(item.id) === archived).map(async (item) => {
         const runtime = await this.#runtime(item.id);
         const name = (await runtime.harness.getName(BACKGROUND_CONTEXT)) ?? `Analysis ${item.id.slice(0, 8)}`;
-        return summary(item, name);
+        return { ...summary(item, name), ...(hidden.has(item.id) ? { archivedAt: hidden.get(item.id)! } : {}) };
       }),
     );
   }
@@ -97,18 +129,124 @@ export class AgentService {
     const runtimePromise = this.#attach(session);
     this.#runtimes.set(id, runtimePromise);
     const runtime = await runtimePromise;
-    const resolvedName = name?.trim() || `Analysis ${id.slice(0, 8)}`;
+    const resolvedName = name?.trim() || "New analysis";
     await runtime.harness.setName(resolvedName, BACKGROUND_CONTEXT);
     return summary(runtime.metadata, resolvedName);
   }
 
-  async snapshot(id: string): Promise<LaneSnapshot> {
+  async archiveSession(id: string): Promise<void> {
+    await this.#admit(id, async () => {
+      const runtime = await this.#runtime(id);
+      const lanes = await runtime.harness.lanes(BACKGROUND_CONTEXT);
+      if (lanes.some((lane) => lane.operation !== null)) throw new Error("Stop the running analysis before archiving");
+      this.#workspaceDb.prepare("INSERT INTO app_archived_sessions (session_id, archived_at) VALUES (?, ?) ON CONFLICT(session_id) DO NOTHING").run(id, Date.now());
+    });
+  }
+
+  async restoreSession(id: string): Promise<void> {
+    await this.#admit(id, async () => {
+      await this.#runtime(id);
+      this.#workspaceDb.prepare("DELETE FROM app_archived_sessions WHERE session_id = ?").run(id);
+    });
+  }
+
+  async renameSession(id: string, name: string): Promise<void> {
+    await this.#admit(id, async () => {
+      const runtime = await this.#runtime(id);
+      if (!name.trim()) throw new Error("Session name cannot be empty");
+      await runtime.harness.setName(name.trim(), BACKGROUND_CONTEXT);
+    });
+  }
+
+  async forkSession(id: string, entryId?: string): Promise<SessionSummary> {
+    return this.#admit(id, async () => {
+      const runtime = await this.#runtime(id);
+      const lanes = await runtime.harness.lanes(BACKGROUND_CONTEXT);
+      if (lanes.some((lane) => lane.operation !== null)) throw new Error("Stop the running analysis before forking");
+      let draft = "";
+      if (entryId !== undefined) {
+        const entry = await runtime.session.getEntry(entryId, BACKGROUND_CONTEXT);
+        if (entry?.type !== "message" || entry.message.role !== "user") throw new Error("Choose a user message to fork from");
+        draft = typeof entry.message.content === "string" ? entry.message.content : entry.message.content.filter((part) => part.type === "text").map((part) => part.text).join("\n");
+      }
+      const session = await this.#repo.fork(runtime.metadata, { scope: "branch", branch: "main", ...(entryId ? { entryId, position: "before" as const } : {}) }, BACKGROUND_CONTEXT);
+      const attached = this.#attach(session);
+      this.#runtimes.set(session.metadata.id, attached);
+      const fork = await attached;
+      const name = `${await runtime.harness.getName(BACKGROUND_CONTEXT) ?? "Analysis"} — ${entryId ? "fork" : "copy"}`;
+      await fork.harness.setName(name, BACKGROUND_CONTEXT);
+      if (entryId !== undefined) await this.saveDraft(session.metadata.id, draft);
+      return summary(session.metadata, name);
+    });
+  }
+
+  async sessionTree(id: string, cursor?: number): Promise<SessionTree> {
     const runtime = await this.#runtime(id);
-    return runtime.watch.resnapshot(BACKGROUND_CONTEXT);
+    const entries = await runtime.session.findEntries({ order: "desc", limit: 200, ...(cursor === undefined ? {} : { cursor: { seq: cursor } }) }, BACKGROUND_CONTEXT);
+    const lanes = await runtime.harness.lanes(BACKGROUND_CONTEXT);
+    return {
+      entries: entries.map((entry) => ({
+        id: entry.id, parentId: entry.parentId, seq: entry.seq,
+        label: entry.type === "message" && "content" in entry.message
+          ? `${entry.message.role}: ${typeof entry.message.content === "string" ? entry.message.content.slice(0, 100) : entry.message.content.filter((part) => part.type === "text").map((part) => part.text).join(" ").slice(0, 100)}`
+          : entry.type,
+      })),
+      lanes: lanes.map((lane) => ({ name: lane.name, tipId: lane.tipId })),
+      ...(entries.length === 200 ? { nextCursor: entries[entries.length - 1]!.seq } : {}),
+    };
+  }
+
+  async snapshot(id: string): Promise<WorkspaceSnapshot> {
+    return this.#snapshot(await this.#runtime(id));
+  }
+
+  #snapshot(runtime: Runtime): WorkspaceSnapshot {
+    const stored = this.#workspaceDb.prepare("SELECT text FROM app_drafts WHERE session_id = ?").get(runtime.metadata.id);
+    return { ...jsonSafe(runtime.watch.snapshot) as LaneSnapshot, draft: typeof stored?.text === "string" ? stored.text : "", eventCursor: runtime.events.sequence };
+  }
+
+  async saveDraft(id: string, text: string): Promise<void> {
+    await this.#runtime(id);
+    this.#workspaceDb.prepare(`
+      INSERT INTO app_drafts (session_id, text) VALUES (?, ?)
+      ON CONFLICT(session_id) DO UPDATE SET text = excluded.text
+    `).run(id, text);
+  }
+
+  async selectModel(id: string, selection: ModelSelection): Promise<void> {
+    await this.#admit(id, async () => {
+      const runtime = await this.#runtime(id);
+      const model = this.#modelRuntime.models.getModel(selection.provider, selection.modelId);
+      if (model === undefined) throw new Error("This model is not in Pi's catalog");
+      const level = await runtime.lane.getThinkingLevel(BACKGROUND_CONTEXT);
+      await runtime.lane.setModel(selection, BACKGROUND_CONTEXT);
+      await runtime.lane.setThinkingLevel(clampThinkingLevel(model, level), BACKGROUND_CONTEXT);
+    });
+  }
+
+  async selectThinking(id: string, level: string): Promise<void> {
+    await this.#admit(id, async () => {
+      const runtime = await this.#runtime(id);
+      const model = await runtime.lane.getModel(BACKGROUND_CONTEXT);
+      const supported = model && getSupportedThinkingLevels(model).find((candidate) => candidate === level);
+      if (supported === undefined) throw new Error("Unsupported thinking level for the selected model");
+      await runtime.lane.setThinkingLevel(supported, BACKGROUND_CONTEXT);
+    });
   }
 
   async startPrompt(id: string, prompt: string): Promise<string> {
+    return this.#admit(id, () => this.#startPrompt(id, prompt));
+  }
+
+  async #startPrompt(id: string, prompt: string): Promise<string> {
+    if (this.#workspaceDb.prepare("SELECT 1 FROM app_archived_sessions WHERE session_id = ?").get(id)) {
+      throw new Error("Restore the archived session before continuing");
+    }
     const runtime = await this.#runtime(id);
+    const name = await runtime.harness.getName(BACKGROUND_CONTEXT);
+    if (name === "New analysis" || name === `Analysis ${id.slice(0, 8)}`) {
+      await runtime.harness.setName(prompt.replace(/\s+/g, " ").slice(0, 70), BACKGROUND_CONTEXT);
+    }
     const operationId = randomUUID();
     const admission = await runtime.lane.accept(
       { kind: "prompt", operationId, prompt },
@@ -117,6 +255,15 @@ export class AgentService {
     if (!admission.ok) throw admission.error;
     this.#trackDrive(runtime, runtime.lane, operationId);
     return operationId;
+  }
+
+  #admit<T>(id: string, action: () => Promise<T>): Promise<T> {
+    // Coordinate app metadata/configuration with Pi admission in this API host.
+    const result = (this.#admissions.get(id) ?? Promise.resolve()).then(action);
+    const settled = result.then(() => undefined, () => undefined);
+    this.#admissions.set(id, settled);
+    void settled.then(() => { if (this.#admissions.get(id) === settled) this.#admissions.delete(id); });
+    return result;
   }
 
   async abort(id: string): Promise<void> {
@@ -132,14 +279,14 @@ export class AgentService {
 
   async subscribe(
     id: string,
-    after: number,
     listener: (event: AgentEvent) => void,
   ): Promise<() => void> {
     const runtime = await this.#runtime(id);
-    return runtime.events.subscribe(after, listener);
+    return runtime.events.subscribe(listener);
   }
 
   async close(): Promise<void> {
+    await Promise.all(this.#admissions.values());
     const runtimes = await Promise.allSettled([...this.#runtimes.values()]);
     for (const settled of runtimes) {
       if (settled.status !== "fulfilled") continue;
@@ -149,6 +296,7 @@ export class AgentService {
         const lane = await runtime.harness.lane(laneInfo.name, BACKGROUND_CONTEXT);
         await lane.abort(BACKGROUND_CONTEXT);
       }
+      await runtime.rebase;
       runtime.watch.unsubscribe();
       await Promise.race([
         Promise.allSettled([...runtime.drives]),
@@ -157,6 +305,8 @@ export class AgentService {
       await runtime.harness.close(BACKGROUND_CONTEXT);
     }
     this.#runtimes.clear();
+    await this.credentials.close();
+    if (this.#workspaceDb.isOpen) this.#workspaceDb.close();
   }
 
   async #runtime(id: string): Promise<Runtime> {
@@ -191,6 +341,7 @@ export class AgentService {
         session,
         models: this.#modelRuntime.models,
         model: this.#modelRuntime.model,
+        thinkingLevel: this.#modelRuntime.model.reasoning ? "medium" : "off",
         tools: createHarnessTools(),
         toolContext,
         systemPrompt: SYSTEM_PROMPT,
@@ -200,8 +351,7 @@ export class AgentService {
     toolContext.harness = harness;
     const lane = await harness.lane("main", { createAt: null }, BACKGROUND_CONTEXT);
     const watch = await lane.watch(BACKGROUND_CONTEXT);
-    const events = new SessionEvents(session.metadata.id);
-    watch.start((event) => events.publish(event));
+    const events = new SessionEvents(session.metadata.id, () => this.#snapshot(runtime));
     const runtime: Runtime = {
       metadata: session.metadata,
       session,
@@ -212,6 +362,18 @@ export class AgentService {
       drives: new Set(),
       drivingIds: new Set(),
     };
+    watch.start(async (event) => {
+      const reduction = reduceLaneSnapshot(watch.snapshot, event);
+      if (reduction === "rebase") {
+        runtime.rebase = watch.resnapshot(BACKGROUND_CONTEXT).then(() => {
+          events.publish({ type: "snapshot", snapshot: this.#snapshot(runtime) });
+        }).catch((error: unknown) => {
+          events.publish({ type: "application_error", operationId: "rebase", message: error instanceof Error ? error.message : String(error) });
+        }).finally(() => { delete runtime.rebase; });
+        // The watch has its own serial delivery queue; held events must follow this baseline.
+        await runtime.rebase;
+      } else events.publish(event);
+    });
     const mainOperation = open.find((operation) => operation.lane === "main");
     if (mainOperation !== undefined) {
       const mainDrive = this.#trackDrive(runtime, lane, mainOperation.operationId);
@@ -272,46 +434,40 @@ export class AgentService {
 
 class SessionEvents {
   readonly #sessionId: string;
-  readonly #history: AgentEvent[] = [];
+  readonly #snapshot: () => WorkspaceSnapshot;
   readonly #listeners = new Set<(event: AgentEvent) => void>();
   #sequence = Date.now() * 1_000;
 
-  constructor(sessionId: string) {
+  constructor(sessionId: string, snapshot: () => WorkspaceSnapshot) {
     this.#sessionId = sessionId;
+    this.#snapshot = snapshot;
   }
 
-  publish(event: unknown): void {
+  get sequence(): number { return this.#sequence; }
+
+  publish(event: AgentEvent["event"]): void {
     const record: AgentEvent = {
       sequence: ++this.#sequence,
       sessionId: this.#sessionId,
-      event: jsonSafe(event),
+      event: jsonSafe(event) as AgentEvent["event"],
     };
-    this.#history.push(record);
-    if (this.#history.length > 500) this.#history.shift();
     for (const listener of this.#listeners) listener(record);
   }
 
-  subscribe(after: number, listener: (event: AgentEvent) => void): () => void {
-    for (const event of this.#history) {
-      if (event.sequence > after) listener(event);
-    }
+  subscribe(listener: (event: AgentEvent) => void): () => void {
     this.#listeners.add(listener);
+    // Install the listener and capture its baseline in one synchronous turn.
+    listener({ sequence: this.#sequence, sessionId: this.#sessionId, event: { type: "snapshot", snapshot: this.#snapshot() } });
     return () => this.#listeners.delete(listener);
   }
 }
 
-export function modelRuntimeFromEnvironment(): ModelRuntime {
-  const identity = process.env.PI_BIO_MODEL?.trim() || "openai/gpt-5.4";
-  const separator = identity.indexOf("/");
-  if (separator <= 0 || separator === identity.length - 1) {
-    throw new Error("PI_BIO_MODEL must have the form provider/model-id");
-  }
-  const provider = identity.slice(0, separator);
-  const modelId = identity.slice(separator + 1);
-  const models = builtinModels();
-  const model = models.getModel(provider, modelId);
-  if (model === undefined) throw new Error(`Unknown Pi model: ${identity}`);
-  return { models, model, identity };
+export function defaultModelRuntime(): ModelRuntime {
+  const modelId = "gpt-5.6-sol";
+  const models = builtinModels({ credentials: new PiFileCredentialStore() });
+  const model = models.getModel("openai-codex", modelId);
+  if (model === undefined) throw new Error(`Pi does not provide openai-codex/${modelId}`);
+  return { models, model, identity: `openai-codex/${modelId}` };
 }
 
 function summary(metadata: JsonlSessionMetadata, name: string): SessionSummary {
@@ -320,6 +476,7 @@ function summary(metadata: JsonlSessionMetadata, name: string): SessionSummary {
     name,
     createdAt: metadata.createdAt,
     modifiedAt: metadata.modifiedAt,
+    ...(metadata.parentSessionId ? { parentSessionId: metadata.parentSessionId } : {}),
   };
 }
 

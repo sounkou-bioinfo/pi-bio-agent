@@ -17,6 +17,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@earendil-works/pi-ai": "0.85.1",
+    "@earendil-works/pi-agent-core": "0.85.1",
     "@sinclair/typebox": "^0.34.48"
   }
 }

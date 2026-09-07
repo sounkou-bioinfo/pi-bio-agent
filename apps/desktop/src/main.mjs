@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, dialog, shell } from "electron";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const apiEntry = fileURLToPath(import.meta.resolve("@pi-bio/api/server"));
@@ -38,7 +38,7 @@ async function start() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
-      preload: resolve(here, "preload.mjs"),
+      preload: resolve(here, "preload.cjs"),
       additionalArguments: [
         `--pi-bio-api=http://127.0.0.1:${ready.port}`,
         `--pi-bio-token=${apiToken}`,
@@ -47,9 +47,23 @@ async function start() {
   });
 
   const appOrigin = `http://127.0.0.1:${ready.port}`;
-  window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-  window.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) => {
-    callback(false);
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    if (URL.canParse(url) && new URL(url).protocol === "https:") {
+      void shell.openExternal(url).catch((error) => {
+        dialog.showErrorBox("Unable to open browser", `Copy the link and open it in your browser.\n\n${String(error)}`);
+      });
+    }
+    return { action: "deny" };
+  });
+  const contents = window.webContents;
+  const canWriteClipboard = (requester, permission, url, isMainFrame) =>
+    requester === contents && permission === "clipboard-sanitized-write" && isMainFrame &&
+    URL.canParse(url) && new URL(url).origin === appOrigin;
+  contents.session.setPermissionCheckHandler((requester, permission, origin, details) =>
+    canWriteClipboard(requester, permission, origin, details.isMainFrame),
+  );
+  contents.session.setPermissionRequestHandler((requester, permission, callback, details) => {
+    callback(canWriteClipboard(requester, permission, details.requestingUrl, details.isMainFrame));
   });
   window.webContents.on("will-navigate", (event, url) => {
     if (new URL(url).origin !== appOrigin) event.preventDefault();
