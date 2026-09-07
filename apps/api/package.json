@@ -1,0 +1,30 @@
+{
+  "name": "@pi-bio/api",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./server": "./dist/server.js"
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "predev": "npm run build -w @pi-bio/protocol",
+    "dev": "npm run build && node --enable-source-maps --watch dist/server.js",
+    "prestart": "npm run build -w @pi-bio/protocol",
+    "provision:ducknng": "node scripts/provision-ducknng.mjs",
+    "start": "node --enable-source-maps dist/server.js",
+    "test": "vitest run test",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@duckdb/node-api": "1.5.4-r.1",
+    "@earendil-works/pi-agent-core": "0.85.1",
+    "@earendil-works/pi-ai": "0.85.1",
+    "@hono/node-server": "^1.19.9",
+    "@pi-bio/protocol": "0.3.0",
+    "@sinclair/typebox": "^0.34.48",
+    "hono": "^4.12.34",
+    "pi-ducknng": "https://github.com/sounkou-bioinfo/pi-ducknng/archive/b289220b2a1fcab3bc710efe9146b50d74f0f6ff.tar.gz"
+  }
+}

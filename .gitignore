@@ -1,17 +1,22 @@
 node_modules/
-package-lock.json
 dist/
 dist-test/
+apps/*/dist/
+packages/*/dist/
+coverage/
+*.tsbuildinfo
 *.log
 .DS_Store
 .env
-.pi-bio-runs/
 .pi/
+/.quarto/
 README.html
 README_files/
 *_cache/
-# Genomic data artifacts written into the tree by local tooling (htslib indexes, downloaded VCFs).
-# Root-anchored so committed test fixtures under test/fixtures/ are unaffected.
+**/test-results/
+**/playwright-report/
+
+# Large local scientific inputs and indexes are never application source.
 /*.tbi
 /*.csi
 /*.vcf
@@ -19,8 +24,3 @@ README_files/
 /*.bcf
 /*.bam
 /*.bai
-
-/.quarto/
-**/*.quarto_ipynb
-**/test-results/
-**/playwright-report/

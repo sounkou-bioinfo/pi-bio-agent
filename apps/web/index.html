@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' http://127.0.0.1:*; img-src 'self' data:; style-src 'self'; script-src 'self'" />
+    <title>Pi Bio</title>
+  </head>
+  <body>
+    <div id="app">
+      <aside class="rail">
+        <div class="brand">
+          <span class="brand-mark">π</span>
+          <div><strong>Pi Bio</strong><small>scientific agent</small></div>
+        </div>
+        <button id="new-session" class="new-session" type="button">New analysis</button>
+        <nav id="sessions" aria-label="Analysis sessions"></nav>
+        <footer>Harness v2</footer>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">ACTIVE ANALYSIS</p>
+            <h1 id="session-title">Select an analysis</h1>
+          </div>
+          <div id="run-state" class="run-state idle"><span></span>Idle</div>
+        </header>
+
+        <section id="transcript" class="transcript" aria-live="polite">
+          <div class="empty-state">
+            <span class="empty-glyph">π</span>
+            <h2>Work with data, not prompt-sized copies.</h2>
+            <p>Use persistent DuckDB, R over NNG, and bounded Harness delegation.</p>
+          </div>
+        </section>
+
+        <form id="composer" class="composer">
+          <textarea id="prompt" rows="2" placeholder="Ask Pi Bio to inspect, compute, or explain…" required></textarea>
+          <div class="composer-actions">
+            <span>DuckDB · R · Delegate</span>
+            <button id="abort" class="secondary hidden" type="button">Stop</button>
+            <button id="send" type="submit">Run <kbd>⌘↵</kbd></button>
+          </div>
+        </form>
+      </main>
+
+      <aside class="inspector">
+        <section>
+          <p class="eyebrow">RUNTIME</p>
+          <div id="runtime"></div>
+        </section>
+        <section>
+          <p class="eyebrow">STATE BOUNDARY</p>
+          <dl class="boundary">
+            <div><dt>Agent</dt><dd>Harness JSONL</dd></div>
+            <div><dt>Science</dt><dd>DuckDB</dd></div>
+            <div><dt>Scratch</dt><dd>R process</dd></div>
+          </dl>
+        </section>
+        <section>
+          <p class="eyebrow">OPERATION</p>
+          <pre id="operation">No active operation</pre>
+        </section>
+      </aside>
+    </div>
+    <div id="toast" role="status"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,21 @@
+{
+  "name": "@pi-bio/web",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./index.html": "./dist/index.html"
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite --host 127.0.0.1",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@pi-bio/protocol": "0.3.0"
+  },
+  "devDependencies": {
+    "vite": "^7.3.1"
+  }
+}

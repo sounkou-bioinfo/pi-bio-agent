@@ -2,133 +2,31 @@ name: CI
 
 on:
   push:
-    branches: [main]
   pull_request:
-  workflow_dispatch:
 
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run check
 
-      - name: Setup Quarto
-        uses: quarto-dev/quarto-actions/setup@v2
-        with:
-          version: 1.9.29
-
-      - name: Setup R
-        uses: r-lib/actions/setup-r@v2
-        with:
-          r-version: "4.6.0"
-          use-public-rspm: true
-
-      - name: Install R compute test dependencies
-        shell: bash
-        run: |
-          r_site_lib="$(R_LIBS_USER= Rscript -e 'cat(.libPaths()[1])')"
-          sudo mkdir -p "$r_site_lib"
-          sudo chown -R "$USER" "$r_site_lib"
-          for attempt in 1 2 3; do
-            if R_SITE_LIB="$r_site_lib" R_LIBS_USER= Rscript -e 'options(timeout = 300); version <- "0.8.0"; url <- sprintf("https://cloud.r-project.org/src/contrib/Archive/nanoarrow/nanoarrow_%s.tar.gz", version); lib <- Sys.getenv("R_SITE_LIB"); install.packages(url, lib = lib, repos = NULL, type = "source"); stopifnot(as.character(packageVersion("nanoarrow", lib.loc = lib)) == version)'; then
-              R_LIBS_USER= Rscript -e 'stopifnot(requireNamespace("nanoarrow", quietly = TRUE))'
-              exit 0
-            fi
-            sleep $((attempt * 10))
-          done
-          exit 1
-
-      - name: Install dependencies
-        run: npm install --no-audit --no-fund
-
-      - name: Install browser test runtime
-        run: npx playwright install --with-deps chromium
-
-      - name: Provision DuckHTS
-        run: npm run provision:duckhts
-
-      - name: Typecheck and test
-        run: npm run check
-
-      - name: Build package
-        run: npm run build
-
-      - name: Check stateless MCP package
-        run: npm run check:mcp
-
-      - name: Build stateless MCP package
-        run: npm run build:mcp
-
-      - name: Provision workbench extensions
-        run: |
-          npm run provision:duckhts --workspace=packages/workbench
-          npm run provision:ducknng --workspace=packages/workbench
-
-      - name: Check workbench package
-        run: npm run check:workbench
-
-      - name: Build workbench package
-        run: npm run build:workbench
-
-      - name: Check Quarto engine package
-        run: npm run check:quarto
-
-      - name: Verify package contents
-        run: |
-          npm pack --dry-run
-          npm pack --dry-run --workspace=packages/mcp-server
-
-  owned-ducknng:
+  science-integration:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 24
-
-      - name: Install dependencies
-        run: npm install --no-audit --no-fund
-
-      - name: Cache owned ducknng build
-        uses: actions/cache@v4
-        with:
-          path: |
-            .pi/ducknng
-            .pi/src/ducknng
-          key: owned-ducknng-${{ runner.os }}-${{ hashFiles('package-lock.json', 'scripts/provision-ducknng-owned.sh') }}
-
-      - name: Provision and verify owned ducknng
-        run: |
-          npm run provision:ducknng-owned
-          duckdb_version="$(node -e 'process.stdout.write(require("@duckdb/node-api/package.json").version.replace(/-.*/, ""))')"
-          echo "DUCKNNG_EXTENSION_PATH=$PWD/.pi/ducknng/duckdb-${duckdb_version}/ducknng.duckdb_extension" >> "$GITHUB_ENV"
-
-      - name: Compile integration tests
-        run: rm -rf dist-test && npx tsc -p tsconfig.test.json
-
-      - name: Exercise owned transport, auth, retry, upload, TLS, and RPC
-        run: >-
-          node --test
-          dist-test/test/ncurl-retry.test.js
-          dist-test/test/ncurl-fanout.test.js
-          dist-test/test/ducknng-sql-http.test.js
-          dist-test/test/ducknng-http-profiles.test.js
-          dist-test/test/ducknng-upload-shared-data.test.js
-          dist-test/test/ducknng-tls-auth.test.js
-          dist-test/test/ducknng-sql-conn.test.js
-          dist-test/test/ducknng-rpc-mutate.test.js
-          dist-test/test/ducknng-rpc-blackboard.test.js
-          dist-test/test/ducknng-socket-reachability.test.js
-
-      - name: Require upload pattern (no skipped lane)
-        run: npm run pattern:ducknng-upload
+          cache: npm
+      - run: sudo apt-get update && sudo apt-get install -y r-base
+      - run: Rscript -e "install.packages(c('jsonlite', 'mirai', 'nanoarrow', 'nanonext'), repos='https://cloud.r-project.org')"
+      - run: npm ci
+      - run: npm run test:integration

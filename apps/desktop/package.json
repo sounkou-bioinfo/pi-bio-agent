@@ -1,0 +1,56 @@
+{
+  "name": "@pi-bio/desktop",
+  "version": "0.3.0",
+  "private": true,
+  "description": "Pi Bio desktop application",
+  "author": "Sounkou Mahamane Toure",
+  "license": "GPL-2.0-or-later",
+  "type": "module",
+  "main": "src/main.mjs",
+  "scripts": {
+    "start": "electron .",
+    "package": "electron-builder --dir",
+    "typecheck": "node --check src/main.mjs && node --check src/preload.mjs"
+  },
+  "dependencies": {
+    "@pi-bio/api": "0.3.0",
+    "@pi-bio/web": "0.3.0"
+  },
+  "devDependencies": {
+    "electron": "44.2.0",
+    "electron-builder": "^26.8.1"
+  },
+  "build": {
+    "appId": "bio.sounkou.pi",
+    "productName": "Pi Bio",
+    "executableName": "pi-bio",
+    "asar": false,
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "package.json",
+      "!node_modules/@pi-bio/api/src/**/*",
+      "!node_modules/@pi-bio/api/scripts/**/*",
+      "!node_modules/@pi-bio/api/test/**/*",
+      "!node_modules/@pi-bio/api/tsconfig.json",
+      "!node_modules/@pi-bio/web/src/**/*",
+      "!node_modules/@pi-bio/web/index.html",
+      "!node_modules/@pi-bio/web/vite.config.ts",
+      "!node_modules/@pi-bio/web/tsconfig.json",
+      "!node_modules/@pi-bio/protocol/src/**/*",
+      "!node_modules/@pi-bio/protocol/test/**/*",
+      "!node_modules/@pi-bio/protocol/tsconfig*.json"
+    ],
+    "linux": {
+      "target": ["AppImage"]
+    },
+    "mac": {
+      "target": ["dmg"]
+    },
+    "win": {
+      "target": ["nsis"]
+    }
+  }
+}
